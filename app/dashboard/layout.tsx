@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
-  Sparkles,
   TrendingUp,
   FileText,
   Settings,
@@ -20,8 +20,15 @@ import {
   LogOut,
   Bell,
   Search,
+  Sparkles,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
+import { usePermissions } from "@/hooks/usePermissions";
+import { filterNavigationByRole, NavigationItem } from "@/lib/permissions/permissions";
+import DemoModeBanner from "@/components/DemoMode/DemoModeBanner";
+import DemoModeToggle from "@/components/DemoMode/DemoModeToggle";
 
 export default function DashboardLayout({
   children,
@@ -30,8 +37,10 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { role, capabilities, loading: permissionsLoading } = usePermissions();
 
   useEffect(() => {
     async function loadUser() {
@@ -69,22 +78,27 @@ export default function DashboardLayout({
       .slice(0, 2);
   };
 
-  const navigation = [
+  const allNavigation: NavigationItem[] = [
     { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Keywords", href: "/dashboard/keywords", icon: Target },
-    { name: "Content", href: "/dashboard/content", icon: Layers },
-    { name: "Rankings", href: "/dashboard/rankings", icon: TrendingUp },
-    { name: "AI Visibility", href: "/dashboard/ai-visibility", icon: Sparkles },
-    { name: "Analytics", href: "/dashboard/analytics", icon: FileText },
-    { name: "Reports", href: "/dashboard/reports", icon: BarChart3 },
-    { name: "Video Reports", href: "/dashboard/video-reports", icon: Video },
-    { name: "Quote Builder", href: "/dashboard/quote-builder", icon: FileText },
-    { name: "Team", href: "/dashboard/team", icon: Users },
-    { name: "Settings", href: "/dashboard/settings", icon: Settings },
+    { name: "Keywords", href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
+    { name: "Content", href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
+    { name: "Rankings", href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
+    { name: "AI Visibility", href: "/dashboard/ai-visibility", icon: Sparkles, requiredCapability: "canViewAIVisibility" },
+    { name: "Analytics", href: "/dashboard/analytics", icon: FileText, requiredCapability: "canViewAnalytics" },
+    { name: "Reports", href: "/dashboard/reports", icon: BarChart3, requiredCapability: "canViewReports" },
+    { name: "Video Reports", href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
+    { name: "Quote Builder", href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
+    { name: "Team", href: "/dashboard/team", icon: Users, requiredCapability: "canManageTeam" },
+    { name: "Settings", href: "/dashboard/settings", icon: Settings, requiredCapability: "canManageSettings" },
   ];
+
+  const navigation = filterNavigationByRole(role, allNavigation);
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Demo Mode Banner */}
+      <DemoModeBanner />
+      
       {/* Mobile Sidebar Backdrop */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -100,20 +114,30 @@ export default function DashboardLayout({
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-300 lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+        className={`fixed inset-y-0 left-0 z-50 bg-white border-r border-gray-200 transform transition-all duration-200 ease-in-out ${
+          sidebarCollapsed ? "lg:w-20" : "lg:w-64"
+        } ${
+          sidebarOpen ? "translate-x-0 w-64" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        <div className="h-full flex flex-col">
+        <div className="h-full flex flex-col relative">
           {/* Logo */}
           <div className="h-16 flex items-center justify-between px-6 border-b border-gray-200">
-            <Link href="/dashboard" className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-primary-600 to-accent-600 rounded-lg flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-white" />
+            <Link href="/dashboard" className="flex items-center gap-3">
+              <div className="relative w-8 h-8 flex-shrink-0">
+                <Image
+                  src="/logo.png"
+                  alt="GeoRepute.ai Logo"
+                  fill
+                  className="object-contain"
+                  priority
+                />
               </div>
-              <span className="text-lg font-bold bg-gradient-to-r from-primary-600 to-accent-600 bg-clip-text text-transparent">
-                GeoRepute.ai
-              </span>
+              {!sidebarCollapsed && (
+                <span className="text-lg font-bold text-primary-600 whitespace-nowrap">
+                  GeoRepute.ai
+                </span>
+              )}
             </Link>
             <button
               onClick={() => setSidebarOpen(false)}
@@ -130,38 +154,86 @@ export default function DashboardLayout({
                 <li key={item.name}>
                   <Link
                     href={item.href}
-                    className="flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors"
+                    className={`flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
+                      sidebarCollapsed ? "justify-center" : ""
+                    }`}
+                    title={sidebarCollapsed ? item.name : undefined}
                   >
-                    <item.icon className="w-5 h-5" />
-                    <span className="font-medium">{item.name}</span>
+                    <item.icon className="w-5 h-5 flex-shrink-0" />
+                    {!sidebarCollapsed && <span className="font-medium">{item.name}</span>}
                   </Link>
                 </li>
               ))}
             </ul>
           </nav>
 
+          {/* Sidebar Toggle Button - Desktop Only */}
+          <div className="hidden lg:block absolute top-1/2 -right-3 z-50">
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="flex items-center justify-center w-6 h-12 bg-white border border-gray-200 rounded-r-lg shadow-sm text-gray-500 hover:text-primary-600 hover:bg-primary-50 hover:border-primary-200 transition-all group"
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {sidebarCollapsed ? (
+                <ChevronRight className="w-4 h-4" />
+              ) : (
+                <ChevronLeft className="w-4 h-4" />
+              )}
+            </button>
+          </div>
+
           {/* User Profile */}
           <div className="p-4 border-t border-gray-200">
             {!loading && user && (
               <>
-                <Link href="/dashboard/settings" className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                  <div className="w-10 h-10 bg-gradient-to-br from-primary-600 to-accent-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                <Link 
+                  href="/dashboard/settings" 
+                  className={`flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 cursor-pointer ${
+                    sidebarCollapsed ? "justify-center" : ""
+                  }`}
+                  title={sidebarCollapsed ? user.user_metadata?.full_name || "User" : undefined}
+                >
+                  <div className="w-10 h-10 bg-primary-500 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0">
                     {getUserInitials()}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {user.user_metadata?.full_name || "User"}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">{user.email}</p>
-                  </div>
+                  {!sidebarCollapsed && (
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-gray-900 truncate">
+                          {user.user_metadata?.full_name || "User"}
+                        </p>
+                        {role && (
+                          <span className={`px-2 py-0.5 text-xs font-semibold rounded ${
+                            role === 'admin' ? 'bg-red-100 text-red-700' :
+                            role === 'agency' ? 'bg-accent-100 text-accent-700' :
+                            'bg-secondary-100 text-secondary-700'
+                          }`}>
+                            {role.charAt(0).toUpperCase() + role.slice(1)}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                    </div>
+                  )}
                 </Link>
-                <button
-                  onClick={handleLogout}
-                  className="mt-2 w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Sign Out</span>
-                </button>
+                {!sidebarCollapsed && (
+                  <button
+                    onClick={handleLogout}
+                    className="mt-2 w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>Sign Out</span>
+                  </button>
+                )}
+                {sidebarCollapsed && (
+                  <button
+                    onClick={handleLogout}
+                    className="mt-2 w-full flex items-center justify-center px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
+                    title="Sign Out"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                )}
               </>
             )}
             {!loading && !user && (
@@ -169,7 +241,7 @@ export default function DashboardLayout({
                 href="/login"
                 className="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
               >
-                Sign In
+                {!sidebarCollapsed && "Sign In"}
               </Link>
             )}
           </div>
@@ -177,9 +249,13 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Content */}
-      <div className="lg:pl-64">
+      <div className={`transition-all duration-200 ease-in-out ${
+        sidebarCollapsed ? "lg:pl-20" : "lg:pl-64"
+      }`}>
         {/* Top Navigation */}
-        <header className="h-16 bg-white border-b border-gray-200 fixed top-0 right-0 left-0 lg:left-64 z-30">
+        <header className={`h-16 bg-white border-b border-gray-200 fixed top-0 right-0 left-0 z-30 transition-all duration-200 ease-in-out ${
+          sidebarCollapsed ? "lg:left-20" : "lg:left-64"
+        }`}>
           <div className="h-full px-4 sm:px-6 lg:px-8 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <button
@@ -202,6 +278,7 @@ export default function DashboardLayout({
             </div>
 
             <div className="flex items-center gap-4">
+              <DemoModeToggle />
               <button className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
                 <Bell className="w-5 h-5" />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>

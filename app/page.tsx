@@ -45,7 +45,7 @@ export default function Home() {
             <h1 className="text-5xl md:text-7xl font-bold text-gray-900 mb-6 leading-tight">
               Master Your Digital
               <br />
-              <span className="gradient-primary bg-clip-text text-transparent">
+              <span className="text-primary-500">
                 Reputation & Visibility
               </span>
             </h1>
@@ -63,7 +63,7 @@ export default function Home() {
             >
               <Link
                 href="/dashboard"
-                className="group px-8 py-4 bg-gradient-to-r from-primary-600 to-primary-500 text-white rounded-lg font-semibold text-lg hover:shadow-xl hover:shadow-primary-500/50 transition-all duration-300 flex items-center gap-2"
+                className="group px-8 py-4 bg-primary-500 text-white rounded-lg font-semibold text-lg hover:bg-primary-600 hover:shadow-xl hover:shadow-primary-500/50 transition-all duration-300 flex items-center gap-2"
               >
                 Start Free Trial
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
@@ -223,7 +223,7 @@ export default function Home() {
                 className="relative"
               >
                 <div className="glass-effect p-6 rounded-2xl text-center h-full">
-                  <div className="w-12 h-12 bg-gradient-to-br from-primary-600 to-accent-600 text-white rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-lg">
+                  <div className="w-12 h-12 bg-primary-500 text-white rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-lg">
                     {phase.step}
                   </div>
                   <phase.icon className="w-8 h-8 mx-auto mb-3 text-primary-600" />
@@ -297,7 +297,7 @@ export default function Home() {
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-r from-primary-600 to-accent-600">
+      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-primary-500">
         <div className="max-w-4xl mx-auto text-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}

@@ -3,8 +3,9 @@
 import { motion } from "framer-motion";
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Sparkles, Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 
 export default function Login() {
@@ -98,10 +99,16 @@ export default function Login() {
           className="hidden lg:block"
         >
           <Link href="/" className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 bg-gradient-to-br from-primary-600 to-accent-600 rounded-xl flex items-center justify-center">
-              <Sparkles className="w-7 h-7 text-white" />
+            <div className="relative w-12 h-12">
+              <Image
+                src="/logo.png"
+                alt="GeoRepute.ai Logo"
+                fill
+                className="object-contain"
+                priority
+              />
             </div>
-            <span className="text-3xl font-bold bg-gradient-to-r from-primary-600 to-accent-600 bg-clip-text text-transparent">
+            <span className="text-3xl font-bold text-primary-600">
               GeoRepute.ai
             </span>
           </Link>
@@ -145,10 +152,16 @@ export default function Login() {
         >
           <div className="lg:hidden mb-8">
             <Link href="/" className="flex items-center gap-2 justify-center">
-              <div className="w-10 h-10 bg-gradient-to-br from-primary-600 to-accent-600 rounded-lg flex items-center justify-center">
-                <Sparkles className="w-6 h-6 text-white" />
+              <div className="relative w-10 h-10">
+                <Image
+                  src="/logo.png"
+                  alt="GeoRepute.ai Logo"
+                  fill
+                  className="object-contain"
+                  priority
+                />
               </div>
-              <span className="text-2xl font-bold bg-gradient-to-r from-primary-600 to-accent-600 bg-clip-text text-transparent">
+              <span className="text-2xl font-bold text-primary-600">
                 GeoRepute.ai
               </span>
             </Link>

@@ -15,9 +15,9 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const baseStyles = "inline-flex items-center justify-center font-semibold rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed";
     
     const variants = {
-      primary: "bg-gradient-to-r from-primary-600 to-accent-600 text-white hover:shadow-lg hover:shadow-primary-500/50",
-      secondary: "bg-gray-100 text-gray-900 hover:bg-gray-200",
-      outline: "border-2 border-gray-300 text-gray-700 hover:border-primary-500 hover:text-primary-600 bg-white",
+      primary: "bg-primary-500 text-white hover:bg-primary-600 hover:shadow-lg hover:shadow-primary-500/50",
+      secondary: "bg-secondary-500 text-white hover:bg-secondary-600 hover:shadow-lg hover:shadow-secondary-500/50",
+      outline: "border-2 border-primary-500 text-primary-600 hover:bg-primary-50 bg-white",
       ghost: "text-gray-700 hover:bg-gray-100",
       danger: "bg-red-600 text-white hover:bg-red-700 hover:shadow-lg hover:shadow-red-500/50",
     };
@@ -31,8 +31,9 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <motion.button
         ref={ref}
-        whileHover={{ scale: disabled ? 1 : 1.02 }}
-        whileTap={{ scale: disabled ? 1 : 0.98 }}
+        whileHover={{ scale: disabled ? 1 : 1.02, y: disabled ? 0 : -2 }}
+        whileTap={{ scale: disabled ? 1 : 0.98, y: 0 }}
+        transition={{ duration: 0.2 }}
         className={cn(baseStyles, variants[variant], sizes[size], className)}
         disabled={disabled || isLoading}
         {...props}

@@ -13,8 +13,16 @@
     --foreground: 210 40% 98%;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  * {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2;
   }
 }
 
@@ -28,11 +36,15 @@
   }
   
   .gradient-primary {
-    @apply bg-gradient-to-r from-primary-600 to-primary-400;
+    background: linear-gradient(to right, #3b82f6, #14b8a6);
   }
   
   .gradient-accent {
-    @apply bg-gradient-to-r from-accent-600 to-primary-600;
+    background: linear-gradient(to right, #8b5cf6, #3b82f6);
+  }
+  
+  .gradient-secondary {
+    background: linear-gradient(to right, #14b8a6, #8b5cf6);
   }
 }
 

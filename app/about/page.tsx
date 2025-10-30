@@ -21,7 +21,7 @@ export default function About() {
           >
             <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
               Pioneering the Future of
-              <span className="gradient-primary bg-clip-text text-transparent"> AI-Driven Visibility</span>
+              <span className="text-primary-500"> AI-Driven Visibility</span>
             </h1>
             <p className="text-xl text-gray-600 leading-relaxed">
               GeoRepute.ai is revolutionizing how businesses control their digital presence 

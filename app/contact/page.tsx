@@ -45,7 +45,7 @@ export default function Contact() {
           >
             <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
               Get in
-              <span className="gradient-primary bg-clip-text text-transparent"> Touch</span>
+              <span className="text-primary-500"> Touch</span>
             </h1>
             <p className="text-xl text-gray-600 leading-relaxed">
               Ready to transform your digital visibility? Let's talk about how 

@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Sparkles } from "lucide-react";
+import { Menu, X } from "lucide-react";
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -12,6 +13,7 @@ export default function Navbar() {
     { href: "/", label: "Home" },
     { href: "/about", label: "About" },
     { href: "/systems", label: "Our Systems" },
+    { href: "/pricing", label: "Pricing" },
     { href: "/contact", label: "Contact" },
   ];
 
@@ -20,15 +22,21 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-20">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group">
+          <Link href="/" className="flex items-center gap-3 group">
             <motion.div
-              whileHover={{ rotate: 360 }}
-              transition={{ duration: 0.5 }}
-              className="w-10 h-10 bg-gradient-to-br from-primary-600 to-accent-600 rounded-lg flex items-center justify-center"
+              whileHover={{ scale: 1.05 }}
+              transition={{ duration: 0.3 }}
+              className="relative w-10 h-10"
             >
-              <Sparkles className="w-6 h-6 text-white" />
+              <Image
+                src="/logo.png"
+                alt="GeoRepute.ai Logo"
+                fill
+                className="object-contain"
+                priority
+              />
             </motion.div>
-            <span className="text-2xl font-bold bg-gradient-to-r from-primary-600 to-accent-600 bg-clip-text text-transparent">
+            <span className="text-2xl font-bold text-primary-600">
               GeoRepute.ai
             </span>
           </Link>
@@ -56,7 +64,7 @@ export default function Navbar() {
             </Link>
             <Link
               href="/dashboard"
-              className="px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg font-semibold hover:shadow-lg hover:shadow-primary-500/50 transition-all duration-300"
+              className="px-6 py-2 bg-primary-500 text-white rounded-lg font-semibold hover:bg-primary-600 hover:shadow-lg hover:shadow-primary-500/50 transition-all duration-300"
             >
               Get Started
             </Link>
@@ -103,7 +111,7 @@ export default function Navbar() {
                 </Link>
                 <Link
                   href="/dashboard"
-                  className="block w-full px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg font-semibold text-center hover:shadow-lg transition-all"
+                  className="block w-full px-6 py-2 bg-primary-500 text-white rounded-lg font-semibold text-center hover:bg-primary-600 hover:shadow-lg transition-all"
                   onClick={() => setIsOpen(false)}
                 >
                   Get Started

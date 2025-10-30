@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Sparkles, Twitter, Linkedin, Github, Mail } from "lucide-react";
+import Image from "next/image";
+import { Twitter, Linkedin, Github, Mail } from "lucide-react";
 
 export default function Footer() {
   const footerLinks = {
@@ -45,9 +46,15 @@ export default function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-6 gap-8 mb-12">
           {/* Brand Column */}
           <div className="col-span-2">
-            <Link href="/" className="flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 bg-gradient-to-br from-primary-600 to-accent-600 rounded-lg flex items-center justify-center">
-                <Sparkles className="w-6 h-6 text-white" />
+            <Link href="/" className="flex items-center gap-3 mb-4">
+              <div className="relative w-10 h-10">
+                <Image
+                  src="/logo.png"
+                  alt="GeoRepute.ai Logo"
+                  fill
+                  className="object-contain"
+                  priority
+                />
               </div>
               <span className="text-xl font-bold text-white">
                 GeoRepute.ai

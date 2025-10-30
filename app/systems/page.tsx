@@ -34,7 +34,7 @@ export default function Systems() {
           >
             <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
               Our
-              <span className="gradient-primary bg-clip-text text-transparent"> Complete GEO System</span>
+              <span className="text-primary-500"> Complete GEO System</span>
             </h1>
             <p className="text-xl text-gray-600 leading-relaxed">
               An end-to-end platform for AI-driven visibility optimization. 

@@ -2,8 +2,9 @@
 
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Sparkles, Building2, User, ArrowRight } from "lucide-react";
+import { Building2, User, ArrowRight } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 
 export default function RoleSelection() {
@@ -57,10 +58,10 @@ export default function RoleSelection() {
 
       console.log(`✅ Role set to: ${role}`);
 
-      // Redirect to dashboard
+      // Redirect to onboarding for new users
       setTimeout(() => {
         router.refresh();
-        router.push("/dashboard");
+        router.push("/onboarding");
       }, 500);
     } catch (err: any) {
       console.error("Error setting role:", err);
@@ -79,10 +80,16 @@ export default function RoleSelection() {
           className="text-center mb-12"
         >
           <div className="flex items-center justify-center gap-3 mb-6">
-            <div className="w-12 h-12 bg-gradient-to-br from-primary-600 to-accent-600 rounded-xl flex items-center justify-center">
-              <Sparkles className="w-7 h-7 text-white" />
+            <div className="relative w-12 h-12">
+              <Image
+                src="/logo.png"
+                alt="GeoRepute.ai Logo"
+                fill
+                className="object-contain"
+                priority
+              />
             </div>
-            <span className="text-3xl font-bold bg-gradient-to-r from-primary-600 to-accent-600 bg-clip-text text-transparent">
+            <span className="text-3xl font-bold text-primary-600">
               GeoRepute.ai
             </span>
           </div>
@@ -113,11 +120,11 @@ export default function RoleSelection() {
             transition={{ delay: 0.1 }}
             onClick={() => handleRoleSelection("client")}
             disabled={loading}
-            className="group relative bg-white rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 text-left border-2 border-transparent hover:border-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="group relative bg-white rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 text-left border-2 border-transparent hover:border-secondary-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <div className="absolute top-6 right-6">
-              <div className="w-12 h-12 bg-primary-100 rounded-xl flex items-center justify-center group-hover:bg-primary-200 transition-colors">
-                <User className="w-6 h-6 text-primary-600" />
+              <div className="w-12 h-12 bg-secondary-100 rounded-xl flex items-center justify-center group-hover:bg-secondary-200 transition-colors">
+                <User className="w-6 h-6 text-secondary-600" />
               </div>
             </div>
 
@@ -130,24 +137,24 @@ export default function RoleSelection() {
 
             <ul className="space-y-3 mb-8">
               <li className="flex items-start gap-2">
-                <ArrowRight className="w-5 h-5 text-primary-600 mt-0.5 flex-shrink-0" />
+                <ArrowRight className="w-5 h-5 text-secondary-600 mt-0.5 flex-shrink-0" />
                 <span className="text-gray-700">Manage your own business visibility</span>
               </li>
               <li className="flex items-start gap-2">
-                <ArrowRight className="w-5 h-5 text-primary-600 mt-0.5 flex-shrink-0" />
+                <ArrowRight className="w-5 h-5 text-secondary-600 mt-0.5 flex-shrink-0" />
                 <span className="text-gray-700">Track rankings and AI visibility</span>
               </li>
               <li className="flex items-start gap-2">
-                <ArrowRight className="w-5 h-5 text-primary-600 mt-0.5 flex-shrink-0" />
+                <ArrowRight className="w-5 h-5 text-secondary-600 mt-0.5 flex-shrink-0" />
                 <span className="text-gray-700">Generate AI-powered content</span>
               </li>
               <li className="flex items-start gap-2">
-                <ArrowRight className="w-5 h-5 text-primary-600 mt-0.5 flex-shrink-0" />
+                <ArrowRight className="w-5 h-5 text-secondary-600 mt-0.5 flex-shrink-0" />
                 <span className="text-gray-700">Access full analytics and reports</span>
               </li>
             </ul>
 
-            <div className="flex items-center justify-center gap-2 text-primary-600 font-semibold group-hover:gap-3 transition-all">
+            <div className="flex items-center justify-center gap-2 text-secondary-600 font-semibold group-hover:gap-3 transition-all">
               <span>Select Client</span>
               <ArrowRight className="w-5 h-5" />
             </div>
@@ -215,12 +222,29 @@ export default function RoleSelection() {
           </motion.div>
         )}
 
+        {/* Skip Option */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="text-center mt-8"
+        >
+          <button
+            onClick={() => {
+              router.push("/dashboard");
+            }}
+            className="text-gray-500 hover:text-gray-700 text-sm font-medium underline"
+          >
+            Skip setup and go to dashboard
+          </button>
+        </motion.div>
+
         {/* Footer Note */}
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          className="text-center text-gray-500 mt-8 text-sm"
+          transition={{ delay: 0.4 }}
+          className="text-center text-gray-500 mt-4 text-sm"
         >
           You can change this later in your account settings
         </motion.p>
