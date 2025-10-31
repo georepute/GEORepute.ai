@@ -71,6 +71,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Insert ranking into ranking table
     const { data, error } = await supabase
       .from('ranking')
       .insert({
@@ -85,6 +86,23 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error) throw error
+
+    // Update ranking_score in keyword table
+    const { error: updateError } = await supabase
+      .from('keyword')
+      .update({ 
+        ranking_score: rank,
+        updated_at: new Date().toISOString()
+      })
+      .eq('keyword_id', keyword_id)
+      .eq('user_id', session.user.id)
+
+    if (updateError) {
+      console.error('Error updating keyword ranking_score:', updateError)
+      // Don't fail the request if keyword update fails, ranking is still saved
+    } else {
+      console.log(`✅ Updated ranking_score for keyword_id ${keyword_id} to ${rank}`)
+    }
 
     return NextResponse.json({ data }, { status: 201 })
   } catch (error: any) {

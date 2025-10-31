@@ -23,12 +23,15 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  Activity,
+  Lightbulb,
+  Shield,
+  Zap,
+  Globe,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { filterNavigationByRole, NavigationItem } from "@/lib/permissions/permissions";
-import DemoModeBanner from "@/components/DemoMode/DemoModeBanner";
-import DemoModeToggle from "@/components/DemoMode/DemoModeToggle";
 
 export default function DashboardLayout({
   children,
@@ -80,10 +83,17 @@ export default function DashboardLayout({
 
   const allNavigation: NavigationItem[] = [
     { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
+    { name: "Live View", href: "/dashboard/live-view", icon: Activity, requiredCapability: "canViewAnalytics" },
+    { name: "Content Generator", href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
+    { name: "Keyword Forecast", href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
+    { name: "Action Plans", href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
     { name: "Keywords", href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
     { name: "Content", href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
     { name: "Rankings", href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
-    { name: "AI Visibility", href: "/dashboard/ai-visibility", icon: Sparkles, requiredCapability: "canViewAIVisibility" },
+    { name: "AI Visibility", href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
+    { name: "Reputation", href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
+    { name: "Leads", href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
+    { name: "AdSync", href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },
     { name: "Analytics", href: "/dashboard/analytics", icon: FileText, requiredCapability: "canViewAnalytics" },
     { name: "Reports", href: "/dashboard/reports", icon: BarChart3, requiredCapability: "canViewReports" },
     { name: "Video Reports", href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
@@ -96,9 +106,6 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Demo Mode Banner */}
-      <DemoModeBanner />
-      
       {/* Mobile Sidebar Backdrop */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -278,7 +285,6 @@ export default function DashboardLayout({
             </div>
 
             <div className="flex items-center gap-4">
-              <DemoModeToggle />
               <button className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
                 <Bell className="w-5 h-5" />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
