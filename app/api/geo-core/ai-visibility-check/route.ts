@@ -42,8 +42,9 @@ export async function POST(request: NextRequest) {
         query,
         platform,
         result_data: {
-          mentionCount: result.mentionCount,
-          insights: result.insights,
+          mentionedBrands: result.mentionedBrands,
+          mentionCount: result.mentionedBrands.length,
+          yourBrandPosition: result.yourBrandPosition,
           recommendations: result.recommendations,
         },
         visibility_score: result.visibilityScore,
@@ -61,8 +62,9 @@ export async function POST(request: NextRequest) {
       {
         visibilityScore: result.visibilityScore,
         sentiment: result.sentiment,
-        mentionCount: result.mentionCount,
-        insights: result.insights,
+        mentionedBrands: result.mentionedBrands,
+        mentionCount: result.mentionedBrands.length,
+        yourBrandPosition: result.yourBrandPosition,
         recommendations: result.recommendations,
         checkId: data?.id,
       },

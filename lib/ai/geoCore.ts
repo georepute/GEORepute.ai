@@ -93,6 +93,19 @@ export interface LearningInput {
   userFeedback?: string;
 }
 
+export interface AnalyzeAndLearnInput {
+  actionType: string;
+  inputData: any;
+  outcomeData: any;
+}
+
+export interface AnalyzeAndLearnOutput {
+  successScore: number;
+  insights: string[];
+  recommendations: string[];
+  appliedToFuture: boolean;
+}
+
 export interface ActionPlanInput {
   objective: string;
   targetKeywords?: string[];
@@ -486,6 +499,62 @@ Respond in JSON format:
   } catch (error) {
     console.error("Learning data recording error:", error);
     throw new Error("Failed to record learning data");
+  }
+}
+
+export async function analyzeAndLearn(
+  input: AnalyzeAndLearnInput
+): Promise<AnalyzeAndLearnOutput> {
+  const prompt = `You are analyzing action outcomes to improve future performance.
+
+Action Type: ${input.actionType}
+Input Data: ${JSON.stringify(input.inputData, null, 2)}
+Outcome Data: ${JSON.stringify(input.outcomeData, null, 2)}
+
+Analyze and provide:
+1. Success Score (0-100): How successful was this action?
+2. Key Insights: What patterns do you notice?
+3. Recommendations: What should be done differently next time?
+4. Applied to Future: Should these learnings be automatically applied? (true/false)
+
+Respond in JSON format:
+{
+  "successScore": 75,
+  "insights": ["Insight 1", "Insight 2"],
+  "recommendations": ["Recommendation 1", "Recommendation 2"],
+  "appliedToFuture": true
+}`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4-turbo",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an AI learning system that analyzes action outcomes and provides insights to improve future performance. Always respond in JSON format.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.7,
+      max_tokens: 1500,
+    });
+
+    const result = JSON.parse(response.choices[0].message.content || "{}");
+
+    return {
+      successScore: result.successScore || 0,
+      insights: result.insights || [],
+      recommendations: result.recommendations || [],
+      appliedToFuture: result.appliedToFuture || false,
+    };
+  } catch (error) {
+    console.error("Analyze and learn error:", error);
+    throw new Error("Failed to analyze and learn");
   }
 }
 
