@@ -104,6 +104,47 @@ export async function POST(request: NextRequest) {
       console.log(`✅ Updated ranking_score for keyword_id ${keyword_id} to ${rank}`)
     }
 
+    // Auto-trigger learning from ranking update (background, non-blocking)
+    try {
+      // Get keyword data for learning trigger
+      const { data: keywordData } = await supabase
+        .from('keyword')
+        .select('keyword_text')
+        .eq('keyword_id', keyword_id)
+        .eq('user_id', session.user.id)
+        .single()
+
+      if (keywordData) {
+        // Get predicted ranking from forecast if available
+        const { data: forecastData } = await supabase
+          .from('keyword_forecast')
+          .select('predicted_ranking')
+          .eq('user_id', session.user.id)
+          .eq('keyword', keywordData.keyword_text)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        const predictedRanking = forecastData?.predicted_ranking || rank + 5 // Default estimate
+
+        // Trigger learning (non-blocking)
+        const { triggerLearningFromRanking } = await import('@/lib/learning/autoTrigger')
+        triggerLearningFromRanking(
+          session.user.id,
+          {
+            keyword_id,
+            keyword_text: keywordData.keyword_text,
+            predictedRanking,
+            actualRanking: rank,
+          },
+          supabase
+        ).catch(err => console.error('Learning trigger error:', err))
+      }
+    } catch (triggerError) {
+      console.warn('Could not trigger learning from ranking:', triggerError)
+      // Don't fail the request
+    }
+
     return NextResponse.json({ data }, { status: 201 })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })

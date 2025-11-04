@@ -28,6 +28,7 @@ import {
   Shield,
   Zap,
   Globe,
+  Brain,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -88,13 +89,14 @@ export default function DashboardLayout({
     { name: "Keyword Forecast", href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
     { name: "Action Plans", href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
     { name: "Keywords", href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
-    { name: "Content", href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
+    { name: "Publication", href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
     { name: "Rankings", href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
     { name: "AI Visibility", href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
     { name: "Reputation", href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
     { name: "Leads", href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
     { name: "AdSync", href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },
     { name: "Analytics", href: "/dashboard/analytics", icon: FileText, requiredCapability: "canViewAnalytics" },
+    { name: "Learning", href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
     { name: "Reports", href: "/dashboard/reports", icon: BarChart3, requiredCapability: "canViewReports" },
     { name: "Video Reports", href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
     { name: "Quote Builder", href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },

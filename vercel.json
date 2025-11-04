@@ -1,0 +1,9 @@
+{
+  "crons": [
+    {
+      "path": "/api/geo-core/orchestrator/scheduled-publish",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
+

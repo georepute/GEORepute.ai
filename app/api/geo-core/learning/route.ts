@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import { analyzeAndLearn } from "@/lib/ai/geoCore";
+import { storeLearningRule } from "@/lib/learning/rulesEngine";
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,6 +52,26 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error("Database insert error:", error);
+    }
+
+    // Auto-extract and store rule if applicable
+    if (result.appliedToFuture && data?.id) {
+      try {
+        await storeLearningRule(
+          session.user.id,
+          {
+            actionType,
+            platform: inputData.platform,
+            keyword: inputData.keyword,
+            recommendations: result.recommendations,
+            appliedToFuture: true,
+          },
+          supabase
+        );
+      } catch (ruleError) {
+        console.warn("Could not store learning rule:", ruleError);
+        // Don't fail the request if rule storage fails
+      }
     }
 
     return NextResponse.json(

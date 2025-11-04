@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import { generateStrategicContent } from "@/lib/ai/geoCore";
+import { applyLearningRules } from "@/lib/learning/rulesEngine";
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,15 +34,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate content
+    // Apply learning rules from previous outcomes
+    const learningRules = await applyLearningRules(
+      session.user.id,
+      {
+        platform: targetPlatform,
+        keywords: targetKeywords,
+        topic,
+      },
+      supabase
+    );
+
+    // Generate content with learning rules applied
     const result = await generateStrategicContent({
       topic,
       targetKeywords,
       targetPlatform,
       brandMention,
-      influenceLevel: influenceLevel || "subtle",
+      influenceLevel: learningRules.tone || influenceLevel || "subtle",
       userContext,
-    });
+    }, learningRules);
 
     // Save to database
     const { data, error } = await supabase
@@ -68,6 +80,9 @@ export async function POST(request: NextRequest) {
       console.error("Database insert error:", error);
     }
 
+    // Note: Learning will be auto-triggered when content performance data is available
+    // via content performance API or manual trigger
+
     return NextResponse.json(
       {
         content: result.content,
@@ -77,6 +92,7 @@ export async function POST(request: NextRequest) {
           wordCount: result.wordCount,
           platform: result.platform,
           ...result.metadata,
+          learningRulesApplied: Object.keys(learningRules).length > 0 ? learningRules : undefined,
         },
         contentId: data?.id,
       },

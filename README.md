@@ -285,7 +285,7 @@ Inspired by Monday.com:
 ### Content Orchestrator
 - Multi-stage approval workflow
 - Platform-specific optimization
-- Scheduled publishing
+- **Scheduled publishing**: Automatically publishes content at scheduled time (works locally + production)
 - Performance tracking
 - AI humanization engine
 
@@ -317,9 +317,13 @@ Required variables in `.env.local`:
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Required for scheduled publishing
 
 # OpenAI
 OPENAI_API_KEY=your_openai_api_key
+
+# Scheduled Publishing (Optional)
+CRON_SECRET=your_random_secret_key  # Optional, for external cron services
 
 # Optional: OAuth
 GOOGLE_CLIENT_ID=your_google_client_id

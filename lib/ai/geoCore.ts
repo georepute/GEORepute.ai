@@ -151,6 +151,63 @@ export interface CompetitorAnalysisOutput {
 }
 
 // ================================================
+// KEYWORD SCORING TYPES
+// ================================================
+
+export interface KeywordScoringInput {
+  keyword: string;
+  searchVolume?: number;
+  difficulty?: number | string;
+  competition?: string;
+  currentRanking?: number | null;
+  historicalData?: {
+    previousRanking?: number;
+    previousScore?: number;
+    rankingChange?: number;
+    trend?: "improving" | "declining" | "stable";
+  };
+  geoStrategy?: {
+    targetPlatforms?: string[];
+    priorityLevel?: "high" | "medium" | "low";
+    geoAlignment?: number; // 0-100, how well it aligns with GEO strategy
+  };
+  industry?: string;
+  location?: string;
+}
+
+export interface KeywordScoreBreakdown {
+  searchVolumeScore: number; // 0-100
+  difficultyScore: number; // 0-100 (inverted - easier = higher score)
+  competitionScore: number; // 0-100 (lower competition = higher score)
+  roiScore: number; // 0-100
+  rankingPotentialScore: number; // 0-100
+  trendScore: number; // 0-100
+  geoStrategyScore: number; // 0-100 (GEO alignment)
+  historicalPerformanceScore: number; // 0-100
+}
+
+export interface KeywordScoringOutput {
+  keyword: string;
+  overallScore: number; // 0-100, weighted composite score
+  priority: "critical" | "high" | "medium" | "low";
+  breakdown: KeywordScoreBreakdown;
+  weightedFactors: {
+    factor: string;
+    weight: number;
+    score: number;
+    contribution: number; // weight * score
+  }[];
+  recommendations: string[];
+  geoStrategyAlignment: number; // 0-100
+  historicalComparison?: {
+    previousScore?: number;
+    scoreChange?: number;
+    trend?: "improving" | "declining" | "stable";
+  };
+  reasoning: string;
+}
+
+// ================================================
 // 1. KEYWORD FORECASTING
 // ================================================
 
@@ -228,7 +285,8 @@ Respond in JSON format:
 // ================================================
 
 export async function generateStrategicContent(
-  input: ContentGenerationInput
+  input: ContentGenerationInput,
+  learningRules?: Record<string, any>
 ): Promise<ContentGenerationOutput> {
   const styleSeed = Math.floor(Math.random() * 1e9);
   const platformGuidelines = {
@@ -307,9 +365,14 @@ ${input.userContext ? `User Context: ${input.userContext}` : ""}
 
 9️⃣ **Formatting.**
 - 150–300 words unless naturally longer.
+${learningRules?.wordCount ? `- Target word count: ${learningRules.wordCount.min || 150}-${learningRules.wordCount.max || 300} words` : ""}
 - Use natural paragraph flow.
 - No summaries or clean endings — stop where it feels right.
 - Never use "in conclusion" or "to sum up."
+
+${learningRules?.tone ? `📚 LEARNED STRATEGY: Use ${learningRules.tone} tone (learned from previous outcomes)` : ""}
+${learningRules?.useEmojis ? `📚 LEARNED STRATEGY: Include ${learningRules.emojiCount || 3} emojis naturally (learned from previous outcomes)` : ""}
+${learningRules?.platformRules ? `📚 LEARNED STRATEGY: ${JSON.stringify(learningRules.platformRules)}` : ""}
 
 ---
 
@@ -639,7 +702,351 @@ Respond in JSON format:
 }
 
 // ================================================
-// 6. COMPETITOR ANALYSIS
+// 6. ADVANCED KEYWORD SCORING (STANDALONE)
+// ================================================
+
+/**
+ * Advanced keyword scoring with multi-factor analysis, weighted scoring,
+ * historical comparison, and GEO strategy alignment
+ */
+export async function generateKeywordScore(
+  input: KeywordScoringInput
+): Promise<KeywordScoringOutput> {
+  // Extract and normalize input data
+  const searchVolume = input.searchVolume || 0;
+  const difficulty = typeof input.difficulty === 'string' 
+    ? convertDifficultyStringToNumber(input.difficulty) 
+    : (input.difficulty || 50);
+  const competition = input.competition || "Medium";
+  const currentRanking = input.currentRanking || null;
+  const historicalData = input.historicalData || {};
+  const geoStrategy = input.geoStrategy || {};
+
+  // ============================================
+  // 1. CALCULATE INDIVIDUAL FACTOR SCORES
+  // ============================================
+
+  // Search Volume Score (0-100)
+  // Higher volume = higher score, logarithmic scale
+  const searchVolumeScore = Math.min(100, Math.log10(Math.max(1, searchVolume) + 1) * 15);
+
+  // Difficulty Score (0-100) - INVERTED (easier = higher score)
+  // Convert difficulty (0-100) to score where 0 difficulty = 100 score
+  const difficultyScore = Math.max(0, 100 - difficulty);
+
+  // Competition Score (0-100) - INVERTED (lower competition = higher score)
+  const competitionScore = convertCompetitionToScore(competition);
+
+  // ROI Score (0-100) - Based on search volume and difficulty
+  // Higher volume + lower difficulty = higher ROI potential
+  const roiScore = Math.min(100, (searchVolumeScore * 0.6) + (difficultyScore * 0.4));
+
+  // Ranking Potential Score (0-100)
+  // If already ranking, consider current position
+  // If not ranking, estimate potential based on difficulty
+  let rankingPotentialScore = 50;
+  if (currentRanking && currentRanking <= 100) {
+    // Already ranking: Better position = higher score
+    rankingPotentialScore = Math.max(0, 100 - currentRanking);
+  } else {
+    // Not ranking: Estimate potential based on difficulty
+    rankingPotentialScore = difficultyScore * 0.8;
+  }
+
+  // Trend Score (0-100) - Based on historical performance
+  let trendScore = 50; // Default neutral
+  if (historicalData.trend) {
+    switch (historicalData.trend) {
+      case "improving":
+        trendScore = 85;
+        break;
+      case "stable":
+        trendScore = 60;
+        break;
+      case "declining":
+        trendScore = 25;
+        break;
+    }
+  } else if (historicalData.rankingChange !== undefined) {
+    // Calculate trend from ranking change
+    if (historicalData.rankingChange < 0) {
+      // Ranking improved (lower number = better)
+      trendScore = 85;
+    } else if (historicalData.rankingChange === 0) {
+      trendScore = 60;
+    } else {
+      trendScore = 25;
+    }
+  }
+
+  // GEO Strategy Alignment Score (0-100)
+  // How well keyword aligns with GEO strategy
+  let geoStrategyScore = 50; // Default neutral
+  if (geoStrategy.geoAlignment !== undefined) {
+    geoStrategyScore = geoStrategy.geoAlignment;
+  } else if (geoStrategy.priorityLevel) {
+    // Convert priority to score
+    switch (geoStrategy.priorityLevel) {
+      case "high":
+        geoStrategyScore = 85;
+        break;
+      case "medium":
+        geoStrategyScore = 60;
+        break;
+      case "low":
+        geoStrategyScore = 35;
+        break;
+    }
+  }
+
+  // Historical Performance Score (0-100)
+  // Based on previous scores and performance
+  let historicalPerformanceScore = 50; // Default neutral
+  if (historicalData.previousScore !== undefined) {
+    historicalPerformanceScore = historicalData.previousScore;
+  } else if (currentRanking && historicalData.previousRanking) {
+    // Estimate from ranking improvement
+    const rankingImprovement = historicalData.previousRanking - currentRanking;
+    if (rankingImprovement > 0) {
+      historicalPerformanceScore = Math.min(100, 50 + (rankingImprovement * 5));
+    } else {
+      historicalPerformanceScore = Math.max(0, 50 + (rankingImprovement * 5));
+    }
+  }
+
+  // ============================================
+  // 2. WEIGHTED SCORING SYSTEM
+  // ============================================
+
+  // Define weights for each factor (must sum to 1.0)
+  const weights = {
+    searchVolume: 0.15,
+    difficulty: 0.15,
+    competition: 0.10,
+    roi: 0.20,
+    rankingPotential: 0.15,
+    trend: 0.10,
+    geoStrategy: 0.10,
+    historicalPerformance: 0.05,
+  };
+
+  // Calculate weighted contributions
+  const weightedFactors = [
+    {
+      factor: "Search Volume",
+      weight: weights.searchVolume,
+      score: searchVolumeScore,
+      contribution: searchVolumeScore * weights.searchVolume,
+    },
+    {
+      factor: "Difficulty (Ease)",
+      weight: weights.difficulty,
+      score: difficultyScore,
+      contribution: difficultyScore * weights.difficulty,
+    },
+    {
+      factor: "Competition Level",
+      weight: weights.competition,
+      score: competitionScore,
+      contribution: competitionScore * weights.competition,
+    },
+    {
+      factor: "ROI Potential",
+      weight: weights.roi,
+      score: roiScore,
+      contribution: roiScore * weights.roi,
+    },
+    {
+      factor: "Ranking Potential",
+      weight: weights.rankingPotential,
+      score: rankingPotentialScore,
+      contribution: rankingPotentialScore * weights.rankingPotential,
+    },
+    {
+      factor: "Trend",
+      weight: weights.trend,
+      score: trendScore,
+      contribution: trendScore * weights.trend,
+    },
+    {
+      factor: "GEO Strategy Alignment",
+      weight: weights.geoStrategy,
+      score: geoStrategyScore,
+      contribution: geoStrategyScore * weights.geoStrategy,
+    },
+    {
+      factor: "Historical Performance",
+      weight: weights.historicalPerformance,
+      score: historicalPerformanceScore,
+      contribution: historicalPerformanceScore * weights.historicalPerformance,
+    },
+  ];
+
+  // Calculate overall weighted score
+  const overallScore = Math.round(
+    weightedFactors.reduce((sum, factor) => sum + factor.contribution, 0)
+  );
+
+  // ============================================
+  // 3. DETERMINE PRIORITY
+  // ============================================
+
+  let priority: "critical" | "high" | "medium" | "low";
+  if (overallScore >= 80) {
+    priority = "critical";
+  } else if (overallScore >= 65) {
+    priority = "high";
+  } else if (overallScore >= 50) {
+    priority = "medium";
+  } else {
+    priority = "low";
+  }
+
+  // ============================================
+  // 4. HISTORICAL COMPARISON
+  // ============================================
+
+  let historicalComparison: {
+    previousScore?: number;
+    scoreChange?: number;
+    trend?: "improving" | "declining" | "stable";
+  } | undefined;
+
+  if (historicalData.previousScore !== undefined) {
+    const scoreChange = overallScore - historicalData.previousScore;
+    let trend: "improving" | "declining" | "stable";
+    if (scoreChange > 5) {
+      trend = "improving";
+    } else if (scoreChange < -5) {
+      trend = "declining";
+    } else {
+      trend = "stable";
+    }
+
+    historicalComparison = {
+      previousScore: historicalData.previousScore,
+      scoreChange: Math.round(scoreChange * 10) / 10,
+      trend,
+    };
+  }
+
+  // ============================================
+  // 5. GENERATE RECOMMENDATIONS
+  // ============================================
+
+  const recommendations: string[] = [];
+
+  if (searchVolumeScore < 50) {
+    recommendations.push("Low search volume - consider more specific or long-tail variations");
+  }
+
+  if (difficultyScore < 40) {
+    recommendations.push("High difficulty - focus on building authority and backlinks");
+  }
+
+  if (competitionScore < 40) {
+    recommendations.push("High competition - consider niche targeting or alternative keywords");
+  }
+
+  if (rankingPotentialScore < 50 && !currentRanking) {
+    recommendations.push("Not currently ranking - create targeted content and optimize on-page SEO");
+  }
+
+  if (trendScore < 40 && historicalComparison) {
+    recommendations.push("Declining trend - review and update content strategy");
+  }
+
+  if (geoStrategyScore < 50) {
+    recommendations.push("Low GEO strategy alignment - consider adjusting to match GEO priorities");
+  }
+
+  if (overallScore >= 80) {
+    recommendations.push("High-priority keyword - allocate maximum resources for optimization");
+  }
+
+  if (recommendations.length === 0) {
+    recommendations.push("Keyword shows good potential - maintain current strategy");
+  }
+
+  // ============================================
+  // 6. GENERATE REASONING
+  // ============================================
+
+  const reasoning = `Overall score: ${overallScore}/100 (${priority} priority). ` +
+    `Strongest factors: ${weightedFactors
+      .sort((a, b) => b.contribution - a.contribution)
+      .slice(0, 3)
+      .map(f => f.factor)
+      .join(", ")}. ` +
+    `GEO alignment: ${geoStrategyScore}/100. ` +
+    (historicalComparison && historicalComparison.scoreChange !== undefined
+      ? `Historical trend: ${historicalComparison.trend} (${historicalComparison.scoreChange > 0 ? '+' : ''}${historicalComparison.scoreChange} points). `
+      : "") +
+    `Recommendations: ${recommendations.slice(0, 2).join(", ")}.`;
+
+  // ============================================
+  // 7. RETURN RESULTS
+  // ============================================
+
+  return {
+    keyword: input.keyword,
+    overallScore,
+    priority,
+    breakdown: {
+      searchVolumeScore: Math.round(searchVolumeScore),
+      difficultyScore: Math.round(difficultyScore),
+      competitionScore: Math.round(competitionScore),
+      roiScore: Math.round(roiScore),
+      rankingPotentialScore: Math.round(rankingPotentialScore),
+      trendScore: Math.round(trendScore),
+      geoStrategyScore: Math.round(geoStrategyScore),
+      historicalPerformanceScore: Math.round(historicalPerformanceScore),
+    },
+    weightedFactors: weightedFactors.map(f => ({
+      ...f,
+      weight: Math.round(f.weight * 1000) / 1000,
+      score: Math.round(f.score),
+      contribution: Math.round(f.contribution * 10) / 10,
+    })),
+    recommendations,
+    geoStrategyAlignment: Math.round(geoStrategyScore),
+    historicalComparison,
+    reasoning,
+  };
+}
+
+// ============================================
+// HELPER FUNCTIONS FOR SCORING
+// ============================================
+
+function convertDifficultyStringToNumber(difficulty: string): number {
+  switch (difficulty?.toLowerCase()) {
+    case "easy":
+      return 30;
+    case "medium":
+      return 60;
+    case "hard":
+      return 85;
+    default:
+      return 60;
+  }
+}
+
+function convertCompetitionToScore(competition: string): number {
+  switch (competition?.toLowerCase()) {
+    case "low":
+      return 85;
+    case "medium":
+      return 60;
+    case "high":
+      return 30;
+    default:
+      return 60;
+  }
+}
+
+// ================================================
+// 7. COMPETITOR ANALYSIS
 // ================================================
 
 export async function analyzeCompetitors(
