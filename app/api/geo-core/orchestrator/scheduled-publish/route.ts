@@ -104,25 +104,10 @@ export async function GET(request: NextRequest) {
               };
 
               if (githubConfig.token && githubConfig.owner && githubConfig.repo) {
-                // Use diagnostic scan keywords as labels
-                // Format keywords for GitHub labels (lowercase, replace spaces with hyphens, remove special chars)
-                const keywords = content.target_keywords || [];
-                const formatLabel = (keyword: string) => {
-                  return keyword
-                    .toLowerCase()
-                    .replace(/\s+/g, "-") // Replace spaces with hyphens
-                    .replace(/[^a-z0-9-]/g, "") // Remove special characters except hyphens
-                    .substring(0, 50); // GitHub label max length is 50
-                };
-                
-                const labels = keywords.length > 0 
-                  ? keywords.slice(0, 10).map(formatLabel).filter((label: string) => label.length > 0) // GitHub allows max 30 labels, use first 10 keywords
-                  : ["content", "auto-published", "scheduled"];
-
+                // Publish to GitHub Discussions (uses categories automatically)
                 gitHubResult = await publishToGitHub(githubConfig, {
                   title: content.topic || "Untitled",
                   content: content.generated_content || "",
-                  labels: labels,
                 });
 
                 if (gitHubResult.success && gitHubResult.url) {
@@ -205,7 +190,7 @@ export async function GET(request: NextRequest) {
             published_url: publishUrl,
             published_at: new Date().toISOString(),
             status: publishUrl ? "published" : "pending",
-            platform_post_id: (platform === "github" ? gitHubResult?.issueNumber?.toString() : redditResult?.postId) || null,
+            platform_post_id: (platform === "github" ? gitHubResult?.discussionNumber?.toString() : redditResult?.postId) || null,
             error_message: (gitHubResult?.error || redditResult?.error) || null,
             metadata: {
               auto_published: true,
@@ -214,7 +199,7 @@ export async function GET(request: NextRequest) {
               github: gitHubResult ? {
                 success: gitHubResult.success,
                 url: gitHubResult.url,
-                issueNumber: gitHubResult.issueNumber,
+                discussionNumber: gitHubResult.discussionNumber,
                 error: gitHubResult.error,
               } : null,
               reddit: redditResult ? {

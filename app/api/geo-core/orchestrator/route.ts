@@ -280,31 +280,17 @@ export async function POST(request: NextRequest) {
                 hasToken: !!gitHubPublishConfig.token,
               });
 
-              // Use diagnostic scan keywords as labels
-              // Format keywords for GitHub labels (lowercase, replace spaces with hyphens, remove special chars)
-              const keywords = contentStrategy.target_keywords || [];
-              const formatLabel = (keyword: string) => {
-                return keyword
-                  .toLowerCase()
-                  .replace(/\s+/g, "-") // Replace spaces with hyphens
-                  .replace(/[^a-z0-9-]/g, "") // Remove special characters except hyphens
-                  .substring(0, 50); // GitHub label max length is 50
-              };
-              
-              const labels = keywords.length > 0 
-                ? keywords.slice(0, 10).map(formatLabel).filter((label: string) => label.length > 0) // GitHub allows max 30 labels, use first 10 keywords
-                : ["content", "auto-published"];
-
+              // Discussions don't use labels, but will automatically select "General" category or first available
               gitHubResult = await publishToGitHub(gitHubPublishConfig, {
                 title: contentStrategy.topic || "Untitled",
                 content: contentStrategy.generated_content || "",
-                labels: labels,
+                // categoryId is optional - will auto-select "General" or first available
               });
 
               console.log("GitHub publish result:", {
                 success: gitHubResult.success,
                 url: gitHubResult.url,
-                issueNumber: gitHubResult.issueNumber,
+                discussionNumber: gitHubResult.discussionNumber,
                 error: gitHubResult.error,
               });
 
@@ -360,7 +346,7 @@ export async function POST(request: NextRequest) {
             gitHubResult = {
               success: false,
               url: undefined, // Explicitly set to undefined
-              issueNumber: undefined,
+              discussionNumber: undefined,
               error: githubError.message || "GitHub publish failed",
             };
             
@@ -470,7 +456,7 @@ export async function POST(request: NextRequest) {
             gitHubResult: gitHubResult ? {
               success: gitHubResult.success,
               url: gitHubResult.url,
-              issueNumber: gitHubResult.issueNumber,
+              discussionNumber: gitHubResult.discussionNumber,
             } : null,
             redditResult: redditResult ? {
               success: redditResult.success,
@@ -485,7 +471,7 @@ export async function POST(request: NextRequest) {
             content_strategy_id: contentId,
             platform: platform === "github" ? "github" : (platform === "reddit" ? "reddit" : platform),
             published_at: new Date().toISOString(),
-            platform_post_id: (platform === "github" ? gitHubResult?.issueNumber?.toString() : redditResult?.postId) || platformPostId || null,
+            platform_post_id: (platform === "github" ? gitHubResult?.discussionNumber?.toString() : redditResult?.postId) || platformPostId || null,
             error_message: ((gitHubResult && !gitHubResult.success && gitHubResult.error) || (redditResult && !redditResult.success && redditResult.error)) ? (gitHubResult?.error || redditResult?.error) : null,
             metadata: {
               auto_published: true,
@@ -493,7 +479,7 @@ export async function POST(request: NextRequest) {
               github: gitHubResult ? {
                 success: gitHubResult.success,
                 url: gitHubResult.url,
-                issueNumber: gitHubResult.issueNumber,
+                discussionNumber: gitHubResult.discussionNumber,
                 error: gitHubResult.error,
               } : null,
             },
@@ -690,25 +676,11 @@ export async function POST(request: NextRequest) {
                 branch: githubConfig.branch || "main",
               };
 
-              // Use diagnostic scan keywords as labels
-              // Format keywords for GitHub labels (lowercase, replace spaces with hyphens, remove special chars)
-              const keywords = contentStrategy.target_keywords || [];
-              const formatLabel = (keyword: string) => {
-                return keyword
-                  .toLowerCase()
-                  .replace(/\s+/g, "-") // Replace spaces with hyphens
-                  .replace(/[^a-z0-9-]/g, "") // Remove special characters except hyphens
-                  .substring(0, 50); // GitHub label max length is 50
-              };
-              
-              const labels = keywords.length > 0 
-                ? keywords.slice(0, 10).map(formatLabel).filter((label: string) => label.length > 0) // GitHub allows max 30 labels, use first 10 keywords
-                : ["content", "auto-published"];
-
+              // Discussions don't use labels, but will automatically select "General" category or first available
               gitHubResult = await publishToGitHub(gitHubPublishConfig, {
                 title: contentStrategy.topic || "Untitled",
                 content: contentStrategy.generated_content || "",
-                labels: labels,
+                // categoryId is optional - will auto-select "General" or first available
               });
 
               if (gitHubResult.success && gitHubResult.url) {
@@ -830,7 +802,7 @@ export async function POST(request: NextRequest) {
           gitHubResult: gitHubResult ? {
             success: gitHubResult.success,
             url: gitHubResult.url,
-            issueNumber: gitHubResult.issueNumber,
+            discussionNumber: gitHubResult.discussionNumber,
           } : null,
           redditResult: redditResult ? {
             success: redditResult.success,
@@ -848,7 +820,7 @@ export async function POST(request: NextRequest) {
             published_url: publishUrl,
             published_at: new Date().toISOString(),
             status: publishUrl ? "published" : "pending",
-            platform_post_id: (publishPlatform === "github" ? gitHubResult?.issueNumber?.toString() : redditResult?.postId) || platformPostId || null,
+            platform_post_id: (publishPlatform === "github" ? gitHubResult?.discussionNumber?.toString() : redditResult?.postId) || platformPostId || null,
             error_message: (gitHubResult?.error || redditResult?.error) || actionData.errorMessage || null,
             metadata: {
               ...contentStrategy.metadata,
@@ -856,7 +828,7 @@ export async function POST(request: NextRequest) {
               github: gitHubResult ? {
                 success: gitHubResult.success,
                 url: gitHubResult.url,
-                issueNumber: gitHubResult.issueNumber,
+                discussionNumber: gitHubResult.discussionNumber,
                 error: gitHubResult.error,
               } : null,
               reddit: redditResult ? {

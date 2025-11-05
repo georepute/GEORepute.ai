@@ -903,7 +903,7 @@ function GitHubIntegrationSettings() {
           <div className="flex-1">
             <h3 className="font-semibold text-gray-900">GitHub Auto-Publishing</h3>
             <p className="text-sm text-gray-600">
-              Automatically publish content as GitHub Issues
+              Automatically publish content as GitHub Discussions
             </p>
           </div>
           <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -946,9 +946,10 @@ function GitHubIntegrationSettings() {
                   <li>Click <strong>"Generate new token"</strong> → <strong>"Generate new token (classic)"</strong></li>
                   <li>Give it a name (e.g., "GeoRepute Auto-Publish")</li>
                   <li>Select expiration (30 days, 90 days, or no expiration)</li>
-                  <li>Check permissions: <code className="bg-blue-100 px-1 rounded">repo</code> and <code className="bg-blue-100 px-1 rounded">issues:write</code></li>
+                  <li>Check permissions: <code className="bg-blue-100 px-1 rounded">repo</code> (Discussions API uses repo scope)</li>
                   <li>Click <strong>"Generate token"</strong> at the bottom</li>
                   <li>Copy the token (starts with <code className="bg-blue-100 px-1 rounded">ghp_</code>) and paste it above</li>
+                  <li className="mt-2"><strong>Important:</strong> Make sure Discussions are enabled in your repository settings (Settings → General → Features → Discussions)</li>
                 </ol>
               </div>
             </div>

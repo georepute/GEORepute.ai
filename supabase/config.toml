@@ -1,0 +1,19 @@
+# Supabase Configuration
+# This file is used by Supabase CLI
+
+[project]
+# Your project reference will be set when you run: supabase link
+
+[auth]
+# Auth configuration
+
+[api]
+# API configuration
+
+[db]
+# Database configuration
+
+[functions]
+# Edge Functions configuration
+# Functions are located in: supabase/functions/
+

@@ -1,9 +1,5 @@
 {
-  "crons": [
-    {
-      "path": "/api/geo-core/orchestrator/scheduled-publish",
-      "schedule": "*/5 * * * *"
-    }
-  ]
+  "_comment": "Cron jobs are now handled by Supabase Edge Functions with pg_cron. See SUPABASE_CRON_SETUP.md for setup instructions.",
+  "crons": []
 }
 
