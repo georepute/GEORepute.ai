@@ -117,7 +117,7 @@ export default function AIVisibility() {
   const platformOptions = [
     { id: "perplexity", name: "Perplexity", icon: "/images/perplexity.png" },
     { id: "chatgpt", name: "ChatGPT", icon: "/images/chatgpt.png" },
-    { id: "gemini", name: "Gemini", icon: "/images/gemini 1.png" },
+    { id: "gemini", name: "Gemini", icon: "/images/gemini 1.png", iconClass: "object-contain brightness-110 contrast-110" },
     { id: "claude", name: "Claude", icon: "/images/claude.png" },
     { id: "groq", name: "Grok", icon: "/images/groq.png" },
   ];
@@ -769,9 +769,11 @@ export default function AIVisibility() {
                                   <Image 
                                     src={platformOption.icon} 
                                     alt={platformOption.name} 
-                                    width={16} 
-                                    height={16} 
-                                    className="w-4 h-4"
+                                    width={platformOption.id === 'gemini' ? 32 : 16} 
+                                    height={platformOption.id === 'gemini' ? 32 : 16} 
+                                    className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                    quality={platformOption.id === 'gemini' ? 100 : 75}
+                                    unoptimized={platformOption.id === 'gemini'}
                                   />
                                 ) : (
                                   platform
@@ -940,9 +942,11 @@ export default function AIVisibility() {
                           <Image 
                             src={platformOption.icon} 
                             alt={platformOption.name} 
-                            width={20} 
-                            height={20} 
-                            className="w-5 h-5"
+                            width={platformOption.id === 'gemini' ? 36 : 20} 
+                            height={platformOption.id === 'gemini' ? 36 : 20} 
+                            className={`${platformOption.id === 'gemini' ? 'w-9 h-9' : 'w-5 h-5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                            quality={platformOption.id === 'gemini' ? 100 : 75}
+                            unoptimized={platformOption.id === 'gemini'}
                           />
                         ) : (
                           <span className="text-lg">🤖</span>
@@ -979,9 +983,11 @@ export default function AIVisibility() {
                               <Image 
                                 src={platformOption.icon} 
                                 alt={platformOption.name} 
-                                width={16} 
-                                height={16} 
-                                className="w-4 h-4"
+                                width={platformOption.id === 'gemini' ? 32 : 16} 
+                                height={platformOption.id === 'gemini' ? 32 : 16} 
+                                className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                quality={platformOption.id === 'gemini' ? 100 : 75}
+                                unoptimized={platformOption.id === 'gemini'}
                               />
                             ) : (
                               platform
@@ -1148,9 +1154,11 @@ export default function AIVisibility() {
                                           <Image 
                                             src={platformOption.icon} 
                                             alt={platformOption.name} 
-                                            width={16} 
-                                            height={16} 
-                                            className="w-4 h-4"
+                                            width={platformOption.id === 'gemini' ? 32 : 16} 
+                                            height={platformOption.id === 'gemini' ? 32 : 16} 
+                                            className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                            quality={platformOption.id === 'gemini' ? 100 : 75}
+                                            unoptimized={platformOption.id === 'gemini'}
                                           />
                                         ) : null}
                                         {platform}
@@ -1456,9 +1464,11 @@ export default function AIVisibility() {
                                             <Image 
                                               src={platformOption.icon} 
                                               alt={platformOption.name} 
-                                              width={14} 
-                                              height={14} 
-                                              className="w-3.5 h-3.5"
+                                              width={platformOption.id === 'gemini' ? 28 : 14} 
+                                              height={platformOption.id === 'gemini' ? 28 : 14} 
+                                              className={`${platformOption.id === 'gemini' ? 'w-7 h-7' : 'w-3.5 h-3.5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                              quality={platformOption.id === 'gemini' ? 100 : 75}
+                                              unoptimized={platformOption.id === 'gemini'}
                                             />
                                           ) : null}
                                           {platform}
@@ -1561,9 +1571,11 @@ export default function AIVisibility() {
                                             <Image 
                                               src={platformOption.icon} 
                                               alt={platformOption.name} 
-                                              width={14} 
-                                              height={14} 
-                                              className="w-3.5 h-3.5"
+                                              width={platformOption.id === 'gemini' ? 28 : 14} 
+                                              height={platformOption.id === 'gemini' ? 28 : 14} 
+                                              className={`${platformOption.id === 'gemini' ? 'w-7 h-7' : 'w-3.5 h-3.5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                              quality={platformOption.id === 'gemini' ? 100 : 75}
+                                              unoptimized={platformOption.id === 'gemini'}
                                             />
                                           ) : null}
                                           {platform}
@@ -2004,9 +2016,11 @@ export default function AIVisibility() {
                                 <Image 
                                   src={platformOption.icon} 
                                   alt={platformOption.name} 
-                                  width={16} 
-                                  height={16} 
-                                  className="w-4 h-4"
+                                  width={platformOption.id === 'gemini' ? 32 : 16} 
+                                  height={platformOption.id === 'gemini' ? 32 : 16} 
+                                  className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                  quality={platformOption.id === 'gemini' ? 100 : 75}
+                                  unoptimized={platformOption.id === 'gemini'}
                                 />
                               ) : null}
                               {platformOption?.name || platform}
@@ -2292,9 +2306,11 @@ export default function AIVisibility() {
                         <Image 
                           src={platform.icon} 
                           alt={platform.name} 
-                          width={24} 
-                          height={24} 
-                          className="w-6 h-6"
+                          width={platform.id === 'gemini' ? 40 : 24} 
+                          height={platform.id === 'gemini' ? 40 : 24} 
+                          className={`${platform.id === 'gemini' ? 'w-10 h-10' : 'w-6 h-6'} object-contain ${platform.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                          quality={platform.id === 'gemini' ? 100 : 75}
+                          unoptimized={platform.id === 'gemini'}
                         />
                       ) : null}
                       <span className={`font-medium ${
