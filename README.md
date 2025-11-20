@@ -328,6 +328,13 @@ CRON_SECRET=your_random_secret_key  # Optional, for external cron services
 # Optional: OAuth
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+# LinkedIn Integration (for auto-publishing)
+LINKEDIN_CLIENT_ID=your_linkedin_client_id
+LINKEDIN_CLIENT_SECRET=your_linkedin_client_secret
+NEXT_PUBLIC_LINKEDIN_CLIENT_ID=your_linkedin_client_id  # Same as above, for client-side OAuth redirect
+LINKEDIN_REDIRECT_URI=http://localhost:3000/api/auth/linkedin/callback  # Development
+# LINKEDIN_REDIRECT_URI=https://yourdomain.com/api/auth/linkedin/callback  # Production
 ```
 
 **Setup Instructions:**
