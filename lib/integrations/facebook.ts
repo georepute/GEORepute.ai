@@ -246,25 +246,86 @@ export async function getUserPages(
   userAccessToken: string
 ): Promise<{ success: boolean; pages?: any[]; error?: string }> {
   try {
-    const response = await fetch(
-      `https://graph.facebook.com/v18.0/me/accounts?access_token=${userAccessToken}`
-    );
-
-    const result = await response.json();
+    console.log('🔍 Fetching user pages from Facebook API...');
+    
+    // Try multiple endpoints to get pages
+    // Method 1: /me/accounts (standard way)
+    let apiUrl = `https://graph.facebook.com/v18.0/me/accounts?fields=id,name,access_token,category&access_token=${userAccessToken}`;
+    console.log('📡 Trying /me/accounts endpoint...');
+    console.log('📡 API URL (without token):', apiUrl.replace(userAccessToken, '***TOKEN***'));
+    
+    let response = await fetch(apiUrl);
+    let result = await response.json();
+    console.log('📥 /me/accounts Response:', JSON.stringify(result, null, 2));
+    
+    // If no pages found, try alternative method
+    if (!result.data || result.data.length === 0) {
+      console.log('⚠️ No pages from /me/accounts, trying /me?fields=accounts...');
+      
+      // Method 2: Get user info first, then pages
+      const userInfoUrl = `https://graph.facebook.com/v18.0/me?fields=id,name&access_token=${userAccessToken}`;
+      const userInfoResponse = await fetch(userInfoUrl);
+      const userInfo = await userInfoResponse.json();
+      console.log('👤 User info:', JSON.stringify(userInfo, null, 2));
+      
+      // Method 3: Try with different fields
+      apiUrl = `https://graph.facebook.com/v18.0/me/accounts?fields=id,name,access_token,category,perms&access_token=${userAccessToken}`;
+      console.log('📡 Trying /me/accounts with extended fields...');
+      response = await fetch(apiUrl);
+      result = await response.json();
+      console.log('📥 Extended fields Response:', JSON.stringify(result, null, 2));
+    }
 
     if (!response.ok) {
       const errorMessage = result.error?.message || result.error || 'Unknown Facebook API error';
+      const errorCode = result.error?.code || response.status;
+      const errorType = result.error?.type || 'Unknown';
+      
+      console.error('❌ Facebook API error getting pages:', {
+        status: response.status,
+        code: errorCode,
+        type: errorType,
+        message: errorMessage,
+      });
+
+      // Provide helpful error messages
+      if (errorCode === 200 || errorMessage.includes('permission') || errorMessage.includes('Permission')) {
+        return {
+          success: false,
+          error: `Missing permission: pages_show_list. Please grant this permission when authorizing the app. Error: ${errorMessage}`,
+        };
+      }
+
+      if (errorCode === 190) {
+        return {
+          success: false,
+          error: `Access token expired or invalid. Please reconnect your account.`,
+        };
+      }
+
       return {
         success: false,
-        error: `Facebook API Error: ${errorMessage}`,
+        error: `Facebook API Error (${errorCode}): ${errorMessage}`,
+      };
+    }
+
+    const pages = result.data || [];
+    console.log(`✅ Found ${pages.length} Facebook page(s)`);
+
+    if (pages.length === 0) {
+      // Provide more helpful error message
+      return {
+        success: false,
+        error: 'No Facebook Pages found. Possible reasons: 1) You don\'t have admin access to any Pages, 2) The Page is in a different Facebook account, 3) The Page needs to be reconnected. Please verify: a) You are Admin of the Facebook Page, b) The Page exists and is published, c) You\'re logged in with the correct Facebook account that owns the Page.',
       };
     }
 
     return {
       success: true,
-      pages: result.data || [],
+      pages: pages,
     };
   } catch (error: any) {
+    console.error('❌ Exception getting user pages:', error);
     return {
       success: false,
       error: error.message || 'Failed to get user pages',

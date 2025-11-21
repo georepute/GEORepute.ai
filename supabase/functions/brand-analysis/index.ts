@@ -124,12 +124,11 @@ async function queryAIPlatform(platform, prompt) {
     }
     if (platform === 'gemini' && apiKey) {
       try {
-        // Try gemini-1.5-pro first
-        let response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent`, {
+        // Try gemini-2.0-flash first (v1 API, optimized for cost and latency)
+        let response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             contents: [
@@ -147,10 +146,35 @@ async function queryAIPlatform(platform, prompt) {
             }
           })
         });
-        // If that fails, try gemini-pro
+        // If that fails, try gemini-1.5-flash (v1 API, faster and cheaper)
         if (!response.ok) {
-          console.log('Gemini 1.5 Pro failed, trying gemini-pro...');
-          response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${apiKey}`, {
+          console.log('Gemini 2.0 Flash failed, trying gemini-1.5-flash (v1)...');
+          response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    {
+                      text: prompt
+                    }
+                  ]
+                }
+              ],
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 1000
+              }
+            })
+          });
+        }
+        // If that also fails, try gemini-1.5-pro with v1 API
+        if (!response.ok) {
+          console.log('Gemini 1.5 Flash failed, trying gemini-1.5-pro (v1)...');
+          response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key=${apiKey}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'

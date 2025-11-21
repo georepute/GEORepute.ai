@@ -1831,7 +1831,7 @@ function InstagramIntegrationSettings() {
     const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
     const redirectUri = `${window.location.origin}/api/auth/instagram/callback`;
     // Request permissions for Instagram and Pages (pages_manage_posts needed for Instagram Business Account access)
-    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish";
+    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_business_basic,instagram_content_publish";
     
     if (!appId) {
       toast.error("Facebook App ID not configured. Please contact support.");

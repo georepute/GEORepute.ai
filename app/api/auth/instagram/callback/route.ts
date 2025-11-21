@@ -53,8 +53,8 @@ export async function GET(request: NextRequest) {
     // Get Facebook App credentials from environment (same as Facebook integration)
     const appId = process.env.FACEBOOK_APP_ID?.trim();
     const appSecret = process.env.FACEBOOK_APP_SECRET?.trim();
-    const redirectUri = process.env.FACEBOOK_REDIRECT_URI?.trim() || 
-      `${request.nextUrl.origin}/api/auth/instagram/callback`;
+    // Instagram uses its own callback URI (must match what's sent in OAuth dialog)
+    const redirectUri = `${request.nextUrl.origin}/api/auth/instagram/callback`;
 
     if (!appId || !appSecret) {
       console.error("Facebook App credentials not configured", {
@@ -129,55 +129,162 @@ export async function GET(request: NextRequest) {
       console.warn("⚠️ Error getting long-lived token, using short-lived token:", longLivedError.message);
     }
 
-    // Step 3: Get user's Facebook pages
-    console.log("🔍 Getting user's Facebook pages...");
-    const pagesResult = await getUserPages(longLivedToken);
+    // Step 3: Debug - Check token permissions first
+    try {
+      console.log("🔍 Checking token permissions...");
+      const debugResponse = await fetch(
+        `https://graph.facebook.com/v18.0/me/permissions?access_token=${longLivedToken}`
+      );
+      const debugData = await debugResponse.json();
+      console.log("📋 Token permissions:", JSON.stringify(debugData, null, 2));
+      
+      // Check if pages_show_list is granted
+      const hasPagesShowList = debugData.data?.some((perm: any) => 
+        perm.permission === 'pages_show_list' && perm.status === 'granted'
+      );
+      const hasInstagramBasic = debugData.data?.some((perm: any) => 
+        (perm.permission === 'instagram_business_basic' || perm.permission === 'instagram_basic') && perm.status === 'granted'
+      );
+      console.log("✅ Has pages_show_list permission:", hasPagesShowList);
+      console.log("✅ Has instagram_business_basic permission:", hasInstagramBasic);
+      
+      if (!hasPagesShowList) {
+        return NextResponse.redirect(
+          new URL(
+            `/dashboard/settings?instagram=error&message=${encodeURIComponent("Missing 'pages_show_list' permission. Please reconnect and make sure to grant ALL requested permissions, especially 'pages_show_list'.")}`,
+            request.url
+          )
+        );
+      }
+      
+      if (!hasInstagramBasic) {
+        console.warn("⚠️ Missing instagram_business_basic permission - this may cause issues");
+      }
+    } catch (debugError: any) {
+      console.warn("⚠️ Could not check permissions:", debugError.message);
+    }
 
-    if (!pagesResult.success || !pagesResult.pages || pagesResult.pages.length === 0) {
-      console.error("No pages found:", pagesResult.error);
+    // Step 4: Get user's Facebook pages
+    console.log("🔍 Getting user's Facebook pages...");
+    console.log("🔑 Using long-lived token (first 20 chars):", longLivedToken.substring(0, 20) + "...");
+    
+    // First, get user info to verify token works
+    try {
+      const userInfoResponse = await fetch(
+        `https://graph.facebook.com/v18.0/me?fields=id,name&access_token=${longLivedToken}`
+      );
+      const userInfo = await userInfoResponse.json();
+      console.log("👤 User info from token:", JSON.stringify(userInfo, null, 2));
+    } catch (e) {
+      console.warn("⚠️ Could not get user info:", e);
+    }
+    
+    const pagesResult = await getUserPages(longLivedToken);
+    console.log("📊 Pages result:", JSON.stringify({ 
+      success: pagesResult.success, 
+      pagesCount: pagesResult.pages?.length || 0,
+      error: pagesResult.error 
+    }, null, 2));
+
+    if (!pagesResult.success) {
+      console.error("❌ Failed to get pages:", pagesResult.error);
+      
+      // If no pages found, provide a more helpful error with troubleshooting steps
+      if (pagesResult.error?.includes("No Facebook Pages found")) {
+        return NextResponse.redirect(
+          new URL(
+            `/dashboard/settings?instagram=error&message=${encodeURIComponent("No Facebook Pages found. Troubleshooting: 1) Verify you're Admin (not Editor) of the Page in Page Settings → Page Roles, 2) Make sure the Page is published, 3) Try disconnecting and reconnecting, granting ALL permissions including 'instagram_business_basic'.")}`,
+            request.url
+          )
+        );
+      }
+      
       return NextResponse.redirect(
         new URL(
-          `/dashboard/settings?instagram=error&message=${encodeURIComponent(pagesResult.error || "No Facebook pages found. Please create a Facebook Page and connect it to your Instagram Business account.")}`,
+          `/dashboard/settings?instagram=error&message=${encodeURIComponent(pagesResult.error || "Failed to get Facebook pages. Please ensure you granted 'pages_show_list' permission.")}`,
           request.url
         )
       );
     }
 
-    // Step 4: Find page with Instagram Business Account
+    if (!pagesResult.pages || pagesResult.pages.length === 0) {
+      console.error("❌ No pages found in result");
+      return NextResponse.redirect(
+        new URL(
+          `/dashboard/settings?instagram=error&message=${encodeURIComponent("No Facebook Pages found. Please verify: 1) You are Admin (not Editor) of the Page, 2) The Page is published, 3) You're using the same Facebook account that owns the Page, 4) Try disconnecting and reconnecting with ALL permissions granted.")}`,
+          request.url
+        )
+      );
+    }
+
+    // Step 5: Find page with Instagram Business Account
+    console.log(`🔍 Checking ${pagesResult.pages.length} page(s) for Instagram Business Account...`);
     let selectedPage: any = null;
     let instagramAccountId: string | null = null;
     let instagramUsername: string | null = null;
 
     for (const page of pagesResult.pages) {
       const pageAccessToken = page.access_token || longLivedToken;
+      console.log(`📄 Checking page: ${page.name} (ID: ${page.id})`);
       
       try {
         // Check if this page has an Instagram Business Account
-        const instagramResponse = await fetch(
-          `https://graph.facebook.com/v18.0/${page.id}?fields=instagram_business_account&access_token=${pageAccessToken}`
-        );
+        // Try with more fields to get better error messages
+        const instagramApiUrl = `https://graph.facebook.com/v18.0/${page.id}?fields=id,name,instagram_business_account{id,username}&access_token=${pageAccessToken}`;
+        console.log(`📡 Checking Instagram for page ${page.id} (${page.name})...`);
+        console.log(`🔑 Using page access token (first 20 chars):`, pageAccessToken.substring(0, 20) + "...");
+        
+        const instagramResponse = await fetch(instagramApiUrl);
 
         if (instagramResponse.ok) {
           const instagramData = await instagramResponse.json();
+          console.log(`📥 Instagram API response for page ${page.id}:`, JSON.stringify(instagramData, null, 2));
           
           if (instagramData.instagram_business_account?.id) {
+            console.log(`✅ Found Instagram Business Account: ${instagramData.instagram_business_account.id} on page ${page.name}`);
             selectedPage = page;
             instagramAccountId = instagramData.instagram_business_account.id;
+            instagramUsername = instagramData.instagram_business_account.username || null;
             
-            // Get Instagram username
-            const usernameResponse = await fetch(
-              `https://graph.facebook.com/v18.0/${instagramAccountId}?fields=username&access_token=${pageAccessToken}`
-            );
-            
-            if (usernameResponse.ok) {
-              const usernameData = await usernameResponse.json();
-              instagramUsername = usernameData.username;
+            // If username not in nested response, get it separately
+            if (!instagramUsername) {
+              console.log(`🔍 Getting Instagram username separately...`);
+              const usernameResponse = await fetch(
+                `https://graph.facebook.com/v18.0/${instagramAccountId}?fields=username&access_token=${pageAccessToken}`
+              );
+              
+              if (usernameResponse.ok) {
+                const usernameData = await usernameResponse.json();
+                instagramUsername = usernameData.username;
+                console.log(`✅ Instagram username: @${instagramUsername}`);
+              } else {
+                const usernameError = await usernameResponse.json().catch(() => ({}));
+                console.warn(`⚠️ Could not get Instagram username:`, usernameError);
+              }
+            } else {
+              console.log(`✅ Instagram username from nested response: @${instagramUsername}`);
             }
             
             break; // Found a page with Instagram, use it
+          } else {
+            console.log(`ℹ️ Page ${page.name} does not have an Instagram Business Account connected`);
+            console.log(`📋 Full page data:`, JSON.stringify(instagramData, null, 2));
+          }
+        } else {
+          const instagramError = await instagramResponse.json().catch(() => ({}));
+          console.error(`❌ Error checking Instagram for page ${page.id}:`, {
+            status: instagramResponse.status,
+            statusText: instagramResponse.statusText,
+            error: instagramError
+          });
+          
+          // If it's a permission error, log it clearly
+          if (instagramResponse.status === 200 || instagramError.error?.code === 200) {
+            console.error(`❌ Permission error: The access token may not have permission to read Instagram Business Account. Error: ${instagramError.error?.message || 'Unknown'}`);
           }
         }
-      } catch (e) {
+      } catch (e: any) {
+        console.error(`❌ Exception checking page ${page.id}:`, e.message);
         // Continue to next page
         continue;
       }
