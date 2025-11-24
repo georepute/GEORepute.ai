@@ -917,6 +917,100 @@ Contributions welcome! Areas for contribution:
 
 ---
 
+## 📍 Dashboard Routes
+
+### Dashboard (Role-Based Access)
+- **Overview** (`/dashboard`): Stats, charts, keyword performance
+- **Live View** (`/dashboard/live-view`): Real-time AI/Google search split view
+- **Content Generator** (`/dashboard/content-generator`): AI humanized content (95%+ human score)
+- **Keyword Forecast** (`/dashboard/keyword-forecast`): AI-powered keyword analysis
+- **Action Plans** (`/dashboard/action-plans`): AI-generated strategic plans
+- **Keywords** (`/dashboard/keywords`): Keyword tracking and management
+- **Content** (`/dashboard/content`): Content orchestration workflow
+- **Rankings** (`/dashboard/rankings`): SEO ranking trends
+- **AI Visibility** (`/dashboard/ai-visibility`): AI platform tracking
+- **Reputation** (`/dashboard/reputation`): Reputation monitoring
+- **Leads** (`/dashboard/leads`): Lead capture and management
+- **AdSync** (`/dashboard/adsync`): Google Ads integration
+- **Analytics** (`/dashboard/analytics`): Comprehensive analytics
+- **Reports** (`/dashboard/reports`): 50+ BI report library
+- **Video Reports** (`/dashboard/video-reports`): Auto-generated video reports
+- **Quote Builder** (`/dashboard/quote-builder`): Agency quote generation
+- **Team** (`/dashboard/team`): Team member management
+- **Settings** (`/dashboard/settings`): User preferences
+
+---
+
+## 🔐 Authentication Details
+
+### Authentication Methods
+- **Email/Password**: Traditional signup/login
+- **Google OAuth**: One-click Google SSO
+- **Session Management**: Supabase Auth with RLS
+
+### User Roles
+- **Admin**: Full system access, user management
+- **Agency**: Multi-client management, white-label tools
+- **Client**: Individual dashboard access
+
+### Role Selection Flow
+1. User signs up → 2. Selects role (Client/Agency) → 3. Onboarding → 4. Dashboard
+
+---
+
+## 🤖 AI/GEO Core Details
+
+### Powered by OpenAI GPT-4 Turbo
+
+**Core Features:**
+1. **Keyword Forecasting**: AI-powered keyword difficulty, traffic, and ROI predictions
+2. **Content Generation**: Humanized content that bypasses AI detection (95%+ human score)
+3. **Action Plans**: Strategic AI-generated optimization plans
+4. **AI Visibility Tracking**: Monitor AI platform mentions
+5. **Self-Learning Loop**: Continuous improvement from performance data
+
+**AI Humanization Techniques:**
+- Natural imperfections (contractions, filler words, casual language)
+- Sentence variety (short, long, incomplete)
+- Personal touch (experiences, emotions, humor)
+- Strategic emojis (😂, 😅, 🤷‍♂️, 💡, 🔥)
+- Grammar variations (slight imperfections)
+- Platform-specific authenticity (Reddit, Quora, Medium styles)
+- Avoids AI patterns (no robotic transitions, perfect structure)
+
+**Bypasses AI Detection Tools:**
+- ✅ Turnitin AI
+- ✅ GPTZero
+- ✅ Copyleaks
+- ✅ Originality.ai
+
+---
+
+## 📊 Key Components
+
+### Dashboard Features
+- Real-time visibility metrics
+- Multi-platform tracking
+- AI-powered forecasts
+- Interactive charts (Recharts)
+- Collapsible sidebar with role badges
+
+### Content Orchestrator
+- Multi-stage approval workflow
+- Platform-specific optimization
+- **Scheduled publishing**: Automatically publishes content at scheduled time (works locally + production)
+- Performance tracking
+- AI humanization engine
+
+### Reports & Analytics
+- 50+ pre-built reports
+- PDF/CSV/Google Sheets export
+- Email scheduling
+- White-label branding
+- Auto-generated video reports
+
+---
+
 ## 📝 License
 
 MIT License - see LICENSE file for details.

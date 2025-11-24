@@ -2,12 +2,12 @@
 
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { 
   Settings as SettingsIcon,
   User,
   Bell,
   Palette,
-  Globe,
   Lock,
   CreditCard,
   Zap,
@@ -16,10 +16,12 @@ import {
   Eye,
   EyeOff,
   CheckCircle,
-  Github,
   Loader,
   XCircle,
-  MessageSquare
+  MessageSquare,
+  FileText,
+  HelpCircle,
+  Linkedin
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -583,9 +585,7 @@ function RedditIntegrationSettings() {
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
       <div className="flex items-center gap-4 mb-6">
-        <div className="w-12 h-12 bg-orange-500 rounded-lg flex items-center justify-center">
-          <MessageSquare className="w-6 h-6 text-white" />
-        </div>
+        <Image src="/reddit-icon.svg" alt="Reddit" width={48} height={48} className="w-12 h-12" />
         <div className="flex-1">
           <h3 className="font-semibold text-gray-900">Reddit Auto-Publishing</h3>
           <p className="text-sm text-gray-600">
@@ -897,9 +897,7 @@ function GitHubIntegrationSettings() {
       {/* GitHub Integration */}
       <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
         <div className="flex items-center gap-4 mb-6">
-          <div className="w-12 h-12 bg-gray-900 rounded-lg flex items-center justify-center">
-            <Github className="w-6 h-6 text-white" />
-          </div>
+          <Image src="/github-142.svg" alt="GitHub" width={48} height={48} className="w-12 h-12" />
           <div className="flex-1">
             <h3 className="font-semibold text-gray-900">GitHub Auto-Publishing</h3>
             <p className="text-sm text-gray-600">
@@ -1017,42 +1015,1308 @@ function GitHubIntegrationSettings() {
       {/* Reddit Integration */}
       <RedditIntegrationSettings />
 
-      {/* Other Integrations */}
-      <div className="space-y-4">
-        {[
-          { name: "Google Search Console", status: "connected", description: "Connected account: john@company.com" },
-          { name: "Google Ads", status: "connected", description: "Syncing 3 ad accounts" },
-          { name: "OpenAI API", status: "connected", description: "API key configured" },
-          { name: "Supabase", status: "connected", description: "Database connected" },
-          { name: "ElevenLabs", status: "disconnected", description: "For video narration" },
-          { name: "Stripe", status: "connected", description: "Billing enabled" },
-        ].map((integration) => (
-          <div key={integration.name} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-                <Globe className="w-6 h-6 text-gray-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">{integration.name}</h3>
-                <p className="text-sm text-gray-600">{integration.description}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                integration.status === "connected" 
-                  ? "bg-green-100 text-green-700" 
-                  : "bg-gray-100 text-gray-700"
-              }`}>
-                {integration.status}
-              </span>
-              <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm">
-                {integration.status === "connected" ? "Configure" : "Connect"}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+      {/* Medium Integration */}
+      <MediumIntegrationSettings />
+
+      {/* Quora Integration */}
+      <QuoraIntegrationSettings />
+
+      {/* Facebook Integration */}
+      <FacebookIntegrationSettings />
+
+      {/* LinkedIn Integration */}
+      <LinkedInIntegrationSettings />
+
+      {/* Instagram Integration */}
+      <InstagramIntegrationSettings />
     </div>
   );
 }
 
+// Medium Integration Component
+function MediumIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [config, setConfig] = useState({
+    email: "",
+    password: "",
+    useCookies: false,
+    cookies: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+
+  useEffect(() => {
+    loadMediumConfig();
+  }, []);
+
+  const loadMediumConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/medium");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.config) {
+          setConfig({
+            email: data.config.email || "",
+            password: "",
+            useCookies: !!data.config.cookies,
+            cookies: data.config.cookies ? "***" : "",
+          });
+          setIsConnected(data.config.verified || false);
+        } else {
+          setIsConnected(false);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading Medium config:", error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (config.useCookies) {
+      if (!config.cookies || config.cookies === "***") {
+        toast.error("Please enter cookies or switch to email/password");
+        return;
+      }
+      
+      // Validate cookies JSON format
+      try {
+        const parsedCookies = JSON.parse(config.cookies);
+        if (!Array.isArray(parsedCookies)) {
+          toast.error("Cookies must be a JSON array. Example: [{\"name\": \"sid\", \"value\": \"...\", \"domain\": \".medium.com\"}]");
+          return;
+        }
+        if (parsedCookies.length === 0) {
+          toast.error("Cookies array is empty. Please add at least one cookie.");
+          return;
+        }
+        // Validate each cookie has required fields
+        for (const cookie of parsedCookies) {
+          if (!cookie.name || !cookie.value) {
+            toast.error(`Cookie is missing required fields (name or value): ${JSON.stringify(cookie)}`);
+            return;
+          }
+        }
+      } catch (parseError: any) {
+        toast.error(`Invalid JSON format for cookies: ${parseError.message}`);
+        return;
+      }
+    } else {
+      if (!config.email || !config.password) {
+        toast.error("Please enter email and password");
+        return;
+      }
+    }
+
+    setLoading(true);
+    try {
+      let cookiesToSend = undefined;
+      if (config.useCookies) {
+        try {
+          cookiesToSend = JSON.parse(config.cookies);
+          console.log("🍪 Sending cookies:", cookiesToSend.length, "cookies");
+        } catch (parseError: any) {
+          toast.error(`Failed to parse cookies JSON: ${parseError.message}`);
+          setLoading(false);
+          return;
+        }
+      }
+      
+      const response = await fetch("/api/integrations/medium", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: config.email || "", // Email is still required for identification
+          password: config.useCookies ? undefined : config.password,
+          cookies: cookiesToSend,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        toast.success("Medium configuration saved!");
+        setIsConnected(true);
+        setConfig({ email: "", password: "", useCookies: false, cookies: "" });
+        await loadMediumConfig();
+      } else {
+        toast.error(data.error || "Failed to save configuration");
+      }
+    } catch (error: any) {
+      console.error("Save error:", error);
+      toast.error("Failed to save configuration: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect Medium integration?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/medium", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Medium integration disconnected");
+        setIsConnected(false);
+        setConfig({ email: "", password: "", useCookies: false, cookies: "" });
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/medium-square.svg" alt="Medium" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">Medium Auto-Publishing</h3>
+          <p className="text-sm text-gray-600">
+            Automatically publish content to Medium using Selenium
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-xs text-yellow-900">
+              <strong>⚠️ Note:</strong> Medium doesn't provide an official API. We use browser automation (Selenium) to publish content. 
+              This requires your login credentials or session cookies.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 mb-4">
+            <input
+              type="checkbox"
+              id="useCookies"
+              checked={config.useCookies}
+              onChange={(e) => setConfig({ ...config, useCookies: e.target.checked })}
+              className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+            />
+            <label htmlFor="useCookies" className="text-sm text-gray-700">
+              Use session cookies instead of password (recommended)
+            </label>
+          </div>
+
+          {config.useCookies ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Session Cookies (JSON) *
+              </label>
+              <textarea
+                value={config.cookies}
+                onChange={(e) => setConfig({ ...config, cookies: e.target.value })}
+                placeholder='[{"name": "session", "value": "...", "domain": ".medium.com"}]'
+                rows={4}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-xs"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Extract cookies from your browser after logging into Medium. Use browser DevTools → Application → Cookies.
+                <a href="/docs/HOW_TO_GET_SESSION_COOKIES.md" target="_blank" className="text-primary-600 hover:underline ml-1">
+                  View detailed guide →
+                </a>
+              </p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email *
+                </label>
+                <input
+                  type="email"
+                  value={config.email}
+                  onChange={(e) => setConfig({ ...config, email: e.target.value })}
+                  placeholder="your@email.com"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Password *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={config.password}
+                    onChange={(e) => setConfig({ ...config, password: e.target.value })}
+                    placeholder="Your Medium password"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none pr-12"
+                  />
+                  <button
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={handleSave}
+              disabled={loading || (config.useCookies ? !config.cookies : (!config.email || !config.password))}
+              className="px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save Configuration
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <button
+            onClick={handleDisconnect}
+            disabled={loading}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Disconnecting...
+              </>
+            ) : (
+              <>
+                <XCircle className="w-4 h-4" />
+                Disconnect
+              </>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Quora Integration Component
+function QuoraIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [config, setConfig] = useState({
+    email: "",
+    password: "",
+    useCookies: false,
+    cookies: "",
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+
+  useEffect(() => {
+    loadQuoraConfig();
+  }, []);
+
+  const loadQuoraConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/quora");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.config) {
+          setConfig({
+            email: data.config.email || "",
+            password: "",
+            useCookies: !!data.config.cookies,
+            cookies: data.config.cookies ? "***" : "",
+          });
+          setIsConnected(data.config.verified || false);
+        } else {
+          setIsConnected(false);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading Quora config:", error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (config.useCookies) {
+      if (!config.cookies || config.cookies === "***") {
+        toast.error("Please enter cookies or switch to email/password");
+        return;
+      }
+    } else {
+      if (!config.email || !config.password) {
+        toast.error("Please enter email and password");
+        return;
+      }
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/quora", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: config.email,
+          password: config.useCookies ? undefined : config.password,
+          cookies: config.useCookies ? JSON.parse(config.cookies) : undefined,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        toast.success("Quora configuration saved!");
+        setIsConnected(true);
+        setConfig({ email: "", password: "", useCookies: false, cookies: "" });
+        await loadQuoraConfig();
+      } else {
+        toast.error(data.error || "Failed to save configuration");
+      }
+    } catch (error: any) {
+      console.error("Save error:", error);
+      toast.error("Failed to save configuration: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect Quora integration?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/quora", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Quora integration disconnected");
+        setIsConnected(false);
+        setConfig({ email: "", password: "", useCookies: false, cookies: "" });
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/quora.svg" alt="Quora" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">Quora Auto-Publishing</h3>
+          <p className="text-sm text-gray-600">
+            Automatically publish content to Quora using Selenium
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-xs text-yellow-900">
+              <strong>⚠️ Note:</strong> Quora doesn't provide an official API. We use browser automation (Selenium) to publish content. 
+              This requires your login credentials or session cookies.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 mb-4">
+            <input
+              type="checkbox"
+              id="useCookiesQuora"
+              checked={config.useCookies}
+              onChange={(e) => setConfig({ ...config, useCookies: e.target.checked })}
+              className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+            />
+            <label htmlFor="useCookiesQuora" className="text-sm text-gray-700">
+              Use session cookies instead of password (recommended)
+            </label>
+          </div>
+
+          {config.useCookies ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Session Cookies (JSON) *
+              </label>
+              <textarea
+                value={config.cookies}
+                onChange={(e) => setConfig({ ...config, cookies: e.target.value })}
+                placeholder='[{"name": "session", "value": "...", "domain": ".quora.com"}]'
+                rows={4}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-xs"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Extract cookies from your browser after logging into Quora. Use browser DevTools → Application → Cookies.
+                <a href="/docs/HOW_TO_GET_SESSION_COOKIES.md" target="_blank" className="text-primary-600 hover:underline ml-1">
+                  View detailed guide →
+                </a>
+              </p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email *
+                </label>
+                <input
+                  type="email"
+                  value={config.email}
+                  onChange={(e) => setConfig({ ...config, email: e.target.value })}
+                  placeholder="your@email.com"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Password *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={config.password}
+                    onChange={(e) => setConfig({ ...config, password: e.target.value })}
+                    placeholder="Your Quora password"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none pr-12"
+                  />
+                  <button
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={handleSave}
+              disabled={loading || (config.useCookies ? !config.cookies : (!config.email || !config.password))}
+              className="px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  Save Configuration
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <button
+            onClick={handleDisconnect}
+            disabled={loading}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Disconnecting...
+              </>
+            ) : (
+              <>
+                <XCircle className="w-4 h-4" />
+                Disconnect
+              </>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// LinkedIn Integration Component
+function LinkedInIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [daysUntilExpiration, setDaysUntilExpiration] = useState<number | null>(null);
+  const [isExpiringSoon, setIsExpiringSoon] = useState(false);
+
+  useEffect(() => {
+    loadLinkedInConfig();
+    
+    // Check for OAuth callback in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const linkedinStatus = urlParams.get("linkedin");
+    
+    if (linkedinStatus === "connected") {
+      const name = urlParams.get("name");
+      toast.success(`LinkedIn connected successfully!${name ? ` Connected as: ${name}` : ""}`);
+      // Reload config
+      loadLinkedInConfig();
+      // Clean URL
+      window.history.replaceState({}, "", "/dashboard/settings");
+    } else if (linkedinStatus === "error") {
+      const errorMessage = urlParams.get("message");
+      toast.error(`LinkedIn connection failed: ${errorMessage || "Unknown error"}`);
+      // Clean URL
+      window.history.replaceState({}, "", "/dashboard/settings");
+    }
+  }, []);
+
+  const loadLinkedInConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/linkedin");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.config) {
+          setFullName(data.config.fullName || "");
+          setIsConnected(data.config.verified || false);
+          setDaysUntilExpiration(data.config.daysUntilExpiration);
+          setIsExpiringSoon(data.config.isExpiringSoon || false);
+        } else {
+          setIsConnected(false);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading LinkedIn config:", error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleConnectLinkedIn = () => {
+    // Get LinkedIn Client ID from environment
+    const clientId = process.env.NEXT_PUBLIC_LINKEDIN_CLIENT_ID;
+    const redirectUri = `${window.location.origin}/api/auth/linkedin/callback`;
+    const scope = "openid profile w_member_social";
+    const state = Date.now().toString(); // Simple state for CSRF protection
+    
+    if (!clientId) {
+      toast.error("LinkedIn Client ID not configured. Please contact support.");
+      return;
+    }
+    
+    // Redirect to LinkedIn OAuth
+    const linkedInAuthUrl = `https://www.linkedin.com/oauth/v2/authorization?` +
+      `response_type=code` +
+      `&client_id=${clientId}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&state=${state}` +
+      `&scope=${encodeURIComponent(scope)}`;
+    
+    window.location.href = linkedInAuthUrl;
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect LinkedIn integration?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/linkedin", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("LinkedIn integration disconnected");
+        setIsConnected(false);
+        setFullName("");
+        setDaysUntilExpiration(null);
+        setIsExpiringSoon(false);
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/linkedin.svg" alt="LinkedIn" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">LinkedIn Auto-Publishing</h3>
+          <p className="text-sm text-gray-600">
+            Automatically publish content to your LinkedIn profile
+            {fullName && isConnected && ` - ${fullName}`}
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs text-blue-900">
+              <strong>ℹ️ Note:</strong> Connect your LinkedIn account to automatically publish content to your LinkedIn profile. Posts will appear on your personal LinkedIn feed.
+            </p>
+          </div>
+
+          <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+            <Image src="/linkedin.svg" alt="LinkedIn" width={64} height={64} className="w-16 h-16 mb-4" />
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">
+              Connect with LinkedIn
+            </h4>
+            <p className="text-sm text-gray-600 mb-6 text-center max-w-md">
+              Click the button below to securely connect your LinkedIn account. 
+              We'll request permission to post on your behalf.
+            </p>
+            <button
+              onClick={handleConnectLinkedIn}
+              disabled={loading}
+              className="px-8 py-3 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-semibold"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-5 h-5 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Image src="/linkedin.svg" alt="LinkedIn" width={20} height={20} className="w-5 h-5" />
+                  Connect LinkedIn
+                </>
+              )}
+            </button>
+            <p className="mt-4 text-xs text-gray-500 text-center max-w-md">
+              Your access token will be valid for 60 days. You'll be notified when it's time to reconnect.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-900">
+              <strong>✅ Connected:</strong> {fullName || "LinkedIn Profile"}
+            </p>
+            {daysUntilExpiration !== null && (
+              <p className="text-xs text-green-700 mt-1">
+                Token expires in {daysUntilExpiration} day{daysUntilExpiration !== 1 ? 's' : ''}
+                {isExpiringSoon && (
+                  <span className="ml-2 text-orange-600 font-semibold">
+                    ⚠️ Expiring soon - please reconnect
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleDisconnect}
+            disabled={loading}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Disconnecting...
+              </>
+            ) : (
+              <>
+                <XCircle className="w-4 h-4" />
+                Disconnect
+              </>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Instagram Integration Component
+function InstagramIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [username, setUsername] = useState("");
+  const [pageName, setPageName] = useState("");
+  const [daysUntilExpiration, setDaysUntilExpiration] = useState<number | null>(null);
+  const [isExpiringSoon, setIsExpiringSoon] = useState(false);
+
+  useEffect(() => {
+    loadInstagramConfig();
+    
+    // Check for OAuth callback in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const instagramStatus = urlParams.get("instagram");
+    
+    if (instagramStatus === "connected") {
+      const username = urlParams.get("username");
+      toast.success(`Instagram connected successfully!${username ? ` Connected as: @${username}` : ""}`);
+      // Reload config
+      loadInstagramConfig();
+      // Clean URL
+      window.history.replaceState({}, "", "/dashboard/settings");
+    } else if (instagramStatus === "error") {
+      const errorMessage = urlParams.get("message");
+      toast.error(`Instagram connection failed: ${errorMessage || "Unknown error"}`);
+      // Clean URL
+      window.history.replaceState({}, "", "/dashboard/settings");
+    }
+  }, []);
+
+  const loadInstagramConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/instagram");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.config) {
+          setUsername(data.config.username || "");
+          setPageName(data.config.pageName || "");
+          setIsConnected(data.config.verified || false);
+          setDaysUntilExpiration(data.config.daysUntilExpiration);
+          setIsExpiringSoon(data.config.isExpiringSoon || false);
+        } else {
+          setIsConnected(false);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading Instagram config:", error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleConnectInstagram = () => {
+    // Get Facebook App ID from environment (Instagram uses Facebook OAuth)
+    const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
+    const redirectUri = `${window.location.origin}/api/auth/instagram/callback`;
+    // Request permissions for Instagram and Pages (pages_manage_posts needed for Instagram Business Account access)
+    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_business_basic,instagram_content_publish";
+    
+    if (!appId) {
+      toast.error("Facebook App ID not configured. Please contact support.");
+      return;
+    }
+    
+    // Redirect to Facebook OAuth (Instagram uses Facebook OAuth)
+    const instagramAuthUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
+      `client_id=${appId}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&scope=${encodeURIComponent(scope)}` +
+      `&response_type=code` +
+      `&state=${Date.now()}`; // Simple state for CSRF protection
+    
+    window.location.href = instagramAuthUrl;
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect Instagram integration?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/instagram", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Instagram integration disconnected");
+        setIsConnected(false);
+        setUsername("");
+        setPageName("");
+        setDaysUntilExpiration(null);
+        setIsExpiringSoon(false);
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/instagram-1-svgrepo-com.svg" alt="Instagram" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">Instagram Auto-Publishing</h3>
+          <p className="text-sm text-gray-600">
+            Automatically publish content to your Instagram Business account
+            {username && isConnected && ` - @${username}`}
+            {pageName && isConnected && ` (via ${pageName})`}
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+            <p className="text-xs text-purple-900">
+              <strong>ℹ️ Note:</strong> Connect your Instagram Business account to automatically publish content. 
+              Your Instagram account must be a Business account and connected to a Facebook Page.
+            </p>
+          </div>
+
+          <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+            <Image src="/instagram-1-svgrepo-com.svg" alt="Instagram" width={64} height={64} className="w-16 h-16 mb-4" />
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">
+              Connect with Instagram
+            </h4>
+            <p className="text-sm text-gray-600 mb-6 text-center max-w-md">
+              Click the button below to securely connect your Instagram Business account. 
+              We'll automatically detect your Instagram account connected to your Facebook Page.
+            </p>
+            <button
+              onClick={handleConnectInstagram}
+              disabled={loading}
+              className="px-8 py-3 bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white rounded-lg hover:opacity-90 transition-opacity text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-semibold"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-5 h-5 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Image src="/instagram-1-svgrepo-com.svg" alt="Instagram" width={20} height={20} className="w-5 h-5" />
+                  Connect Instagram
+                </>
+              )}
+            </button>
+            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg max-w-md">
+              <p className="text-xs text-yellow-900">
+                <strong>⚠️ Requirements:</strong>
+              </p>
+              <ul className="text-xs text-yellow-800 mt-1 list-disc list-inside space-y-1">
+                <li>Instagram Business account (not personal)</li>
+                <li>Connected to a Facebook Page</li>
+                <li>Admin access to the Facebook Page</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-900">
+              <strong>✅ Connected:</strong> @{username || "Instagram Business Account"}
+              {pageName && ` via ${pageName}`}
+            </p>
+            {daysUntilExpiration !== null && (
+              <p className="text-xs text-green-700 mt-1">
+                Token expires in {daysUntilExpiration} day{daysUntilExpiration !== 1 ? 's' : ''}
+                {isExpiringSoon && (
+                  <span className="ml-2 text-orange-600 font-semibold">
+                    ⚠️ Expiring soon - please reconnect
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={handleDisconnect}
+            disabled={loading}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Disconnecting...
+              </>
+            ) : (
+              <>
+                <XCircle className="w-4 h-4" />
+                Disconnect
+              </>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Facebook Integration Component
+function FacebookIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [config, setConfig] = useState({
+    email: "",
+    accessToken: "",
+  });
+  const [showToken, setShowToken] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [pageName, setPageName] = useState("");
+  const [showManualEntry, setShowManualEntry] = useState(false);
+
+  useEffect(() => {
+    loadFacebookConfig();
+    
+    // Check for OAuth callback in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const facebookStatus = urlParams.get("facebook");
+    
+    if (facebookStatus === "connected") {
+      const pageName = urlParams.get("page");
+      toast.success(`Facebook connected successfully!${pageName ? ` Connected to: ${pageName}` : ""}`);
+      // Reload config
+      loadFacebookConfig();
+      // Clean URL
+      window.history.replaceState({}, "", "/dashboard/settings");
+    } else if (facebookStatus === "error") {
+      const errorMessage = urlParams.get("message");
+      toast.error(`Facebook connection failed: ${errorMessage || "Unknown error"}`);
+      // Clean URL
+      window.history.replaceState({}, "", "/dashboard/settings");
+    }
+  }, []);
+
+  const loadFacebookConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/facebook");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.config) {
+          setConfig({
+            email: data.config.email || "",
+            accessToken: "",
+          });
+          setPageName(data.config.pageName || "");
+          setIsConnected(data.config.verified || false);
+        } else {
+          setIsConnected(false);
+        }
+      }
+    } catch (error) {
+      console.error("Error loading Facebook config:", error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleConnectFacebook = () => {
+    // Get Facebook App ID from environment (or use a config)
+    // For now, we'll construct the OAuth URL
+    const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
+    const redirectUri = `${window.location.origin}/api/auth/facebook/callback`;
+    // Required permissions: pages_show_list (to list pages), pages_read_engagement (to read page data), pages_manage_posts (to post to pages)
+    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts";
+    
+    if (!appId) {
+      toast.error("Facebook App ID not configured. Please contact support.");
+      return;
+    }
+    
+    // Redirect to Facebook OAuth
+    const facebookAuthUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
+      `client_id=${appId}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&scope=${encodeURIComponent(scope)}` +
+      `&response_type=code` +
+      `&state=${Date.now()}`; // Simple state for CSRF protection
+    
+    window.location.href = facebookAuthUrl;
+  };
+
+  const handleSave = async () => {
+    if (!config.email || !config.accessToken) {
+      toast.error("Please enter both email and access token");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/facebook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: config.email.trim(),
+          accessToken: config.accessToken.trim(),
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        toast.success("Facebook configuration saved!");
+        setIsConnected(true);
+        setPageName(data.config?.pageName || "");
+        setConfig({ email: "", accessToken: "" });
+        await loadFacebookConfig();
+      } else {
+        toast.error(data.error || "Failed to save configuration");
+        if (data.suggestions) {
+          console.log("Suggestions:", data.suggestions);
+        }
+      }
+    } catch (error: any) {
+      console.error("Save error:", error);
+      toast.error("Failed to save configuration: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect Facebook integration?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/facebook", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Facebook integration disconnected");
+        setIsConnected(false);
+        setConfig({ email: "", accessToken: "" });
+        setPageName("");
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/facebook-color.svg" alt="Facebook" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">Facebook Auto-Publishing</h3>
+          <p className="text-sm text-gray-600">
+            Automatically publish content to your Facebook Page using Graph API
+            {pageName && isConnected && ` - ${pageName}`}
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-xs text-blue-900">
+              <strong>ℹ️ Note:</strong> Connect your Facebook account to automatically publish content to your Facebook Page. No manual token entry needed!
+            </p>
+          </div>
+
+          {/* OAuth Connect Button (Primary Method) */}
+          {!showManualEntry ? (
+            <>
+              <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+                <Image src="/facebook-color.svg" alt="Facebook" width={64} height={64} className="w-16 h-16 mb-4" />
+                <h4 className="text-lg font-semibold text-gray-900 mb-2">
+                  Connect with Facebook
+                </h4>
+                <p className="text-sm text-gray-600 mb-6 text-center max-w-md">
+                  Click the button below to securely connect your Facebook account. 
+                  We'll automatically detect your pages and set up publishing.
+                </p>
+                <button
+                  onClick={handleConnectFacebook}
+                  disabled={loading}
+                  className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-semibold"
+                >
+                  {loading ? (
+                    <>
+                      <Loader className="w-5 h-5 animate-spin" />
+                      Connecting...
+                    </>
+                  ) : (
+                    <>
+                      <Image src="/facebook-color.svg" alt="Facebook" width={20} height={20} className="w-5 h-5" />
+                      Connect Facebook
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowManualEntry(true)}
+                  className="mt-4 text-sm text-gray-600 hover:text-gray-900 underline"
+                >
+                  Or enter token manually
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Manual Token Entry (Fallback) */}
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-semibold text-gray-900">Manual Token Entry</h4>
+                <button
+                  onClick={() => setShowManualEntry(false)}
+                  className="text-sm text-primary-600 hover:text-primary-700"
+                >
+                  Use OAuth instead
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Email *
+                </label>
+                <input
+                  type="email"
+                  value={config.email}
+                  onChange={(e) => setConfig({ ...config, email: e.target.value })}
+                  placeholder="your@email.com"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Your Facebook account email (used for identification)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Access Token *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showToken ? "text" : "password"}
+                    value={config.accessToken}
+                    onChange={(e) => setConfig({ ...config, accessToken: e.target.value })}
+                    placeholder="EAAxxxxxxxxxxxxx"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none pr-12 font-mono text-sm"
+                  />
+                  <button
+                    onClick={() => setShowToken(!showToken)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showToken ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Your Facebook Access Token (User Access Token or Page Access Token)
+                </p>
+              </div>
+
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <h4 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                  <HelpCircle className="w-4 h-4" />
+                  How to get Access Token:
+                </h4>
+                <ol className="text-xs text-gray-700 space-y-2 list-decimal list-inside">
+                  <li>Go to <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">Facebook Graph API Explorer</a></li>
+                  <li>Select your Facebook App (or create one if needed)</li>
+                  <li>Click "Generate Access Token"</li>
+                  <li>If you have a Page: Select your Page and grant permissions: <code className="bg-blue-100 px-1 rounded">pages_manage_posts</code>, <code className="bg-blue-100 px-1 rounded">pages_read_engagement</code></li>
+                  <li>If you don't have a Page: Use User Access Token with <code className="bg-blue-100 px-1 rounded">pages_show_list</code> permission - we'll get your pages automatically</li>
+                  <li>Copy the generated token (starts with "EAA...")</li>
+                  <li><strong>Note:</strong> Short-lived tokens expire in ~1 hour. For long-lived tokens (60 days), use the token exchange endpoint.</li>
+                </ol>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleSave}
+                  disabled={loading || !config.email || !config.accessToken}
+                  className="px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {loading ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Save Configuration
+                    </>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="pt-4">
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-900">
+              <strong>✅ Connected:</strong> {pageName || "Facebook Page"} {config.email && `(${config.email})`}
+            </p>
+          </div>
+          <button
+            onClick={handleDisconnect}
+            disabled={loading}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Disconnecting...
+              </>
+            ) : (
+              <>
+                <XCircle className="w-4 h-4" />
+                Disconnect
+              </>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
