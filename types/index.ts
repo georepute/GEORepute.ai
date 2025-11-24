@@ -126,3 +126,48 @@ export interface Subscription {
   features: string[];
 }
 
+// Organization Types
+export interface Organization {
+  id: string;
+  name: string;
+  description?: string;
+  website?: string;
+  logo_url?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Role Types
+export interface Role {
+  id: string;
+  name: "Admin" | "Manager" | "Editor" | "Viewer";
+  description?: string;
+  permissions: Record<string, any>;
+  created_at: string;
+}
+
+// Organization User Types
+export interface OrganizationUser {
+  id: string;
+  user_id: string;
+  organization_id: string;
+  role_id: string;
+  invited_by?: string;
+  invited_at?: string;
+  joined_at: string;
+  status: "active" | "inactive" | "invited" | "suspended";
+  created_at: string;
+  updated_at: string;
+}
+
+// Extended types with relations
+export interface OrganizationWithRole extends Organization {
+  role: Role;
+  organization_user: OrganizationUser;
+}
+
+export interface UserWithOrganization extends User {
+  organization?: Organization;
+  organizations?: OrganizationWithRole[];
+}
+

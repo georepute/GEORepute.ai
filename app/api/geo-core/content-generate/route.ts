@@ -34,6 +34,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate targetPlatform - normalize to lowercase for comparison
+    const normalizedPlatform = targetPlatform.toLowerCase().trim();
+    
+    // Try to query existing platform values to see what's actually in the database
+    const { data: existingPlatforms } = await supabase
+      .from("content_strategy")
+      .select("target_platform")
+      .limit(100);
+    
+    const uniquePlatforms = existingPlatforms 
+      ? [...new Set(existingPlatforms.map((p: any) => p.target_platform).filter(Boolean))]
+      : [];
+    
+    console.log('🔍 Platform info:', { 
+      received: targetPlatform, 
+      normalized: normalizedPlatform,
+      existingInDB: uniquePlatforms
+    });
+
     // Apply learning rules from previous outcomes
     const learningRules = await applyLearningRules(
       session.user.id,
@@ -55,14 +74,15 @@ export async function POST(request: NextRequest) {
       userContext,
     }, learningRules);
 
-    // Save to database
+    // Save to database - use normalized platform value
+    console.log('💾 Saving to database with platform:', normalizedPlatform);
     const { data, error } = await supabase
       .from("content_strategy")
       .insert({
         user_id: session.user.id,
         topic,
         target_keywords: targetKeywords,
-        target_platform: targetPlatform,
+        target_platform: normalizedPlatform, // Use normalized value
         brand_mention: brandMention,
         influence_level: influenceLevel || "subtle",
         generated_content: result.content,
@@ -76,8 +96,62 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
+    // Handle database errors - but don't fail the entire request if content was generated
     if (error) {
-      console.error("Database insert error:", error);
+      console.error("❌ Database insert error:", {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        platformAttempted: normalizedPlatform,
+        originalPlatform: targetPlatform
+      });
+      
+      // If it's a constraint violation, return the content but warn about the database save
+      if (error.code === '23514') {
+        return NextResponse.json(
+          { 
+            content: result.content,
+            metadata: {
+              neutralityScore: result.neutralityScore,
+              tone: result.tone,
+              wordCount: result.wordCount,
+              platform: result.platform,
+              ...result.metadata,
+              learningRulesApplied: Object.keys(learningRules).length > 0 ? learningRules : undefined,
+            },
+            warning: `Content generated successfully, but could not be saved to database. The platform "${normalizedPlatform}" is not allowed by the database constraint 'content_strategy_target_platform_check'. Please update the database constraint to include this platform value, or use one of the allowed values.`,
+            databaseError: {
+              code: error.code,
+              message: error.message,
+              attemptedPlatform: normalizedPlatform
+            },
+            existingPlatformsInDB: uniquePlatforms
+          },
+          { status: 200 } // Still return 200 since content was generated successfully
+        );
+      }
+      
+      // For other database errors, still return content but warn
+      return NextResponse.json(
+        { 
+          content: result.content,
+          metadata: {
+            neutralityScore: result.neutralityScore,
+            tone: result.tone,
+            wordCount: result.wordCount,
+            platform: result.platform,
+            ...result.metadata,
+            learningRulesApplied: Object.keys(learningRules).length > 0 ? learningRules : undefined,
+          },
+          warning: "Content generated successfully, but could not be saved to database.",
+          databaseError: {
+            code: error.code,
+            message: error.message
+          }
+        },
+        { status: 200 } // Still return 200 since content was generated successfully
+      );
     }
 
     // Note: Learning will be auto-triggered when content performance data is available

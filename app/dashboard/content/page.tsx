@@ -58,6 +58,7 @@ export default function Content() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [viewContent, setViewContent] = useState<ContentItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [publishingContentId, setPublishingContentId] = useState<string | null>(null);
   const [stats, setStats] = useState({
     total: 0,
     published: 0,
@@ -149,7 +150,32 @@ export default function Content() {
 
   const handleReviewAction = async (action: "publish" | "schedule" | "reject", contentId: string, scheduledAt?: string) => {
     if (action === "publish") {
-      await handleAction("approve", contentId, { autoPublish: true });
+      // Check if this is Medium publishing
+      const contentItem = contentItems.find(item => item.id === contentId);
+      const isMedium = contentItem?.raw?.target_platform === "medium" || contentItem?.platforms?.includes("medium");
+      
+      if (isMedium) {
+        setPublishingContentId(contentId);
+      }
+      
+      try {
+        await handleAction("approve", contentId, { autoPublish: true });
+        // Reload content after successful publish
+        await loadContent();
+      } catch (error) {
+        // On error, clear loading state immediately
+        if (isMedium) {
+          setPublishingContentId(null);
+        }
+        throw error;
+      } finally {
+        if (isMedium) {
+          // Keep loading state for a bit to show success, then clear
+          setTimeout(() => {
+            setPublishingContentId(null);
+          }, 2000);
+        }
+      }
     } else if (action === "schedule") {
       if (scheduledAt) {
         await handleAction("approve", contentId, { scheduledAt });
@@ -434,16 +460,36 @@ export default function Content() {
                       </div>
                     </div>
 
-                    {/* Platforms - Left Side */}
+                    {/* Platforms with Keywords - Left Side */}
                     <div className="flex flex-wrap gap-2 mt-3">
-                      {item.platforms.map((platform) => (
-                        <span
-                          key={platform}
-                          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium capitalize"
-                        >
-                          {platform}
-                        </span>
-                      ))}
+                      {item.platforms.map((platform) => {
+                        // Get the first keyword for this platform
+                        // Try keywordMetrics first, then fall back to raw target_keywords
+                        const firstKeyword = item.keywordMetrics && item.keywordMetrics.length > 0
+                          ? item.keywordMetrics[0].keyword
+                          : (item.raw?.target_keywords && item.raw.target_keywords.length > 0
+                            ? item.raw.target_keywords[0]
+                            : null);
+                        
+                        // Get keyword percentage if available
+                        const keywordPercent = item.keywordMetrics && item.keywordMetrics.length > 0
+                          ? item.keywordMetrics[0].percent
+                          : null;
+
+                        return (
+                          <div key={platform} className="flex items-center gap-2">
+                            <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium capitalize">
+                              {platform}
+                            </span>
+                            {firstKeyword && (
+                              <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
+                                {firstKeyword}
+                                {keywordPercent !== null && ` - ${keywordPercent}%`}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Performance (if published) */}
@@ -533,64 +579,82 @@ export default function Content() {
 
                     {/* Action Buttons */}
                     <div className="flex items-center gap-2">
-                      {/* Draft: Only Approve button */}
-                      {item.status === "draft" && (
-                        <button
-                          onClick={() => handleApprove(item.id)}
-                          className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium hover:bg-green-100 transition-colors flex items-center gap-2"
-                          title="Approve"
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                          Approve
-                        </button>
-                      )}
-
-                      {/* Review: Reject, Publish, Schedule buttons */}
-                      {item.status === "review" && (
+                      {/* Loading state for Medium publishing */}
+                      {publishingContentId === item.id && (item.raw?.target_platform === "medium" || item.platforms?.includes("medium")) ? (
+                        <div className="flex items-center gap-3 px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg">
+                          <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium">Publishing to Medium...</span>
+                            <span className="text-xs text-blue-600">This typically takes 2-3 minutes</span>
+                          </div>
+                        </div>
+                      ) : (
                         <>
-                          <button
-                            onClick={() => handleReviewAction("publish", item.id)}
-                            className="p-2 text-green-600 hover:bg-green-50 rounded-full transition-colors"
-                            title="Publish"
+                          {/* Draft: Only Approve button */}
+                          {item.status === "draft" && (
+                            <button
+                              onClick={() => handleApprove(item.id)}
+                              className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium hover:bg-green-100 transition-colors flex items-center gap-2"
+                              title="Approve"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                              Approve
+                            </button>
+                          )}
+
+                          {/* Review: Reject, Publish, Schedule buttons */}
+                          {item.status === "review" && (
+                            <>
+                              <button
+                                onClick={() => handleReviewAction("publish", item.id)}
+                                disabled={publishingContentId === item.id}
+                                className="p-2 text-green-600 hover:bg-green-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Publish"
+                              >
+                                <CheckCircle className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={() => handleReviewAction("reject", item.id)}
+                                disabled={publishingContentId === item.id}
+                                className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Reject"
+                              >
+                                <XCircle className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={(e) => handleScheduleClick(item.id, e)}
+                                disabled={publishingContentId === item.id}
+                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors relative disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Schedule"
+                              >
+                                <Clock className="w-5 h-5" />
+                              </button>
+                            </>
+                          )}
+
+                          {/* View action for all statuses */}
+                          <button 
+                            onClick={() => {
+                              setViewContent(item);
+                              setShowViewModal(true);
+                            }}
+                            disabled={publishingContentId === item.id}
+                            className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="View"
                           >
-                            <CheckCircle className="w-5 h-5" />
+                            <Eye className="w-5 h-5" />
                           </button>
-                          <button
-                            onClick={() => handleReviewAction("reject", item.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                            title="Reject"
+                          {/* Delete action for all statuses */}
+                          <button 
+                            onClick={() => handleDelete(item.id)}
+                            disabled={publishingContentId === item.id}
+                            className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Delete"
                           >
-                            <XCircle className="w-5 h-5" />
-                          </button>
-                          <button
-                            onClick={(e) => handleScheduleClick(item.id, e)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors relative"
-                            title="Schedule"
-                          >
-                            <Clock className="w-5 h-5" />
+                            <Trash2 className="w-5 h-5" />
                           </button>
                         </>
                       )}
-
-                      {/* View action for all statuses */}
-                      <button 
-                        onClick={() => {
-                          setViewContent(item);
-                          setShowViewModal(true);
-                        }}
-                        className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
-                        title="View"
-                      >
-                        <Eye className="w-5 h-5" />
-                      </button>
-                      {/* Delete action for all statuses */}
-                      <button 
-                        onClick={() => handleDelete(item.id)}
-                        className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
                     </div>
                   </div>
                 </div>

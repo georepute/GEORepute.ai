@@ -91,6 +91,8 @@ Deno.serve(async (req) => {
         let publishUrl = null;
         let gitHubResult: any = null;
         let redditResult: any = null;
+        let linkedInResult: any = null;
+        let instagramResult: any = null;
 
         // Get GitHub integration if platform is GitHub
         if (platform === "github") {
@@ -337,6 +339,267 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Get LinkedIn integration if platform is LinkedIn
+        if (platform === "linkedin") {
+          try {
+            const { data: linkedInIntegration } = await supabase
+              .from("platform_integrations")
+              .select("*")
+              .eq("user_id", content.user_id)
+              .eq("platform", "linkedin")
+              .eq("status", "connected")
+              .maybeSingle();
+
+            if (linkedInIntegration && linkedInIntegration.access_token) {
+              // Check if token is expired
+              const expiresAt = linkedInIntegration.expires_at 
+                ? new Date(linkedInIntegration.expires_at) 
+                : null;
+              const now = new Date();
+              
+              if (expiresAt && expiresAt < now) {
+                throw new Error("LinkedIn access token has expired. Please reconnect your LinkedIn integration.");
+              }
+
+              const personUrn = linkedInIntegration.metadata?.personUrn || linkedInIntegration.platform_user_id;
+              if (!personUrn) {
+                throw new Error("LinkedIn Person URN not found. Please reconnect your LinkedIn integration.");
+              }
+
+              // Combine title and content
+              let shareText = '';
+              if (content.topic && content.topic.trim()) {
+                shareText = `${content.topic}\n\n${content.generated_content || ""}`;
+              } else {
+                shareText = content.generated_content || "";
+              }
+
+              // Prepare UGC Post payload
+              const ugcPost: any = {
+                author: personUrn,
+                lifecycleState: 'PUBLISHED',
+                specificContent: {
+                  'com.linkedin.ugc.ShareContent': {
+                    shareCommentary: {
+                      text: shareText,
+                    },
+                    shareMediaCategory: 'NONE',
+                  },
+                },
+                visibility: {
+                  'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC',
+                },
+              };
+
+              // Add link if provided
+              if (content.metadata?.link) {
+                ugcPost.specificContent['com.linkedin.ugc.ShareContent'].shareMediaCategory = 'ARTICLE';
+                ugcPost.specificContent['com.linkedin.ugc.ShareContent'].media = [
+                  {
+                    status: 'READY',
+                    description: {
+                      text: shareText,
+                    },
+                    originalUrl: content.metadata.link,
+                    title: {
+                      text: content.topic || 'Shared Link',
+                    },
+                  },
+                ];
+              }
+
+              // Publish to LinkedIn
+              const linkedInResponse = await fetch('https://api.linkedin.com/v2/ugcPosts', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${linkedInIntegration.access_token}`,
+                  'Content-Type': 'application/json',
+                  'X-Restli-Protocol-Version': '2.0.0',
+                },
+                body: JSON.stringify(ugcPost),
+              });
+
+              const linkedInData = await linkedInResponse.json();
+
+              if (linkedInResponse.ok && linkedInData.id) {
+                const postId = linkedInData.id;
+                const url = postId 
+                  ? `https://www.linkedin.com/feed/update/${postId.replace('urn:li:ugcPost:', '')}`
+                  : undefined;
+
+                publishUrl = url;
+                linkedInResult = {
+                  success: true,
+                  url: url,
+                  postId: postId,
+                };
+
+                // Update last_used_at
+                await supabase
+                  .from("platform_integrations")
+                  .update({ last_used_at: new Date().toISOString() })
+                  .eq("id", linkedInIntegration.id);
+              } else {
+                const errorMessage = linkedInData.message || linkedInData.error?.message || 'Unknown LinkedIn API error';
+                linkedInResult = {
+                  success: false,
+                  error: `LinkedIn API Error (${linkedInResponse.status}): ${errorMessage}`,
+                };
+              }
+            } else {
+              throw new Error("LinkedIn integration not found or not connected.");
+            }
+          } catch (linkedInError: any) {
+            console.error(`LinkedIn publish error for content ${content.id}:`, linkedInError);
+            linkedInResult = {
+              success: false,
+              error: linkedInError.message || "LinkedIn publish failed",
+            };
+          }
+        }
+
+        // Get Instagram integration if platform is Instagram
+        if (platform === "instagram") {
+          try {
+            const { data: instagramIntegration } = await supabase
+              .from("platform_integrations")
+              .select("*")
+              .eq("user_id", content.user_id)
+              .eq("platform", "instagram")
+              .eq("status", "connected")
+              .maybeSingle();
+
+            if (instagramIntegration && instagramIntegration.access_token) {
+              // Check if token is expired
+              const expiresAt = instagramIntegration.expires_at 
+                ? new Date(instagramIntegration.expires_at) 
+                : null;
+              const now = new Date();
+              
+              if (expiresAt && expiresAt < now) {
+                throw new Error("Instagram access token has expired. Please reconnect your Instagram integration.");
+              }
+
+              const pageId = instagramIntegration.metadata?.pageId || "";
+              const instagramAccountId = instagramIntegration.metadata?.instagramAccountId || instagramIntegration.platform_user_id;
+
+              if (!pageId || !instagramAccountId) {
+                throw new Error("Instagram integration missing page ID or Instagram account ID. Please reconnect.");
+              }
+
+              // Instagram requires an image
+              if (!content.metadata?.imageUrl) {
+                throw new Error("Image URL is required for Instagram posts.");
+              }
+
+              // Prepare caption
+              let caption = '';
+              if (content.topic && content.topic.trim()) {
+                caption = `${content.topic}\n\n${content.generated_content || ""}`;
+              } else {
+                caption = content.generated_content || "";
+              }
+
+              // Add hashtags if provided
+              if (content.metadata?.tags && content.metadata.tags.length > 0) {
+                const hashtags = content.metadata.tags.map((tag: string) => `#${tag.replace(/#/g, '').replace(/\s+/g, '')}`).join(' ');
+                caption = `${caption}\n\n${hashtags}`;
+              }
+
+              // Limit caption to 2200 characters
+              if (caption.length > 2200) {
+                caption = caption.substring(0, 2197) + '...';
+              }
+
+              // Step 1: Create media container
+              const mediaResponse = await fetch(
+                `https://graph.facebook.com/v18.0/${instagramAccountId}/media`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    image_url: content.metadata.imageUrl,
+                    caption: caption,
+                    access_token: instagramIntegration.access_token,
+                  }),
+                }
+              );
+
+              if (!mediaResponse.ok) {
+                const error = await mediaResponse.json().catch(() => ({ error: { message: 'Unknown error' } }));
+                throw new Error(`Instagram API error: ${mediaResponse.status} - ${error.error?.message || 'Failed to create media container'}`);
+              }
+
+              const mediaData = await mediaResponse.json();
+              const creationId = mediaData.id;
+
+              // Step 2: Publish the media
+              const publishResponse = await fetch(
+                `https://graph.facebook.com/v18.0/${instagramAccountId}/media_publish`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    creation_id: creationId,
+                    access_token: instagramIntegration.access_token,
+                  }),
+                }
+              );
+
+              const publishData = await publishResponse.json();
+
+              if (publishResponse.ok && publishData.id) {
+                // Get permalink
+                let permalink: string | undefined;
+                try {
+                  const permalinkResponse = await fetch(
+                    `https://graph.facebook.com/v18.0/${publishData.id}?fields=permalink&access_token=${instagramIntegration.access_token}`
+                  );
+                  if (permalinkResponse.ok) {
+                    const permalinkData = await permalinkResponse.json();
+                    permalink = permalinkData.permalink;
+                  }
+                } catch (e) {
+                  // Permalink is optional
+                }
+
+                const url = permalink || `https://www.instagram.com/p/${publishData.id}/`;
+
+                publishUrl = url;
+                instagramResult = {
+                  success: true,
+                  url: url,
+                  postId: publishData.id,
+                };
+
+                // Update last_used_at
+                await supabase
+                  .from("platform_integrations")
+                  .update({ last_used_at: new Date().toISOString() })
+                  .eq("id", instagramIntegration.id);
+              } else {
+                const errorMessage = publishData.error?.message || 'Unknown Instagram API error';
+                instagramResult = {
+                  success: false,
+                  error: `Instagram API Error (${publishResponse.status}): ${errorMessage}`,
+                };
+              }
+            } else {
+              throw new Error("Instagram integration not found or not connected.");
+            }
+          } catch (instagramError: any) {
+            console.error(`Instagram publish error for content ${content.id}:`, instagramError);
+            instagramResult = {
+              success: false,
+              error: instagramError.message || "Instagram publish failed",
+            };
+          }
+        }
+
         // Create published_content record
         const { data: publishedRecord, error: publishError } = await supabase
           .from("published_content")
@@ -347,14 +610,16 @@ Deno.serve(async (req) => {
             published_url: publishUrl,
             published_at: new Date().toISOString(),
             status: publishUrl ? "published" : "pending",
-            platform_post_id: (platform === "github" ? gitHubResult?.discussionNumber?.toString() : redditResult?.postId) || null,
-            error_message: (gitHubResult?.error || redditResult?.error) || null,
+            platform_post_id: (platform === "github" ? gitHubResult?.discussionNumber?.toString() : platform === "reddit" ? redditResult?.postId : platform === "linkedin" ? linkedInResult?.postId?.replace('urn:li:ugcPost:', '') : instagramResult?.postId) || null,
+            error_message: (gitHubResult?.error || redditResult?.error || linkedInResult?.error || instagramResult?.error) || null,
             metadata: {
               auto_published: true,
               scheduled: true,
               scheduled_at: content.scheduled_at,
               github: gitHubResult || null,
               reddit: redditResult || null,
+              linkedin: linkedInResult || null,
+              instagram: instagramResult || null,
               ...content.metadata,
             },
           })

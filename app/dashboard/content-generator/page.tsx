@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
+import Image from "next/image";
 import {
   Sparkles,
   FileText,
@@ -13,11 +14,14 @@ import {
   Lightbulb,
   Brain,
   BarChart3,
-  ChevronRight
+  ChevronRight,
+  ArrowRight,
+  Send
 } from "lucide-react";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
 import toast from "react-hot-toast";
+import Link from "next/link";
 
 export default function ContentGeneratorPage() {
   // Step 1: User Input
@@ -39,10 +43,13 @@ export default function ContentGeneratorPage() {
 
   // Platforms
   const platforms = [
-    { value: "reddit", label: "Reddit", desc: "Casual, community-focused", icon: "🔴" },
-    { value: "quora", label: "Quora", desc: "Authoritative, detailed", icon: "🔵" },
-    { value: "medium", label: "Medium", desc: "Professional, thought-leadership", icon: "⚫" },
-    { value: "github", label: "GitHub", desc: "Technical, documentation", icon: "⚪" },
+    { value: "reddit", label: "Reddit", desc: "Casual, community-focused", icon: "/reddit-icon.svg" },
+    { value: "quora", label: "Quora", desc: "Authoritative, detailed", icon: "/quora.svg" },
+    { value: "medium", label: "Medium", desc: "Professional, thought-leadership", icon: "/medium-square.svg" },
+    { value: "github", label: "GitHub", desc: "Technical, documentation", icon: "/github-142.svg" },
+    { value: "facebook", label: "Facebook", desc: "Social media, engaging", icon: "/facebook-color.svg" },
+    { value: "linkedin", label: "LinkedIn", desc: "Professional network", icon: "/linkedin.svg" },
+    { value: "instagram", label: "Instagram", desc: "Visual social media", icon: "/instagram-1-svgrepo-com.svg" },
   ];
 
   // Step 1: Diagnostic Scan (using existing API or mock)
@@ -257,7 +264,7 @@ export default function ContentGeneratorPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Target Platform
                   </label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {platforms.map((platform) => (
                       <button
                         key={platform.value}
@@ -268,7 +275,15 @@ export default function ContentGeneratorPage() {
                             : "border-gray-200 hover:border-gray-300"
                         }`}
                       >
-                        <div className="text-2xl mb-1">{platform.icon}</div>
+                        <div className="flex items-center justify-center mb-2 h-10">
+                          <Image 
+                            src={platform.icon} 
+                            alt={platform.label} 
+                            width={40} 
+                            height={40} 
+                            className="w-10 h-10"
+                          />
+                        </div>
                         <div className="font-semibold text-sm text-gray-900">
                           {platform.label}
                         </div>
@@ -526,6 +541,35 @@ export default function ContentGeneratorPage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Arrow to Publication Page */}
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="mt-6"
+                  >
+                    <Link href="/dashboard/content">
+                      <div className="bg-gradient-to-r from-primary-500 to-accent-500 rounded-lg p-4 border border-primary-300 hover:shadow-lg transition-all cursor-pointer group">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                              <Send className="w-5 h-5 text-white" />
+                            </div>
+                            <div>
+                              <h4 className="font-semibold text-white text-sm mb-0.5">
+                                Ready to Publish?
+                              </h4>
+                              <p className="text-xs text-white/90">
+                                Go to Publication page to review and publish your content
+                              </p>
+                            </div>
+                          </div>
+                          <ArrowRight className="w-6 h-6 text-white group-hover:translate-x-1 transition-transform" />
+                        </div>
+                      </div>
+                    </Link>
+                  </motion.div>
                 </motion.div>
               )}
             </Card>
