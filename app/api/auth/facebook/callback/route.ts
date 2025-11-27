@@ -224,7 +224,7 @@ export async function GET(request: NextRequest) {
     // Step 8: Redirect back to settings with success
     return NextResponse.redirect(
       new URL(
-        `/dashboard/settings?facebook=connected&page=${encodeURIComponent(pageName)}`,
+        `/dashboard/settings?facebook=connected&page=${encodeURIComponent(pageName)}#facebook-integration`,
         request.url
       )
     );

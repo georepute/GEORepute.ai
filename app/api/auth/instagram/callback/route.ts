@@ -131,24 +131,50 @@ export async function GET(request: NextRequest) {
 
     // Step 3: Debug - Check token permissions first
     try {
-      console.log("🔍 Checking token permissions...");
+      console.log("\n╔════════════════════════════════════════════════════════╗");
+      console.log("║  🔍 CHECKING GRANTED PERMISSIONS                      ║");
+      console.log("╚════════════════════════════════════════════════════════╝\n");
+      
       const debugResponse = await fetch(
         `https://graph.facebook.com/v18.0/me/permissions?access_token=${longLivedToken}`
       );
       const debugData = await debugResponse.json();
-      console.log("📋 Token permissions:", JSON.stringify(debugData, null, 2));
       
-      // Check if pages_show_list is granted
-      const hasPagesShowList = debugData.data?.some((perm: any) => 
-        perm.permission === 'pages_show_list' && perm.status === 'granted'
-      );
-      const hasInstagramBasic = debugData.data?.some((perm: any) => 
-        (perm.permission === 'instagram_business_basic' || perm.permission === 'instagram_basic') && perm.status === 'granted'
-      );
-      console.log("✅ Has pages_show_list permission:", hasPagesShowList);
-      console.log("✅ Has instagram_business_basic permission:", hasInstagramBasic);
+      const grantedPerms = debugData.data?.filter((p: any) => p.status === 'granted').map((p: any) => p.permission) || [];
+      const declinedPerms = debugData.data?.filter((p: any) => p.status === 'declined').map((p: any) => p.permission) || [];
+      const expiredPerms = debugData.data?.filter((p: any) => p.status === 'expired').map((p: any) => p.permission) || [];
+      
+      console.log(`✅ GRANTED PERMISSIONS (${grantedPerms.length}):`);
+      grantedPerms.forEach((p: string) => console.log(`   ✓ ${p}`));
+      
+      if (declinedPerms.length > 0) {
+        console.log(`\n❌ DECLINED PERMISSIONS (${declinedPerms.length}):`);
+        declinedPerms.forEach((p: string) => console.log(`   ✗ ${p}`));
+      }
+      
+      if (expiredPerms.length > 0) {
+        console.log(`\n⏰ EXPIRED PERMISSIONS (${expiredPerms.length}):`);
+        expiredPerms.forEach((p: string) => console.log(`   ⏰ ${p}`));
+      }
+      
+      // Check critical permissions
+      const hasPagesShowList = grantedPerms.includes('pages_show_list');
+      const hasInstagramBusinessBasic = grantedPerms.includes('instagram_business_basic');
+      const hasInstagramBasic = grantedPerms.includes('instagram_basic');
+      const hasInstagramContentPublish = grantedPerms.includes('instagram_content_publish');
+      const hasInstagramManageInsights = grantedPerms.includes('instagram_manage_insights');
+      const hasBusinessManagement = grantedPerms.includes('business_management');
+      
+      console.log("\n🎯 CRITICAL PERMISSIONS CHECK:");
+      console.log(`   pages_show_list:               ${hasPagesShowList ? '✅ GRANTED' : '❌ MISSING'}`);
+      console.log(`   instagram_business_basic:      ${hasInstagramBusinessBasic ? '✅ GRANTED' : '❌ MISSING'}`);
+      console.log(`   instagram_basic:               ${hasInstagramBasic ? '✅ GRANTED' : '⚠️  NOT REQUESTED'}`);
+      console.log(`   instagram_content_publish:     ${hasInstagramContentPublish ? '✅ GRANTED' : '❌ MISSING'}`);
+      console.log(`   instagram_manage_insights:     ${hasInstagramManageInsights ? '✅ GRANTED' : 'ℹ️  NOT REQUESTED (optional)'}`);
+      console.log(`   business_management:           ${hasBusinessManagement ? '✅ GRANTED' : 'ℹ️  NOT GRANTED (for Business Pages)'}`);
       
       if (!hasPagesShowList) {
+        console.error("\n❌ CRITICAL ERROR: pages_show_list permission is MISSING!");
         return NextResponse.redirect(
           new URL(
             `/dashboard/settings?instagram=error&message=${encodeURIComponent("Missing 'pages_show_list' permission. Please reconnect and make sure to grant ALL requested permissions, especially 'pages_show_list'.")}`,
@@ -157,9 +183,30 @@ export async function GET(request: NextRequest) {
         );
       }
       
-      if (!hasInstagramBasic) {
-        console.warn("⚠️ Missing instagram_business_basic permission - this may cause issues");
+      if (!hasInstagramBusinessBasic && !hasInstagramBasic) {
+        console.error("\n❌ CRITICAL ERROR: Neither 'instagram_business_basic' nor 'instagram_basic' permission is granted!");
+        console.error("   This means the app CANNOT read Instagram Business Account data.");
+        console.error("   Possible reasons:");
+        console.error("   1. Permission was declined during OAuth");
+        console.error("   2. Permission requires App Review (production mode)");
+        console.error("   3. App is not added as Instagram Tester");
+        console.error("\n   SOLUTION: Disconnect and reconnect, ensuring you click 'Allow' for ALL permissions.");
+        
+        return NextResponse.redirect(
+          new URL(
+            `/dashboard/settings?instagram=error&message=${encodeURIComponent("Missing 'instagram_business_basic' permission. This permission is REQUIRED to access Instagram Business Accounts. Please reconnect and grant ALL permissions. If you're a Tester, ensure you've accepted the Instagram Tester invitation.")}`,
+            request.url
+          )
+        );
       }
+      
+      if (!hasInstagramBusinessBasic) {
+        console.warn("\n⚠️  WARNING: instagram_business_basic not granted, but instagram_basic is available");
+        console.warn("   instagram_basic has limited functionality compared to instagram_business_basic");
+      }
+      
+      console.log("\n" + "═".repeat(60) + "\n");
+      
     } catch (debugError: any) {
       console.warn("⚠️ Could not check permissions:", debugError.message);
     }
@@ -225,14 +272,30 @@ export async function GET(request: NextRequest) {
 
     for (const page of pagesResult.pages) {
       const pageAccessToken = page.access_token || longLivedToken;
-      console.log(`📄 Checking page: ${page.name} (ID: ${page.id})`);
+      console.log(`\n📄 Checking page: ${page.name} (ID: ${page.id})`);
+      console.log(`🔑 Using page access token (first 20 chars):`, pageAccessToken.substring(0, 20) + "...");
+      
+      // Check Page Access Token permissions
+      try {
+        console.log(`   🔍 Checking Page Access Token permissions...`);
+        const pagePermUrl = `https://graph.facebook.com/v18.0/me/permissions?access_token=${pageAccessToken}`;
+        const pagePermResponse = await fetch(pagePermUrl);
+        const pagePermData = await pagePermResponse.json();
+        const pageGrantedPerms = pagePermData.data?.filter((p: any) => p.status === 'granted').map((p: any) => p.permission) || [];
+        console.log(`   📋 Page Token Permissions (${pageGrantedPerms.length}):`, pageGrantedPerms.join(', '));
+        
+        const pageHasInstagramBasic = pageGrantedPerms.includes('instagram_business_basic') || pageGrantedPerms.includes('instagram_basic');
+        console.log(`   ${pageHasInstagramBasic ? '✅' : '❌'} Instagram permissions on Page Token: ${pageHasInstagramBasic ? 'AVAILABLE' : 'MISSING'}`);
+      } catch (permErr) {
+        console.warn(`   ⚠️  Could not check Page Token permissions`);
+      }
       
       try {
         // Check if this page has an Instagram Business Account
         // Try with more fields to get better error messages
-        const instagramApiUrl = `https://graph.facebook.com/v18.0/${page.id}?fields=id,name,instagram_business_account{id,username}&access_token=${pageAccessToken}`;
-        console.log(`📡 Checking Instagram for page ${page.id} (${page.name})...`);
-        console.log(`🔑 Using page access token (first 20 chars):`, pageAccessToken.substring(0, 20) + "...");
+        const instagramApiUrl = `https://graph.facebook.com/v18.0/${page.id}?fields=id,name,instagram_business_account{id,username,profile_picture_url}&access_token=${pageAccessToken}`;
+        console.log(`   📡 Querying Instagram Business Account...`);
+        console.log(`   🌐 API URL: ${instagramApiUrl.replace(pageAccessToken, '***TOKEN***')}`);
         
         const instagramResponse = await fetch(instagramApiUrl);
 
@@ -375,7 +438,7 @@ export async function GET(request: NextRequest) {
     // Step 9: Redirect back to settings with success
     return NextResponse.redirect(
       new URL(
-        `/dashboard/settings?instagram=connected&username=${encodeURIComponent(instagramUsername || pageName)}`,
+        `/dashboard/settings?instagram=connected&username=${encodeURIComponent(instagramUsername || pageName)}#instagram-integration`,
         request.url
       )
     );

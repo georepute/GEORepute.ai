@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
+import ImageUpload from "@/components/ImageUpload";
 import toast from "react-hot-toast";
 import Link from "next/link";
 
@@ -30,6 +31,7 @@ export default function ContentGeneratorPage() {
   const [targetPlatform, setTargetPlatform] = useState("reddit");
   const [userBrand, setUserBrand] = useState("");
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
+  const [imageUrl, setImageUrl] = useState(""); // For Instagram posts
 
   // Step 2: Diagnostic Scan Results
   const [diagnosticResults, setDiagnosticResults] = useState<any>(null);
@@ -108,6 +110,13 @@ export default function ContentGeneratorPage() {
 
     setGeneratingContent(true);
     try {
+      // Check if Instagram requires image
+      if (targetPlatform === 'instagram' && !imageUrl.trim()) {
+        toast.error("Instagram posts require an image URL");
+        setGeneratingContent(false);
+        return;
+      }
+
       // REAL AI Content Generation using OpenAI GPT-4 Turbo
       const response = await fetch('/api/geo-core/content-generate', {
         method: 'POST',
@@ -120,6 +129,7 @@ export default function ContentGeneratorPage() {
           targetPlatform,
           brandMention: userBrand,
           influenceLevel,
+          ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}), // Include imageUrl if provided
         }),
       });
 
@@ -306,6 +316,54 @@ export default function ContentGeneratorPage() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
+
+                {/* Image Upload (Required for Instagram, Optional for others) */}
+                {targetPlatform === 'instagram' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Image (Required for Instagram) *
+                    </label>
+                    <ImageUpload
+                      onImageUploaded={(url) => setImageUrl(url)}
+                      currentImageUrl={imageUrl}
+                      maxSizeMB={8}
+                      className="w-full"
+                    />
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs text-blue-900 font-semibold mb-1">
+                        📸 Instagram Image Requirements:
+                      </p>
+                      <ul className="text-xs text-blue-700 space-y-0.5 ml-4">
+                        <li>• <strong>Required</strong> for all Instagram posts</li>
+                        <li>• Formats: JPEG, PNG, WebP</li>
+                        <li>• <strong>Max size: 8MB</strong> (Instagram API limit)</li>
+                        <li>• Aspect ratio: 4:5 (portrait) to 1.91:1 (landscape)</li>
+                        <li>• Min width: 320px</li>
+                        <li>• Stored securely in your cloud storage</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Optional Image Upload for Other Platforms */}
+                {(targetPlatform === 'facebook' || targetPlatform === 'linkedin' || targetPlatform === 'medium') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Image (Optional - Enhances Engagement)
+                    </label>
+                    <ImageUpload
+                      onImageUploaded={(url) => setImageUrl(url)}
+                      currentImageUrl={imageUrl}
+                      maxSizeMB={20}
+                      className="w-full"
+                    />
+                    <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-lg">
+                      <p className="text-xs text-gray-600">
+                        💡 <strong>Tip:</strong> Posts with images get 2-3x more engagement on {targetPlatform}!
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Influence Level */}
                 <div>

@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
       brandMention,
       influenceLevel,
       userContext,
+      imageUrl, // Optional image URL for platforms like Instagram
     } = body;
 
     if (!topic || !targetKeywords || !targetPlatform) {
@@ -34,8 +35,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate targetPlatform - normalize to lowercase for comparison
+    // Check if Instagram requires an image
     const normalizedPlatform = targetPlatform.toLowerCase().trim();
+    if (normalizedPlatform === 'instagram' && !imageUrl) {
+      return NextResponse.json(
+        { error: "Instagram posts require an image URL. Please provide an imageUrl." },
+        { status: 400 }
+      );
+    }
+
+    // Remove the duplicate normalization (already done above in validation)
     
     // Try to query existing platform values to see what's actually in the database
     const { data: existingPlatforms } = await supabase
@@ -76,6 +85,13 @@ export async function POST(request: NextRequest) {
 
     // Save to database - use normalized platform value
     console.log('💾 Saving to database with platform:', normalizedPlatform);
+    
+    // Merge imageUrl into metadata if provided
+    const contentMetadata = {
+      ...result.metadata,
+      ...(imageUrl ? { imageUrl } : {}), // Add imageUrl if provided
+    };
+    
     const { data, error } = await supabase
       .from("content_strategy")
       .insert({
@@ -90,7 +106,7 @@ export async function POST(request: NextRequest) {
         tone: result.tone,
         word_count: result.wordCount,
         ai_model: "gpt-4-turbo",
-        metadata: result.metadata,
+        metadata: contentMetadata, // Include imageUrl in metadata
         status: "draft",
       })
       .select()

@@ -39,6 +39,23 @@ export default function Settings() {
     { id: "billing", label: "Billing", icon: CreditCard },
   ];
 
+  // Check for OAuth callback and auto-switch to integrations tab
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasCallback = urlParams.get("facebook") || 
+                        urlParams.get("instagram") || 
+                        urlParams.get("linkedin") ||
+                        urlParams.get("github") ||
+                        urlParams.get("reddit") ||
+                        urlParams.get("medium") ||
+                        urlParams.get("quora");
+    
+    // If any integration callback detected, switch to integrations tab
+    if (hasCallback) {
+      setActiveTab("integrations");
+    }
+  }, []);
+
   const handleSave = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
@@ -1676,7 +1693,7 @@ function LinkedInIntegrationSettings() {
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+    <div id="linkedin-integration" className="bg-white border border-gray-200 rounded-lg p-6 mb-6 scroll-mt-20">
       <div className="flex items-center gap-4 mb-6">
         <Image src="/linkedin.svg" alt="LinkedIn" width={48} height={48} className="w-12 h-12" />
         <div className="flex-1">
@@ -1831,7 +1848,10 @@ function InstagramIntegrationSettings() {
     const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
     const redirectUri = `${window.location.origin}/api/auth/instagram/callback`;
     // Request permissions for Instagram and Pages (pages_manage_posts needed for Instagram Business Account access)
-    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_business_basic,instagram_content_publish";
+    // business_management: Access to Business Portfolio Pages (Meta Business Suite)
+    // NOTE: Using instagram_basic for Development (no App Review needed)
+    //       Switch to instagram_business_basic for Production (requires App Review)
+    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish,business_management";
     
     if (!appId) {
       toast.error("Facebook App ID not configured. Please contact support.");
@@ -1880,7 +1900,7 @@ function InstagramIntegrationSettings() {
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+    <div id="instagram-integration" className="bg-white border border-gray-200 rounded-lg p-6 mb-6 scroll-mt-20">
       <div className="flex items-center gap-4 mb-6">
         <Image src="/instagram-1-svgrepo-com.svg" alt="Instagram" width={48} height={48} className="w-12 h-12" />
         <div className="flex-1">
@@ -2050,7 +2070,8 @@ function FacebookIntegrationSettings() {
     const appId = process.env.NEXT_PUBLIC_FACEBOOK_APP_ID;
     const redirectUri = `${window.location.origin}/api/auth/facebook/callback`;
     // Required permissions: pages_show_list (to list pages), pages_read_engagement (to read page data), pages_manage_posts (to post to pages)
-    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts";
+    // business_management: Access to Business Portfolio Pages (Meta Business Suite)
+    const scope = "pages_show_list,pages_read_engagement,pages_manage_posts,business_management";
     
     if (!appId) {
       toast.error("Facebook App ID not configured. Please contact support.");
@@ -2136,7 +2157,7 @@ function FacebookIntegrationSettings() {
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+    <div id="facebook-integration" className="bg-white border border-gray-200 rounded-lg p-6 mb-6 scroll-mt-20">
       <div className="flex items-center gap-4 mb-6">
         <Image src="/facebook-color.svg" alt="Facebook" width={48} height={48} className="w-12 h-12" />
         <div className="flex-1">

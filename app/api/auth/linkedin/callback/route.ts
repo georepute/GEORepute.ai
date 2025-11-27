@@ -226,7 +226,7 @@ export async function GET(request: NextRequest) {
     // Step 7: Redirect back to settings with success
     return NextResponse.redirect(
       new URL(
-        `/dashboard/settings?linkedin=connected&name=${encodeURIComponent(fullName)}`,
+        `/dashboard/settings?linkedin=connected&name=${encodeURIComponent(fullName)}#linkedin-integration`,
         request.url
       )
     );
