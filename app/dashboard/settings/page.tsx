@@ -21,7 +21,11 @@ import {
   MessageSquare,
   FileText,
   HelpCircle,
-  Linkedin
+  Linkedin,
+  Plus,
+  Edit2,
+  Trash2,
+  Star
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -29,9 +33,28 @@ export default function Settings() {
   const [activeTab, setActiveTab] = useState("profile");
   const [showApiKey, setShowApiKey] = useState(false);
   const [saved, setSaved] = useState(false);
+  
+  // Brand Voice States
+  const [brandVoices, setBrandVoices] = useState<any[]>([]);
+  const [loadingVoices, setLoadingVoices] = useState(false);
+  const [showVoiceForm, setShowVoiceForm] = useState(false);
+  const [editingVoice, setEditingVoice] = useState<any>(null);
+  const [savingVoice, setSavingVoice] = useState(false);
+  
+  // Form States for Brand Voice
+  const [voiceBrandName, setVoiceBrandName] = useState("");
+  const [voiceDescription, setVoiceDescription] = useState("");
+  const [voicePersonality, setVoicePersonality] = useState<string[]>([]);
+  const [voiceTone, setVoiceTone] = useState("neutral");
+  const [voiceEmojiStyle, setVoiceEmojiStyle] = useState("moderate");
+  const [voicePreferredWords, setVoicePreferredWords] = useState("");
+  const [voiceAvoidWords, setVoiceAvoidWords] = useState("");
+  const [voiceSignaturePhrases, setVoiceSignaturePhrases] = useState("");
+  const [voiceIsDefault, setVoiceIsDefault] = useState(false);
 
   const tabs = [
     { id: "profile", label: "Profile", icon: User },
+    { id: "brand-voice", label: "Brand Voice", icon: MessageSquare },
     { id: "white-label", label: "White Label", icon: Palette },
     { id: "notifications", label: "Notifications", icon: Bell },
     { id: "integrations", label: "Integrations", icon: Zap },
@@ -56,9 +79,144 @@ export default function Settings() {
     }
   }, []);
 
+  // Load brand voices when brand-voice tab is active
+  useEffect(() => {
+    if (activeTab === "brand-voice") {
+      loadBrandVoices();
+    }
+  }, [activeTab]);
+
   const handleSave = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  };
+
+  // Brand Voice Functions
+  const loadBrandVoices = async () => {
+    setLoadingVoices(true);
+    try {
+      const response = await fetch("/api/brand-voice");
+      if (response.ok) {
+        const data = await response.json();
+        setBrandVoices(data.voices || []);
+      } else {
+        toast.error("Failed to load brand voices");
+      }
+    } catch (error) {
+      console.error("Error loading brand voices:", error);
+      toast.error("Error loading brand voices");
+    } finally {
+      setLoadingVoices(false);
+    }
+  };
+
+  const resetVoiceForm = () => {
+    setVoiceBrandName("");
+    setVoiceDescription("");
+    setVoicePersonality([]);
+    setVoiceTone("neutral");
+    setVoiceEmojiStyle("moderate");
+    setVoicePreferredWords("");
+    setVoiceAvoidWords("");
+    setVoiceSignaturePhrases("");
+    setVoiceIsDefault(false);
+    setEditingVoice(null);
+    setShowVoiceForm(false);
+  };
+
+  const handleEditVoice = (voice: any) => {
+    setEditingVoice(voice);
+    setVoiceBrandName(voice.brand_name);
+    setVoiceDescription(voice.description || "");
+    setVoicePersonality(voice.personality_traits || []);
+    setVoiceTone(voice.tone);
+    setVoiceEmojiStyle(voice.emoji_style);
+    setVoicePreferredWords(voice.preferred_words?.join(", ") || "");
+    setVoiceAvoidWords(voice.avoid_words?.join(", ") || "");
+    setVoiceSignaturePhrases(voice.signature_phrases?.join(", ") || "");
+    setVoiceIsDefault(voice.is_default);
+    setShowVoiceForm(true);
+  };
+
+  const handleSaveVoice = async () => {
+    if (!voiceBrandName.trim()) {
+      toast.error("Brand name is required");
+      return;
+    }
+
+    setSavingVoice(true);
+    try {
+      const voiceData = {
+        brand_name: voiceBrandName.trim(),
+        description: voiceDescription.trim() || null,
+        personality_traits: voicePersonality,
+        tone: voiceTone,
+        emoji_style: voiceEmojiStyle,
+        preferred_words: voicePreferredWords.split(",").map((w) => w.trim()).filter(Boolean),
+        avoid_words: voiceAvoidWords.split(",").map((w) => w.trim()).filter(Boolean),
+        signature_phrases: voiceSignaturePhrases.split(",").map((p) => p.trim()).filter(Boolean),
+        is_default: voiceIsDefault,
+      };
+
+      let response;
+      if (editingVoice) {
+        // Update existing voice
+        response = await fetch("/api/brand-voice", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: editingVoice.id, ...voiceData }),
+        });
+      } else {
+        // Create new voice
+        response = await fetch("/api/brand-voice", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(voiceData),
+        });
+      }
+
+      if (response.ok) {
+        toast.success(editingVoice ? "Brand voice updated!" : "Brand voice created!");
+        resetVoiceForm();
+        loadBrandVoices();
+      } else {
+        const error = await response.json();
+        toast.error(error.error || "Failed to save brand voice");
+      }
+    } catch (error) {
+      console.error("Error saving brand voice:", error);
+      toast.error("Error saving brand voice");
+    } finally {
+      setSavingVoice(false);
+    }
+  };
+
+  const handleDeleteVoice = async (voiceId: string) => {
+    if (!confirm("Are you sure you want to delete this brand voice?")) return;
+
+    try {
+      const response = await fetch(`/api/brand-voice?id=${voiceId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Brand voice deleted!");
+        loadBrandVoices();
+      } else {
+        toast.error("Failed to delete brand voice");
+      }
+    } catch (error) {
+      console.error("Error deleting brand voice:", error);
+      toast.error("Error deleting brand voice");
+    }
+  };
+
+  const togglePersonalityTrait = (trait: string) => {
+    if (voicePersonality.includes(trait)) {
+      setVoicePersonality(voicePersonality.filter((t) => t !== trait));
+    } else {
+      setVoicePersonality([...voicePersonality, trait]);
+    }
   };
 
   return (
@@ -183,6 +341,365 @@ export default function Settings() {
                     />
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Brand Voice Tab */}
+            {activeTab === "brand-voice" && (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">Brand Voice Profiles</h2>
+                    <p className="text-gray-600 mt-1">
+                      Create consistent brand personalities for your content generation
+                    </p>
+                  </div>
+                  {!showVoiceForm && (
+                    <button
+                      onClick={() => setShowVoiceForm(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New Voice Profile
+                    </button>
+                  )}
+                </div>
+
+                {/* Voice Form */}
+                {showVoiceForm && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-8 p-6 bg-blue-50 border-2 border-blue-200 rounded-xl"
+                  >
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-bold text-gray-900">
+                        {editingVoice ? "Edit" : "Create"} Brand Voice Profile
+                      </h3>
+                      <button
+                        onClick={resetVoiceForm}
+                        className="text-gray-600 hover:text-gray-900"
+                      >
+                        <XCircle className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-6">
+                      {/* Brand Name */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Brand Name *
+                        </label>
+                        <input
+                          type="text"
+                          value={voiceBrandName}
+                          onChange={(e) => setVoiceBrandName(e.target.value)}
+                          placeholder="e.g., Nike, Apple, Wendy's"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                        />
+                      </div>
+
+                      {/* Description */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Description (Optional)
+                        </label>
+                        <textarea
+                          value={voiceDescription}
+                          onChange={(e) => setVoiceDescription(e.target.value)}
+                          placeholder="Brief description of this brand voice"
+                          rows={2}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none"
+                        />
+                      </div>
+
+                      {/* Personality Traits */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-3">
+                          Personality Traits
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            "professional",
+                            "friendly",
+                            "innovative",
+                            "motivational",
+                            "humorous",
+                            "authoritative",
+                            "casual",
+                            "empowering",
+                            "minimalist",
+                            "bold",
+                          ].map((trait) => (
+                            <button
+                              key={trait}
+                              onClick={() => togglePersonalityTrait(trait)}
+                              className={`px-4 py-2 rounded-lg border-2 transition-all ${
+                                voicePersonality.includes(trait)
+                                  ? "border-primary-500 bg-primary-50 text-primary-700 font-semibold"
+                                  : "border-gray-200 text-gray-700 hover:border-gray-300"
+                              }`}
+                            >
+                              {trait}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Tone & Emoji Style */}
+                      <div className="grid md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Tone
+                          </label>
+                          <select
+                            value={voiceTone}
+                            onChange={(e) => setVoiceTone(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                          >
+                            <option value="casual">Casual</option>
+                            <option value="professional">Professional</option>
+                            <option value="formal">Formal</option>
+                            <option value="friendly">Friendly</option>
+                            <option value="humorous">Humorous</option>
+                            <option value="authoritative">Authoritative</option>
+                            <option value="neutral">Neutral</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Emoji Style
+                          </label>
+                          <select
+                            value={voiceEmojiStyle}
+                            onChange={(e) => setVoiceEmojiStyle(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                          >
+                            <option value="none">None</option>
+                            <option value="minimal">Minimal</option>
+                            <option value="moderate">Moderate</option>
+                            <option value="heavy">Heavy</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Preferred Words */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Preferred Words (comma-separated)
+                        </label>
+                        <input
+                          type="text"
+                          value={voicePreferredWords}
+                          onChange={(e) => setVoicePreferredWords(e.target.value)}
+                          placeholder="e.g., innovative, cutting-edge, solution"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                        />
+                      </div>
+
+                      {/* Avoid Words */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Avoid Words (comma-separated)
+                        </label>
+                        <input
+                          type="text"
+                          value={voiceAvoidWords}
+                          onChange={(e) => setVoiceAvoidWords(e.target.value)}
+                          placeholder="e.g., cheap, discount, old"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                        />
+                      </div>
+
+                      {/* Signature Phrases */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Signature Phrases (comma-separated)
+                        </label>
+                        <input
+                          type="text"
+                          value={voiceSignaturePhrases}
+                          onChange={(e) => setVoiceSignaturePhrases(e.target.value)}
+                          placeholder="e.g., Just do it, Think different"
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                        />
+                      </div>
+
+                      {/* Set as Default */}
+                      <div className="flex items-center gap-3 p-4 bg-white border border-gray-200 rounded-lg">
+                        <input
+                          type="checkbox"
+                          id="voice-default"
+                          checked={voiceIsDefault}
+                          onChange={(e) => setVoiceIsDefault(e.target.checked)}
+                          className="w-5 h-5 text-primary-600 border-gray-300 rounded focus:ring-2 focus:ring-primary-500"
+                        />
+                        <label htmlFor="voice-default" className="text-sm font-medium text-gray-900 cursor-pointer">
+                          Set as default brand voice
+                        </label>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-3 pt-4">
+                        <button
+                          onClick={handleSaveVoice}
+                          disabled={savingVoice || !voiceBrandName.trim()}
+                          className="flex items-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {savingVoice ? (
+                            <>
+                              <Loader className="w-4 h-4 animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4" />
+                              {editingVoice ? "Update" : "Create"} Voice Profile
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={resetVoiceForm}
+                          className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Voice List */}
+                {loadingVoices ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader className="w-8 h-8 text-primary-600 animate-spin" />
+                  </div>
+                ) : brandVoices.length === 0 ? (
+                  <div className="text-center py-12 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300">
+                    <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                      No brand voices yet
+                    </h3>
+                    <p className="text-gray-600 mb-4">
+                      Create your first brand voice profile to maintain consistent content
+                    </p>
+                    <button
+                      onClick={() => setShowVoiceForm(true)}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Create Brand Voice
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid gap-4">
+                    {brandVoices.map((voice) => (
+                      <motion.div
+                        key={voice.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-6 bg-white border-2 border-gray-200 rounded-xl hover:border-primary-300 transition-all"
+                      >
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 bg-gradient-to-br from-primary-500 to-accent-500 rounded-xl flex items-center justify-center">
+                              <MessageSquare className="w-6 h-6 text-white" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-lg font-bold text-gray-900">{voice.brand_name}</h3>
+                                {voice.is_default && (
+                                  <span className="flex items-center gap-1 px-2 py-1 bg-primary-100 text-primary-700 text-xs font-semibold rounded-full">
+                                    <Star className="w-3 h-3" />
+                                    Default
+                                  </span>
+                                )}
+                              </div>
+                              {voice.description && (
+                                <p className="text-sm text-gray-600 mt-1">{voice.description}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleEditVoice(voice)}
+                              className="p-2 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteVoice(voice.id)}
+                              className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid md:grid-cols-2 gap-4">
+                          {/* Personality */}
+                          {voice.personality_traits && voice.personality_traits.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                                Personality
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {voice.personality_traits.map((trait: string) => (
+                                  <span
+                                    key={trait}
+                                    className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-md"
+                                  >
+                                    {trait}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Tone & Emoji Style */}
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                              Style
+                            </p>
+                            <div className="space-y-1">
+                              <p className="text-sm text-gray-700">
+                                <span className="font-medium">Tone:</span> {voice.tone}
+                              </p>
+                              <p className="text-sm text-gray-700">
+                                <span className="font-medium">Emojis:</span> {voice.emoji_style}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Preferred Words */}
+                          {voice.preferred_words && voice.preferred_words.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                                Preferred Words
+                              </p>
+                              <p className="text-sm text-gray-700">
+                                {voice.preferred_words.join(", ")}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Signature Phrases */}
+                          {voice.signature_phrases && voice.signature_phrases.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-gray-500 uppercase mb-2">
+                                Signature Phrases
+                              </p>
+                              <p className="text-sm text-gray-700 italic">
+                                &ldquo;{voice.signature_phrases.join('" | "')}&rdquo;
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

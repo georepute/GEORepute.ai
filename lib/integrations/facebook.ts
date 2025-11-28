@@ -149,7 +149,7 @@ export async function publishToFacebook(
         },
         body: JSON.stringify(postData),
       });
-    }
+      }
 
     const result = await response.json();
 

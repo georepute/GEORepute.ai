@@ -57,6 +57,7 @@ export default function Content() {
   const [scheduleTime, setScheduleTime] = useState("");
   const [showViewModal, setShowViewModal] = useState(false);
   const [viewContent, setViewContent] = useState<ContentItem | null>(null);
+  const [showSchema, setShowSchema] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [publishingContentId, setPublishingContentId] = useState<string | null>(null);
   const [stats, setStats] = useState({
@@ -842,39 +843,144 @@ export default function Content() {
             {/* Content Body */}
             <div className="flex-1 overflow-y-auto p-6">
               <div className="prose prose-sm max-w-none">
-                {viewContent.raw?.generated_content ? (
-                  <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
-                    {viewContent.raw.generated_content}
-                  </div>
-                ) : (
-                  <div className="text-gray-500 text-center py-12">
-                    <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>No content available</p>
-                  </div>
-                )}
+                {!showSchema ? (
+                  <>
+                    {/* Show Content */}
+                    {viewContent.raw?.generated_content ? (
+                      <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
+                        {viewContent.raw.generated_content}
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 text-center py-12">
+                        <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                        <p>No content available</p>
+                      </div>
+                    )}
 
-                {/* Published URL Link in View Modal */}
-                {viewContent.status === "published" && viewContent.published_records && viewContent.published_records.length > 0 && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h4 className="text-sm font-semibold text-gray-900 mb-3">Published Links:</h4>
-                    <div className="space-y-2">
-                      {viewContent.published_records.map((pub: any, idx: number) => (
-                        pub.published_url ? (
-                          <a
-                            key={idx}
-                            href={pub.published_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline p-2 rounded-lg hover:bg-blue-50 transition-colors"
-                          >
-                            <Send className="w-4 h-4" />
-                            <span className="break-all">{pub.published_url}</span>
-                            <span className="text-xs text-gray-500 capitalize whitespace-nowrap">({pub.platform || 'external'})</span>
-                          </a>
-                        ) : null
-                      ))}
+                    {/* Published URL Link in View Modal */}
+                    {viewContent.status === "published" && viewContent.published_records && viewContent.published_records.length > 0 && (
+                      <div className="mt-6 pt-6 border-t border-gray-200">
+                        <h4 className="text-sm font-semibold text-gray-900 mb-3">Published Links:</h4>
+                        <div className="space-y-2">
+                          {viewContent.published_records.map((pub: any, idx: number) => (
+                            pub.published_url ? (
+                              <a
+                                key={idx}
+                                href={pub.published_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline p-2 rounded-lg hover:bg-blue-50 transition-colors"
+                              >
+                                <Send className="w-4 h-4" />
+                                <span className="break-all">{pub.published_url}</span>
+                                <span className="text-xs text-gray-500 capitalize whitespace-nowrap">({pub.platform || 'external'})</span>
+                              </a>
+                            ) : null
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Show Schema */}
+                    <div className="space-y-4">
+                      {/* Auto-Generated Schema (includes structured SEO data) */}
+                      <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <h4 className="text-sm font-semibold text-gray-900">Auto-Generated JSON-LD Schema</h4>
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">Includes Structured SEO Data</span>
+                        </div>
+                        <p className="text-xs text-gray-600 mb-3">
+                          This schema automatically includes: headings (H1/H2/H3), FAQs, meta description, and other structured data from your content.
+                        </p>
+                        {viewContent.raw?.metadata?.schema?.jsonLd ? (
+                          <pre className="text-xs bg-white p-4 rounded border border-gray-200 overflow-x-auto max-h-96 overflow-y-auto">
+                            {JSON.stringify(viewContent.raw.metadata.schema.jsonLd, null, 2)}
+                          </pre>
+                        ) : (
+                          <p className="text-gray-500 text-sm">No schema data available</p>
+                        )}
+                      </div>
+                      
+                      {/* HTML Script Tags (ready to embed) */}
+                      <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <h4 className="text-sm font-semibold text-gray-900 mb-3">HTML Script Tags (Ready to Embed):</h4>
+                        {viewContent.raw?.metadata?.schema?.scriptTags ? (
+                          <pre className="text-xs bg-white p-4 rounded border border-gray-200 overflow-x-auto max-h-96 overflow-y-auto">
+                            {viewContent.raw.metadata.schema.scriptTags}
+                          </pre>
+                        ) : (
+                          <p className="text-gray-500 text-sm">No script tags available</p>
+                        )}
+                      </div>
+
+                      {/* Additional Structured SEO Info (not in schema) */}
+                      {viewContent.raw?.metadata?.structuredSEO && (
+                        <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                          <div className="flex items-center gap-2 mb-3">
+                            <h4 className="text-sm font-semibold text-gray-900">Additional SEO Elements</h4>
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Not in Schema</span>
+                          </div>
+                          <p className="text-xs text-gray-600 mb-3">
+                            These elements are used for meta tags, social sharing, and internal linking (not included in JSON-LD schema).
+                          </p>
+                          <div className="space-y-2 text-sm">
+                            {viewContent.raw.metadata.structuredSEO.metaDescription && (
+                              <div>
+                                <span className="font-medium text-gray-700">Meta Description: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.metaDescription}</span>
+                                <span className="text-xs text-gray-500 ml-2">(also in schema)</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.headings && viewContent.raw.metadata.structuredSEO.headings.length > 0 && (
+                              <div>
+                                <span className="font-medium text-gray-700">Headings Structure: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.headings.length} headings (H1, H2, H3)</span>
+                                <span className="text-xs text-gray-500 ml-2">(included in schema)</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.faqs && viewContent.raw.metadata.structuredSEO.faqs.length > 0 && (
+                              <div>
+                                <span className="font-medium text-gray-700">FAQs: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.faqs.length} FAQs</span>
+                                <span className="text-xs text-gray-500 ml-2">(included in schema if FAQPage type)</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.ogTags && (
+                              <div className="pt-2 border-t border-green-200">
+                                <span className="font-medium text-gray-700">Open Graph Tags: </span>
+                                <span className="text-gray-600 text-xs">For social media sharing previews</span>
+                                <div className="mt-2 ml-4 text-xs text-gray-600 space-y-1">
+                                  <div>Title: {viewContent.raw.metadata.structuredSEO.ogTags.title}</div>
+                                  <div>Description: {viewContent.raw.metadata.structuredSEO.ogTags.description?.substring(0, 80)}...</div>
+                                  <div>Image: {viewContent.raw.metadata.structuredSEO.ogTags.image}</div>
+                                </div>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.internalLinks && viewContent.raw.metadata.structuredSEO.internalLinks.length > 0 && (
+                              <div className="pt-2 border-t border-green-200">
+                                <span className="font-medium text-gray-700">Internal Linking Suggestions: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.internalLinks.length} links</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.canonicalUrl && (
+                              <div className="pt-2 border-t border-green-200">
+                                <span className="font-medium text-gray-700">Canonical URL: </span>
+                                <span className="text-gray-600 break-all text-xs">{viewContent.raw.metadata.structuredSEO.canonicalUrl}</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.seoScore !== null && viewContent.raw.metadata.structuredSEO.seoScore !== undefined && (
+                              <div className="pt-2 border-t border-green-200">
+                                <span className="font-medium text-gray-700">SEO Score: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.seoScore}/100</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
             </div>
@@ -900,21 +1006,46 @@ export default function Content() {
                 ))}
               </div>
               <div className="flex gap-3">
+                {!showSchema && (
+                  <button
+                    onClick={() => {
+                      if (viewContent.raw?.generated_content) {
+                        navigator.clipboard.writeText(viewContent.raw.generated_content);
+                        toast.success("Content copied to clipboard!");
+                      }
+                    }}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
+                  >
+                    Copy
+                  </button>
+                )}
+                {showSchema && (
+                  <button
+                    onClick={() => {
+                      const schemaText = viewContent.raw?.metadata?.schema?.scriptTags || JSON.stringify(viewContent.raw?.metadata?.schema?.jsonLd || {}, null, 2);
+                      if (schemaText) {
+                        navigator.clipboard.writeText(schemaText);
+                        toast.success("Schema copied to clipboard!");
+                      }
+                    }}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
+                  >
+                    Copy Schema
+                  </button>
+                )}
                 <button
                   onClick={() => {
-                    if (viewContent.raw?.generated_content) {
-                      navigator.clipboard.writeText(viewContent.raw.generated_content);
-                      toast.success("Content copied to clipboard!");
-                    }
+                    setShowSchema(!showSchema);
                   }}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
+                  className="px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium text-sm border border-blue-200"
                 >
-                  Copy
+                  {showSchema ? "View Content" : "View Schema"}
                 </button>
                 <button
                   onClick={() => {
                     setShowViewModal(false);
                     setViewContent(null);
+                    setShowSchema(false);
                   }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
                 >

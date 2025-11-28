@@ -243,6 +243,18 @@ export async function POST(request: NextRequest) {
           let quoraIntegration: any = null;
           let facebookIntegration: any = null;
 
+          // Get schema from content metadata (automatically generated during content creation)
+          const schemaData = contentStrategy.metadata?.schema;
+          if (schemaData) {
+            console.log("✅ Schema Automation: Schema found in content metadata, will be included in published content");
+            console.log("📋 Schema Type:", Array.isArray(schemaData.jsonLd) 
+              ? schemaData.jsonLd[0]?.["@type"] || "Article"
+              : schemaData.jsonLd?.["@type"] || "Article");
+            console.log("💾 Schema will be saved in published_content.metadata.schema");
+          } else {
+            console.log("⚠️ Schema Automation: No schema found in content metadata");
+          }
+
           // Auto-publish to GitHub if enabled
           try {
             const { data: githubIntegrationData } = await supabase
@@ -299,9 +311,16 @@ export async function POST(request: NextRequest) {
               });
 
               // Discussions don't use labels, but will automatically select "General" category or first available
+              // Include schema in GitHub content (GitHub supports HTML in Markdown)
+              let githubContent = contentStrategy.generated_content || "";
+              if (schemaData?.scriptTags) {
+                githubContent += `\n\n<!-- SEO Schema (JSON-LD) - Automatically Generated -->\n${schemaData.scriptTags}`;
+                console.log("✅ Schema Automation: Schema included in GitHub post");
+              }
+              
               gitHubResult = await publishToGitHub(gitHubPublishConfig, {
                 title: contentStrategy.topic || "Untitled",
-                content: contentStrategy.generated_content || "",
+                content: githubContent,
                 // categoryId is optional - will auto-select "General" or first available
               });
 
@@ -430,9 +449,20 @@ export async function POST(request: NextRequest) {
                 // Get subreddit from metadata or use default
                 const subreddit = actionData.subreddit || contentStrategy.metadata?.subreddit || "test";
                 
+                // Reddit doesn't support HTML/schema in posts - use clean content only
+                // Schema is stored in metadata for website use, not in the post
+                let redditContent = contentStrategy.generated_content || "";
+                // Remove any schema that might have been accidentally included
+                redditContent = redditContent.replace(/<!-- SEO Schema.*?-->/gs, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").trim();
+                
+                if (schemaData) {
+                  console.log("ℹ️ Schema Automation: Schema available but Reddit doesn't support HTML in posts");
+                  console.log("💡 Schema is stored in metadata for your website use");
+                }
+                
                 redditResult = await publishToReddit(redditPublishConfig, {
                   title: contentStrategy.topic || "Untitled",
-                  content: contentStrategy.generated_content || "",
+                  content: redditContent,
                   subreddit: subreddit,
                   kind: "self", // Text post
                 });
@@ -493,9 +523,17 @@ export async function POST(request: NextRequest) {
                 };
 
                 if (mediumConfig.email) {
+                  // Include schema in Medium content if available (Medium supports HTML)
+                  let mediumContent = contentStrategy.generated_content || "";
+                  if (schemaData?.scriptTags) {
+                    // Add schema as HTML comment at the end of content (Medium will process it)
+                    mediumContent += `\n\n<!-- SEO Schema (JSON-LD) - Automatically Generated -->\n${schemaData.scriptTags}`;
+                    console.log("✅ Schema Automation: Schema included in Medium post");
+                  }
+                  
                   mediumResult = await publishToMedium(mediumConfig, {
                     title: contentStrategy.topic || "Untitled",
-                    content: contentStrategy.generated_content || "",
+                    content: mediumContent,
                     tags: contentStrategy.metadata?.tags || [],
                   });
 
@@ -567,9 +605,20 @@ export async function POST(request: NextRequest) {
                 };
 
                 if (quoraConfig.email) {
+                  // Quora doesn't support HTML/schema in posts - use clean content only
+                  // Schema is stored in metadata for website use, not in the post
+                  let quoraContent = contentStrategy.generated_content || "";
+                  // Remove any schema that might have been accidentally included
+                  quoraContent = quoraContent.replace(/<!-- SEO Schema.*?-->/gs, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").trim();
+                  
+                  if (schemaData) {
+                    console.log("ℹ️ Schema Automation: Schema available but Quora doesn't support HTML in posts");
+                    console.log("💡 Schema is stored in metadata for your website use");
+                  }
+                  
                   quoraResult = await publishToQuora(quoraConfig, {
                     title: contentStrategy.topic || "Untitled",
-                    content: contentStrategy.generated_content || "",
+                    content: quoraContent,
                     tags: contentStrategy.metadata?.tags || [],
                   }, actionData.questionUrl);
 
@@ -628,9 +677,20 @@ export async function POST(request: NextRequest) {
                 };
 
                 if (facebookConfig.pageAccessToken && facebookConfig.pageId) {
+                  // Facebook doesn't support HTML/schema in posts - use clean content only
+                  // Schema is stored in metadata for website use, not in the post
+                  let facebookContent = contentStrategy.generated_content || "";
+                  // Remove any schema that might have been accidentally included
+                  facebookContent = facebookContent.replace(/<!-- SEO Schema.*?-->/gs, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").trim();
+                  
+                  if (schemaData) {
+                    console.log("ℹ️ Schema Automation: Schema available but Facebook doesn't support HTML in posts");
+                    console.log("💡 Schema is stored in metadata for your website use");
+                  }
+                  
                   facebookResult = await publishToFacebook(facebookConfig, {
                     title: contentStrategy.topic || "Untitled",
-                    content: contentStrategy.generated_content || "",
+                    content: facebookContent,
                     tags: contentStrategy.metadata?.tags || [],
                     metadata: {
                       link: contentStrategy.metadata?.link,
@@ -725,9 +785,20 @@ export async function POST(request: NextRequest) {
                 };
 
                 if (linkedInConfig.accessToken) {
+                  // LinkedIn doesn't support HTML/schema in posts - use clean content only
+                  // Schema is stored in metadata for website use, not in the post
+                  let linkedInContent = contentStrategy.generated_content || "";
+                  // Remove any schema that might have been accidentally included
+                  linkedInContent = linkedInContent.replace(/<!-- SEO Schema.*?-->/gs, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").trim();
+                  
+                  if (schemaData) {
+                    console.log("ℹ️ Schema Automation: Schema available but LinkedIn doesn't support HTML in posts");
+                    console.log("💡 Schema is stored in metadata for your website use");
+                  }
+                  
                   linkedInResult = await publishToLinkedIn(linkedInConfig, {
                     title: contentStrategy.topic || "Untitled",
-                    content: contentStrategy.generated_content || "",
+                    content: linkedInContent,
                     tags: contentStrategy.metadata?.tags || [],
                     metadata: {
                       link: contentStrategy.metadata?.link,
@@ -829,9 +900,20 @@ export async function POST(request: NextRequest) {
                     throw new Error("Image URL is required for Instagram posts. Please provide an image in the content metadata.");
                   }
 
+                  // Instagram doesn't support HTML/schema in posts - use clean content only
+                  // Schema is stored in metadata for website use, not in the post
+                  let instagramContent = contentStrategy.generated_content || "";
+                  // Remove any schema that might have been accidentally included
+                  instagramContent = instagramContent.replace(/<!-- SEO Schema.*?-->/gs, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").trim();
+                  
+                  if (schemaData) {
+                    console.log("ℹ️ Schema Automation: Schema available but Instagram doesn't support HTML in posts");
+                    console.log("💡 Schema is stored in metadata for your website use");
+                  }
+                  
                   instagramResult = await publishToInstagram(instagramConfig, {
                     title: contentStrategy.topic || "Untitled",
-                    content: contentStrategy.generated_content || "",
+                    content: instagramContent,
                     tags: contentStrategy.metadata?.tags || [],
                     metadata: {
                       link: contentStrategy.metadata?.link,
@@ -950,8 +1032,21 @@ export async function POST(request: NextRequest) {
                            (facebookResult && !facebookResult.success && facebookResult.error)) ? 
                            (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error) : null,
             metadata: {
+              ...contentStrategy.metadata, // Include all metadata including structuredSEO
               auto_published: true,
               approved_by: session.user.id,
+              // Include schema in published_content metadata
+              schema: schemaData ? {
+                jsonLd: schemaData.jsonLd,
+                scriptTags: schemaData.scriptTags,
+                generatedAt: schemaData.generatedAt || new Date().toISOString(),
+              } : contentStrategy.metadata?.schema || null,
+              schema_included: schemaData ? true : false,
+              schema_type: schemaData?.jsonLd 
+                ? (Array.isArray(schemaData.jsonLd) 
+                  ? schemaData.jsonLd[0]?.["@type"] 
+                  : schemaData.jsonLd["@type"])
+                : null,
               github: gitHubResult ? {
                 success: gitHubResult.success,
                 url: gitHubResult.url,
@@ -1137,6 +1232,18 @@ export async function POST(request: NextRequest) {
       case "publish":
         // Publish content and create published_content record
         const publishPlatform = actionData.platform || contentStrategy.target_platform;
+        
+        // 🔄 SCHEMA AUTOMATION: Get schema from content metadata (automatically generated during content creation)
+        const schemaData = contentStrategy.metadata?.schema;
+        if (schemaData) {
+          const schemaType = Array.isArray(schemaData.jsonLd) 
+            ? schemaData.jsonLd[0]?.["@type"] || "Article"
+            : schemaData.jsonLd?.["@type"] || "Article";
+          console.log("✅ Schema Automation: Schema found and will be included in published content");
+          console.log("📋 Schema Type:", schemaType, "| Platform:", publishPlatform);
+        } else {
+          console.log("⚠️ Schema Automation: No schema found in content metadata");
+        }
         let publishUrl = actionData.publishedUrl || null;
         const platformPostId = actionData.platformPostId || null;
         let gitHubResult = null;
@@ -1177,9 +1284,16 @@ export async function POST(request: NextRequest) {
               };
 
               // Discussions don't use labels, but will automatically select "General" category or first available
+              // Include schema in GitHub content (GitHub supports HTML in Markdown)
+              let githubContent = contentStrategy.generated_content || "";
+              if (schemaData?.scriptTags) {
+                githubContent += `\n\n<!-- SEO Schema (JSON-LD) - Automatically Generated -->\n${schemaData.scriptTags}`;
+                console.log("✅ Schema Automation: Schema included in GitHub post");
+              }
+              
               gitHubResult = await publishToGitHub(gitHubPublishConfig, {
                 title: contentStrategy.topic || "Untitled",
-                content: contentStrategy.generated_content || "",
+                content: githubContent,
                 // categoryId is optional - will auto-select "General" or first available
               });
 
@@ -1323,8 +1437,20 @@ export async function POST(request: NextRequest) {
             platform_post_id: (publishPlatform === "github" ? gitHubResult?.discussionNumber?.toString() : redditResult?.postId) || platformPostId || null,
             error_message: (gitHubResult?.error || redditResult?.error) || actionData.errorMessage || null,
             metadata: {
-              ...contentStrategy.metadata,
+              ...contentStrategy.metadata, // Include all metadata including structuredSEO
               published_by: session.user.id,
+              // Include schema in published_content metadata
+              schema: schemaData ? {
+                jsonLd: schemaData.jsonLd,
+                scriptTags: schemaData.scriptTags,
+                generatedAt: schemaData.generatedAt || new Date().toISOString(),
+              } : contentStrategy.metadata?.schema || null,
+              schema_included: schemaData ? true : false, // Track if schema was included
+              schema_type: schemaData?.jsonLd 
+                ? (Array.isArray(schemaData.jsonLd) 
+                  ? schemaData.jsonLd[0]?.["@type"] 
+                  : schemaData.jsonLd["@type"])
+                : null,
               github: gitHubResult ? {
                 success: gitHubResult.success,
                 url: gitHubResult.url,
