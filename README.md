@@ -1,6 +1,6 @@
 # GeoRepute.ai - AI-Driven Generative Optimization System
 
-Next-generation, AI-driven visibility control across traditional SEO and emerging AI search ecosystems.
+Next-generation, AI-driven visibility control across traditional SEO and emerging AI search ecosystems with **complete team management and Stripe payment integration**.
 
 ---
 
@@ -9,15 +9,14 @@ Next-generation, AI-driven visibility control across traditional SEO and emergin
 1. [Features](#-features)
 2. [Tech Stack](#-tech-stack)
 3. [Quick Start](#-quick-start)
-4. [Project Structure](#-project-structure)
-5. [Organizations & Roles System](#-organizations--roles-system)
-6. [Team Management](#-team-management)
-7. [Email Invitations](#-email-invitations-gmail-smtp)
+4. [Stripe Payment Integration](#-stripe-payment-integration)
+5. [Team Seat Management](#-team-seat-management)
+6. [Organizations & Roles](#-organizations--roles-system)
+7. [Team Management UI](#-team-management-ui)
 8. [Database Setup](#-database-setup)
-9. [Troubleshooting](#-troubleshooting)
-10. [Testing](#-testing)
+9. [API Documentation](#-api-documentation)
+10. [Troubleshooting](#-troubleshooting)
 11. [Deployment](#-deployment)
-12. [API Documentation](#-api-documentation)
 
 ---
 
@@ -32,20 +31,21 @@ Next-generation, AI-driven visibility control across traditional SEO and emergin
 - **AI Content Generation**: 95%+ human score content that bypasses AI detection
 - **Action Plans**: AI-generated strategic optimization roadmaps
 - **50+ BI Reports**: Comprehensive analytics with PDF/CSV exports
-- **Video Reports**: Auto-generated with AI narration (planned)
 - **White-Label Ready**: Custom branding for agencies
 
+### Team & Billing Features ⭐ NEW
+- **Stripe Payment Integration**: Seamless seat purchase workflow
+- **Flexible Seat Management**: Pay-per-seat model ($1/seat)
+- **Organization Owner Free**: Owner account always included
+- **Real-time Seat Tracking**: Monitor usage and availability
+- **Pending Invitation Management**: Track and manage invites
+- **Professional Team UI**: Modern, polished interface
+- **Role-Based Permissions**: Admin, Manager, Editor, Viewer roles
+
 ### Role-Based Access
-- **Admin Panel**: Full system control, user management
+- **Admin Panel**: Full system control, user management, seat purchases
 - **Agency Tools**: Multi-client management, quote builder, team management
 - **Client Portal**: Individual dashboards, content generation, tracking
-
-### User Experience
-- **Guided Onboarding**: 4-step personalized setup flow
-- **Demo Mode**: Interactive demo with sample data
-- **Collapsible Sidebar**: Clean, focused workspace
-- **Real-Time Notifications**: Toast alerts for actions
-- **Responsive Design**: Mobile-friendly interface
 
 ---
 
@@ -53,25 +53,27 @@ Next-generation, AI-driven visibility control across traditional SEO and emergin
 
 ### Frontend
 - **Framework**: Next.js 14 (App Router), React 18, TypeScript
-- **Styling**: Tailwind CSS with custom color palette
+- **Styling**: Tailwind CSS with custom design system
 - **Animations**: Framer Motion for smooth interactions
 - **Charts**: Recharts for data visualization
 - **Icons**: Lucide React
-- **State Management**: Zustand (demo mode, onboarding)
-- **Forms**: React Hook Form
+- **State Management**: Zustand
 - **Notifications**: React Hot Toast
+- **Payments**: Stripe.js
 
-### Backend & AI
+### Backend & Services
 - **Database**: Supabase (PostgreSQL)
 - **Authentication**: Supabase Auth (Email/Password + Google OAuth)
 - **AI Engine**: OpenAI GPT-4 Turbo
+- **Payment Processing**: Stripe
 - **Row Level Security**: Supabase RLS policies
 - **API Routes**: Next.js API Routes
 - **Email**: Nodemailer with Gmail SMTP
 
 ### Deployment
-- **Hosting**: Vercel
-- **CI/CD**: GitHub Actions (optional)
+- **Hosting**: Vercel (recommended)
+- **Database**: Supabase Cloud
+- **Payments**: Stripe
 
 ---
 
@@ -84,1048 +86,1206 @@ cd georepute-ai
 npm install
 ```
 
-### 2. Setup Environment
-Create `.env.local` in the root directory:
-```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+### 2. Install Additional Dependencies
+```bash
+# Stripe packages
+npm install stripe @stripe/stripe-js
+```
 
-# OpenAI
+### 3. Setup Environment Variables
+Create `.env.local` in the root directory:
+
+```env
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+
+# Stripe Configuration
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_your_publishable_key
+STRIPE_SECRET_KEY=sk_test_your_secret_key
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+
+# OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key
+
+# Application URL
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
 
 # Gmail SMTP (for email invitations)
 GMAIL_USER=your-email@gmail.com
-GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
-EMAIL_FROM_NAME=GeoRepute.ai
-
-# App URL
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-# For production: NEXT_PUBLIC_APP_URL=https://yourdomain.com
+GMAIL_APP_PASSWORD=your_app_password
 ```
 
-### 3. Setup Database
-1. Create a Supabase project at https://supabase.com
-2. Run SQL migrations from `/database` folder in Supabase SQL Editor:
-   - `001_organizations_and_roles.sql` (Organizations & Roles)
-   - `002_fix_rls_recursion.sql` (RLS fixes - if needed)
-   - `004_invitation_tokens.sql` (Email invitations)
-   - `005_fix_user_table_rls.sql` (Team visibility fix)
+### 4. Database Setup
 
-### 4. Setup Gmail SMTP (for email invitations)
-1. Go to your Google Account: https://myaccount.google.com
-2. Navigate to **Security** → Enable **2-Step Verification**
-3. Go to **App passwords**: https://myaccount.google.com/apppasswords
-4. Generate an app password for "GeoRepute.ai"
-5. Copy the 16-character password to `.env.local`
+#### Run All Migrations
+Execute these SQL files in your Supabase SQL Editor in order:
 
-### 5. Run Development Server
+1. `database/001_organizations_and_roles.sql` - Base org structure
+2. `database/002_fix_rls_recursion.sql` - RLS fixes
+3. `database/003_fix_team_page_rls.sql` - Team page policies
+4. `database/004_invitation_tokens.sql` - Email invitations
+5. `database/005_fix_user_table_rls.sql` - User table policies
+6. `database/006_allow_delete_organization_users.sql` - Delete permissions
+7. `database/007_fix_invitation_tokens_rls.sql` - Invitation policies
+8. **`database/008_add_seats_to_organizations.sql`** - Seat management ⭐ NEW
+
+### 5. Start Development Server
 ```bash
 npm run dev
 ```
 
-### 6. Open Application
-Visit [http://localhost:3000](http://localhost:3000) and create an account!
+### 6. Setup Stripe Webhooks (Development)
 
-**First Time Setup:**
-1. Sign up → 2. Choose role (Client/Agency) → 3. Complete onboarding → 4. Start using the dashboard!
+#### Install Stripe CLI
+```bash
+# macOS
+brew install stripe/stripe-cli/stripe
+
+# Windows (Scoop)
+scoop install stripe
+
+# Linux
+wget -qO- https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg
+```
+
+#### Forward Webhooks
+```bash
+# Login to Stripe
+stripe login
+
+# Forward webhooks to your local server
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+```
+
+Copy the webhook signing secret (starts with `whsec_`) and add it to `.env.local`.
+
+### 7. Access the Application
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 📁 Project Structure
+## 💳 Stripe Payment Integration
+
+### Overview
+Complete Stripe integration for purchasing team member seats at $1 per seat.
+
+### Key Features
+✅ Secure Stripe Checkout integration
+✅ Webhook-based seat allocation
+✅ Payment history tracking
+✅ Automatic seat updates
+✅ Real-time availability checking
+✅ Admin-only purchase restrictions
+
+### Setup Instructions
+
+#### 1. Get Stripe API Keys
+
+1. Sign up at [https://stripe.com](https://stripe.com)
+2. Go to Dashboard → Developers → API keys
+3. Copy your **Publishable key** and **Secret key**
+4. Add them to `.env.local`
+
+#### 2. Configure Webhooks
+
+**For Development:**
+```bash
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+```
+
+**For Production:**
+1. Go to Stripe Dashboard → Developers → Webhooks
+2. Click "Add endpoint"
+3. URL: `https://yourdomain.com/api/stripe/webhook`
+4. Select events:
+   - `checkout.session.completed`
+   - `checkout.session.expired`
+   - `payment_intent.succeeded`
+   - `payment_intent.payment_failed`
+5. Copy the signing secret
+
+#### 3. Test Purchase Flow
+
+1. Navigate to Dashboard → Team → Manage Team
+2. Click "Buy More Seats"
+3. Select number of seats (1-100)
+4. Click "Purchase"
+5. Use test card: `4242 4242 4242 4242`
+6. Complete checkout
+
+**Verify:**
+- Seats added to organization
+- Payment recorded in database
+- Can now invite team members
+
+### API Endpoints
+
+#### Create Checkout Session
+```typescript
+POST /api/stripe/create-checkout
+
+Body:
+{
+  "organizationId": "uuid",
+  "seats": 5
+}
+
+Response:
+{
+  "success": true,
+  "sessionId": "cs_test_...",
+  "url": "https://checkout.stripe.com/..."
+}
+```
+
+#### Webhook Handler
+```typescript
+POST /api/stripe/webhook
+
+Headers:
+- stripe-signature: [signature]
+
+Body: Stripe event payload
+```
+
+### Database Tables
+
+#### seat_payments
+Tracks all seat purchase transactions:
+```sql
+- id: UUID
+- organization_id: UUID
+- stripe_session_id: VARCHAR(500)
+- stripe_payment_intent_id: VARCHAR(500)
+- amount_cents: INTEGER
+- seats_purchased: INTEGER
+- status: VARCHAR(50) [pending, completed, failed, refunded]
+- paid_at: TIMESTAMP
+- created_at: TIMESTAMP
+```
+
+### Pricing
+
+| Seats | Cost | Total People (with owner) |
+|-------|------|---------------------------|
+| 0 | $0 | 1 (owner only) |
+| 5 | $5 | 6 (5 + owner) |
+| 10 | $10 | 11 (10 + owner) |
+| 20 | $20 | 21 (20 + owner) |
+| 50 | $50 | 51 (50 + owner) |
+| 100 | $100 | 101 (100 + owner) |
+
+**Note**: Organization owner is always free and doesn't count against seat limit.
+
+---
+
+## 👥 Team Seat Management
+
+### Seat Calculation Formula
 
 ```
-GEORepute.ai/
-├── app/                         # Next.js 14 App Router
-│   ├── page.tsx                 # Home page
-│   ├── about/                   # About page
-│   ├── systems/                 # Our Systems page
-│   ├── contact/                 # Contact page
-│   ├── pricing/                 # Pricing plans page
-│   ├── login/                   # Login page
-│   ├── signup/                  # Signup page
-│   ├── role-selection/          # Role selection (Client/Agency)
-│   ├── onboarding/              # User onboarding flow
-│   ├── dashboard/               # Dashboard app
-│   │   ├── layout.tsx           # Dashboard layout with sidebar
-│   │   ├── page.tsx             # Dashboard overview
-│   │   ├── live-view/           # Live AI/Google search split view
-│   │   ├── content-generator/   # AI content generation
-│   │   ├── keyword-forecast/    # Keyword forecasting
-│   │   ├── action-plans/        # AI-generated action plans
-│   │   ├── team/                # Team management
-│   │   └── settings/            # User settings
-│   ├── api/                     # API routes
-│   │   ├── organizations/       # Organization APIs
-│   │   │   ├── route.ts         # Create/get organizations
-│   │   │   └── invite/          # Invitation system
-│   │   └── geo-core/            # GEO Core AI APIs
-│   └── invite/accept/           # Invitation acceptance page
-├── components/                  # Reusable UI components
-├── lib/                         # Utilities & services
-│   ├── supabase/                # Supabase client
-│   ├── ai/geoCore.ts            # GEO Core AI engine
-│   ├── organizations.ts         # Organization utilities
-│   └── email.ts                 # Email service (Gmail SMTP)
-├── database/                    # Database migrations
-│   ├── 001_organizations_and_roles.sql
-│   ├── 002_fix_rls_recursion.sql
-│   ├── 004_invitation_tokens.sql
-│   └── 005_fix_user_table_rls.sql
-└── types/                       # TypeScript types
+Available Seats = Purchased Seats - Active Members (excluding owner) - Pending Invitations
 ```
+
+### How It Works
+
+#### 1. Organization Creation
+- **Default Seats**: 0 (all must be purchased)
+- **Owner Status**: Free (doesn't count)
+- **Initial State**: Owner can work alone at no cost
+
+#### 2. Adding Team Members
+- **Requirement**: Must have available purchased seats
+- **Check**: System validates before sending invitation
+- **Pending Invites**: Count against available seats
+- **Owner**: Never counted in seat usage
+
+#### 3. Seat Validation
+The system validates seat availability at multiple points:
+
+**Before Invitation:**
+```typescript
+const totalPending = pendingInvites.length + pendingInvitations.length;
+const availableSeats = totalSeats - usedSeats - totalPending;
+
+if (availableSeats <= 0) {
+  // Prevent invitation
+  // Prompt to purchase or cancel pending invites
+}
+```
+
+**During Invitation:**
+- Re-validates availability (prevents race conditions)
+- Shows appropriate error messages
+- Suggests actions (cancel invites or purchase seats)
+
+**Database Level:**
+```sql
+-- Trigger enforces seat limits
+CREATE TRIGGER trigger_check_seat_availability
+  BEFORE INSERT OR UPDATE ON organization_users
+  FOR EACH ROW
+  EXECUTE FUNCTION check_seat_availability();
+```
+
+### Scenarios
+
+#### Scenario 1: New Organization
+```
+Purchased Seats: 0
+Active Members: 1 (owner - free)
+Pending Invites: 0
+Available: 0 ❌
+
+Action Required: Purchase seats before inviting
+```
+
+#### Scenario 2: After Purchase
+```
+Purchased Seats: 5
+Active Members: 1 (owner - free)  
+Pending Invites: 0
+Available: 5 ✅
+
+Can Invite: 5 team members
+```
+
+#### Scenario 3: With Pending Invites
+```
+Purchased Seats: 5
+Active Members: 2 (1 owner + 1 member)
+Pending Invites: 2
+Available: 2 ✅
+
+Note: Pending invites reserve seats
+```
+
+#### Scenario 4: At Capacity
+```
+Purchased Seats: 5
+Active Members: 4 (1 owner + 3 members)
+Pending Invites: 2
+Available: 0 ❌
+
+Options:
+1. Cancel a pending invitation
+2. Purchase more seats
+```
+
+### User Experience
+
+#### Visual Indicators
+
+**Green (Seats Available):**
+```
+✅ "Seats available! You can invite X more team members. (Owner seat is free)"
+```
+
+**Yellow (Reserved by Pending Invites):**
+```
+⚠️ "All seats are reserved. You have X pending invitations.
+    Cancel a pending invitation to free up a seat, or purchase more seats."
+```
+
+**Red (No Seats):**
+```
+🔴 "No seats available. Purchase seats to invite team members.
+    (Owner is free and doesn't count)"
+```
+
+### Best Practices
+
+1. **Plan Ahead**: Purchase seats before inviting team members
+2. **Monitor Usage**: Check seat overview regularly
+3. **Manage Invites**: Cancel expired or unnecessary invitations
+4. **Owner Privileges**: Owner can always access, never needs a seat
+5. **Scale Gradually**: Purchase seats as your team grows
 
 ---
 
 ## 🏢 Organizations & Roles System
 
-### Overview
-Complete organization and role-based access control (RBAC) system that automatically creates organizations when users sign up as agencies.
+### Organization Structure
 
-### Database Schema
+Each organization has:
+- **Unique ID**: UUID identifier
+- **Name**: Organization/Agency name
+- **Description**: Optional description
+- **Website**: Optional website URL
+- **Logo**: Optional logo URL
+- **Seats**: Number of purchased team seats (default: 0)
+- **Seats Used**: Auto-calculated active members (excluding owner)
+- **Created/Updated**: Timestamps
 
-#### Tables
+### Roles & Permissions
 
-**organizations**
-- `id` (UUID, Primary Key)
-- `name` (VARCHAR, NOT NULL)
-- `description` (TEXT)
-- `website` (VARCHAR)
-- `logo_url` (VARCHAR)
-- `created_at`, `updated_at` (TIMESTAMP)
+#### Admin
+**Capabilities:**
+- Full organization control
+- User management (invite, edit, remove)
+- Purchase team seats
+- Update organization settings
+- Access all features
+- Manage billing
 
-**roles** (4 default roles)
-- `id` (UUID, Primary Key)
-- `name` (VARCHAR, UNIQUE): Admin, Manager, Editor, Viewer
-- `description` (TEXT)
-- `permissions` (JSONB)
-- `created_at` (TIMESTAMP)
-
-**organization_users** (Junction Table)
-- `id` (UUID, Primary Key)
-- `user_id` (UUID, NOT NULL)
-- `organization_id` (UUID → organizations.id)
-- `role_id` (UUID → roles.id)
-- `invited_by` (UUID)
-- `status` (VARCHAR: active/inactive/invited/suspended)
-- `invited_at`, `joined_at` (TIMESTAMP)
-- `created_at`, `updated_at` (TIMESTAMP)
-
-### Role Permissions
-
-| Role | Permissions |
-|------|------------|
-| **Admin** | Full access to everything |
-| **Manager** | Content, keywords, reports management |
-| **Editor** | Create and edit content |
-| **Viewer** | Read-only access |
-
-### Signup Flow
-
-**For Agency Users:**
-1. User signs up → 2. Selects "Agency" → 3. Organization auto-created → 4. User assigned as Admin → 5. Onboarding
-
-**For Client Users:**
-1. User signs up → 2. Selects "Client" → 3. No organization created → 4. Can be invited later → 5. Onboarding
-
-### Helper Functions
-
-Available in `lib/organizations.ts`:
-
-```typescript
-import { 
-  getUserOrganizations,
-  isOrganizationAdmin,
-  hasPermission,
-  getOrganizationMembers,
-  createOrganization,
-  updateUserRole,
-  removeUserFromOrganization
-} from '@/lib/organizations';
-
-// Get user's organizations
-const { organizations } = await getUserOrganizations();
-
-// Check if admin
-const isAdmin = await isOrganizationAdmin(orgId);
-
-// Check permission
-const canCreate = await hasPermission(orgId, 'content.create');
-
-// Get members
-const { members } = await getOrganizationMembers(orgId);
-```
-
-### Security Features
-
-- ✅ Row Level Security (RLS) enabled
-- ✅ Users can only view their organizations
-- ✅ Only admins can update organization details
-- ✅ Only admins can manage members
-- ✅ Permission-based access control
-
----
-
-## 👥 Team Management
-
-### Features
-
-The `/dashboard/team` page provides complete team management:
-
-✅ **Real-Time Team Data** - Fetches organization members from database  
-✅ **Invite Functionality** - Admins can invite new members via email  
-✅ **Role Management** - Change member roles (Admin, Manager, Editor, Viewer)  
-✅ **Member Removal** - Remove members from organization  
-✅ **Search & Filter** - Real-time search by name, email, or role  
-✅ **Statistics Dashboard** - Total members, admins, managers, pending invites  
-✅ **Permission-Based UI** - Admin-only actions hidden from non-admins  
-
-### Usage
-
-```typescript
-// In your team management page
-import { 
-  getOrganizationMembers,
-  isOrganizationAdmin,
-  updateUserRole,
-  removeUserFromOrganization
-} from '@/lib/organizations';
-
-// Get all members
-const { members } = await getOrganizationMembers(organizationId);
-
-// Check admin status
-const isAdmin = await isOrganizationAdmin(organizationId);
-
-// Update member role
-await updateUserRole(organizationId, userId, newRoleId);
-
-// Remove member
-await removeUserFromOrganization(organizationId, userId);
-```
-
-### UI Components
-
-- **Member Cards**: Display name, email, role, status, join date
-- **Invite Modal**: Email input + role selection
-- **Edit Role Modal**: Select new role for member
-- **Remove Confirmation**: Warning before removal
-- **Statistics Cards**: Visual metrics for team overview
-
----
-
-## 📧 Email Invitations (Gmail SMTP)
-
-### Overview
-
-Complete email invitation system using Gmail SMTP. Users receive beautiful HTML emails with invitation links to join organizations.
-
-### Setup (5 Steps)
-
-#### 1. Enable 2-Factor Authentication
-1. Go to: https://myaccount.google.com → Security
-2. Enable **2-Step Verification**
-
-#### 2. Generate App Password
-1. Go to: https://myaccount.google.com/apppasswords
-2. Select **Mail** and **Other (Custom name)**
-3. Enter name: "GeoRepute.ai"
-4. Copy the 16-character password
-
-#### 3. Add to Environment Variables
-```env
-GMAIL_USER=your-email@gmail.com
-GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
-EMAIL_FROM_NAME=GeoRepute.ai
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-```
-
-#### 4. Run Database Migration
-```sql
--- Run: database/004_invitation_tokens.sql
-```
-
-#### 5. Restart Dev Server
-```bash
-npm run dev
-```
-
-### Invitation Flow
-
-```
-Admin clicks "Invite Member"
-    ↓
-Enters email and selects role
-    ↓
-System generates secure token
-    ↓
-Beautiful HTML email sent via Gmail
-    ↓
-User clicks "Accept Invitation" in email
-    ↓
-User redirected to acceptance page
-    ↓
-User accepts invitation
-    ↓
-User added to organization
-    ↓
-Welcome email sent
-```
-
-### Security Features
-
-- ✅ 32-byte cryptographically secure tokens
-- ✅ 7-day expiration (configurable)
-- ✅ One-time use only
-- ✅ Email verification required
-- ✅ Status tracking (pending/accepted/expired/cancelled)
-
-### Email Templates
-
-**Invitation Email:**
-- Beautiful HTML design with gradient header
-- Clear call-to-action button
-- Organization and role details
-- Expiration notice
-
-**Welcome Email:**
-- Sent after acceptance
-- Link to dashboard
-- Professional design
-
-### API Endpoints
-
-**POST /api/organizations/invite** - Send invitation
+**Permissions:**
 ```json
 {
-  "email": "user@example.com",
-  "organizationId": "org-uuid",
-  "roleId": "role-uuid"
+  "all": true,
+  "users": {"create": true, "read": true, "update": true, "delete": true},
+  "organization": {"update": true, "delete": true},
+  "billing": {"manage": true}
 }
 ```
 
-**GET /api/organizations/invite?token=xxx** - Validate token
+#### Manager
+**Capabilities:**
+- Content management
+- Keyword management
+- View reports
+- Limited team visibility
 
-**POST /api/organizations/invite/accept** - Accept invitation
+**Permissions:**
 ```json
 {
-  "token": "invitation-token"
+  "content": {"create": true, "read": true, "update": true, "delete": true},
+  "keywords": {"create": true, "read": true, "update": true, "delete": true},
+  "reports": {"read": true}
 }
 ```
 
-### Database Schema
+#### Editor
+**Capabilities:**
+- Create and edit content
+- View keywords
+- Limited access
 
-```sql
-invitation_tokens
-├── id (UUID, PK)
-├── organization_id (UUID → organizations.id)
-├── email (VARCHAR)
-├── role_id (UUID → roles.id)
-├── invited_by (UUID)
-├── token (VARCHAR, UNIQUE)
-├── expires_at (TIMESTAMP)
-├── accepted_at (TIMESTAMP)
-├── status (VARCHAR: pending/accepted/expired/cancelled)
-├── created_at, updated_at (TIMESTAMP)
+**Permissions:**
+```json
+{
+  "content": {"create": true, "read": true, "update": true},
+  "keywords": {"read": true}
+}
 ```
+
+#### Viewer
+**Capabilities:**
+- Read-only access
+- View content and reports
+
+**Permissions:**
+```json
+{
+  "content": {"read": true},
+  "keywords": {"read": true},
+  "reports": {"read": true}
+}
+```
+
+### Organization Setup Flow
+
+1. **User Signs Up** → Creates account
+2. **Role Selection** → Automatically set to "Agency"
+3. **Organization Setup** → Fill in organization details
+4. **Onboarding** → 4-step guided setup
+5. **Dashboard Access** → Start using the platform
+
+### Team Invitation Flow
+
+1. **Admin Checks Seats** → Verifies available seats
+2. **Purchases Seats** (if needed) → Stripe checkout
+3. **Invites Member** → Enters email and selects role
+4. **Email Sent** → Invitation email with token
+5. **Member Accepts** → Clicks link, creates/logs in
+6. **Joins Organization** → Access granted based on role
+
+---
+
+## 🎨 Team Management UI
+
+### Design System
+
+#### Color Scheme
+```css
+/* Primary Actions */
+from-primary-600 to-accent-600 (gradient buttons)
+
+/* Status Colors */
+- Success: bg-green-100 text-green-600
+- Warning: bg-yellow-100 text-yellow-600
+- Danger: bg-red-100 text-red-600
+- Info: bg-blue-100 text-blue-600
+
+/* Role Colors */
+- Admin: bg-purple-100 text-purple-700
+- Manager: bg-blue-100 text-blue-700
+- Editor: bg-green-100 text-green-700
+- Viewer: bg-gray-100 text-gray-700
+```
+
+#### Components
+
+**Statistics Cards:**
+- Hover effects with gradient glow
+- Icon badges with colored backgrounds
+- Status indicators (Active/Action Needed)
+- Smooth animations
+- 3D depth with shadows
+
+**Team Member Cards:**
+- Gradient backgrounds on hover
+- Modern rounded corners (2xl)
+- Gradient avatar squares
+- Badge indicators (role, status, "You")
+- Professional dropdown menus
+- Smooth transitions (300ms)
+
+**Pending Invitation Cards:**
+- Yellow theme for pending users
+- Orange theme for email invites
+- Expiration countdown badges
+- Mail badge indicators
+- Action menus with dividers
+
+**Empty States:**
+- Gradient backgrounds with dashed borders
+- Large icons in colored circles
+- Context-aware messages
+- Call-to-action buttons
+
+### UI Features
+
+✅ **Consistent Design Language** - All components follow same visual style
+✅ **Clear Visual Hierarchy** - Important information stands out
+✅ **Micro-interactions** - Delightful hover and click effects
+✅ **Professional Polish** - Attention to detail in spacing, shadows
+✅ **Accessibility** - Focus states, color contrast, clear labels
+✅ **Responsive** - Mobile-optimized with adaptive grids
+✅ **Smooth Animations** - Staggered entrance, hover effects
+
+### Page Sections
+
+1. **Seat Overview Card**
+   - Shows purchased seats + owner (free)
+   - Active member count
+   - Pending invitations
+   - Available seats
+   - Status message with color coding
+   - "Buy More Seats" button
+
+2. **Statistics Grid**
+   - Team Members count
+   - Admins count
+   - Managers count
+   - Pending Invites count
+   - Hover effects and status badges
+
+3. **Search & Actions Bar**
+   - Enhanced search with focus animations
+   - Clear button when typing
+   - Invite Member button (with seat validation)
+   - Disabled states with helpful messages
+
+4. **Team Members Section**
+   - Grid of active member cards
+   - Avatar with gradient background
+   - Role and status badges
+   - Join date information
+   - Action menu (Edit Role, Remove)
+   - "You" badge for current user
+
+5. **Pending Invitations Section**
+   - Separate cards for pending users
+   - Expiration countdown
+   - Cancel/Resend actions
+   - Visual differentiation from active members
 
 ---
 
 ## 🗄️ Database Setup
 
-### Migrations to Run
+### Migration Order
 
-Execute these in order in Supabase SQL Editor:
+Execute these SQL files in Supabase SQL Editor in this order:
 
-1. **001_organizations_and_roles.sql** ⭐ Main migration
-   - Creates organizations, roles, organization_users tables
-   - Adds 4 default roles
+1. **001_organizations_and_roles.sql**
+   - Creates organizations table
+   - Creates roles table with default roles
+   - Creates organization_users junction table
    - Sets up RLS policies
-   - Creates helper functions
 
-2. **002_fix_rls_recursion.sql** (Optional - if you encounter recursion errors)
-   - Fixes RLS infinite recursion
-   - Updates policies to prevent circular dependencies
+2. **002_fix_rls_recursion.sql**
+   - Fixes recursive RLS policy issues
+   - Optimizes query performance
 
-3. **004_invitation_tokens.sql**
+3. **003_fix_team_page_rls.sql**
+   - Updates team page policies
+   - Allows proper data access
+
+4. **004_invitation_tokens.sql**
    - Creates invitation_tokens table
-   - Adds RLS policies for invitations
-   - Enables email invitation system
+   - Sets up expiration logic
+   - Email invitation support
 
-4. **005_fix_user_table_rls.sql**
-   - Fixes team member visibility
-   - Allows organization members to view each other
-   - Required for team page to work properly
+5. **005_fix_user_table_rls.sql**
+   - Updates user table policies
+   - Fixes access issues
 
-### Verification Queries
+6. **006_allow_delete_organization_users.sql**
+   - Adds delete permissions
+   - Allows member removal
 
+7. **007_fix_invitation_tokens_rls.sql**
+   - Fixes invitation token policies
+   - Proper access control
+
+8. **008_add_seats_to_organizations.sql** ⭐ NEW
+   - Adds seat management
+   - Creates seat_payments table
+   - Implements seat validation triggers
+   - Enforces seat limits
+
+### Key Tables
+
+#### organizations
 ```sql
--- Check roles exist
-SELECT * FROM roles ORDER BY name;
--- Should show: Admin, Editor, Manager, Viewer
-
--- View organizations
-SELECT * FROM organizations ORDER BY created_at DESC;
-
--- View organization members
-SELECT 
-  u.email,
-  o.name as organization,
-  r.name as role,
-  ou.status
-FROM organization_users ou
-JOIN "user" u ON u.user_id = ou.user_id
-JOIN organizations o ON o.id = ou.organization_id
-JOIN roles r ON r.id = ou.role_id
-WHERE ou.status = 'active';
-
--- Check pending invitations
-SELECT 
-  it.email,
-  o.name as organization,
-  r.name as role,
-  it.status,
-  it.expires_at
-FROM invitation_tokens it
-JOIN organizations o ON o.id = it.organization_id
-JOIN roles r ON r.id = it.role_id
-WHERE it.status = 'pending';
+- id: UUID (PK)
+- name: VARCHAR(255)
+- description: TEXT
+- website: VARCHAR(500)
+- logo_url: VARCHAR(500)
+- seats: INTEGER (default: 0) ⭐ NEW
+- seats_used: INTEGER (default: 0) ⭐ NEW
+- created_at: TIMESTAMP
+- updated_at: TIMESTAMP
 ```
 
----
-
-## 🐛 Troubleshooting
-
-### Common Issues & Fixes
-
-#### 1. Organization Not Created on Signup
-
-**Symptoms:** Agency users don't get organization after signup
-
-**Solution:**
-1. Check browser console for errors
-2. Verify `SUPABASE_SERVICE_ROLE_KEY` is set in `.env.local`
-3. Restart dev server after adding env variables
-4. Check Supabase logs for errors
-
-**SQL Check:**
+#### organization_users
 ```sql
-SELECT * FROM organizations ORDER BY created_at DESC LIMIT 5;
+- id: UUID (PK)
+- user_id: UUID (FK)
+- organization_id: UUID (FK)
+- role_id: UUID (FK)
+- invited_by: UUID
+- invited_at: TIMESTAMP
+- joined_at: TIMESTAMP
+- status: VARCHAR(50) [active, inactive, invited, suspended]
+- created_at: TIMESTAMP
+- updated_at: TIMESTAMP
 ```
 
-#### 2. RLS Infinite Recursion Error
-
-**Error:** "infinite recursion detected in policy for relation organization_users"
-
-**Solution:** Run `database/002_fix_rls_recursion.sql`
-
-Or use service role key (recommended):
-```env
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-```
-
-#### 3. Team Members Not Showing Names/Emails
-
-**Symptoms:** On team page, only see your own data, others show "No name"
-
-**Solution:** Run `database/005_fix_user_table_rls.sql`
-
-This updates RLS policies to allow organization members to view each other.
-
-#### 4. Email Invitations Not Sending
-
-**Symptoms:** Invitation created but email not received
-
-**Checks:**
-1. Verify Gmail credentials in `.env.local`
-2. Ensure you're using **App Password**, not regular password
-3. Check 2FA is enabled on Google account
-4. Verify email service configuration:
-
-```typescript
-// Check in browser console
-const response = await fetch('/api/organizations/invite', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email: 'test@example.com',
-    organizationId: 'org-id',
-    roleId: 'role-id'
-  })
-});
-const data = await response.json();
-console.log(data);
-```
-
-#### 5. Permission Denied Errors
-
-**Symptoms:** Database queries fail with "permission denied"
-
-**Check RLS Policies:**
+#### seat_payments ⭐ NEW
 ```sql
-SELECT * FROM pg_policies 
-WHERE tablename IN ('organizations', 'organization_users', 'user');
+- id: UUID (PK)
+- organization_id: UUID (FK)
+- stripe_session_id: VARCHAR(500)
+- stripe_payment_intent_id: VARCHAR(500)
+- amount_cents: INTEGER
+- seats_purchased: INTEGER
+- currency: VARCHAR(3) [default: usd]
+- status: VARCHAR(50) [pending, completed, failed, refunded]
+- paid_at: TIMESTAMP
+- created_at: TIMESTAMP
+- updated_at: TIMESTAMP
 ```
 
-**Temporary Debug (DO NOT USE IN PRODUCTION):**
+#### invitation_tokens
 ```sql
--- Disable RLS for testing
-ALTER TABLE organizations DISABLE ROW LEVEL SECURITY;
-ALTER TABLE organization_users DISABLE ROW LEVEL SECURITY;
-
--- Test your queries
-
--- RE-ENABLE IMMEDIATELY
-ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE organization_users ENABLE ROW LEVEL SECURITY;
+- id: UUID (PK)
+- organization_id: UUID (FK)
+- role_id: UUID (FK)
+- email: VARCHAR(255)
+- token: VARCHAR(500)
+- status: VARCHAR(50) [pending, accepted, expired, cancelled]
+- expires_at: TIMESTAMP
+- created_at: TIMESTAMP
 ```
 
-#### 6. Pending Invites Count Always Zero
+### Triggers & Functions
 
-**Fixed!** The stats card now includes both:
-- Pending invites from `organization_users` (invited status)
-- Pending invitations from `invitation_tokens` (email invites)
-
-No action needed if you have the latest version.
-
----
-
-## 🧪 Testing
-
-### Functional Testing Checklist
-
-#### Organizations & Roles
-- [ ] Agency signup creates organization
-- [ ] User assigned as Admin role
-- [ ] organization_id set in user table
-- [ ] Client signup does NOT create organization
-- [ ] Organization visible in database
-
-#### Team Management
-- [ ] View all team members on /dashboard/team
-- [ ] Search by name, email, or role works
-- [ ] Admin can invite new members
-- [ ] Admin can change member roles
-- [ ] Admin can remove members
-- [ ] Non-admins cannot see admin actions
-- [ ] Statistics show correct counts
-
-#### Email Invitations
-- [ ] Admin can send invitation email
-- [ ] Invitation email received in inbox
-- [ ] Email contains valid invitation link
-- [ ] Clicking link shows invitation details
-- [ ] User can accept invitation
-- [ ] User added to organization after acceptance
-- [ ] Welcome email sent after acceptance
-- [ ] Expired invitations cannot be accepted
-
-### SQL Testing Queries
-
+#### update_organization_seats_used()
+Automatically calculates and updates seats_used when members are added/removed:
 ```sql
--- Test 1: Check user's organizations
-SELECT 
-  o.name,
-  r.name as role,
-  ou.status
-FROM organization_users ou
-JOIN organizations o ON o.id = ou.organization_id
-JOIN roles r ON r.id = ou.role_id
-WHERE ou.user_id = 'your-user-id';
-
--- Test 2: Check if user is admin
-SELECT is_organization_admin('user-id'::uuid, 'org-id'::uuid);
-
--- Test 3: View all pending invitations
-SELECT 
-  email,
-  status,
-  expires_at,
-  created_at
-FROM invitation_tokens
-WHERE status = 'pending'
-  AND expires_at > NOW()
-ORDER BY created_at DESC;
-
--- Test 4: Check team member visibility
-SELECT 
-  u.email,
-  u.full_name
-FROM "user" u
-WHERE u.user_id IN (
-  SELECT ou.user_id
-  FROM organization_users ou
-  WHERE ou.organization_id = 'your-org-id'
-    AND ou.status = 'active'
-);
+- Counts active members
+- Excludes organization owner
+- Updates seats_used column
 ```
 
-### API Testing
-
-```javascript
-// Test in browser console after login
-
-// 1. Get organizations
-const orgs = await fetch('/api/organizations');
-console.log(await orgs.json());
-
-// 2. Create organization
-const create = await fetch('/api/organizations', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    name: 'Test Agency',
-    description: 'Testing'
-  })
-});
-console.log(await create.json());
-
-// 3. Send invitation
-const invite = await fetch('/api/organizations/invite', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email: 'test@example.com',
-    organizationId: 'org-id',
-    roleId: 'role-id'
-  })
-});
-console.log(await invite.json());
-```
-
----
-
-## 🚢 Deployment
-
-### Vercel (Recommended)
-
-1. Push code to GitHub
-2. Import repository in Vercel
-3. Configure environment variables
-4. Deploy
-
-### Environment Variables for Production
-
-```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=your_production_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_production_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_production_service_key
-
-# OpenAI
-OPENAI_API_KEY=your_openai_key
-
-# Gmail SMTP
-GMAIL_USER=your-production-email@gmail.com
-GMAIL_APP_PASSWORD=your_app_password
-EMAIL_FROM_NAME=GeoRepute.ai
-
-# App URL (IMPORTANT!)
-NEXT_PUBLIC_APP_URL=https://yourdomain.com
-```
-
-### Pre-Deployment Checklist
-
-- [ ] All migrations run successfully
-- [ ] Environment variables configured
-- [ ] Gmail SMTP tested and working
-- [ ] Invitation emails working
-- [ ] Team management tested
-- [ ] RLS policies enabled
-- [ ] Service role key secured (never expose to client)
-- [ ] App URL set to production domain
-- [ ] Test signup flow end-to-end
-- [ ] Test invitation flow end-to-end
-
-### Build Commands
-
-```bash
-# Build for production
-npm run build
-
-# Start production server (local testing)
-npm start
-
-# Lint code
-npm run lint
+#### check_seat_availability()
+Validates seat availability before adding members:
+```sql
+- Checks if seats are available
+- Excludes owner from count
+- Throws error if no seats available
+- Enforces database-level constraint
 ```
 
 ---
 
 ## 📚 API Documentation
 
-### Organizations
+### Stripe Endpoints
 
-#### POST /api/organizations
-Create a new organization
+#### Create Checkout Session
+```typescript
+POST /api/stripe/create-checkout
 
-**Request:**
-```json
+Authorization: Required (Supabase Auth)
+
+Request Body:
+{
+  "organizationId": "uuid",
+  "seats": number (1-100)
+}
+
+Response (Success):
+{
+  "success": true,
+  "sessionId": "cs_test_...",
+  "url": "https://checkout.stripe.com/..."
+}
+
+Response (Error):
+{
+  "error": "Error message"
+}
+```
+
+**Validations:**
+- User must be authenticated
+- User must be admin of organization
+- Seats must be between 1-100
+- Creates payment record with status "pending"
+
+#### Verify Checkout Session
+```typescript
+GET /api/stripe/create-checkout?session_id=cs_test_...
+
+Response:
+{
+  "success": true,
+  "status": "paid",
+  "session": {
+    "id": "cs_test_...",
+    "payment_status": "paid",
+    "amount_total": 500,
+    "currency": "usd",
+    "metadata": {...}
+  }
+}
+```
+
+#### Webhook Handler
+```typescript
+POST /api/stripe/webhook
+
+Headers:
+- stripe-signature: [required]
+
+Body: Stripe event payload
+
+Events Handled:
+- checkout.session.completed → Add seats to organization
+- checkout.session.expired → Mark payment as failed
+- payment_intent.succeeded → Update payment status
+- payment_intent.payment_failed → Mark payment as failed
+
+Response:
+{
+  "received": true
+}
+```
+
+**Security:**
+- Verifies webhook signature
+- Uses service role for database operations
+- Idempotent processing (handles duplicates)
+
+### Organization Endpoints
+
+#### Create Organization
+```typescript
+POST /api/organizations
+
+Body:
 {
   "name": "My Agency",
-  "description": "Optional",
+  "description": "Optional description",
   "website": "https://example.com",
   "logo_url": "https://example.com/logo.png"
 }
-```
 
-**Response:**
-```json
+Response:
 {
   "success": true,
-  "organization": { "id": "...", "name": "..." },
-  "role": "Admin",
-  "message": "Organization created successfully"
+  "organization": {...}
 }
 ```
 
-#### GET /api/organizations
-Get user's organizations
+#### Get Organizations
+```typescript
+GET /api/organizations
 
-**Response:**
-```json
+Response:
 {
   "success": true,
-  "organizations": [
-    {
-      "organization": { "id": "...", "name": "..." },
-      "role": { "name": "Admin", "permissions": {...} },
-      "status": "active"
-    }
-  ]
+  "organizations": [...]
 }
 ```
 
-### Invitations
+### Invitation Endpoints
 
-#### POST /api/organizations/invite
-Send invitation email
+#### Send Invitation
+```typescript
+POST /api/organizations/invite
 
-**Request:**
-```json
+Body:
 {
   "email": "user@example.com",
-  "organizationId": "org-uuid",
-  "roleId": "role-uuid"
+  "organizationId": "uuid",
+  "roleId": "uuid"
 }
-```
 
-**Response:**
-```json
+Response:
 {
   "success": true,
   "invitation": {
-    "id": "...",
-    "email": "...",
-    "expires_at": "...",
+    "id": "uuid",
+    "email": "user@example.com",
     "email_sent": true
   }
 }
 ```
 
-#### GET /api/organizations/invite?token=xxx
-Validate invitation token
+#### Resend Invitation
+```typescript
+POST /api/organizations/invite/resend
 
-**Response:**
-```json
+Body:
+{
+  "invitationId": "uuid"
+}
+
+Response:
 {
   "success": true,
   "invitation": {
-    "email": "...",
-    "organization": { "name": "..." },
-    "role": { "name": "Manager" }
-  }
-}
-```
-
-#### POST /api/organizations/invite/accept
-Accept invitation
-
-**Request:**
-```json
-{
-  "token": "invitation-token"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Invitation accepted successfully",
-  "organization": {...},
-  "role": {...}
-}
-```
-
-#### POST /api/organizations/invite/resend
-Resend expired invitation
-
-**Request:**
-```json
-{
-  "invitationId": "invitation-uuid"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "invitation": {
-    "id": "...",
-    "email_sent": true,
-    "expires_at": "..."
+    "id": "uuid",
+    "email_sent": true
   }
 }
 ```
 
 ---
 
-## 🎨 Design System
+## 🔧 Troubleshooting
 
-### Colors
-- **Primary**: Blue (#3B82F6)
-- **Secondary**: Teal (#14B8A6)
-- **Accent**: Purple (#8B5CF6)
-- **Success**: Green
-- **Warning**: Yellow
-- **Error**: Red
+### Common Issues
 
-### Typography
-- **Font**: Inter (system font stack)
-- **Headings**: Bold, solid colors
-- **Body**: Regular weight, comfortable line-height
+#### 1. Failed to Create Payment Record
 
-### UI Philosophy
-- Dashboard-first design
-- Role-based dashboards (Admin/Agency/Client)
-- Smooth interactions with Framer Motion
-- Clean, focused workspace
-- Mobile-responsive
+**Error:**
+```
+POST /api/stripe/create-checkout 500 (Internal Server Error)
+Error: Failed to create payment record
+```
+
+**Causes:**
+- Missing `SUPABASE_SERVICE_ROLE_KEY` environment variable
+- Database migration not run
+- RLS policies blocking insert
+
+**Solutions:**
+1. Add service role key to `.env.local`:
+```env
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
+
+2. Run database migration:
+```sql
+-- Execute: database/008_add_seats_to_organizations.sql
+```
+
+3. Restart development server:
+```bash
+npm run dev
+```
+
+#### 2. Stripe Redirect Error
+
+**Error:**
+```
+IntegrationError: stripe.redirectToCheckout is no longer supported
+```
+
+**Solution:**
+✅ Already fixed in `components/PurchaseSeats.tsx`
+- Uses direct URL redirect instead of deprecated method
+- No action needed
+
+#### 3. Webhook Signature Verification Failed
+
+**Error:**
+```
+Webhook Error: No signature found
+```
+
+**Solutions:**
+1. For local development:
+```bash
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+```
+
+2. Copy the webhook secret (starts with `whsec_`) to `.env.local`:
+```env
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+3. Restart server
+
+#### 4. No Available Seats Error
+
+**Error:**
+```
+No available seats. Please purchase more seats first.
+```
+
+**Explanation:**
+✅ This is expected behavior! The system is working correctly.
+
+**Solutions:**
+- Purchase seats first, then invite members
+- Cancel pending invitations to free up seats
+- Check seat overview for current usage
+
+#### 5. Cannot Invite Member
+
+**Causes:**
+- No purchased seats available
+- Pending invitations using all seats
+- Database constraint preventing insert
+
+**Solutions:**
+1. Check seat overview in Team page
+2. Purchase additional seats
+3. Cancel unnecessary pending invitations
+4. Verify user has admin role
+
+### Debugging Tips
+
+#### Check Environment Variables
+```bash
+# Add to your API route temporarily
+console.log('Env check:', {
+  supabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+  serviceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+  stripeSecret: !!process.env.STRIPE_SECRET_KEY,
+  stripePublishable: !!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+  webhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
+});
+```
+
+#### Verify Database Tables
+```sql
+-- Check if seat_payments table exists
+SELECT * FROM seat_payments LIMIT 1;
+
+-- Check organization seats
+SELECT id, name, seats, seats_used 
+FROM organizations;
+
+-- Check seat payments
+SELECT * FROM seat_payments 
+ORDER BY created_at DESC LIMIT 10;
+```
+
+#### Monitor Webhook Delivery
+1. Go to Stripe Dashboard
+2. Developers → Webhooks
+3. Click your endpoint
+4. View recent events and delivery status
+
+#### Test Cards
+Use these Stripe test cards:
+- **Success**: `4242 4242 4242 4242`
+- **Decline**: `4000 0000 0000 0002`
+- **Requires Auth**: `4000 0025 0000 3155`
+
+All test cards:
+- Expiry: Any future date
+- CVC: Any 3 digits
+- ZIP: Any 5 digits
 
 ---
 
-## 🤝 Contributing
+## 🚀 Deployment
 
-Contributions welcome! Areas for contribution:
-- Additional AI platforms for visibility tracking
-- New report templates
-- UI/UX improvements
-- Documentation enhancements
+### Vercel Deployment (Recommended)
+
+#### 1. Prepare Repository
+```bash
+git add .
+git commit -m "Ready for deployment"
+git push origin main
+```
+
+#### 2. Deploy to Vercel
+1. Go to [vercel.com](https://vercel.com)
+2. Click "Import Project"
+3. Select your GitHub repository
+4. Configure project settings
+
+#### 3. Add Environment Variables
+In Vercel Dashboard → Settings → Environment Variables:
+
+```env
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=your_production_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_production_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_production_service_key
+
+# Stripe (LIVE keys)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_...
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_... (production webhook)
+
+# OpenAI
+OPENAI_API_KEY=your_openai_key
+
+# Application
+NEXT_PUBLIC_SITE_URL=https://yourdomain.com
+
+# Gmail
+GMAIL_USER=your-email@gmail.com
+GMAIL_APP_PASSWORD=your_app_password
+```
+
+#### 4. Setup Production Webhook
+
+1. **Activate Stripe Live Mode**
+   - Complete business verification
+   - Switch to Live mode in dashboard
+
+2. **Create Production Webhook**
+   - Go to Developers → Webhooks
+   - Click "Add endpoint"
+   - URL: `https://yourdomain.com/api/stripe/webhook`
+   - Select events:
+     - `checkout.session.completed`
+     - `checkout.session.expired`
+     - `payment_intent.succeeded`
+     - `payment_intent.payment_failed`
+   - Copy signing secret to Vercel env vars
+
+3. **Test Production Deployment**
+   - Use real credit card (you'll be charged!)
+   - Verify webhook delivery
+   - Check database for payment records
+   - Confirm seats are added
+
+#### 5. Database Migrations
+Ensure all migrations are run in your production Supabase instance:
+1. Go to Supabase Dashboard (production project)
+2. SQL Editor → New query
+3. Execute all migration files in order
+4. Verify tables and triggers exist
+
+### Post-Deployment Checklist
+
+- [ ] All environment variables set in Vercel
+- [ ] Database migrations executed
+- [ ] Stripe webhook configured and tested
+- [ ] Live payment test successful
+- [ ] Seats correctly allocated after payment
+- [ ] Email invitations working
+- [ ] Team management functional
+- [ ] RLS policies active
+- [ ] SSL certificate active
+- [ ] Custom domain configured (optional)
+
+### Monitoring
+
+#### Stripe Dashboard
+- Monitor payment success rate
+- Check webhook delivery status
+- Review customer disputes
+- Track revenue
+
+#### Supabase Dashboard
+- Monitor database performance
+- Check RLS policy execution
+- Review API usage
+- Monitor auth activity
+
+#### Vercel Dashboard
+- Check deployment status
+- Monitor function execution
+- Review error logs
+- Check build times
 
 ---
 
-## 📍 Dashboard Routes
+## 📊 Database Queries for Monitoring
 
-### Dashboard (Role-Based Access)
-- **Overview** (`/dashboard`): Stats, charts, keyword performance
-- **Live View** (`/dashboard/live-view`): Real-time AI/Google search split view
-- **Content Generator** (`/dashboard/content-generator`): AI humanized content (95%+ human score)
-- **Keyword Forecast** (`/dashboard/keyword-forecast`): AI-powered keyword analysis
-- **Action Plans** (`/dashboard/action-plans`): AI-generated strategic plans
-- **Keywords** (`/dashboard/keywords`): Keyword tracking and management
-- **Content** (`/dashboard/content`): Content orchestration workflow
-- **Rankings** (`/dashboard/rankings`): SEO ranking trends
-- **AI Visibility** (`/dashboard/ai-visibility`): AI platform tracking
-- **Reputation** (`/dashboard/reputation`): Reputation monitoring
-- **Leads** (`/dashboard/leads`): Lead capture and management
-- **AdSync** (`/dashboard/adsync`): Google Ads integration
-- **Analytics** (`/dashboard/analytics`): Comprehensive analytics
-- **Reports** (`/dashboard/reports`): 50+ BI report library
-- **Video Reports** (`/dashboard/video-reports`): Auto-generated video reports
-- **Quote Builder** (`/dashboard/quote-builder`): Agency quote generation
-- **Team** (`/dashboard/team`): Team member management
-- **Settings** (`/dashboard/settings`): User preferences
+### Seat Usage
+```sql
+-- Organization seat overview
+SELECT 
+  o.name,
+  o.seats as purchased_seats,
+  o.seats_used,
+  (o.seats - o.seats_used) as available_seats,
+  COUNT(ou.id) FILTER (WHERE ou.status = 'active') as total_members
+FROM organizations o
+LEFT JOIN organization_users ou ON ou.organization_id = o.id
+GROUP BY o.id, o.name, o.seats, o.seats_used;
+```
+
+### Payment History
+```sql
+-- Recent seat purchases
+SELECT 
+  o.name as organization,
+  sp.seats_purchased,
+  sp.amount_cents / 100.0 as amount_usd,
+  sp.status,
+  sp.paid_at,
+  sp.created_at
+FROM seat_payments sp
+JOIN organizations o ON sp.organization_id = o.id
+ORDER BY sp.created_at DESC
+LIMIT 20;
+```
+
+### Active Invitations
+```sql
+-- Pending invitations overview
+SELECT 
+  o.name as organization,
+  it.email,
+  r.name as role,
+  it.status,
+  it.expires_at,
+  it.created_at
+FROM invitation_tokens it
+JOIN organizations o ON it.organization_id = o.id
+JOIN roles r ON it.role_id = r.id
+WHERE it.status IN ('pending', 'expired')
+ORDER BY it.created_at DESC;
+```
+
+### Team Analytics
+```sql
+-- Organization size distribution
+SELECT 
+  CASE 
+    WHEN member_count = 1 THEN 'Solo (Owner only)'
+    WHEN member_count <= 5 THEN 'Small (2-5)'
+    WHEN member_count <= 20 THEN 'Medium (6-20)'
+    ELSE 'Large (21+)'
+  END as organization_size,
+  COUNT(*) as count
+FROM (
+  SELECT 
+    o.id,
+    COUNT(ou.id) FILTER (WHERE ou.status = 'active') as member_count
+  FROM organizations o
+  LEFT JOIN organization_users ou ON ou.organization_id = o.id
+  GROUP BY o.id
+) subquery
+GROUP BY organization_size
+ORDER BY 
+  CASE organization_size
+    WHEN 'Solo (Owner only)' THEN 1
+    WHEN 'Small (2-5)' THEN 2
+    WHEN 'Medium (6-20)' THEN 3
+    WHEN 'Large (21+)' THEN 4
+  END;
+```
 
 ---
 
-## 🔐 Authentication Details
+## 🎯 Key Features Summary
 
-### Authentication Methods
-- **Email/Password**: Traditional signup/login
-- **Google OAuth**: One-click Google SSO
-- **Session Management**: Supabase Auth with RLS
+### ✅ Implemented Features
 
-### User Roles
-- **Admin**: Full system access, user management
-- **Agency**: Multi-client management, white-label tools
-- **Client**: Individual dashboard access
+#### Signup & Onboarding
+- ✅ Automatic agency role assignment
+- ✅ Organization info collection
+- ✅ Owner gets free account
+- ✅ Can edit organization later
 
-### Role Selection Flow
-1. User signs up → 2. Selects role (Client/Agency) → 3. Onboarding → 4. Dashboard
+#### Team Management
+- ✅ Two tabs: Organization Info & Manage Team
+- ✅ Professional modern UI
+- ✅ Seat overview dashboard
+- ✅ Real-time seat tracking
+- ✅ Pending invitation management
+- ✅ Role-based access control
 
----
+#### Payment System
+- ✅ Stripe integration
+- ✅ $1 per seat pricing
+- ✅ Owner always free
+- ✅ Secure checkout
+- ✅ Webhook processing
+- ✅ Payment history
+- ✅ Automatic seat allocation
 
-## 🤖 AI/GEO Core Details
+#### Seat Validation
+- ✅ Database-level enforcement
+- ✅ API-level validation
+- ✅ UI-level checks
+- ✅ Pending invites counted
+- ✅ Owner excluded from limits
+- ✅ Clear error messages
 
-### Powered by OpenAI GPT-4 Turbo
-
-**Core Features:**
-1. **Keyword Forecasting**: AI-powered keyword difficulty, traffic, and ROI predictions
-2. **Content Generation**: Humanized content that bypasses AI detection (95%+ human score)
-3. **Action Plans**: Strategic AI-generated optimization plans
-4. **AI Visibility Tracking**: Monitor AI platform mentions
-5. **Self-Learning Loop**: Continuous improvement from performance data
-
-**AI Humanization Techniques:**
-- Natural imperfections (contractions, filler words, casual language)
-- Sentence variety (short, long, incomplete)
-- Personal touch (experiences, emotions, humor)
-- Strategic emojis (😂, 😅, 🤷‍♂️, 💡, 🔥)
-- Grammar variations (slight imperfections)
-- Platform-specific authenticity (Reddit, Quora, Medium styles)
-- Avoids AI patterns (no robotic transitions, perfect structure)
-
-**Bypasses AI Detection Tools:**
-- ✅ Turnitin AI
-- ✅ GPTZero
-- ✅ Copyleaks
-- ✅ Originality.ai
-
----
-
-## 📊 Key Components
-
-### Dashboard Features
-- Real-time visibility metrics
-- Multi-platform tracking
-- AI-powered forecasts
-- Interactive charts (Recharts)
-- Collapsible sidebar with role badges
-
-### Content Orchestrator
-- Multi-stage approval workflow
-- Platform-specific optimization
-- **Scheduled publishing**: Automatically publishes content at scheduled time (works locally + production)
-- Performance tracking
-- AI humanization engine
-
-### Reports & Analytics
-- 50+ pre-built reports
-- PDF/CSV/Google Sheets export
-- Email scheduling
-- White-label branding
-- Auto-generated video reports
+#### User Experience
+- ✅ Gradient hover effects
+- ✅ Smooth animations
+- ✅ Professional card designs
+- ✅ Clear visual hierarchy
+- ✅ Context-aware messages
+- ✅ Responsive design
+- ✅ Accessibility features
 
 ---
 
 ## 📝 License
 
-MIT License - see LICENSE file for details.
+This project is proprietary and confidential.
 
 ---
 
-## 📧 Support & Resources
+## 🤝 Support
 
-- **Documentation**: See `/database` folder for schema details
-- **AI System**: Check `lib/ai/geoCore.ts` for AI implementation
-- **Issue Tracker**: GitHub Issues
-
----
-
-## 🎯 Roadmap
-
-### ✅ Phase 1: Core Features (Complete)
-- [x] Authentication & roles
-- [x] Dashboard UI
-- [x] AI/GEO Core integration
-- [x] Content generation with humanization
-- [x] Keyword forecasting
-- [x] Action plans
-- [x] Organizations & Roles system
-- [x] Team management
-- [x] Email invitations
-
-### 🚧 Phase 2: Advanced Features (In Progress)
-- [ ] Video report generation (FFmpeg + ElevenLabs)
-- [ ] Rank tracking crawler
-- [ ] Multi-platform publishing
-- [ ] Advanced analytics dashboard
-
-### 📅 Phase 3: Scaling (Planned)
-- [ ] White-label customization UI
-- [ ] API for third-party integrations
-- [ ] Mobile app (React Native)
-- [ ] Enterprise features
+For issues, questions, or feature requests:
+- Check the [Troubleshooting](#-troubleshooting) section
+- Review [Stripe Integration](#-stripe-payment-integration) docs
+- Verify [Database Setup](#-database-setup)
 
 ---
 
-## 🏗️ Architecture Overview
+## 🎉 Version History
 
-```
-User Signup
-    ↓
-Role Selection (Client/Agency)
-    ↓
-    ├─ Client: No organization
-    └─ Agency: Organization auto-created
-    ↓
-Onboarding (4 steps)
-    ↓
-Dashboard (Role-based)
-    ↓
-Features:
-├─ Content Generation (AI humanization)
-├─ Keyword Forecasting (AI predictions)
-├─ Action Plans (Strategic roadmaps)
-├─ Team Management (Invite, roles)
-├─ Reports (50+ BI reports)
-└─ Live View (Split-screen AI/Google)
-```
+### v2.0.0 (November 2024) - Team & Billing Update
+- ✅ Complete Stripe payment integration
+- ✅ Team seat management system
+- ✅ Professional UI redesign
+- ✅ Seat validation system
+- ✅ Pending invitation tracking
+- ✅ Owner-free pricing model
+- ✅ Database triggers and constraints
+- ✅ Comprehensive documentation
+
+### v1.0.0 (Previous)
+- Basic organization structure
+- Role-based permissions
+- Email invitations
+- Team management
 
 ---
 
-## 📊 Database Schema Quick Reference
-
-```
-user
-├─ user_id (PK)
-├─ email
-├─ full_name
-├─ role (client/agency)
-└─ organization_id (FK → organizations.id)
-
-organizations
-├─ id (PK)
-├─ name
-├─ description
-├─ website
-├─ logo_url
-└─ timestamps
-
-roles
-├─ id (PK)
-├─ name (Admin/Manager/Editor/Viewer)
-├─ description
-└─ permissions (JSONB)
-
-organization_users (Junction)
-├─ id (PK)
-├─ user_id (FK)
-├─ organization_id (FK)
-├─ role_id (FK)
-├─ status
-└─ timestamps
-
-invitation_tokens
-├─ id (PK)
-├─ organization_id (FK)
-├─ email
-├─ role_id (FK)
-├─ token (UNIQUE)
-├─ expires_at
-├─ status
-└─ timestamps
-```
-
----
-
-**Built with ❤️ using Next.js 14, OpenAI GPT-4 Turbo, and Supabase**
-
-**GeoRepute.ai** - The future of AI-driven visibility optimization
-
-**Version:** 1.0  
-**Last Updated:** November 23, 2025  
-**Status:** Production Ready ✅
+**Built with ❤️ for modern teams. Ready to scale with confidence! 🚀**
