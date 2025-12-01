@@ -150,7 +150,55 @@ scoop install stripe
 wget -qO- https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg
 ```
 
-#### Forward Webhooks
+### Environment Variables
+
+Required variables in `.env.local`:
+
+```env
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Required for scheduled publishing
+
+# OpenAI
+OPENAI_API_KEY=your_openai_api_key
+
+# Scheduled Publishing (Optional)
+CRON_SECRET=your_random_secret_key  # Optional, for external cron services
+
+# Optional: OAuth
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+
+# LinkedIn Integration (for auto-publishing)
+LINKEDIN_CLIENT_ID=your_linkedin_client_id
+LINKEDIN_CLIENT_SECRET=your_linkedin_client_secret
+NEXT_PUBLIC_LINKEDIN_CLIENT_ID=your_linkedin_client_id  # Same as above, for client-side OAuth redirect
+LINKEDIN_REDIRECT_URI=http://localhost:3000/api/auth/linkedin/callback  # Development
+# LINKEDIN_REDIRECT_URI=https://yourdomain.com/api/auth/linkedin/callback  # Production
+```
+
+**Setup Instructions:**
+1. Create a Supabase project at https://supabase.com
+2. Get OpenAI API key from https://platform.openai.com
+3. Run database migrations from `/database` folder
+4. Configure Google OAuth (optional) in Supabase dashboard
+
+## 🗄️ Database Schema
+
+### Core Tables
+- **user**: User profiles with roles (admin/agency/client)
+- **keyword_forecast**: AI-generated keyword analysis
+- **content_strategy**: Content generation history
+- **action_plan**: Strategic optimization plans
+- **ai_engine_results**: AI visibility tracking
+- **geo_learning_data**: Self-learning feedback loop
+- **competitor_analysis**: Competitor tracking data
+
+### Row Level Security (RLS)
+All tables have RLS policies ensuring users can only access their own data.
+
+### Running Migrations
 ```bash
 # Login to Stripe
 stripe login

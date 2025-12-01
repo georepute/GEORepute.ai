@@ -126,48 +126,69 @@ export interface Subscription {
   features: string[];
 }
 
-// Organization Types
-export interface Organization {
-  id: string;
-  name: string;
-  description?: string;
-  website?: string;
-  logo_url?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-// Role Types
-export interface Role {
-  id: string;
-  name: "Admin" | "Manager" | "Editor" | "Viewer";
-  description?: string;
-  permissions: Record<string, any>;
-  created_at: string;
-}
-
-// Organization User Types
-export interface OrganizationUser {
+// Brand Voice Profile
+export interface BrandVoiceProfile {
   id: string;
   user_id: string;
-  organization_id: string;
-  role_id: string;
-  invited_by?: string;
-  invited_at?: string;
-  joined_at: string;
-  status: "active" | "inactive" | "invited" | "suspended";
+  brand_name: string;
+  description?: string;
+  is_default: boolean;
+  personality_traits: string[];
+  tone: "casual" | "professional" | "formal" | "friendly" | "humorous" | "authoritative" | "neutral";
+  sentence_length: "short" | "medium" | "long" | "mixed";
+  vocabulary_level: "simple" | "intermediate" | "advanced";
+  use_emojis: boolean;
+  emoji_style: "none" | "minimal" | "moderate" | "heavy";
+  preferred_words: string[];
+  avoid_words: string[];
+  signature_phrases: string[];
+  voice_examples: string[];
   created_at: string;
   updated_at: string;
 }
 
-// Extended types with relations
-export interface OrganizationWithRole extends Organization {
-  role: Role;
-  organization_user: OrganizationUser;
+// SEO Schema Types (JSON-LD Structured Data)
+export interface SchemaData {
+  "@context": string;
+  "@type": string;
+  [key: string]: any;
 }
 
-export interface UserWithOrganization extends User {
-  organization?: Organization;
-  organizations?: OrganizationWithRole[];
+export interface ContentSchema {
+  jsonLd: SchemaData | SchemaData[];
+  scriptTags: string;
+  generatedAt: string;
+}
+
+// Structured SEO Content Types
+export interface StructuredSEOContent {
+  metaDescription: string;
+  headings: Array<{
+    level: number;
+    text: string;
+    position: number;
+  }>;
+  faqs: Array<{
+    question: string;
+    answer: string;
+  }>;
+  seoScore: number | null;
+  wordCount: number;
+  ogTags?: {
+    title: string;
+    description: string;
+    image: string;
+    url: string;
+    type: string;
+    siteName?: string;
+  };
+  internalLinks?: Array<{
+    anchorText: string;
+    suggestedUrl: string;
+    relevance: number;
+    reason: string;
+  }>;
+  canonicalUrl?: string;
+  generatedAt: string;
 }
 
