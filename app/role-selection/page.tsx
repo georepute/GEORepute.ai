@@ -49,6 +49,9 @@ export default function RoleSelection() {
       if (profile?.role) {
         // User already has a role, redirect to dashboard
         router.push("/dashboard");
+      } else {
+        // Automatically show agency form for new users
+        setShowAgencyForm(true);
       }
     }
     checkAuth();
@@ -164,13 +167,10 @@ export default function RoleSelection() {
             </span>
           </div>
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            {showAgencyForm ? "Setup Your Agency" : "Choose Your Account Type"}
+            Setup Your Organization
           </h1>
           <p className="text-xl text-gray-600">
-            {showAgencyForm 
-              ? "Tell us about your agency to get started" 
-              : "Select the option that best describes how you'll use GeoRepute.ai"
-            }
+            Tell us about your organization to get started
           </p>
         </motion.div>
 
@@ -185,110 +185,7 @@ export default function RoleSelection() {
         )}
 
         <AnimatePresence mode="wait">
-          {!showAgencyForm ? (
-            /* Role Selection Cards */
-            <motion.div
-              key="role-selection"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="grid md:grid-cols-2 gap-6"
-            >
-              {/* Client Card */}
-              <motion.button
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.1 }}
-                onClick={() => handleRoleSelection("client")}
-                disabled={loading}
-                className="group relative bg-white rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 text-left border-2 border-transparent hover:border-secondary-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <div className="absolute top-6 right-6">
-                  <div className="w-12 h-12 bg-secondary-100 rounded-xl flex items-center justify-center group-hover:bg-secondary-200 transition-colors">
-                    <User className="w-6 h-6 text-secondary-600" />
-                  </div>
-                </div>
-
-                <h3 className="text-2xl font-bold text-gray-900 mb-3">
-                  I'm a Client
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  I'm a business owner or individual looking to improve my online visibility and reputation.
-                </p>
-
-                <ul className="space-y-3 mb-8">
-                  <li className="flex items-start gap-2">
-                    <ArrowRight className="w-5 h-5 text-secondary-600 mt-0.5 flex-shrink-0" />
-                    <span className="text-gray-700">Manage your own business visibility</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ArrowRight className="w-5 h-5 text-secondary-600 mt-0.5 flex-shrink-0" />
-                    <span className="text-gray-700">Track rankings and AI visibility</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ArrowRight className="w-5 h-5 text-secondary-600 mt-0.5 flex-shrink-0" />
-                    <span className="text-gray-700">Generate AI-powered content</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ArrowRight className="w-5 h-5 text-secondary-600 mt-0.5 flex-shrink-0" />
-                    <span className="text-gray-700">Access full analytics and reports</span>
-                  </li>
-                </ul>
-
-                <div className="flex items-center justify-center gap-2 text-secondary-600 font-semibold group-hover:gap-3 transition-all">
-                  <span>Select Client</span>
-                  <ArrowRight className="w-5 h-5" />
-                </div>
-              </motion.button>
-
-              {/* Agency Card */}
-              <motion.button
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.2 }}
-                onClick={() => handleRoleSelection("agency")}
-                disabled={loading}
-                className="group relative bg-white rounded-2xl p-8 shadow-xl hover:shadow-2xl transition-all duration-300 text-left border-2 border-transparent hover:border-accent-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <div className="absolute top-6 right-6">
-                  <div className="w-12 h-12 bg-accent-100 rounded-xl flex items-center justify-center group-hover:bg-accent-200 transition-colors">
-                    <Building2 className="w-6 h-6 text-accent-600" />
-                  </div>
-                </div>
-
-                <h3 className="text-2xl font-bold text-gray-900 mb-3">
-                  I'm an Agency
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  I manage multiple clients and need white-label tools to deliver results at scale.
-                </p>
-
-                <ul className="space-y-3 mb-8">
-                  <li className="flex items-start gap-2">
-                    <ArrowRight className="w-5 h-5 text-accent-600 mt-0.5 flex-shrink-0" />
-                    <span className="text-gray-700">Manage multiple client accounts</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ArrowRight className="w-5 h-5 text-accent-600 mt-0.5 flex-shrink-0" />
-                    <span className="text-gray-700">White-label branding options</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ArrowRight className="w-5 h-5 text-accent-600 mt-0.5 flex-shrink-0" />
-                    <span className="text-gray-700">Team collaboration features</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <ArrowRight className="w-5 h-5 text-accent-600 mt-0.5 flex-shrink-0" />
-                    <span className="text-gray-700">Client reporting and proposals</span>
-                  </li>
-                </ul>
-
-                <div className="flex items-center justify-center gap-2 text-accent-600 font-semibold group-hover:gap-3 transition-all">
-                  <span>Select Agency</span>
-                  <ArrowRight className="w-5 h-5" />
-                </div>
-              </motion.button>
-            </motion.div>
-          ) : (
+          {showAgencyForm && (
             /* Agency Form */
             <motion.div
               key="agency-form"
@@ -430,7 +327,7 @@ export default function RoleSelection() {
         </AnimatePresence>
 
         {/* Loading State */}
-        {loading && !showAgencyForm && (
+        {loading && showAgencyForm && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -443,23 +340,6 @@ export default function RoleSelection() {
           </motion.div>
         )}
 
-        {/* Skip Option */}
-        {!showAgencyForm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="text-center mt-8"
-          >
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="text-gray-500 hover:text-gray-700 text-sm font-medium underline"
-            >
-              Skip setup and go to dashboard
-            </button>
-          </motion.div>
-        )}
-
         {/* Footer Note */}
         <motion.p
           initial={{ opacity: 0 }}
@@ -467,10 +347,7 @@ export default function RoleSelection() {
           transition={{ delay: 0.4 }}
           className="text-center text-gray-500 mt-4 text-sm"
         >
-          {showAgencyForm 
-            ? "You can update these details later in organization settings"
-            : "You can change this later in your account settings"
-          }
+          You can update these details later in organization settings
         </motion.p>
       </div>
     </div>

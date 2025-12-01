@@ -19,7 +19,10 @@ import {
   X,
   Loader2,
   AlertCircle,
-  RotateCw
+  RotateCw,
+  Building2,
+  ShoppingCart,
+  Check
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { 
@@ -31,6 +34,8 @@ import {
   removeUserFromOrganization
 } from "@/lib/organizations";
 import toast from "react-hot-toast";
+import OrganizationInfo from "@/components/OrganizationInfo";
+import PurchaseSeats from "@/components/PurchaseSeats";
 
 interface TeamMember {
   id: string;
@@ -55,6 +60,7 @@ interface UserProfile {
 }
 
 export default function Team() {
+  const [activeTab, setActiveTab] = useState<"organization" | "team">("organization");
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
@@ -70,6 +76,11 @@ export default function Team() {
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [availableRoles, setAvailableRoles] = useState<any[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  
+  // Organization seats info
+  const [totalSeats, setTotalSeats] = useState(1);
+  const [usedSeats, setUsedSeats] = useState(0);
   
   // Invite form state
   const [inviteEmail, setInviteEmail] = useState("");
@@ -120,6 +131,18 @@ export default function Team() {
 
       const orgId = organizations[0].organization.id;
       setOrganizationId(orgId);
+
+      // Get organization seats info
+      const { data: orgData, error: orgDataError } = await supabase
+        .from('organizations')
+        .select('seats, seats_used')
+        .eq('id', orgId)
+        .single();
+
+      if (!orgDataError && orgData) {
+        setTotalSeats(orgData.seats || 1);
+        setUsedSeats(orgData.seats_used || 0);
+      }
 
       // Check if user is admin
       const adminStatus = await isOrganizationAdmin(orgId);
@@ -238,6 +261,23 @@ export default function Team() {
     
     if (!organizationId || !inviteEmail || !inviteRole) {
       toast.error("Please fill in all fields");
+      return;
+    }
+
+    // Check if seats are available (including pending invitations)
+    const totalPending = pendingInvites.length + pendingInvitations.length;
+    const trueAvailableSeats = totalSeats - usedSeats - totalPending;
+    
+    if (trueAvailableSeats <= 0) {
+      if (totalPending > 0) {
+        toast.error("No available seats. Cancel a pending invitation or purchase more seats.");
+      } else {
+        toast.error("No available seats. Please purchase more seats to invite members.");
+      }
+      setShowInviteModal(false);
+      if (totalPending === 0) {
+        setShowPurchaseModal(true);
+      }
       return;
     }
 
@@ -479,6 +519,12 @@ export default function Team() {
     pending: pendingInvites.length + pendingInvitations.length,
   };
 
+  // Calculate true available seats (considering pending invitations)
+  const totalPendingInvitations = pendingInvites.length + pendingInvitations.length;
+  const availableSeats = totalSeats - usedSeats - totalPendingInvitations;
+  const canInvite = isAdmin && availableSeats > 0;
+  const hasPendingInvites = totalPendingInvitations > 0;
+
   const statsData = [
     { label: "Team Members", value: stats.total.toString(), icon: Users, color: "text-blue-600" },
     { label: "Admins", value: stats.admins.toString(), icon: Crown, color: "text-purple-600" },
@@ -557,47 +603,209 @@ export default function Team() {
     <div className="p-4 sm:p-6 lg:p-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Team Management</h1>
-        <p className="text-gray-600">Manage your organization members and roles</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Team</h1>
+        <p className="text-gray-600">Manage your organization and team members</p>
       </div>
 
+      {/* Tabs */}
+      <div className="mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-1 inline-flex gap-1">
+          <button
+            onClick={() => setActiveTab("organization")}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${
+              activeTab === "organization"
+                ? "bg-gradient-to-r from-primary-600 to-accent-600 text-white shadow-md"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+            }`}
+          >
+            <Building2 className="w-5 h-5" />
+            Organization Info
+          </button>
+          <button
+            onClick={() => setActiveTab("team")}
+            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${
+              activeTab === "team"
+                ? "bg-gradient-to-r from-primary-600 to-accent-600 text-white shadow-md"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+            }`}
+          >
+            <Users className="w-5 h-5" />
+            Manage Team
+          </button>
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === "organization" ? (
+        <OrganizationInfo />
+      ) : (
+        <>
+      {/* Team Management Content */}
+      {/* Seats Overview */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mb-8"
+      >
+        <div className={`rounded-xl p-6 border-2 ${
+          availableSeats > 0 
+            ? 'bg-green-50 border-green-200' 
+            : availableSeats === 0 && hasPendingInvites
+            ? 'bg-yellow-50 border-yellow-200'
+            : 'bg-red-50 border-red-200'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Team Seats Overview</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+                <div className="bg-white/60 rounded-lg p-3">
+                  <div className="text-xs text-gray-600 mb-1">Purchased Seats</div>
+                  <div className="text-2xl font-bold text-gray-900">{totalSeats}</div>
+                  <div className="text-xs text-green-600 mt-1">+ 1 owner (free)</div>
+                </div>
+                <div className="bg-white/60 rounded-lg p-3">
+                  <div className="text-xs text-gray-600 mb-1">Active Members</div>
+                  <div className="text-2xl font-bold text-blue-600">{usedSeats}</div>
+                  <div className="text-xs text-gray-500 mt-1">excluding owner</div>
+                </div>
+                <div className="bg-white/60 rounded-lg p-3">
+                  <div className="text-xs text-gray-600 mb-1">Pending Invites</div>
+                  <div className="text-2xl font-bold text-orange-600">{totalPendingInvitations}</div>
+                </div>
+                <div className="bg-white/60 rounded-lg p-3">
+                  <div className="text-xs text-gray-600 mb-1">Available</div>
+                  <div className={`text-2xl font-bold ${
+                    availableSeats > 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {availableSeats}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Status Messages */}
+              {availableSeats === 0 && hasPendingInvites ? (
+                <div className="flex items-start gap-2 p-3 bg-yellow-100 border border-yellow-300 rounded-lg">
+                  <AlertCircle className="w-5 h-5 text-yellow-700 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-yellow-800">
+                    <strong>All seats are reserved.</strong> You have {totalPendingInvitations} pending invitation{totalPendingInvitations !== 1 ? 's' : ''}.
+                    Cancel a pending invitation to free up a seat, or purchase more seats.
+                  </div>
+                </div>
+              ) : availableSeats < 0 ? (
+                <div className="flex items-start gap-2 p-3 bg-red-100 border border-red-300 rounded-lg">
+                  <AlertCircle className="w-5 h-5 text-red-700 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-red-800">
+                    <strong>Over capacity!</strong> You have more members/invites than available seats.
+                    Please purchase more seats immediately.
+                  </div>
+                </div>
+              ) : availableSeats === 0 && !hasPendingInvites ? (
+                <div className="flex items-start gap-2 p-3 bg-red-100 border border-red-300 rounded-lg">
+                  <AlertCircle className="w-5 h-5 text-red-700 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-red-800">
+                    <strong>No seats available.</strong> Purchase seats to invite team members. (Owner is free and doesn't count)
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 p-3 bg-green-100 border border-green-300 rounded-lg">
+                  <Check className="w-5 h-5 text-green-700 flex-shrink-0 mt-0.5" />
+                  <div className="text-sm text-green-800">
+                    <strong>Seats available!</strong> You can invite {availableSeats} more team member{availableSeats !== 1 ? 's' : ''}. (Owner seat is free)
+                  </div>
+                </div>
+              )}
+            </div>
+            {isAdmin && (
+              <button
+                onClick={() => setShowPurchaseModal(true)}
+                className="ml-4 px-6 py-3 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg font-semibold hover:shadow-lg transition-all flex items-center gap-2 whitespace-nowrap"
+              >
+                <ShoppingCart className="w-5 h-5" />
+                Buy More Seats
+              </button>
+            )}
+          </div>
+        </div>
+      </motion.div>
+
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
         {statsData.map((stat, index) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className="bg-white rounded-xl p-6 border border-gray-200"
+            transition={{ delay: index * 0.05 }}
+            className="group relative overflow-hidden bg-white rounded-2xl p-6 border border-gray-200 hover:border-primary-300 hover:shadow-xl transition-all duration-300 cursor-pointer"
           >
-            <stat.icon className={`w-8 h-8 ${stat.color} mb-2`} />
-            <div className="text-2xl font-bold text-gray-900 mb-1">{stat.value}</div>
-            <p className="text-gray-600">{stat.label}</p>
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-primary-50 to-transparent rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+            <div className="relative">
+              <div className="flex items-center justify-between mb-3">
+                <div className={`p-3 ${stat.color.replace('text-', 'bg-').replace('600', '100')} rounded-xl`}>
+                  <stat.icon className={`w-6 h-6 ${stat.color}`} />
+                </div>
+                <div className={`text-xs font-medium px-2 py-1 rounded-full ${
+                  stat.label === 'Team Members' ? 'bg-blue-100 text-blue-700' :
+                  stat.label === 'Admins' ? 'bg-purple-100 text-purple-700' :
+                  stat.label === 'Managers' ? 'bg-green-100 text-green-700' :
+                  'bg-orange-100 text-orange-700'
+                }`}>
+                  {stat.label === 'Pending Invites' && stats.pending > 0 ? 'Action Needed' : 'Active'}
+                </div>
+              </div>
+              <div className="text-3xl font-bold text-gray-900 mb-1">{stat.value}</div>
+              <p className="text-sm text-gray-600 font-medium">{stat.label}</p>
+            </div>
           </motion.div>
         ))}
       </div>
 
       {/* Toolbar */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200 mb-6">
+      <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl p-6 border border-gray-200 shadow-sm mb-8">
         <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <div className="flex-1 relative group">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-primary-600 transition-colors" />
             <input
               type="text"
-              placeholder="Search team members..."
+              placeholder="Search by name, email, or role..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
+              className="w-full pl-12 pr-4 py-3.5 bg-white border-2 border-gray-200 rounded-xl focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10 outline-none transition-all text-gray-900 placeholder:text-gray-400"
             />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <X className="w-4 h-4 text-gray-400" />
+              </button>
+            )}
           </div>
           {isAdmin && (
             <button 
-              onClick={() => setShowInviteModal(true)}
-              className="px-6 py-3 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg font-semibold hover:shadow-lg transition-all flex items-center gap-2 justify-center"
+              onClick={() => {
+                if (!canInvite) {
+                  if (hasPendingInvites) {
+                    toast.error("No available seats. Cancel a pending invitation or purchase more seats.");
+                  } else {
+                    toast.error("No available seats. Please purchase more seats first.");
+                    setShowPurchaseModal(true);
+                  }
+                } else {
+                  setShowInviteModal(true);
+                }
+              }}
+              disabled={!canInvite}
+              className={`px-6 py-3.5 rounded-xl font-semibold transition-all duration-300 flex items-center gap-2.5 justify-center shadow-md ${
+                canInvite
+                  ? 'bg-gradient-to-r from-primary-600 to-accent-600 text-white hover:shadow-xl hover:scale-105 active:scale-100'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              }`}
             >
               <Plus className="w-5 h-5" />
-              Invite Member
+              <span className="whitespace-nowrap">
+                {canInvite ? 'Invite Member' : 'No Seats Available'}
+              </span>
             </button>
           )}
         </div>
@@ -610,25 +818,42 @@ export default function Team() {
         className="mb-8"
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Users className="w-6 h-6" />
-            Team Members
-          </h2>
-          <span className="text-sm text-gray-500">
-            {filteredTeamMembers.length} {filteredTeamMembers.length === 1 ? 'member' : 'members'}
-          </span>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Users className="w-6 h-6 text-blue-600" />
+              </div>
+              Team Members
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {filteredTeamMembers.length} active {filteredTeamMembers.length === 1 ? 'member' : 'members'}
+            </p>
+          </div>
         </div>
 
         {filteredTeamMembers.length === 0 ? (
-          <div className="bg-white rounded-xl p-12 border border-gray-200 text-center">
-            <Users className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">No team members found</h3>
-            <p className="text-gray-600">
-              {searchTerm ? "Try a different search term" : "Invite members to get started"}
-            </p>
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl p-16 border-2 border-dashed border-gray-300 text-center">
+            <div className="max-w-md mx-auto">
+              <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Users className="w-10 h-10 text-gray-400" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">No team members found</h3>
+              <p className="text-gray-600 mb-6">
+                {searchTerm ? "Try a different search term or clear your filters" : "Start building your team by inviting members"}
+              </p>
+              {!searchTerm && isAdmin && canInvite && (
+                <button
+                  onClick={() => setShowInviteModal(true)}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all"
+                >
+                  <Plus className="w-5 h-5" />
+                  Invite Your First Member
+                </button>
+              )}
+            </div>
           </div>
         ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredTeamMembers.map((member, index) => {
             const profile = member.user_id ? userProfiles[member.user_id] : null;
             const roleConfig = getRoleConfig(member.role.name);
@@ -646,94 +871,114 @@ export default function Team() {
                 key={member.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 + index * 0.05 }}
-                className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-all"
+                transition={{ delay: 0.05 + index * 0.03 }}
+                className="group relative bg-white rounded-2xl p-6 border-2 border-gray-200 hover:border-primary-300 hover:shadow-2xl transition-all duration-300"
               >
-                {/* Header */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-gradient-to-br from-primary-600 to-accent-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                      {initials}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-gray-900">{displayName}</h3>
+                {/* Background gradient on hover */}
+                <div className="absolute inset-0 bg-gradient-to-br from-primary-50 via-transparent to-accent-50 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                
+                <div className="relative">
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-start gap-3 flex-1">
+                      <div className="relative">
+                        <div className="w-14 h-14 bg-gradient-to-br from-primary-500 via-primary-600 to-accent-600 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md">
+                          {initials}
+                        </div>
                         {member.user_id === currentUserId && (
-                          <span className="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs font-semibold rounded-full">
-                            You
-                          </span>
+                          <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
+                            <Check className="w-3 h-3 text-white" />
+                          </div>
                         )}
                       </div>
-                      <p className="text-sm text-gray-600 flex items-center gap-1">
-                        <Mail className="w-3 h-3" />
-                        {displayEmail}
-                      </p>
-                    </div>
-                  </div>
-                  {isAdmin && (
-                    <div className="relative group">
-                      <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
-                        <MoreVertical className="w-5 h-5" />
-                      </button>
-                      <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 min-w-[120px]">
-                        <button 
-                          onClick={() => {
-                            setSelectedMember(member);
-                            setShowEditModal(true);
-                          }}
-                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-                        >
-                          <Edit className="w-4 h-4" />
-                          Edit Role
-                        </button>
-                        <button 
-                          onClick={() => handleRemoveClick(member)}
-                          className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          Remove
-                        </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-bold text-gray-900 truncate text-base">{displayName}</h3>
+                          {member.user_id === currentUserId && (
+                            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-semibold rounded-md">
+                              You
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-600 flex items-center gap-1.5 truncate">
+                          <Mail className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate">{displayEmail}</span>
+                        </p>
                       </div>
                     </div>
-                  )}
-                </div>
-
-                {/* Role & Status */}
-                <div className="flex items-center gap-2 mb-4">
-                  <span className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold ${roleConfig.bg} ${roleConfig.color}`}>
-                    <RoleIcon className="w-3 h-3" />
-                    {roleConfig.label}
-                  </span>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(member.status)}`}>
-                    {member.status}
-                  </span>
-                </div>
-
-                {/* Join/Invite Date */}
-                <div className="p-3 bg-gray-50 rounded-lg">
-                  <div className="text-xs text-gray-600">
-                    {member.joined_at ? 'Joined' : member.invited_at ? 'Invited' : 'Added'}
+                    {isAdmin && member.user_id !== currentUserId && (
+                      <div className="relative">
+                        <button className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all">
+                          <MoreVertical className="w-5 h-5" />
+                        </button>
+                        <div className="absolute right-0 top-full mt-2 bg-white border-2 border-gray-100 rounded-xl shadow-xl py-1.5 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20 min-w-[160px]">
+                          <button 
+                            onClick={() => {
+                              setSelectedMember(member);
+                              setShowEditModal(true);
+                            }}
+                            className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                          >
+                            <Edit className="w-4 h-4" />
+                            <span className="font-medium">Edit Role</span>
+                          </button>
+                          <div className="h-px bg-gray-100 my-1" />
+                          <button 
+                            onClick={() => handleRemoveClick(member)}
+                            className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            <span className="font-medium">Remove</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <div className="text-sm font-semibold text-gray-900">
-                    {member.joined_at 
-                      ? new Date(member.joined_at).toLocaleDateString('en-US', { 
-                          month: 'short', 
-                          day: 'numeric', 
-                          year: 'numeric' 
-                        })
-                      : member.invited_at
-                      ? new Date(member.invited_at).toLocaleDateString('en-US', { 
-                          month: 'short', 
-                          day: 'numeric', 
-                          year: 'numeric' 
-                        })
-                      : member.created_at
-                      ? new Date(member.created_at).toLocaleDateString('en-US', { 
-                          month: 'short', 
-                          day: 'numeric', 
-                          year: 'numeric' 
-                        })
-                      : 'N/A'}
+
+                  {/* Role & Status */}
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${roleConfig.bg} ${roleConfig.color} shadow-sm`}>
+                      <RoleIcon className="w-3.5 h-3.5" />
+                      {roleConfig.label}
+                    </span>
+                    <span className={`px-3 py-1.5 rounded-lg text-xs font-bold ${getStatusColor(member.status)} shadow-sm`}>
+                      {member.status}
+                    </span>
+                  </div>
+
+                  {/* Join Date */}
+                  <div className="p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-medium text-gray-500 mb-1">
+                          {member.joined_at ? 'Joined' : member.invited_at ? 'Invited' : 'Added'}
+                        </div>
+                        <div className="text-sm font-bold text-gray-900">
+                          {member.joined_at 
+                            ? new Date(member.joined_at).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric', 
+                                year: 'numeric' 
+                              })
+                            : member.invited_at
+                            ? new Date(member.invited_at).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric', 
+                                year: 'numeric' 
+                              })
+                            : member.created_at
+                            ? new Date(member.created_at).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric', 
+                                year: 'numeric' 
+                              })
+                            : 'N/A'}
+                        </div>
+                      </div>
+                      <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                        <UserCheck className="w-5 h-5 text-green-600" />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -751,18 +996,35 @@ export default function Team() {
         className="mb-8"
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Mail className="w-6 h-6" />
-            Pending Invites
-          </h2>
-          <span className="text-sm text-gray-500">
-            {filteredPendingInvites.length + pendingInvitations.length} {filteredPendingInvites.length + pendingInvitations.length === 1 ? 'invite' : 'invites'}
-          </span>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+              <div className="p-2 bg-orange-100 rounded-lg">
+                <Mail className="w-6 h-6 text-orange-600" />
+              </div>
+              Pending Invitations
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {filteredPendingInvites.length + pendingInvitations.length} pending {filteredPendingInvites.length + pendingInvitations.length === 1 ? 'invitation' : 'invitations'}
+            </p>
+          </div>
         </div>
 
-        {/* Pending Invites from organization_users */}
-        {filteredPendingInvites.length > 0 && (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+        {/* Empty State */}
+        {filteredPendingInvites.length === 0 && pendingInvitations.length === 0 ? (
+          <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl p-16 border-2 border-dashed border-gray-300 text-center">
+            <div className="max-w-md mx-auto">
+              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Check className="w-10 h-10 text-green-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">All clear!</h3>
+              <p className="text-gray-600">
+                {searchTerm ? "No pending invitations match your search" : "All invitations have been accepted or there are no pending invites"}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {/* Pending Invites from organization_users */}
             {filteredPendingInvites.map((member, index) => {
               const profile = member.user_id ? userProfiles[member.user_id] : null;
               const roleConfig = getRoleConfig(member.role.name);
@@ -773,72 +1035,83 @@ export default function Team() {
                   key={member.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 + index * 0.05 }}
-                  className="bg-white rounded-xl p-6 border-2 border-yellow-200 hover:shadow-lg transition-all"
+                  transition={{ delay: 0.05 + index * 0.03 }}
+                  className="group relative bg-white rounded-2xl p-6 border-2 border-yellow-300 hover:border-yellow-400 hover:shadow-2xl transition-all duration-300"
                 >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-700 font-bold text-lg">
-                        {profile ? getInitials(profile.full_name || profile.email) : 'IN'}
+                  {/* Background pattern */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-yellow-50 via-transparent to-orange-50 rounded-2xl opacity-50" />
+                  
+                  <div className="relative">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-start gap-3 flex-1">
+                        <div className="w-14 h-14 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md relative">
+                          {profile ? getInitials(profile.full_name || profile.email) : 'IN'}
+                          <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-yellow-500 rounded-full border-2 border-white flex items-center justify-center">
+                            <Mail className="w-3 h-3 text-white" />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-bold text-gray-900 truncate text-base mb-1">
+                            {profile?.full_name || profile?.email || 'Pending User'}
+                          </h3>
+                          <p className="text-sm text-gray-600 flex items-center gap-1.5 truncate">
+                            <Mail className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="truncate">{profile?.email || 'Invited (pending signup)'}</span>
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-bold text-gray-900">
-                          {profile?.full_name || profile?.email || 'Pending User'}
-                        </h3>
-                        <p className="text-sm text-gray-600 flex items-center gap-1">
-                          <Mail className="w-3 h-3" />
-                          {profile?.email || 'Invited (pending signup)'}
-                        </p>
-                      </div>
+                      {isAdmin && (
+                        <button
+                          onClick={() => handleRemoveClick(member)}
+                          className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                          title="Cancel invitation"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      )}
                     </div>
-                    {isAdmin && (
-                      <button
-                        onClick={() => handleRemoveClick(member)}
-                        className="p-2 text-red-400 hover:text-red-600 transition-colors"
-                        title="Cancel invite"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    )}
-                  </div>
 
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold ${roleConfig.bg} ${roleConfig.color}`}>
-                      <RoleIcon className="w-3 h-3" />
-                      {roleConfig.label}
-                    </span>
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-700">
-                      Pending
-                    </span>
-                  </div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${roleConfig.bg} ${roleConfig.color} shadow-sm`}>
+                        <RoleIcon className="w-3.5 h-3.5" />
+                        {roleConfig.label}
+                      </span>
+                      <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-yellow-100 text-yellow-800 shadow-sm">
+                        Pending
+                      </span>
+                    </div>
 
-                  <div className="p-3 bg-yellow-50 rounded-lg">
-                    <div className="text-xs text-gray-600">Invited</div>
-                    <div className="text-sm font-semibold text-gray-900">
-                      {member.invited_at 
-                        ? new Date(member.invited_at).toLocaleDateString('en-US', { 
-                            month: 'short', 
-                            day: 'numeric', 
-                            year: 'numeric' 
-                          })
-                        : member.created_at
-                        ? new Date(member.created_at).toLocaleDateString('en-US', { 
-                            month: 'short', 
-                            day: 'numeric', 
-                            year: 'numeric' 
-                          })
-                        : 'N/A'}
+                    <div className="p-4 bg-gradient-to-br from-yellow-50 to-orange-50 rounded-xl border border-yellow-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-xs font-medium text-yellow-700 mb-1">Invited</div>
+                          <div className="text-sm font-bold text-gray-900">
+                            {member.invited_at 
+                              ? new Date(member.invited_at).toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric', 
+                                  year: 'numeric' 
+                                })
+                              : member.created_at
+                              ? new Date(member.created_at).toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric', 
+                                  year: 'numeric' 
+                                })
+                              : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                          <Mail className="w-5 h-5 text-yellow-600" />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </motion.div>
               );
             })}
-          </div>
-        )}
 
-        {/* Pending Invitations from invitation_tokens */}
-        {pendingInvitations.length > 0 && (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* Pending Invitations from invitation_tokens */}
             {pendingInvitations
               .filter(inv => {
                 if (!searchTerm.trim()) return true;
@@ -860,111 +1133,118 @@ export default function Team() {
                     key={invitation.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 + index * 0.05 }}
-                    className="bg-white rounded-xl p-6 border-2 border-orange-200 hover:shadow-lg transition-all"
+                    transition={{ delay: 0.05 + (filteredPendingInvites.length + index) * 0.03 }}
+                    className="group relative bg-white rounded-2xl p-6 border-2 border-orange-300 hover:border-orange-400 hover:shadow-2xl transition-all duration-300"
                   >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center text-orange-700 font-bold text-lg">
-                          {invitation.email.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-gray-900">Email Sent</h3>
-                          <p className="text-sm text-gray-600 flex items-center gap-1">
-                            <Mail className="w-3 h-3" />
-                            {invitation.email}
-                          </p>
-                        </div>
-                      </div>
-                      {isAdmin && (
-                        <div className="relative invitation-menu-container">
-                          <button 
-                            onClick={() => setOpenInvitationMenu(
-                              openInvitationMenu === invitation.id ? null : invitation.id
-                            )}
-                            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                            disabled={cancellingInvitation === invitation.id || resendingInvitation === invitation.id}
-                          >
-                            {cancellingInvitation === invitation.id || resendingInvitation === invitation.id ? (
-                              <Loader2 className="w-5 h-5 animate-spin" />
-                            ) : (
-                              <MoreVertical className="w-5 h-5" />
-                            )}
-                          </button>
-                          {openInvitationMenu === invitation.id && (
-                            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-10 min-w-[160px]">
-                              <button 
-                                onClick={() => handleCancelInvitation(invitation.id)}
-                                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                disabled={cancellingInvitation === invitation.id || resendingInvitation === invitation.id}
-                              >
-                                <X className="w-4 h-4" />
-                                Cancel Invitation
-                              </button>
-                              {isExpired && (
-                                <button 
-                                  onClick={() => handleResendInvitation(invitation.id)}
-                                  className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-2"
-                                  disabled={cancellingInvitation === invitation.id || resendingInvitation === invitation.id}
-                                >
-                                  <RotateCw className="w-4 h-4" />
-                                  Resend Invitation
-                                </button>
-                              )}
+                    {/* Background pattern */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-orange-50 via-transparent to-red-50 rounded-2xl opacity-50" />
+                    
+                    <div className="relative">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-start gap-3 flex-1">
+                          <div className="w-14 h-14 bg-gradient-to-br from-orange-400 to-red-500 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md relative">
+                            {invitation.email.charAt(0).toUpperCase()}
+                            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-orange-500 rounded-full border-2 border-white flex items-center justify-center">
+                              <Mail className="w-3 h-3 text-white" />
                             </div>
-                          )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-gray-900 text-base mb-1">Email Sent</h3>
+                            <p className="text-sm text-gray-600 flex items-center gap-1.5 truncate">
+                              <Mail className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span className="truncate">{invitation.email}</span>
+                            </p>
+                          </div>
                         </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold ${roleConfig.bg} ${roleConfig.color}`}>
-                        <RoleIcon className="w-3 h-3" />
-                        {roleConfig.label}
-                      </span>
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        isExpired 
-                          ? 'bg-red-100 text-red-700' 
-                          : daysUntilExpiry <= 2
-                          ? 'bg-orange-100 text-orange-700'
-                          : 'bg-yellow-100 text-yellow-700'
-                      }`}>
-                        {isExpired ? 'Expired' : `${daysUntilExpiry}d left`}
-                      </span>
-                    </div>
-
-                    <div className="p-3 bg-orange-50 rounded-lg">
-                      <div className="text-xs text-gray-600">Invited</div>
-                      <div className="text-sm font-semibold text-gray-900">
-                        {new Date(invitation.created_at).toLocaleDateString('en-US', { 
-                          month: 'short', 
-                          day: 'numeric', 
-                          year: 'numeric' 
-                        })}
+                        {isAdmin && (
+                          <div className="relative invitation-menu-container">
+                            <button 
+                              onClick={() => setOpenInvitationMenu(
+                                openInvitationMenu === invitation.id ? null : invitation.id
+                              )}
+                              disabled={cancellingInvitation === invitation.id || resendingInvitation === invitation.id}
+                              className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-all disabled:opacity-50"
+                            >
+                              {cancellingInvitation === invitation.id || resendingInvitation === invitation.id ? (
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                              ) : (
+                                <MoreVertical className="w-5 h-5" />
+                              )}
+                            </button>
+                            {openInvitationMenu === invitation.id && (
+                              <div className="absolute right-0 top-full mt-2 bg-white border-2 border-gray-100 rounded-xl shadow-xl py-1.5 z-20 min-w-[180px]">
+                                <button 
+                                  onClick={() => handleCancelInvitation(invitation.id)}
+                                  disabled={cancellingInvitation === invitation.id || resendingInvitation === invitation.id}
+                                  className="w-full px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 disabled:opacity-50 transition-colors"
+                                >
+                                  <X className="w-4 h-4" />
+                                  <span className="font-medium">Cancel Invitation</span>
+                                </button>
+                                {isExpired && (
+                                  <>
+                                    <div className="h-px bg-gray-100 my-1" />
+                                    <button 
+                                      onClick={() => handleResendInvitation(invitation.id)}
+                                      disabled={cancellingInvitation === invitation.id || resendingInvitation === invitation.id}
+                                      className="w-full px-4 py-2.5 text-left text-sm text-blue-600 hover:bg-blue-50 flex items-center gap-3 disabled:opacity-50 transition-colors"
+                                    >
+                                      <RotateCw className="w-4 h-4" />
+                                      <span className="font-medium">Resend Invitation</span>
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      {!isExpired && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          Expires: {expiresAt.toLocaleDateString('en-US', { 
-                            month: 'short', 
-                            day: 'numeric' 
-                          })}
+
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold ${roleConfig.bg} ${roleConfig.color} shadow-sm`}>
+                          <RoleIcon className="w-3.5 h-3.5" />
+                          {roleConfig.label}
+                        </span>
+                        <span className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm ${
+                          isExpired 
+                            ? 'bg-red-100 text-red-700' 
+                            : daysUntilExpiry <= 2
+                            ? 'bg-orange-100 text-orange-700'
+                            : 'bg-yellow-100 text-yellow-700'
+                        }`}>
+                          {isExpired ? 'Expired' : `${daysUntilExpiry}d left`}
+                        </span>
+                      </div>
+
+                      <div className="p-4 bg-gradient-to-br from-orange-50 to-red-50 rounded-xl border border-orange-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-medium text-orange-700 mb-1">Invited</div>
+                            <div className="text-sm font-bold text-gray-900">
+                              {new Date(invitation.created_at).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric', 
+                                year: 'numeric' 
+                              })}
+                            </div>
+                            {!isExpired && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                Expires: {expiresAt.toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric' 
+                                })}
+                              </div>
+                            )}
+                          </div>
+                          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                            <Mail className="w-5 h-5 text-orange-600" />
+                          </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   </motion.div>
                 );
               })}
-          </div>
-        )}
-
-        {/* Empty state for pending invites */}
-        {filteredPendingInvites.length === 0 && pendingInvitations.length === 0 && (
-          <div className="bg-white rounded-xl p-12 border border-gray-200 text-center">
-            <Mail className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">No pending invites</h3>
-            <p className="text-gray-600">
-              {searchTerm ? "Try a different search term" : "All invitations have been accepted"}
-            </p>
           </div>
         )}
       </motion.div>
@@ -1010,7 +1290,11 @@ export default function Team() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
                     placeholder="user@example.com"
                   />
-                  <p className="mt-1 text-sm text-gray-500">User must have an account to be invited</p>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Available seats: <strong className={availableSeats > 0 ? 'text-green-600' : 'text-red-600'}>
+                      {availableSeats}
+                    </strong> {availableSeats === 0 && hasPendingInvites && '(Cancel a pending invite to free up a seat)'}
+                  </p>
                 </div>
 
                 <div>
@@ -1213,6 +1497,40 @@ export default function Team() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Purchase Seats Modal */}
+      <AnimatePresence>
+        {showPurchaseModal && organizationId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowPurchaseModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            >
+              <PurchaseSeats
+                organizationId={organizationId}
+                currentSeats={totalSeats}
+                usedSeats={usedSeats}
+                onSuccess={() => {
+                  setShowPurchaseModal(false);
+                  loadTeamData();
+                }}
+                onCancel={() => setShowPurchaseModal(false)}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+        </>
+      )}
     </div>
   );
 }
