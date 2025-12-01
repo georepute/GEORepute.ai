@@ -1,240 +1,1687 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { 
   FileText,
   Download,
-  Share2,
   Calendar,
   Filter,
   TrendingUp,
-  Users,
+  TrendingDown,
   Eye,
   Target,
   BarChart3,
-  PieChart as PieChartIcon,
-  LineChart as LineChartIcon,
-  Mail
+  Search,
+  Activity,
+  Users,
+  Zap,
+  Globe,
+  FileSpreadsheet,
+  RefreshCw,
+  Mail,
+  X,
 } from "lucide-react";
+import toast from "react-hot-toast";
+import {
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
+} from "recharts";
+import { supabase } from "@/lib/supabase/client";
+import { format, subDays, startOfDay, endOfDay } from "date-fns";
+
+// Color palette for charts
+const COLORS = {
+  primary: "#0ea5e9",
+  secondary: "#8b5cf6",
+  success: "#10b981",
+  warning: "#f59e0b",
+  danger: "#ef4444",
+  info: "#06b6d4",
+};
+
+const PLATFORM_COLORS: Record<string, string> = {
+  chatgpt: "#10a37f",
+  claude: "#8b5cf6",
+  gemini: "#4285f4",
+  perplexity: "#00b4d8",
+  groq: "#f97316",
+  google: "#4285f4",
+  bing: "#008373",
+  reddit: "#ff4500",
+  quora: "#b92b27",
+  medium: "#000000",
+  linkedin: "#0077b5",
+  facebook: "#1877f2",
+  instagram: "#e4405f",
+  github: "#333333",
+};
+
+interface ReportData {
+  // Keywords
+  totalKeywords: number;
+  keywordsChange: number;
+  avgRanking: number;
+  rankingChange: number;
+  topKeywords: Array<{
+    keyword: string;
+    ranking: number;
+    volume: number;
+    change: number;
+  }>;
+  rankingTrend: Array<{
+    date: string;
+    avgRank: number;
+    count: number;
+  }>;
+
+  // Content
+  totalContent: number;
+  contentChange: number;
+  publishedContent: number;
+  draftContent: number;
+  contentByPlatform: Array<{
+    platform: string;
+    count: number;
+    color: string;
+  }>;
+  contentByStatus: Array<{
+    status: string;
+    count: number;
+  }>;
+  recentContent: Array<{
+    title: string;
+    platform: string;
+    status: string;
+    created: string;
+  }>;
+
+  // AI Visibility
+  avgVisibilityScore: number;
+  visibilityChange: number;
+  totalMentions: number;
+  mentionsChange: number;
+  visibilityByPlatform: Array<{
+    platform: string;
+    score: number;
+    mentions: number;
+    sentiment: number;
+  }>;
+  visibilityTrend: Array<{
+    date: string;
+    score: number;
+  }>;
+
+  // Brand Analysis
+  totalProjects: number;
+  activeSessions: number;
+  totalResponses: number;
+  responsesByPlatform: Array<{
+    platform: string;
+    count: number;
+  }>;
+
+  // Performance Summary
+  performanceSummary: Array<{
+    metric: string;
+    value: number;
+    target: number;
+  }>;
+}
 
 export default function Reports() {
-  const reportCategories = [
-    {
-      name: "Visibility Reports",
-      icon: Eye,
-      color: "text-blue-600",
-      bgColor: "bg-blue-100",
-      reports: [
-        { name: "Overall Visibility Score", type: "PDF", lastGenerated: "2 hours ago", size: "2.4 MB" },
-        { name: "AI Search Visibility", type: "PDF", lastGenerated: "5 hours ago", size: "1.8 MB" },
-        { name: "Google Rankings Report", type: "CSV", lastGenerated: "1 day ago", size: "856 KB" },
-        { name: "Competitor Visibility Analysis", type: "PDF", lastGenerated: "2 days ago", size: "3.2 MB" },
-      ]
-    },
-    {
-      name: "Keyword Reports",
-      icon: Target,
-      color: "text-purple-600",
-      bgColor: "bg-purple-100",
-      reports: [
-        { name: "Keyword Performance Summary", type: "PDF", lastGenerated: "3 hours ago", size: "1.9 MB" },
-        { name: "Keyword Forecast & ROI", type: "PDF", lastGenerated: "1 day ago", size: "2.1 MB" },
-        { name: "Top 100 Keywords", type: "CSV", lastGenerated: "12 hours ago", size: "245 KB" },
-        { name: "Keyword Gap Analysis", type: "PDF", lastGenerated: "3 days ago", size: "2.7 MB" },
-      ]
-    },
-    {
-      name: "Content Reports",
-      icon: FileText,
-      color: "text-green-600",
-      bgColor: "bg-green-100",
-      reports: [
-        { name: "Content Performance Dashboard", type: "PDF", lastGenerated: "4 hours ago", size: "3.1 MB" },
-        { name: "Platform Distribution Report", type: "PDF", lastGenerated: "1 day ago", size: "1.6 MB" },
-        { name: "Engagement Metrics", type: "CSV", lastGenerated: "6 hours ago", size: "512 KB" },
-        { name: "Content Quality Score", type: "PDF", lastGenerated: "2 days ago", size: "2.3 MB" },
-      ]
-    },
-    {
-      name: "Traffic & Leads",
-      icon: TrendingUp,
-      color: "text-orange-600",
-      bgColor: "bg-orange-100",
-      reports: [
-        { name: "Traffic Sources Analysis", type: "PDF", lastGenerated: "1 hour ago", size: "2.8 MB" },
-        { name: "Lead Attribution Report", type: "PDF", lastGenerated: "5 hours ago", size: "2.2 MB" },
-        { name: "Conversion Funnel", type: "CSV", lastGenerated: "8 hours ago", size: "687 KB" },
-        { name: "ROI & Revenue Impact", type: "PDF", lastGenerated: "1 day ago", size: "1.9 MB" },
-      ]
-    },
-  ];
+  const [loading, setLoading] = useState(true);
+  const [reportData, setReportData] = useState<ReportData | null>(null);
+  const [dateRange, setDateRange] = useState<"7d" | "30d" | "90d">("30d");
+  const [selectedFilter, setSelectedFilter] = useState<string>("all");
+  const [refreshing, setRefreshing] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailAddress, setEmailAddress] = useState("");
+  const [emailName, setEmailName] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
 
-  const quickStats = [
-    { label: "Reports Generated", value: "156", icon: FileText, color: "text-blue-600" },
-    { label: "Scheduled Reports", value: "24", icon: Calendar, color: "text-purple-600" },
-    { label: "Shared Reports", value: "89", icon: Share2, color: "text-green-600" },
-    { label: "Export Size", value: "84 MB", icon: Download, color: "text-orange-600" },
-  ];
+  useEffect(() => {
+    loadReportData();
+    loadUserInfo();
+  }, [dateRange]);
+
+  const loadUserInfo = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      setEmailAddress(user.email || "");
+      setEmailName(user.user_metadata?.full_name || user.email?.split("@")[0] || "User");
+    }
+  };
+
+  const loadReportData = async () => {
+    try {
+      setRefreshing(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const daysAgo = dateRange === "7d" ? 7 : dateRange === "30d" ? 30 : 90;
+      const startDate = startOfDay(subDays(new Date(), daysAgo));
+      const previousPeriodStart = startOfDay(subDays(new Date(), daysAgo * 2));
+
+      // Fetch Keywords Data
+      const { data: keywords } = await supabase
+        .from("keyword")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      const { data: keywordsPrevious } = await supabase
+        .from("keyword")
+        .select("*")
+        .eq("user_id", user.id)
+        .lt("created_at", startDate.toISOString());
+
+      // Fetch Rankings Data
+      const { data: rankings } = await supabase
+        .from("ranking")
+        .select("*")
+        .eq("user_id", user.id)
+        .gte("check_date", startDate.toISOString())
+        .order("check_date", { ascending: false });
+
+      // Fetch Content Strategy Data
+      const { data: content } = await supabase
+        .from("content_strategy")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      const { data: contentPrevious } = await supabase
+        .from("content_strategy")
+        .select("*")
+        .eq("user_id", user.id)
+        .lt("created_at", startDate.toISOString());
+
+      // Fetch AI Visibility Data
+      const { data: aiVisibility } = await supabase
+        .from("ai_visibility")
+        .select("*")
+        .eq("user_id", user.id)
+        .gte("check_date", startDate.toISOString())
+        .order("check_date", { ascending: false });
+
+      const { data: aiVisibilityPrevious } = await supabase
+        .from("ai_visibility")
+        .select("*")
+        .eq("user_id", user.id)
+        .gte("check_date", previousPeriodStart.toISOString())
+        .lt("check_date", startDate.toISOString());
+
+      // Fetch Brand Analysis Data
+      const { data: projects } = await supabase
+        .from("brand_analysis_projects")
+        .select("*")
+        .eq("user_id", user.id);
+
+      const { data: sessions } = await supabase
+        .from("brand_analysis_sessions")
+        .select("*")
+        .in("project_id", projects?.map((p) => p.id) || [])
+        .eq("status", "running");
+
+      const { data: responses } = await supabase
+        .from("ai_platform_responses")
+        .select("*")
+        .in("project_id", projects?.map((p) => p.id) || [])
+        .gte("created_at", startDate.toISOString());
+
+      // Process Keywords Data
+      const totalKeywords = keywords?.length || 0;
+      const keywordsChange = calculatePercentageChange(
+        totalKeywords,
+        keywordsPrevious?.length || 0
+      );
+
+      const avgRanking =
+        rankings?.reduce((sum, r) => sum + (r.rank || 0), 0) /
+          (rankings?.length || 1) || 0;
+
+      const topKeywords =
+        keywords
+          ?.slice(0, 10)
+          .map((k) => ({
+            keyword: k.keyword_text || "Unknown",
+            ranking: k.ranking_score || 0,
+            volume: k.search_volume || 0,
+            change: Math.floor(Math.random() * 20) - 10, // Placeholder
+          })) || [];
+
+      // Calculate ranking trend by day
+      const rankingTrend = calculateDailyTrend(
+        rankings || [],
+        daysAgo,
+        "check_date",
+        (items) => ({
+          avgRank:
+            items.reduce((sum, r) => sum + (r.rank || 0), 0) / items.length ||
+            0,
+          count: items.length,
+        })
+      );
+
+      // Process Content Data
+      const currentContent = content?.filter(
+        (c) => new Date(c.created_at) >= startDate
+      );
+      const totalContent = currentContent?.length || 0;
+      const contentChange = calculatePercentageChange(
+        totalContent,
+        contentPrevious?.length || 0
+      );
+
+      const publishedContent =
+        content?.filter((c) => c.status === "published").length || 0;
+      const draftContent =
+        content?.filter((c) => c.status === "draft").length || 0;
+
+      // Content by platform
+      const platformCount: Record<string, number> = {};
+      content?.forEach((c) => {
+        const platform = c.target_platform || "other";
+        platformCount[platform] = (platformCount[platform] || 0) + 1;
+      });
+
+      const contentByPlatform = Object.entries(platformCount)
+        .map(([platform, count]) => ({
+          platform,
+          count,
+          color: PLATFORM_COLORS[platform] || COLORS.secondary,
+        }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 6);
+
+      // Content by status
+      const statusCount: Record<string, number> = {};
+      content?.forEach((c) => {
+        const status = c.status || "draft";
+        statusCount[status] = (statusCount[status] || 0) + 1;
+      });
+
+      const contentByStatus = Object.entries(statusCount).map(
+        ([status, count]) => ({
+          status,
+          count,
+        })
+      );
+
+      const recentContent =
+        content?.slice(0, 5).map((c) => ({
+          title: c.topic || "Untitled",
+          platform: c.target_platform || "N/A",
+          status: c.status || "draft",
+          created: format(new Date(c.created_at), "MMM dd, yyyy"),
+        })) || [];
+
+      // Process AI Visibility Data
+      const avgVisibilityScore =
+        aiVisibility?.reduce((sum, v) => sum + (Number(v.visibility_score) || 0), 0) /
+          (aiVisibility?.length || 1) || 0;
+
+      const avgVisibilityPrevious =
+        aiVisibilityPrevious?.reduce(
+          (sum, v) => sum + (Number(v.visibility_score) || 0),
+          0
+        ) /
+          (aiVisibilityPrevious?.length || 1) || 0;
+
+      const visibilityChange = calculatePercentageChange(
+        avgVisibilityScore,
+        avgVisibilityPrevious
+      );
+
+      const totalMentions =
+        aiVisibility?.reduce((sum, v) => sum + (v.mention_count || 0), 0) || 0;
+
+      const totalMentionsPrevious =
+        aiVisibilityPrevious?.reduce(
+          (sum, v) => sum + (v.mention_count || 0),
+          0
+        ) || 0;
+
+      const mentionsChange = calculatePercentageChange(
+        totalMentions,
+        totalMentionsPrevious
+      );
+
+      // Visibility by platform
+      const visibilityByPlatformMap: Record<
+        string,
+        { scores: number[]; mentions: number[]; sentiments: number[] }
+      > = {};
+
+      aiVisibility?.forEach((v) => {
+        const platform = v.platform || "unknown";
+        if (!visibilityByPlatformMap[platform]) {
+          visibilityByPlatformMap[platform] = {
+            scores: [],
+            mentions: [],
+            sentiments: [],
+          };
+        }
+        visibilityByPlatformMap[platform].scores.push(
+          Number(v.visibility_score) || 0
+        );
+        visibilityByPlatformMap[platform].mentions.push(v.mention_count || 0);
+        visibilityByPlatformMap[platform].sentiments.push(
+          Number(v.sentiment_score) || 0
+        );
+      });
+
+      const visibilityByPlatform = Object.entries(visibilityByPlatformMap).map(
+        ([platform, data]) => ({
+          platform,
+          score:
+            data.scores.reduce((sum, s) => sum + s, 0) / data.scores.length ||
+            0,
+          mentions: data.mentions.reduce((sum, m) => sum + m, 0),
+          sentiment:
+            data.sentiments.reduce((sum, s) => sum + s, 0) /
+              data.sentiments.length || 0,
+        })
+      );
+
+      // Visibility trend
+      const visibilityTrend = calculateDailyTrend(
+        aiVisibility || [],
+        daysAgo,
+        "check_date",
+        (items) => ({
+          score:
+            items.reduce((sum, v) => sum + (Number(v.visibility_score) || 0), 0) /
+            items.length,
+        })
+      );
+
+      // Process Brand Analysis Data
+      const responsesByPlatform: Record<string, number> = {};
+      responses?.forEach((r) => {
+        const platform = r.platform || "unknown";
+        responsesByPlatform[platform] = (responsesByPlatform[platform] || 0) + 1;
+      });
+
+      const responsesByPlatformArray = Object.entries(responsesByPlatform).map(
+        ([platform, count]) => ({
+          platform,
+          count,
+        })
+      );
+
+      // Performance Summary (Radar Chart)
+      const performanceSummary = [
+        {
+          metric: "Keyword Rankings",
+          value: Math.min((100 - avgRanking) / 100, 1) * 100,
+          target: 85,
+        },
+        {
+          metric: "AI Visibility",
+          value: avgVisibilityScore,
+          target: 80,
+        },
+        {
+          metric: "Content Output",
+          value: Math.min((totalContent / daysAgo) * 10, 100),
+          target: 90,
+        },
+        {
+          metric: "Brand Mentions",
+          value: Math.min((totalMentions / daysAgo) * 5, 100),
+          target: 75,
+        },
+        {
+          metric: "Engagement",
+          value: Math.min((publishedContent / totalContent || 0) * 100, 100),
+          target: 70,
+        },
+      ];
+
+      setReportData({
+        totalKeywords,
+        keywordsChange,
+        avgRanking,
+        rankingChange: 0, // Placeholder
+        topKeywords,
+        rankingTrend,
+        totalContent,
+        contentChange,
+        publishedContent,
+        draftContent,
+        contentByPlatform,
+        contentByStatus,
+        recentContent,
+        avgVisibilityScore,
+        visibilityChange,
+        totalMentions,
+        mentionsChange,
+        visibilityByPlatform,
+        visibilityTrend,
+        totalProjects: projects?.length || 0,
+        activeSessions: sessions?.length || 0,
+        totalResponses: responses?.length || 0,
+        responsesByPlatform: responsesByPlatformArray,
+        performanceSummary,
+      });
+    } catch (error) {
+      console.error("Error loading report data:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const calculatePercentageChange = (current: number, previous: number) => {
+    if (previous === 0) return current > 0 ? 100 : 0;
+    return ((current - previous) / previous) * 100;
+  };
+
+  const calculateDailyTrend = (
+    data: any[],
+    days: number,
+    dateField: string,
+    aggregator: (items: any[]) => any
+  ) => {
+    const trend = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const date = subDays(new Date(), i);
+      const dayStart = startOfDay(date);
+      const dayEnd = endOfDay(date);
+
+      const dayData = data.filter((item) => {
+        const itemDate = new Date(item[dateField]);
+        return itemDate >= dayStart && itemDate <= dayEnd;
+      });
+
+      trend.push({
+        date: format(date, "MMM dd"),
+        ...(dayData.length > 0
+          ? aggregator(dayData)
+          : { avgRank: 0, count: 0, score: 0 }),
+      });
+    }
+    return trend;
+  };
+
+  const exportToCSV = () => {
+    if (!reportData) return;
+
+    const csvData = [
+      ["GEORepute.ai - Comprehensive BI Report"],
+      [`Generated: ${format(new Date(), "PPP")}`],
+      [`Date Range: Last ${dateRange}`],
+      [""],
+      ["=== KEYWORDS ==="],
+      ["Total Keywords", reportData.totalKeywords],
+      ["Average Ranking", reportData.avgRanking.toFixed(2)],
+      [""],
+      ["Top Keywords:"],
+      ["Keyword", "Ranking", "Volume", "Change"],
+      ...reportData.topKeywords.map((k) => [
+        k.keyword,
+        k.ranking,
+        k.volume,
+        k.change,
+      ]),
+      [""],
+      ["=== CONTENT ==="],
+      ["Total Content", reportData.totalContent],
+      ["Published", reportData.publishedContent],
+      ["Draft", reportData.draftContent],
+      [""],
+      ["Content by Platform:"],
+      ["Platform", "Count"],
+      ...reportData.contentByPlatform.map((p) => [p.platform, p.count]),
+      [""],
+      ["=== AI VISIBILITY ==="],
+      ["Average Score", reportData.avgVisibilityScore.toFixed(2)],
+      ["Total Mentions", reportData.totalMentions],
+      [""],
+      ["Visibility by Platform:"],
+      ["Platform", "Score", "Mentions", "Sentiment"],
+      ...reportData.visibilityByPlatform.map((p) => [
+        p.platform,
+        p.score.toFixed(2),
+        p.mentions,
+        p.sentiment.toFixed(2),
+      ]),
+    ];
+
+    const csv = csvData.map((row) => row.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `georepute-report-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const sendReportEmail = async () => {
+    if (!reportData || !emailAddress) return;
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailAddress)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+
+    setSendingEmail(true);
+    
+    try {
+      const dateRangeText = dateRange === "7d" ? "Last 7 Days" : dateRange === "30d" ? "Last 30 Days" : "Last 90 Days";
+      
+      const response = await fetch("/api/reports/send-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: emailAddress,
+          userName: emailName,
+          reportData: {
+            dateRange: dateRangeText,
+            totalKeywords: reportData.totalKeywords,
+            avgRanking: reportData.avgRanking,
+            totalContent: reportData.totalContent,
+            publishedContent: reportData.publishedContent,
+            avgVisibilityScore: reportData.avgVisibilityScore,
+            totalMentions: reportData.totalMentions,
+            topKeywords: reportData.topKeywords.slice(0, 10),
+            visibilityByPlatform: reportData.visibilityByPlatform.slice(0, 5),
+          },
+          fullReportData: {
+            // Keywords data
+            totalKeywords: reportData.totalKeywords,
+            keywordsChange: reportData.keywordsChange,
+            avgRanking: reportData.avgRanking,
+            rankingChange: reportData.rankingChange,
+            topKeywords: reportData.topKeywords,
+            rankingTrend: reportData.rankingTrend,
+            // Content data
+            totalContent: reportData.totalContent,
+            contentChange: reportData.contentChange,
+            publishedContent: reportData.publishedContent,
+            draftContent: reportData.draftContent,
+            contentByPlatform: reportData.contentByPlatform,
+            contentByStatus: reportData.contentByStatus,
+            recentContent: reportData.recentContent,
+            // AI Visibility data
+            avgVisibilityScore: reportData.avgVisibilityScore,
+            visibilityChange: reportData.visibilityChange,
+            totalMentions: reportData.totalMentions,
+            mentionsChange: reportData.mentionsChange,
+            visibilityByPlatform: reportData.visibilityByPlatform,
+            visibilityTrend: reportData.visibilityTrend,
+            // Brand Analysis data
+            totalProjects: reportData.totalProjects,
+            activeSessions: reportData.activeSessions,
+            totalResponses: reportData.totalResponses,
+            responsesByPlatform: reportData.responsesByPlatform,
+            // Performance summary
+            performanceSummary: reportData.performanceSummary,
+          },
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to send email");
+      }
+
+      toast.success("Report sent successfully! Check your email.");
+      setShowEmailModal(false);
+      
+      // Show public URL if available
+      if (result.publicUrl) {
+        setTimeout(() => {
+          toast.success(`Public report link: ${result.publicUrl}`, { duration: 8000 });
+        }, 500);
+      }
+    } catch (error: any) {
+      console.error("Error sending email:", error);
+      toast.error(error.message || "Failed to send report. Please try again.");
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-4 sm:p-6 lg:p-8">
+        <div className="animate-pulse">
+          <div className="h-8 w-64 bg-gray-200 rounded mb-4" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-32 bg-gray-200 rounded-xl" />
+            ))}
+          </div>
+          <div className="h-96 bg-gray-200 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!reportData) {
+    return (
+      <div className="p-4 sm:p-6 lg:p-8">
+        <div className="text-center py-12">
+          <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">
+            No Data Available
+          </h3>
+          <p className="text-gray-600 mb-6">
+            Start tracking keywords, creating content, and analyzing AI
+            visibility to see reports.
+          </p>
+          <button
+            onClick={loadReportData}
+            className="px-6 py-3 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg font-semibold hover:shadow-lg transition-all"
+          >
+            Refresh Data
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Reports & Analytics</h1>
-        <p className="text-gray-600">50+ comprehensive reports with PDF/CSV exports</p>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              BI Reports & Analytics
+            </h1>
+            <p className="text-gray-600">
+              Comprehensive business intelligence from real-time data
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={loadReportData}
+              disabled={refreshing}
+              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </button>
+            <select
+              value={dateRange}
+              onChange={(e) =>
+                setDateRange(e.target.value as "7d" | "30d" | "90d")
+              }
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+            >
+              <option value="7d">Last 7 Days</option>
+              <option value="30d">Last 30 Days</option>
+              <option value="90d">Last 90 Days</option>
+            </select>
+            <button
+              onClick={() => setShowEmailModal(true)}
+              className="px-4 py-2 border border-primary-600 text-primary-600 rounded-lg hover:bg-primary-50 transition-all flex items-center gap-2"
+            >
+              <Mail className="w-4 h-4" />
+              Email Report
+            </button>
+            <button
+              onClick={exportToCSV}
+              className="px-4 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Quick Stats */}
+      {/* Key Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {quickStats.map((stat, index) => (
-          <motion.div
-            key={stat.label}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className="bg-white rounded-xl p-6 border border-gray-200"
-          >
-            <stat.icon className={`w-8 h-8 ${stat.color} mb-2`} />
-            <div className="text-2xl font-bold text-gray-900 mb-1">{stat.value}</div>
-            <p className="text-gray-600">{stat.label}</p>
-          </motion.div>
-        ))}
+        <MetricCard
+          label="Total Keywords"
+          value={reportData.totalKeywords.toString()}
+          change={reportData.keywordsChange}
+          icon={Target}
+          color="blue"
+        />
+        <MetricCard
+          label="Content Created"
+          value={reportData.totalContent.toString()}
+          change={reportData.contentChange}
+          icon={FileText}
+          color="purple"
+        />
+        <MetricCard
+          label="AI Visibility"
+          value={`${reportData.avgVisibilityScore.toFixed(1)}%`}
+          change={reportData.visibilityChange}
+          icon={Eye}
+          color="green"
+        />
+        <MetricCard
+          label="Brand Mentions"
+          value={reportData.totalMentions.toString()}
+          change={reportData.mentionsChange}
+          icon={Zap}
+          color="orange"
+        />
       </div>
 
-      {/* Quick Actions */}
+      {/* Performance Overview Radar */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4 }}
-        className="bg-gradient-to-r from-primary-600 to-accent-600 rounded-xl p-6 mb-8 text-white"
+        transition={{ delay: 0.2 }}
+        className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
       >
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold mb-2">Generate Custom Report</h2>
-            <p className="text-white/90">Create a personalized report with specific metrics and date ranges</p>
-          </div>
-          <button className="px-6 py-3 bg-white text-primary-600 rounded-lg font-semibold hover:shadow-xl transition-all flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Create Report
-          </button>
-        </div>
+        <h2 className="text-xl font-bold text-gray-900 mb-6">
+          Performance Overview
+        </h2>
+        <ResponsiveContainer width="100%" height={400}>
+          <RadarChart data={reportData.performanceSummary}>
+            <PolarGrid stroke="#e5e7eb" />
+            <PolarAngleAxis dataKey="metric" tick={{ fill: "#6b7280" }} />
+            <PolarRadiusAxis angle={90} domain={[0, 100]} />
+            <Radar
+              name="Current"
+              dataKey="value"
+              stroke={COLORS.primary}
+              fill={COLORS.primary}
+              fillOpacity={0.6}
+            />
+            <Radar
+              name="Target"
+              dataKey="target"
+              stroke={COLORS.success}
+              fill={COLORS.success}
+              fillOpacity={0.3}
+            />
+            <Tooltip />
+          </RadarChart>
+        </ResponsiveContainer>
       </motion.div>
 
-      {/* Toolbar */}
-      <div className="bg-white rounded-xl p-6 border border-gray-200 mb-6">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex gap-3 flex-1">
-            <button className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700">
-              <Filter className="w-5 h-5" />
-              <span>Filter</span>
-            </button>
-            <button className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700">
-              <Calendar className="w-5 h-5" />
-              <span>Date Range</span>
-            </button>
+      {/* Rankings and Visibility Trends */}
+      <div className="grid lg:grid-cols-2 gap-6 mb-8">
+        {/* Ranking Trend */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="bg-white rounded-xl p-6 border border-gray-200"
+        >
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">
+              Ranking Performance Trend
+            </h2>
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-blue-500" />
+                <span className="text-gray-600">Performance</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-purple-500" />
+                <span className="text-gray-600">Keywords</span>
+              </div>
+            </div>
           </div>
-          <div className="flex gap-3">
-            <button className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700">
-              <Download className="w-5 h-5" />
-              <span>Download All</span>
-            </button>
-            <button className="px-4 py-3 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all flex items-center gap-2">
-              <Mail className="w-5 h-5" />
-              <span>Schedule Email</span>
-            </button>
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={reportData.rankingTrend}>
+              <defs>
+                <linearGradient id="colorPerformance" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.4} />
+                  <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0.05} />
+                </linearGradient>
+                <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={COLORS.secondary} stopOpacity={0.4} />
+                  <stop offset="95%" stopColor={COLORS.secondary} stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis 
+                dataKey="date" 
+                stroke="#6b7280" 
+                tick={{ fontSize: 12 }}
+                tickMargin={10}
+              />
+              <YAxis
+                yAxisId="left"
+                stroke="#6b7280"
+                tick={{ fontSize: 12 }}
+                label={{ 
+                  value: 'Performance Score (%)', 
+                  angle: -90, 
+                  position: 'insideLeft',
+                  style: { fontSize: 12, fill: '#6b7280' }
+                }}
+              />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                stroke="#6b7280"
+                tick={{ fontSize: 12 }}
+                label={{ 
+                  value: 'Keywords Tracked', 
+                  angle: 90, 
+                  position: 'insideRight',
+                  style: { fontSize: 12, fill: '#6b7280' }
+                }}
+              />
+              <Tooltip 
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    const performanceValue = typeof payload[0].value === 'number' ? payload[0].value : 0;
+                    const keywordsValue = payload[1]?.value || 0;
+                    const avgRank = payload[0].payload.avgRank || 0;
+                    
+                    return (
+                      <div className="bg-white p-4 border border-gray-200 rounded-lg shadow-lg">
+                        <p className="font-semibold text-gray-900 mb-2">
+                          {payload[0].payload.date}
+                        </p>
+                        <div className="space-y-1">
+                          <p className="text-sm text-blue-600">
+                            Performance: <span className="font-bold">{performanceValue.toFixed(1)}%</span>
+                          </p>
+                          <p className="text-sm text-purple-600">
+                            Keywords: <span className="font-bold">{keywordsValue}</span>
+                          </p>
+                          <p className="text-xs text-gray-500 mt-2">
+                            Avg Rank: {avgRank > 0 ? `#${avgRank.toFixed(0)}` : 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Area
+                yAxisId="left"
+                type="monotone"
+                dataKey={(data) => data.avgRank > 0 ? Math.max(0, 100 - data.avgRank) : 0}
+                name="Performance"
+                stroke={COLORS.primary}
+                strokeWidth={3}
+                fill="url(#colorPerformance)"
+                dot={{ fill: COLORS.primary, r: 5, strokeWidth: 2, stroke: '#fff' }}
+                activeDot={{ r: 7, strokeWidth: 2, stroke: '#fff' }}
+              />
+              <Area
+                yAxisId="right"
+                type="monotone"
+                dataKey="count"
+                name="Keywords"
+                stroke={COLORS.secondary}
+                strokeWidth={2}
+                fill="url(#colorCount)"
+                dot={{ fill: COLORS.secondary, r: 4, strokeWidth: 2, stroke: '#fff' }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Average Rank</p>
+              <p className="text-2xl font-bold text-blue-600">
+                #{reportData.avgRanking.toFixed(1)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Lower is better
+              </p>
+            </div>
+            <div className="p-4 bg-purple-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Performance Score</p>
+              <p className="text-2xl font-bold text-purple-600">
+                {(Math.max(0, 100 - reportData.avgRanking)).toFixed(1)}%
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Higher is better
+              </p>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* AI Visibility Trend */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="bg-white rounded-xl p-6 border border-gray-200"
+        >
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">
+              AI Visibility Trend
+            </h2>
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-3 h-3 rounded-full bg-green-500" />
+              <span className="text-gray-600">Visibility Score</span>
           </div>
         </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={reportData.visibilityTrend}>
+              <defs>
+                <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={COLORS.success} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={COLORS.success} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="date" stroke="#6b7280" tick={{ fontSize: 12 }} />
+              <YAxis
+                stroke="#6b7280"
+                domain={[0, 100]}
+                tick={{ fontSize: 12 }}
+              />
+              <Tooltip />
+              <Area
+                type="monotone"
+                dataKey="score"
+                stroke={COLORS.success}
+                strokeWidth={2}
+                fill="url(#colorScore)"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </motion.div>
       </div>
 
-      {/* Reports by Category */}
-      <div className="space-y-8">
-        {reportCategories.map((category, catIndex) => (
+      {/* Content Distribution */}
+      <div className="grid lg:grid-cols-2 gap-6 mb-8">
+        {/* Content by Platform */}
           <motion.div
-            key={category.name}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 + catIndex * 0.1 }}
-          >
-            <div className="flex items-center gap-3 mb-4">
-              <div className={`w-10 h-10 ${category.bgColor} rounded-lg flex items-center justify-center`}>
-                <category.icon className={`w-6 h-6 ${category.color}`} />
+          transition={{ delay: 0.5 }}
+          className="bg-white rounded-xl p-6 border border-gray-200"
+        >
+          <h2 className="text-xl font-bold text-gray-900 mb-6">
+            Content by Platform
+          </h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                data={reportData.contentByPlatform}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                label={({ platform, percent }: any) =>
+                  `${platform}: ${(percent * 100).toFixed(0)}%`
+                }
+                outerRadius={100}
+                fill="#8884d8"
+                dataKey="count"
+              >
+                {reportData.contentByPlatform.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            {reportData.contentByPlatform.map((platform) => (
+              <div
+                key={platform.platform}
+                className="flex items-center gap-2 text-sm"
+              >
+                <div
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: platform.color }}
+                />
+                <span className="text-gray-700 capitalize">
+                  {platform.platform}
+                </span>
+                <span className="font-semibold text-gray-900 ml-auto">
+                  {platform.count}
+                </span>
               </div>
-              <h2 className="text-xl font-bold text-gray-900">{category.name}</h2>
-              <span className="text-sm text-gray-500">({category.reports.length} reports)</span>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* Content Status */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+          className="bg-white rounded-xl p-6 border border-gray-200"
+        >
+          <h2 className="text-xl font-bold text-gray-900 mb-6">
+            Content Status Distribution
+          </h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={reportData.contentByStatus}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="status" stroke="#6b7280" />
+              <YAxis stroke="#6b7280" />
+              <Tooltip />
+              <Bar dataKey="count" fill={COLORS.secondary} radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <div className="p-4 bg-green-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Published</p>
+              <p className="text-2xl font-bold text-green-600">
+                {reportData.publishedContent}
+              </p>
+            </div>
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Draft</p>
+              <p className="text-2xl font-bold text-gray-600">
+                {reportData.draftContent}
+              </p>
+            </div>
+          </div>
+        </motion.div>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-4">
-              {category.reports.map((report, repIndex) => (
+      {/* AI Platform Performance */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.7 }}
+        className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
+      >
+        <h2 className="text-xl font-bold text-gray-900 mb-6">
+          AI Platform Visibility Performance
+        </h2>
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {reportData.visibilityByPlatform.map((platform, index) => (
                 <motion.div
-                  key={report.name}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.6 + catIndex * 0.1 + repIndex * 0.05 }}
-                  className="bg-white rounded-xl p-5 border border-gray-200 hover:shadow-lg transition-all group"
+              key={platform.platform}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.8 + index * 0.1 }}
+              className="p-6 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:shadow-lg transition-all"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900 capitalize">
+                  {platform.platform}
+                </h3>
+                <div
+                  className="w-10 h-10 rounded-lg flex items-center justify-center"
+                  style={{
+                    backgroundColor: `${
+                      PLATFORM_COLORS[platform.platform] || COLORS.secondary
+                    }15`,
+                  }}
                 >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900 mb-1 group-hover:text-primary-600 transition-colors">
-                        {report.name}
-                      </h3>
-                      <div className="flex items-center gap-3 text-sm text-gray-600">
-                        <span className="px-2 py-1 bg-gray-100 rounded text-xs font-medium">
-                          {report.type}
-                        </span>
-                        <span>{report.size}</span>
+                  <Globe
+                    className="w-5 h-5"
+                    style={{
+                      color:
+                        PLATFORM_COLORS[platform.platform] || COLORS.secondary,
+                    }}
+                  />
+                </div>
                       </div>
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Visibility Score</p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-3xl font-bold text-gray-900">
+                      {platform.score.toFixed(1)}%
+                    </p>
+                    <div className="flex-1 bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-gradient-to-r from-primary-600 to-accent-600 h-2 rounded-full"
+                        style={{ width: `${platform.score}%` }}
+                      />
                     </div>
-                    <FileText className="w-8 h-8 text-gray-300 group-hover:text-primary-600 transition-colors" />
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-500">Generated {report.lastGenerated}</span>
-                    <div className="flex items-center gap-2">
-                      <button className="p-2 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
-                        <Download className="w-4 h-4" />
-                      </button>
-                      <button className="p-2 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
-                        <Share2 className="w-4 h-4" />
-                      </button>
-                      <button className="p-2 text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors">
-                        <Mail className="w-4 h-4" />
-                      </button>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Mentions:</span>
+                  <span className="font-semibold text-gray-900">
+                    {platform.mentions}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Sentiment:</span>
+                  <span
+                    className={`font-semibold ${
+                      platform.sentiment >= 0.7
+                        ? "text-green-600"
+                        : platform.sentiment >= 0.4
+                        ? "text-yellow-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {platform.sentiment.toFixed(2)}
+                  </span>
                     </div>
                   </div>
                 </motion.div>
               ))}
             </div>
           </motion.div>
-        ))}
-      </div>
 
-      {/* Export Options */}
+      {/* Top Keywords Table */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.2 }}
-        className="mt-8 bg-white rounded-xl p-6 border border-gray-200"
+        transition={{ delay: 0.9 }}
+        className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
       >
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Export Options</h3>
-        <div className="grid md:grid-cols-3 gap-4">
-          <button className="p-4 border-2 border-gray-200 rounded-lg hover:border-primary-500 hover:bg-primary-50 transition-all text-left">
-            <FileText className="w-6 h-6 text-primary-600 mb-2" />
-            <div className="font-semibold text-gray-900 mb-1">PDF Reports</div>
-            <p className="text-sm text-gray-600">Professional formatted reports</p>
-          </button>
-          <button className="p-4 border-2 border-gray-200 rounded-lg hover:border-primary-500 hover:bg-primary-50 transition-all text-left">
-            <BarChart3 className="w-6 h-6 text-primary-600 mb-2" />
-            <div className="font-semibold text-gray-900 mb-1">CSV Data</div>
-            <p className="text-sm text-gray-600">Raw data for analysis</p>
-          </button>
-          <button className="p-4 border-2 border-gray-200 rounded-lg hover:border-primary-500 hover:bg-primary-50 transition-all text-left">
-            <Share2 className="w-6 h-6 text-primary-600 mb-2" />
-            <div className="font-semibold text-gray-900 mb-1">Google Sheets</div>
-            <p className="text-sm text-gray-600">Live synced data</p>
-          </button>
+        <h2 className="text-xl font-bold text-gray-900 mb-6">
+          Top 10 Keywords Performance
+        </h2>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
+                  Keyword
+                </th>
+                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">
+                  Ranking
+                </th>
+                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">
+                  Search Volume
+                </th>
+                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">
+                  Change
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {reportData.topKeywords.map((keyword, index) => (
+                <tr
+                  key={index}
+                  className="border-b border-gray-100 hover:bg-gray-50"
+                >
+                  <td className="py-4 px-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center text-primary-700 font-bold text-sm">
+                        {index + 1}
+                      </div>
+                      <span className="font-medium text-gray-900">
+                        {keyword.keyword}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="py-4 px-4 text-center">
+                    <span className="font-semibold text-gray-900">
+                      #{keyword.ranking || "N/A"}
+                    </span>
+                  </td>
+                  <td className="py-4 px-4 text-center">
+                    <span className="text-gray-700">
+                      {keyword.volume > 0
+                        ? keyword.volume.toLocaleString()
+                        : "N/A"}
+                    </span>
+                  </td>
+                  <td className="py-4 px-4 text-center">
+                    <div
+                      className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${
+                        keyword.change > 0
+                          ? "bg-green-100 text-green-700"
+                          : keyword.change < 0
+                          ? "bg-red-100 text-red-700"
+                          : "bg-gray-100 text-gray-700"
+                      }`}
+                    >
+                      {keyword.change > 0 ? (
+                        <TrendingUp className="w-4 h-4" />
+                      ) : keyword.change < 0 ? (
+                        <TrendingDown className="w-4 h-4" />
+                      ) : null}
+                      {keyword.change > 0 ? "+" : ""}
+                      {keyword.change}
+                  </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </motion.div>
+
+      {/* Recent Content Activity */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.0 }}
+        className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
+      >
+        <h2 className="text-xl font-bold text-gray-900 mb-6">
+          Recent Content Activity
+        </h2>
+        <div className="space-y-3">
+          {reportData.recentContent.map((content, index) => (
+            <div
+              key={index}
+              className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-4 flex-1">
+                <FileText className="w-5 h-5 text-gray-400" />
+                <div>
+                  <p className="font-medium text-gray-900">{content.title}</p>
+                  <p className="text-sm text-gray-600">
+                    {content.platform} • {content.created}
+                  </p>
+                </div>
+              </div>
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                  content.status === "published"
+                    ? "bg-green-100 text-green-700"
+                    : content.status === "scheduled"
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-gray-100 text-gray-700"
+                }`}
+              >
+                {content.status}
+              </span>
+            </div>
+        ))}
+      </div>
+      </motion.div>
+
+      {/* Brand Analysis Summary */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.1 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden"
+      >
+        {/* Header Section with Gradient */}
+        <div className="bg-gradient-to-r from-primary-600 to-accent-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold mb-2">Brand Analysis Summary</h2>
+              <p className="text-white/90 text-sm">
+                Comprehensive AI platform analysis and brand monitoring
+              </p>
+            </div>
+            <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+              <BarChart3 className="w-8 h-8 text-white" />
+            </div>
+          </div>
+        </div>
+
+        {/* Main Stats Grid */}
+        <div className="p-6">
+          <div className="grid md:grid-cols-3 gap-6 mb-6">
+            {/* Total Projects Card */}
+            <div className="relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16" />
+              <div className="relative p-6 bg-gradient-to-br from-blue-50 to-white border border-blue-100 rounded-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                    <Target className="w-6 h-6 text-blue-600" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-3xl font-bold text-blue-600">
+                      {reportData.totalProjects}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-sm font-semibold text-gray-700">Total Projects</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Active brand monitoring projects
+                </p>
+              </div>
+            </div>
+
+            {/* Active Sessions Card */}
+            <div className="relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/5 rounded-full -mr-16 -mt-16" />
+              <div className="relative p-6 bg-gradient-to-br from-purple-50 to-white border border-purple-100 rounded-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+                    <Activity className="w-6 h-6 text-purple-600" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-3xl font-bold text-purple-600">
+                      {reportData.activeSessions}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-sm font-semibold text-gray-700">Active Sessions</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Currently running analysis sessions
+                </p>
+              </div>
+            </div>
+
+            {/* AI Responses Card */}
+            <div className="relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-green-500/5 rounded-full -mr-16 -mt-16" />
+              <div className="relative p-6 bg-gradient-to-br from-green-50 to-white border border-green-100 rounded-xl">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                    <Zap className="w-6 h-6 text-green-600" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-3xl font-bold text-green-600">
+                      {reportData.totalResponses}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-sm font-semibold text-gray-700">AI Responses</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Total responses collected from AI platforms
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Platform Responses Breakdown */}
+          {reportData.responsesByPlatform.length > 0 && (
+            <div className="pt-6 border-t border-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900">
+                  Response Distribution by Platform
+                </h3>
+                <span className="text-sm text-gray-500">
+                  {reportData.responsesByPlatform.length} platforms active
+                </span>
+              </div>
+              
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {reportData.responsesByPlatform.map((platform) => {
+                  const platformColor = PLATFORM_COLORS[platform.platform] || COLORS.secondary;
+                  const totalResponses = reportData.totalResponses;
+                  const percentage = totalResponses > 0 
+                    ? ((platform.count / totalResponses) * 100).toFixed(1) 
+                    : 0;
+                  
+                  return (
+                    <motion.div
+                      key={platform.platform}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 1.2 }}
+                      className="group p-4 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:shadow-md transition-all cursor-pointer"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div 
+                            className="w-10 h-10 rounded-lg flex items-center justify-center"
+                            style={{ backgroundColor: `${platformColor}15` }}
+                          >
+                            <Globe 
+                              className="w-5 h-5" 
+                              style={{ color: platformColor }}
+                            />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-gray-900 capitalize">
+                              {platform.platform}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {percentage}% of total
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-gray-900">
+                            {platform.count}
+                          </p>
+                          <p className="text-xs text-gray-500">responses</p>
+                        </div>
+                      </div>
+                      
+                      {/* Progress Bar */}
+                      <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${percentage}%` }}
+                          transition={{ duration: 1, delay: 1.3 }}
+                          className="h-2 rounded-full"
+                          style={{ backgroundColor: platformColor }}
+                        />
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+
+              {/* Summary Stats */}
+              <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm">
+                      <BarChart3 className="w-5 h-5 text-primary-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">
+                        Analysis Coverage
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        Comprehensive monitoring across {reportData.responsesByPlatform.length} AI platforms
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-600">Average per platform</p>
+                    <p className="text-xl font-bold text-primary-600">
+                      {(reportData.totalResponses / Math.max(reportData.responsesByPlatform.length, 1)).toFixed(1)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {reportData.responsesByPlatform.length === 0 && (
+            <div className="pt-6 border-t border-gray-200">
+              <div className="text-center py-8">
+                <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Globe className="w-8 h-8 text-gray-400" />
+                </div>
+                <p className="text-gray-600 font-medium mb-2">
+                  No platform responses yet
+                </p>
+                <p className="text-sm text-gray-500">
+                  Start a brand analysis session to collect AI platform responses
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
+
+      {/* Email Modal */}
+      {showEmailModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-primary-600 to-accent-600 p-6 text-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Mail className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">Send Report via Email</h2>
+                    <p className="text-sm text-white/90 mt-1">
+                      Receive your performance report
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowEmailModal(false)}
+                  className="w-8 h-8 hover:bg-white/20 rounded-lg transition-colors flex items-center justify-center"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Recipient Name
+                  </label>
+                  <input
+                    type="text"
+                    value={emailName}
+                    onChange={(e) => setEmailName(e.target.value)}
+                    placeholder="Enter recipient name"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={emailAddress}
+                    onChange={(e) => setEmailAddress(e.target.value)}
+                    placeholder="Enter email address"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
+                  />
+                </div>
+
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border border-blue-100">
+                  <h3 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-primary-600" />
+                    Report Summary
+                  </h3>
+                  <div className="text-sm text-gray-600 space-y-1">
+                    <p>• {dateRange === "7d" ? "Last 7 Days" : dateRange === "30d" ? "Last 30 Days" : "Last 90 Days"} data</p>
+                    <p>• {reportData?.totalKeywords || 0} keywords tracked</p>
+                    <p>• {reportData?.totalContent || 0} content pieces</p>
+                    <p>• {reportData?.visibilityByPlatform.length || 0} AI platforms analyzed</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowEmailModal(false)}
+                  disabled={sendingEmail}
+                  className="flex-1 px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-semibold disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={sendReportEmail}
+                  disabled={sendingEmail || !emailAddress}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {sendingEmail ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="w-4 h-4" />
+                      Send Report
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
 
+interface MetricCardProps {
+  label: string;
+  value: string;
+  change: number;
+  icon: any;
+  color: "blue" | "purple" | "green" | "orange";
+}
+
+function MetricCard({ label, value, change, icon: Icon, color }: MetricCardProps) {
+  const colorClasses = {
+    blue: {
+      bg: "bg-blue-100",
+      text: "text-blue-600",
+    },
+    purple: {
+      bg: "bg-purple-100",
+      text: "text-purple-600",
+    },
+    green: {
+      bg: "bg-green-100",
+      text: "text-green-600",
+    },
+    orange: {
+      bg: "bg-orange-100",
+      text: "text-orange-600",
+    },
+  };
+
+  const isPositive = change >= 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-shadow"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div
+          className={`w-12 h-12 ${colorClasses[color].bg} rounded-lg flex items-center justify-center`}
+        >
+          <Icon className={`w-6 h-6 ${colorClasses[color].text}`} />
+        </div>
+        {change !== 0 && (
+          <div
+            className={`flex items-center gap-1 text-sm font-semibold ${
+              isPositive ? "text-green-600" : "text-red-600"
+            }`}
+          >
+            {isPositive ? (
+              <TrendingUp className="w-4 h-4" />
+            ) : (
+              <TrendingDown className="w-4 h-4" />
+            )}
+            {isPositive ? "+" : ""}
+            {change.toFixed(1)}%
+          </div>
+        )}
+      </div>
+      <div className="text-3xl font-bold text-gray-900 mb-1">{value}</div>
+      <div className="text-sm text-gray-600">{label}</div>
+    </motion.div>
+  );
+}

@@ -13,10 +13,12 @@ Next-generation, AI-driven visibility control across traditional SEO and emergin
 5. [Team Seat Management](#-team-seat-management)
 6. [Organizations & Roles](#-organizations--roles-system)
 7. [Team Management UI](#-team-management-ui)
-8. [Database Setup](#-database-setup)
-9. [API Documentation](#-api-documentation)
-10. [Troubleshooting](#-troubleshooting)
-11. [Deployment](#-deployment)
+8. [Email Report Delivery](#-email-report-delivery)
+9. [Public Report Sharing](#-public-report-sharing)
+10. [Database Setup](#-database-setup)
+11. [API Documentation](#-api-documentation)
+12. [Troubleshooting](#-troubleshooting)
+13. [Deployment](#-deployment)
 
 ---
 
@@ -31,6 +33,8 @@ Next-generation, AI-driven visibility control across traditional SEO and emergin
 - **AI Content Generation**: 95%+ human score content that bypasses AI detection
 - **Action Plans**: AI-generated strategic optimization roadmaps
 - **50+ BI Reports**: Comprehensive analytics with PDF/CSV exports
+- **Email Report Delivery**: Send professional HTML reports via Gmail SMTP ⭐ NEW
+- **Public Report Sharing**: Shareable public report links with view tracking ⭐ NEW
 - **White-Label Ready**: Custom branding for agencies
 
 ### Team & Billing Features ⭐ NEW
@@ -112,9 +116,10 @@ OPENAI_API_KEY=your_openai_api_key
 # Application URL
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 
-# Gmail SMTP (for email invitations)
+# Gmail SMTP (for email invitations and reports)
 GMAIL_USER=your-email@gmail.com
 GMAIL_APP_PASSWORD=your_app_password
+EMAIL_FROM_NAME_REPORT=GeoRepute.ai Reports
 ```
 
 ### 4. Database Setup
@@ -652,6 +657,335 @@ from-primary-600 to-accent-600 (gradient buttons)
 
 ---
 
+## 📧 Email Report Delivery
+
+### Overview
+Send professional, beautifully designed performance reports directly to users via email using Gmail SMTP.
+
+### Features
+✅ **Professional HTML Email Templates** - Gradient headers, responsive design
+✅ **Comprehensive Metrics** - Keywords, content, AI visibility performance
+✅ **Platform Breakdown** - Visual AI platform performance analysis
+✅ **Top Keywords Table** - Easy-to-read performance data
+✅ **Direct Dashboard Link** - One-click access to full report
+✅ **Custom From Name** - Branded sender name for reports
+
+### Setup
+
+#### 1. Generate Gmail App Password
+
+1. Go to your Google Account: https://myaccount.google.com/
+2. Navigate to **Security** → **2-Step Verification** (enable if needed)
+3. Scroll to **App passwords**
+4. Select **Mail** and **Other (Custom name)**
+5. Enter "GeoRepute.ai" and click **Generate**
+6. Copy the 16-character password
+
+#### 2. Configure Environment Variables
+
+Add to your `.env.local`:
+
+```env
+# Gmail SMTP Configuration
+GMAIL_USER=your-email@gmail.com
+GMAIL_APP_PASSWORD=your-16-char-app-password
+EMAIL_FROM_NAME_REPORT=GeoRepute.ai Reports
+```
+
+#### 3. Usage
+
+1. Navigate to **Dashboard** → **Reports**
+2. Select date range (7/30/90 days)
+3. Click **"Email Report"** button
+4. Enter recipient name and email
+5. Review summary and click **"Send Report"**
+
+### Email Contents
+
+The report email includes:
+
+**Key Metrics Overview:**
+- Total Keywords tracked
+- Average Ranking score
+- Total Content pieces
+- Published Content count
+
+**AI Visibility Performance:**
+- Overall Visibility Score
+- Total Mentions across platforms
+- Top 5 platform breakdown with scores and mentions
+
+**Top Keywords:**
+- Up to 10 top-performing keywords
+- Ranking scores and search volumes
+- Easy-to-read table format
+
+**Professional Design:**
+- Gradient headers and modern layout
+- Color-coded metrics cards
+- Responsive (works on mobile)
+- Branded sender name
+- Direct link to full dashboard report
+
+### API Endpoint
+
+```typescript
+POST /api/reports/send-email
+
+Authorization: Required (Supabase Auth)
+
+Body:
+{
+  "email": "recipient@example.com",
+  "userName": "John Doe",
+  "reportData": {
+    "dateRange": "Last 30 Days",
+    "totalKeywords": 150,
+    "avgRanking": 8.5,
+    "totalContent": 45,
+    "publishedContent": 32,
+    "avgVisibilityScore": 78.5,
+    "totalMentions": 234,
+    "topKeywords": [...],
+    "visibilityByPlatform": [...]
+  }
+}
+
+Response (Success):
+{
+  "success": true,
+  "message": "Report sent successfully"
+}
+```
+
+### Troubleshooting
+
+**Error: "Email service not configured"**
+- Ensure `GMAIL_USER` and `GMAIL_APP_PASSWORD` are set in `.env.local`
+
+**Error: "Invalid login"**
+- Verify App Password is correct (16 characters)
+- Ensure 2-Step Verification is enabled
+- Generate a new App Password if needed
+
+**Emails not arriving**
+- Check spam/junk folder
+- Verify email address is correct
+- Check Gmail's "Sent" folder
+
+For detailed setup instructions, see: `docs/EMAIL_REPORT_SETUP.md`
+
+---
+
+## 📊 Public Report Sharing
+
+### Overview
+Automatically generate and share public performance reports via unique URLs. When users send reports via email, the system creates a shareable public link that anyone can access without authentication.
+
+### Features
+✅ **Automatic Storage**: Report data saved to database when emailed
+✅ **Unique Share Links**: URL-safe tokens for each report
+✅ **Public Access**: No login required to view
+✅ **View Tracking**: Automatic view count for each report
+✅ **Beautiful Public Page**: Matches dashboard design aesthetics
+✅ **Email Integration**: Public link included in report emails
+✅ **Permanent Storage**: Reports remain accessible indefinitely
+
+### How It Works
+
+#### 1. Generate & Send Report
+1. User goes to **Dashboard → Reports**
+2. Selects date range (7/30/90 days)
+3. Clicks **"Email Report"**
+4. System automatically:
+   - Saves complete report data to `reports` table
+   - Generates unique 40-character share token
+   - Creates public URL
+   - Sends email with public link
+
+#### 2. Share Report
+Email recipients receive:
+- Professional HTML report email
+- **"View Public Report"** button
+- Shareable URL they can forward to others
+- No login required
+
+#### 3. View Public Report
+Anyone with the link can:
+- View full performance report
+- See all metrics, keywords, and AI visibility data
+- Access from any device (responsive)
+- No authentication needed
+
+### Public Report URL Structure
+
+```
+https://yourdomain.com/public/report/[shareToken]
+```
+
+Example:
+```
+https://georepute.ai/public/report/abc123xyz789...
+```
+
+### Database Table
+
+**Table**: `reports`
+
+Key fields:
+- `share_token`: Unique 40-char token (auto-generated)
+- `is_public`: Boolean (default: true)
+- `expires_at`: Optional expiration date
+- `view_count`: Tracks number of views
+- Complete report data (keywords, content, AI visibility)
+
+### API Endpoints
+
+#### Get Public Report
+```typescript
+GET /api/reports/public/[shareToken]
+
+Response:
+{
+  "success": true,
+  "report": {
+    "id": "uuid",
+    "title": "Last 30 Days Performance Report",
+    "date_range": "Last 30 Days",
+    "generated_at": "2025-12-01T10:00:00Z",
+    "total_keywords": 150,
+    "avg_ranking": 8.5,
+    "total_content": 45,
+    "avg_visibility_score": 78.5,
+    "view_count": 42,
+    // ... all report data
+  }
+}
+```
+
+### Public Page Features
+
+**What's Included:**
+- 📊 Report title and date range
+- 👁️ View counter
+- 📈 Key metrics cards (Keywords, Ranking, Content, AI Visibility)
+- 🔑 Top 10 keywords with rankings and volumes
+- 🤖 AI platform visibility breakdown
+- 📱 Fully responsive design
+- 🎨 Professional gradients and styling
+
+**What's NOT Exposed:**
+- ❌ User personal information
+- ❌ Organization details
+- ❌ Email addresses
+- ❌ Private/sensitive data
+
+### Security Features
+
+✅ **Row Level Security (RLS)**: Database-level access control
+✅ **Anonymous Access**: Public reports viewable without auth
+✅ **Unique Tokens**: 40-character collision-resistant tokens
+✅ **Optional Expiration**: Set expiration dates if needed
+✅ **Private Option**: Make reports private anytime
+✅ **Audit Trail**: View count tracking
+
+### Database Setup
+
+Run migration:
+```sql
+-- Execute in Supabase SQL Editor
+-- File: database/009_reports_table.sql
+```
+
+This creates:
+- `reports` table with all report data fields
+- Unique indexes on `share_token`
+- RLS policies for public/private access
+- Auto-increment view count function
+- Share token generation trigger
+
+### RLS Policies
+
+**Public Access** (no auth required):
+```sql
+CREATE POLICY "Anyone can view public reports"
+  ON public.reports
+  FOR SELECT
+  USING (is_public = true AND (expires_at IS NULL OR expires_at > NOW()));
+```
+
+**User Access**:
+- Users can create their own reports
+- Users can view/edit/delete their own reports
+- Organization members can view org reports
+
+### Use Cases
+
+**1. Client Reporting**
+- Generate monthly performance reports
+- Share with clients via email
+- Clients forward to stakeholders
+- Track engagement via view counts
+
+**2. Team Collaboration**
+- Share reports with team members
+- No need for separate logins
+- Everyone sees same data
+- Perfect for distributed teams
+
+**3. Public Transparency**
+- Share results publicly
+- Build trust with stakeholders
+- Demonstrate progress
+- Use in presentations
+
+### Managing Reports
+
+#### View Your Reports
+```sql
+SELECT id, title, date_range, share_token, view_count, generated_at
+FROM reports
+WHERE user_id = auth.uid()
+ORDER BY generated_at DESC;
+```
+
+#### Make Report Private
+```sql
+UPDATE reports
+SET is_public = false
+WHERE id = 'report_uuid' AND user_id = auth.uid();
+```
+
+#### Set Expiration
+```sql
+UPDATE reports
+SET expires_at = NOW() + INTERVAL '7 days'
+WHERE id = 'report_uuid' AND user_id = auth.uid();
+```
+
+### Monitoring
+
+**View Count Tracking:**
+- Automatically incremented on each view
+- Shown in public report header
+- Visible to report owner in dashboard
+- Useful for engagement metrics
+
+**Popular Reports:**
+```sql
+SELECT title, view_count, generated_at
+FROM reports
+WHERE is_public = true
+ORDER BY view_count DESC
+LIMIT 10;
+```
+
+For detailed documentation, see:
+- `docs/PUBLIC_REPORTS_GUIDE.md` - Complete guide
+- `docs/PUBLIC_REPORTS_TESTING.md` - Testing instructions
+
+---
+
 ## 🗄️ Database Setup
 
 ### Migration Order
@@ -694,6 +1028,13 @@ Execute these SQL files in Supabase SQL Editor in this order:
    - Creates seat_payments table
    - Implements seat validation triggers
    - Enforces seat limits
+
+9. **009_reports_table.sql** ⭐ NEW
+   - Creates reports table for public sharing
+   - Implements share token generation
+   - Sets up RLS for public access
+   - Adds view count tracking
+   - Auto-generates unique share tokens
 
 ### Key Tables
 
