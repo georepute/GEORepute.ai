@@ -21,8 +21,15 @@ import {
   RefreshCw,
   Mail,
   X,
+  Share2,
+  Link,
+  MessageCircle,
+  Check,
+  Sheet,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import {
   LineChart,
   Line,
@@ -156,6 +163,10 @@ export default function Reports() {
   const [emailAddress, setEmailAddress] = useState("");
   const [emailName, setEmailName] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareLink, setShareLink] = useState("");
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
     loadReportData();
@@ -670,6 +681,337 @@ export default function Reports() {
     }
   };
 
+  const generateShareLink = async () => {
+    if (!reportData) return null;
+
+    try {
+      const dateRangeText = dateRange === "7d" ? "Last 7 Days" : dateRange === "30d" ? "Last 30 Days" : "Last 90 Days";
+      
+      const response = await fetch("/api/reports/send-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: emailAddress || "noreply@georepute.ai",
+          userName: emailName || "User",
+          reportData: {
+            dateRange: dateRangeText,
+            totalKeywords: reportData.totalKeywords,
+            avgRanking: reportData.avgRanking,
+            totalContent: reportData.totalContent,
+            publishedContent: reportData.publishedContent,
+            avgVisibilityScore: reportData.avgVisibilityScore,
+            totalMentions: reportData.totalMentions,
+            topKeywords: reportData.topKeywords.slice(0, 10),
+            visibilityByPlatform: reportData.visibilityByPlatform.slice(0, 5),
+          },
+          fullReportData: {
+            totalKeywords: reportData.totalKeywords,
+            keywordsChange: reportData.keywordsChange,
+            avgRanking: reportData.avgRanking,
+            rankingChange: reportData.rankingChange,
+            topKeywords: reportData.topKeywords,
+            rankingTrend: reportData.rankingTrend,
+            totalContent: reportData.totalContent,
+            contentChange: reportData.contentChange,
+            publishedContent: reportData.publishedContent,
+            draftContent: reportData.draftContent,
+            contentByPlatform: reportData.contentByPlatform,
+            contentByStatus: reportData.contentByStatus,
+            recentContent: reportData.recentContent,
+            avgVisibilityScore: reportData.avgVisibilityScore,
+            visibilityChange: reportData.visibilityChange,
+            totalMentions: reportData.totalMentions,
+            mentionsChange: reportData.mentionsChange,
+            visibilityByPlatform: reportData.visibilityByPlatform,
+            visibilityTrend: reportData.visibilityTrend,
+            totalProjects: reportData.totalProjects,
+            activeSessions: reportData.activeSessions,
+            totalResponses: reportData.totalResponses,
+            responsesByPlatform: reportData.responsesByPlatform,
+            performanceSummary: reportData.performanceSummary,
+          },
+          generateLinkOnly: true,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to generate link");
+      }
+
+      return result.publicUrl;
+    } catch (error: any) {
+      console.error("Error generating share link:", error);
+      toast.error("Failed to generate share link");
+      return null;
+    }
+  };
+
+  const handleShareClick = async () => {
+    setShowShareModal(true);
+    setLinkCopied(false);
+    
+    // Generate share link when modal opens
+    if (!shareLink) {
+      const link = await generateShareLink();
+      if (link) {
+        setShareLink(link);
+      }
+    }
+  };
+
+  const handleCopyLink = async () => {
+    let link = shareLink;
+    
+    if (!link) {
+      link = await generateShareLink();
+      if (link) {
+        setShareLink(link);
+      }
+    }
+    
+    if (link) {
+      navigator.clipboard.writeText(link);
+      setLinkCopied(true);
+      toast.success("Link copied to clipboard!");
+      
+      setTimeout(() => {
+        setLinkCopied(false);
+      }, 3000);
+    }
+  };
+
+  const handleShareWhatsApp = async () => {
+    let link = shareLink;
+    
+    if (!link) {
+      link = await generateShareLink();
+      if (link) {
+        setShareLink(link);
+      }
+    }
+    
+    if (link) {
+      const message = encodeURIComponent(`Check out my GEORepute.ai Performance Report: ${link}`);
+      window.open(`https://wa.me/?text=${message}`, "_blank");
+    }
+  };
+
+  const handleShareEmail = () => {
+    // Close share modal and open email modal
+    setShowShareModal(false);
+    setShowEmailModal(true);
+  };
+
+  const handleExportPDF = async () => {
+    setShowExportModal(false);
+    
+    if (!reportData) {
+      toast.error("No data available to export");
+      return;
+    }
+
+    const loadingToast = toast.loading("Generating PDF... This may take a moment");
+
+    try {
+      // Get the main report container
+      const reportElement = document.querySelector('.report-container') as HTMLElement;
+      
+      if (!reportElement) {
+        toast.error("Could not find report content");
+        return;
+      }
+
+      // Create PDF
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+
+      // Add header
+      pdf.setFontSize(20);
+      pdf.setTextColor(14, 165, 233); // primary color
+      pdf.text("GEORepute.ai BI Report", pageWidth / 2, 15, { align: 'center' });
+      
+      pdf.setFontSize(10);
+      pdf.setTextColor(107, 114, 128);
+      pdf.text(`Generated: ${format(new Date(), "MMM dd, yyyy 'at' hh:mm a")}`, pageWidth / 2, 22, { align: 'center' });
+      pdf.text(`Date Range: ${dateRange === "7d" ? "Last 7 Days" : dateRange === "30d" ? "Last 30 Days" : "Last 90 Days"}`, pageWidth / 2, 27, { align: 'center' });
+
+      let yPosition = 35;
+
+      // Get all sections to capture
+      const sections = reportElement.querySelectorAll('.report-section');
+      
+      for (let i = 0; i < sections.length; i++) {
+        const section = sections[i] as HTMLElement;
+        
+        // Capture the section as canvas
+        const canvas = await html2canvas(section, {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const imgWidth = pageWidth - (margin * 2);
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+        // Check if we need a new page
+        if (yPosition + imgHeight > pageHeight - margin) {
+          pdf.addPage();
+          yPosition = margin;
+        }
+
+        // Add image to PDF
+        pdf.addImage(imgData, 'PNG', margin, yPosition, imgWidth, imgHeight);
+        yPosition += imgHeight + 5;
+      }
+
+      // Add footer on last page
+      const totalPages = pdf.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        pdf.setPage(i);
+        pdf.setFontSize(8);
+        pdf.setTextColor(156, 163, 175);
+        pdf.text(
+          `Page ${i} of ${totalPages}`,
+          pageWidth / 2,
+          pageHeight - 5,
+          { align: 'center' }
+        );
+      }
+
+      // Save the PDF
+      pdf.save(`georepute-report-${format(new Date(), "yyyy-MM-dd")}.pdf`);
+      
+      toast.success("PDF exported successfully!", { id: loadingToast });
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast.error("Failed to generate PDF", { id: loadingToast });
+    }
+  };
+
+  const handleExportCSV = () => {
+    setShowExportModal(false);
+    exportToCSV();
+  };
+
+  const handleExportSheet = () => {
+    setShowExportModal(false);
+    
+    if (!reportData) {
+      toast.error("No data available to export");
+      return;
+    }
+
+    // Create Excel-compatible CSV with UTF-8 BOM
+    const BOM = "\uFEFF";
+    const csvData = [
+      ["GEORepute.ai - Comprehensive BI Report"],
+      [`Generated: ${format(new Date(), "PPP 'at' pp")}`],
+      [`Date Range: ${dateRange === "7d" ? "Last 7 Days" : dateRange === "30d" ? "Last 30 Days" : "Last 90 Days"}`],
+      [""],
+      ["=== KEY METRICS ==="],
+      ["Metric", "Value", "Change (%)"],
+      ["Total Keywords", reportData.totalKeywords, reportData.keywordsChange.toFixed(2)],
+      ["Content Created", reportData.totalContent, reportData.contentChange.toFixed(2)],
+      ["AI Visibility Score", reportData.avgVisibilityScore.toFixed(2) + "%", reportData.visibilityChange.toFixed(2)],
+      ["Brand Mentions", reportData.totalMentions, reportData.mentionsChange.toFixed(2)],
+      ["Average Ranking", reportData.avgRanking.toFixed(2), ""],
+      ["Published Content", reportData.publishedContent, ""],
+      ["Draft Content", reportData.draftContent, ""],
+      [""],
+      ["=== TOP KEYWORDS PERFORMANCE ==="],
+      ["Rank", "Keyword", "Ranking Position", "Search Volume", "Change"],
+      ...reportData.topKeywords.map((k, i) => [
+        i + 1,
+        k.keyword,
+        k.ranking || "N/A",
+        k.volume || "N/A",
+        k.change,
+      ]),
+      [""],
+      ["=== CONTENT BY PLATFORM ==="],
+      ["Platform", "Count", "Percentage"],
+      ...reportData.contentByPlatform.map((p) => [
+        p.platform,
+        p.count,
+        ((p.count / reportData.totalContent) * 100).toFixed(1) + "%",
+      ]),
+      [""],
+      ["=== AI VISIBILITY BY PLATFORM ==="],
+      ["Platform", "Visibility Score (%)", "Mentions", "Sentiment Score"],
+      ...reportData.visibilityByPlatform.map((p) => [
+        p.platform,
+        p.score.toFixed(2),
+        p.mentions,
+        p.sentiment.toFixed(2),
+      ]),
+      [""],
+      ["=== BRAND ANALYSIS ==="],
+      ["Metric", "Value"],
+      ["Total Projects", reportData.totalProjects],
+      ["Active Sessions", reportData.activeSessions],
+      ["Total AI Responses", reportData.totalResponses],
+      [""],
+      ["=== RESPONSE DISTRIBUTION ==="],
+      ["Platform", "Response Count", "Percentage"],
+      ...reportData.responsesByPlatform.map((p) => [
+        p.platform,
+        p.count,
+        reportData.totalResponses > 0 
+          ? ((p.count / reportData.totalResponses) * 100).toFixed(1) + "%"
+          : "0%",
+      ]),
+      [""],
+      ["=== PERFORMANCE SUMMARY ==="],
+      ["Metric", "Current Value", "Target"],
+      ...reportData.performanceSummary.map((p) => [
+        p.metric,
+        p.value.toFixed(1),
+        p.target,
+      ]),
+      [""],
+      [""],
+      ["Report generated by GEORepute.ai"],
+      [`© ${new Date().getFullYear()} GEORepute.ai. All rights reserved.`],
+    ];
+
+    // Convert to CSV with proper escaping
+    const csv = BOM + csvData.map((row) => 
+      row.map(cell => {
+        const cellStr = String(cell);
+        // Escape quotes and wrap in quotes if contains comma, quote, or newline
+        if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+          return `"${cellStr.replace(/"/g, '""')}"`;
+        }
+        return cellStr;
+      }).join(",")
+    ).join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `georepute-report-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    toast.success("Excel-compatible spreadsheet downloaded successfully!");
+  };
+
   if (loading) {
     return (
       <div className="p-4 sm:p-6 lg:p-8">
@@ -710,9 +1052,9 @@ export default function Reports() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8 report-container">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-8 report-section">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -733,37 +1075,26 @@ export default function Reports() {
               />
               Refresh
             </button>
-            <select
-              value={dateRange}
-              onChange={(e) =>
-                setDateRange(e.target.value as "7d" | "30d" | "90d")
-              }
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-            >
-              <option value="7d">Last 7 Days</option>
-              <option value="30d">Last 30 Days</option>
-              <option value="90d">Last 90 Days</option>
-            </select>
             <button
-              onClick={() => setShowEmailModal(true)}
-              className="px-4 py-2 border border-primary-600 text-primary-600 rounded-lg hover:bg-primary-50 transition-all flex items-center gap-2"
+              onClick={handleShareClick}
+              className="px-4 py-2 border border-green-600 text-green-600 rounded-lg hover:bg-green-50 transition-all flex items-center gap-2"
             >
-              <Mail className="w-4 h-4" />
-              Email Report
+              <Share2 className="w-4 h-4" />
+              Share
             </button>
             <button
-              onClick={exportToCSV}
+              onClick={() => setShowExportModal(true)}
               className="px-4 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all flex items-center gap-2"
             >
               <Download className="w-4 h-4" />
-              Export CSV
+              Export
             </button>
           </div>
         </div>
       </div>
 
       {/* Key Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 report-section">
         <MetricCard
           label="Total Keywords"
           value={reportData.totalKeywords.toString()}
@@ -799,7 +1130,7 @@ export default function Reports() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
+        className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
       >
         <h2 className="text-xl font-bold text-gray-900 mb-6">
           Performance Overview
@@ -829,7 +1160,7 @@ export default function Reports() {
       </motion.div>
 
       {/* Rankings and Visibility Trends */}
-      <div className="grid lg:grid-cols-2 gap-6 mb-8">
+      <div className="grid lg:grid-cols-2 gap-6 mb-8 report-section">
         {/* Ranking Trend */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -1013,7 +1344,7 @@ export default function Reports() {
       </div>
 
       {/* Content Distribution */}
-      <div className="grid lg:grid-cols-2 gap-6 mb-8">
+      <div className="grid lg:grid-cols-2 gap-6 mb-8 report-section">
         {/* Content by Platform */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -1107,7 +1438,7 @@ export default function Reports() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.7 }}
-        className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
+        className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
       >
         <h2 className="text-xl font-bold text-gray-900 mb-6">
           AI Platform Visibility Performance
@@ -1188,7 +1519,7 @@ export default function Reports() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.9 }}
-        className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
+        className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
       >
         <h2 className="text-xl font-bold text-gray-900 mb-6">
           Top 10 Keywords Performance
@@ -1270,7 +1601,7 @@ export default function Reports() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1.0 }}
-        className="bg-white rounded-xl p-6 border border-gray-200 mb-8"
+        className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
       >
         <h2 className="text-xl font-bold text-gray-900 mb-6">
           Recent Content Activity
@@ -1311,7 +1642,7 @@ export default function Reports() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1.1 }}
-        className="bg-white rounded-xl border border-gray-200 overflow-hidden"
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden report-section"
       >
         {/* Header Section with Gradient */}
         <div className="bg-gradient-to-r from-primary-600 to-accent-600 p-6 text-white">
@@ -1613,6 +1944,244 @@ export default function Reports() {
                     </>
                   )}
                 </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-green-600 to-emerald-600 p-6 text-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Share2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">Share Report</h2>
+                    <p className="text-sm text-white/90 mt-1">
+                      Choose your sharing method
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowShareModal(false)}
+                  className="w-8 h-8 hover:bg-white/20 rounded-lg transition-colors flex items-center justify-center"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <div className="space-y-3">
+                {/* Share via Link */}
+                <button
+                  onClick={handleCopyLink}
+                  className="w-full p-5 border-2 border-gray-200 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-blue-100 group-hover:bg-blue-200 rounded-xl flex items-center justify-center transition-colors">
+                      {linkCopied ? (
+                        <Check className="w-7 h-7 text-blue-600" />
+                      ) : (
+                        <Link className="w-7 h-7 text-blue-600" />
+                      )}
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h3 className="font-bold text-gray-900 text-lg mb-1">
+                        {linkCopied ? "Link Copied!" : "Via Link"}
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        {linkCopied ? "Share the copied link with anyone" : "Copy link to clipboard and share"}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Share via WhatsApp */}
+                <button
+                  onClick={handleShareWhatsApp}
+                  className="w-full p-5 border-2 border-gray-200 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-green-100 group-hover:bg-green-200 rounded-xl flex items-center justify-center transition-colors">
+                      <MessageCircle className="w-7 h-7 text-green-600" />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h3 className="font-bold text-gray-900 text-lg mb-1">
+                        Via WhatsApp
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Share directly on WhatsApp
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Share via Email */}
+                <button
+                  onClick={handleShareEmail}
+                  className="w-full p-5 border-2 border-gray-200 rounded-xl hover:border-purple-500 hover:bg-purple-50 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-purple-100 group-hover:bg-purple-200 rounded-xl flex items-center justify-center transition-colors">
+                      <Mail className="w-7 h-7 text-purple-600" />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h3 className="font-bold text-gray-900 text-lg mb-1">
+                        Via Email
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Send report link via email client
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Info Box */}
+              <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border border-blue-100">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm mt-0.5">
+                    <FileText className="w-4 h-4 text-green-600" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-gray-900 mb-1">
+                      Public Report Link
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      A shareable link will be generated with your report data. Anyone with the link can view your report.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-primary-600 to-accent-600 p-6 text-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Download className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">Export Report</h2>
+                    <p className="text-sm text-white/90 mt-1">
+                      Choose your export format
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="w-8 h-8 hover:bg-white/20 rounded-lg transition-colors flex items-center justify-center"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <div className="space-y-3">
+                {/* Export PDF */}
+                <button
+                  onClick={handleExportPDF}
+                  className="w-full p-5 border-2 border-gray-200 rounded-xl hover:border-red-500 hover:bg-red-50 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-red-100 group-hover:bg-red-200 rounded-xl flex items-center justify-center transition-colors">
+                      <FileText className="w-7 h-7 text-red-600" />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h3 className="font-bold text-gray-900 text-lg mb-1">
+                        Export PDF
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Download report as PDF document
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Export CSV */}
+                <button
+                  onClick={handleExportCSV}
+                  className="w-full p-5 border-2 border-gray-200 rounded-xl hover:border-green-500 hover:bg-green-50 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-green-100 group-hover:bg-green-200 rounded-xl flex items-center justify-center transition-colors">
+                      <FileSpreadsheet className="w-7 h-7 text-green-600" />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h3 className="font-bold text-gray-900 text-lg mb-1">
+                        Export CSV
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Download data as CSV spreadsheet
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {/* Export Sheet */}
+                <button
+                  onClick={handleExportSheet}
+                  className="w-full p-5 border-2 border-gray-200 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-blue-100 group-hover:bg-blue-200 rounded-xl flex items-center justify-center transition-colors">
+                      <Sheet className="w-7 h-7 text-blue-600" />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h3 className="font-bold text-gray-900 text-lg mb-1">
+                        Export Sheet
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Export to Excel or Google Sheets
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Info Box */}
+              <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-100">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm mt-0.5">
+                    <Download className="w-4 h-4 text-primary-600" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-gray-900 mb-1">
+                      Export Options
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      Choose the format that best suits your needs. All exports include comprehensive report data.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </motion.div>

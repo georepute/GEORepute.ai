@@ -217,7 +217,7 @@ export async function sendReportEmail(
         <div style="text-align: center; margin: 40px 0 30px 0;">
           <a href="${primaryUrl}" 
              style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px 48px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);">
-            ${publicReportUrl ? 'View Public Report' : 'View Full Report'}
+            ${publicReportUrl ? 'View Full Report' : 'View Full Report'}
           </a>
         </div>
         
