@@ -95,42 +95,61 @@ export async function publishToFacebook(
       message = content.content;
     }
 
-    // Prepare post data
-    const postData: any = {
-      message: message,
-    };
+    let response;
+    let endpoint;
 
-    // Add link if provided
-    if (content.metadata?.link) {
-      postData.link = content.metadata.link;
-    }
-
-    // Add image if provided (as attachment)
+    // Check if we have an image to post
     if (content.metadata?.imageUrl) {
-      // For images, we can either:
-      // 1. Use the link with og:image (if link is provided)
-      // 2. Upload image separately (more complex)
-      // For now, if link is provided, Facebook will auto-fetch og:image
-      if (!postData.link) {
-        postData.link = content.metadata.imageUrl;
-      }
-    }
+      // Use /photos endpoint to post as actual photo (not link preview)
+      console.log(`📤 Publishing photo to Facebook Page ${config.pageId}...`);
+      console.log(`🖼️ Image URL: ${content.metadata.imageUrl}`);
+      
+      endpoint = `https://graph.facebook.com/v18.0/${config.pageId}/photos`;
+      
+      const photoData: any = {
+        url: content.metadata.imageUrl, // Direct image URL
+        caption: message, // Post text as caption
+        access_token: config.pageAccessToken,
+      };
 
-    // Post to Facebook Page using Graph API
-    console.log(`📤 Publishing to Facebook Page ${config.pageId}...`);
-    const response = await fetch(
-      `https://graph.facebook.com/v18.0/${config.pageId}/feed`,
-      {
+      // Add link if provided (will be included in caption)
+      if (content.metadata?.link) {
+        // Facebook doesn't support separate links in photo posts
+        // We'll append it to the caption instead
+        photoData.caption = `${message}\n\n🔗 ${content.metadata.link}`;
+      }
+
+      response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          ...postData,
-          access_token: config.pageAccessToken,
-        }),
+        body: JSON.stringify(photoData),
+      });
+    } else {
+      // No image - use /feed endpoint for text post
+      console.log(`📤 Publishing text post to Facebook Page ${config.pageId}...`);
+      
+      endpoint = `https://graph.facebook.com/v18.0/${config.pageId}/feed`;
+      
+    const postData: any = {
+      message: message,
+        access_token: config.pageAccessToken,
+    };
+
+      // Add link if provided (will show as link preview)
+    if (content.metadata?.link) {
+      postData.link = content.metadata.link;
+    }
+
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(postData),
+      });
       }
-    );
 
     const result = await response.json();
 
@@ -168,14 +187,21 @@ export async function publishToFacebook(
     }
 
     // Success - extract post ID
-    const postId = result.id;
+    const postId = result.id || result.post_id;
+    
+    console.log(`✅ Successfully published to Facebook!`);
+    console.log(`   Post ID: ${postId}`);
+    console.log(`   Type: ${content.metadata?.imageUrl ? 'Photo Post' : 'Text Post'}`);
     
     // Construct Facebook post URL
-    // Format: https://www.facebook.com/{pageId}/posts/{postId}
-    // Or: https://www.facebook.com/{postId}
+    // For photo posts, the ID format is: {page-id}_{photo-id}
+    // For regular posts: {page-id}_{post-id}
+    // URL format: https://www.facebook.com/{page-id}/posts/{post-id}
     const url = postId 
       ? `https://www.facebook.com/${postId.replace('_', '/posts/')}`
       : undefined;
+
+    console.log(`   URL: ${url}`);
 
     return {
       success: true,
@@ -246,17 +272,61 @@ export async function getUserPages(
   userAccessToken: string
 ): Promise<{ success: boolean; pages?: any[]; error?: string }> {
   try {
-    console.log('🔍 Fetching user pages from Facebook API...');
+    console.log('\n╔════════════════════════════════════════════════════════╗');
+    console.log('║  🔍 FACEBOOK PAGE ACCESS DIAGNOSTIC                   ║');
+    console.log('╚════════════════════════════════════════════════════════╝\n');
     
-    // Try multiple endpoints to get pages
-    // Method 1: /me/accounts (standard way)
+    // First, check what permissions this token has
+    console.log('📋 Step 1: Checking token permissions...');
+    try {
+      const permUrl = `https://graph.facebook.com/v18.0/me/permissions?access_token=${userAccessToken}`;
+      const permResponse = await fetch(permUrl);
+      const permData = await permResponse.json();
+      
+      if (permData.data) {
+        const granted = permData.data.filter((p: any) => p.status === 'granted');
+        const declined = permData.data.filter((p: any) => p.status === 'declined');
+        
+        console.log(`   ✅ Granted permissions (${granted.length}):`);
+        granted.forEach((p: any) => console.log(`      - ${p.permission}`));
+        
+        if (declined.length > 0) {
+          console.log(`   ❌ Declined permissions (${declined.length}):`);
+          declined.forEach((p: any) => console.log(`      - ${p.permission}`));
+        }
+        
+        const hasPagesShowList = granted.some((p: any) => p.permission === 'pages_show_list');
+        if (!hasPagesShowList) {
+          console.error('\n   ❌ CRITICAL: pages_show_list permission is MISSING!');
+          console.error('   User may have clicked "Skip" or "Don\'t Allow" during OAuth');
+        }
+      }
+    } catch (permError) {
+      console.warn('   ⚠️ Could not check permissions:', permError);
+    }
+    
+    // Get user info
+    console.log('\n📋 Step 2: Getting user account info...');
+    try {
+      const userUrl = `https://graph.facebook.com/v18.0/me?fields=id,name,email&access_token=${userAccessToken}`;
+      const userResponse = await fetch(userUrl);
+      const userData = await userResponse.json();
+      
+      console.log(`   User ID: ${userData.id}`);
+      console.log(`   Name: ${userData.name}`);
+      console.log(`   Email: ${userData.email || 'N/A'}`);
+    } catch (userError) {
+      console.warn('   ⚠️ Could not get user info:', userError);
+    }
+    
+    // Now try to get pages
+    console.log('\n📋 Step 3: Fetching Pages from /me/accounts...');
     let apiUrl = `https://graph.facebook.com/v18.0/me/accounts?fields=id,name,access_token,category&access_token=${userAccessToken}`;
-    console.log('📡 Trying /me/accounts endpoint...');
-    console.log('📡 API URL (without token):', apiUrl.replace(userAccessToken, '***TOKEN***'));
+    console.log('   API URL:', apiUrl.replace(userAccessToken, '***TOKEN***'));
     
     let response = await fetch(apiUrl);
     let result = await response.json();
-    console.log('📥 /me/accounts Response:', JSON.stringify(result, null, 2));
+    console.log('   Response:', JSON.stringify(result, null, 2));
     
     // If no pages found, try alternative method
     if (!result.data || result.data.length === 0) {
@@ -310,19 +380,99 @@ export async function getUserPages(
     }
 
     const pages = result.data || [];
-    console.log(`✅ Found ${pages.length} Facebook page(s)`);
+    console.log(`✅ Found ${pages.length} personal Facebook page(s)`);
 
-    if (pages.length === 0) {
-      // Provide more helpful error message
+    // Step 4: Check for Business Portfolio Pages (if business_management permission granted)
+    console.log('\n📋 Step 4: Checking for Business Portfolio Pages...');
+    let businessPages: any[] = [];
+    
+    try {
+      const permUrl = `https://graph.facebook.com/v18.0/me/permissions?access_token=${userAccessToken}`;
+      const permResponse = await fetch(permUrl);
+      const permData = await permResponse.json();
+      const hasBusinessManagement = permData.data?.some((p: any) => 
+        p.permission === 'business_management' && p.status === 'granted'
+      );
+      
+      if (hasBusinessManagement) {
+        console.log('   ✅ business_management permission granted - fetching Business Pages...');
+        
+        // Get user's businesses
+        const businessesUrl = `https://graph.facebook.com/v18.0/me/businesses?fields=id,name&access_token=${userAccessToken}`;
+        const businessesResponse = await fetch(businessesUrl);
+        const businessesData = await businessesResponse.json();
+        
+        if (businessesData.data && businessesData.data.length > 0) {
+          console.log(`   📊 Found ${businessesData.data.length} Business Portfolio(s)`);
+          
+          // Fetch pages from each business
+          for (const business of businessesData.data) {
+            console.log(`   🔍 Fetching pages from Business: ${business.name} (${business.id})`);
+            
+            const businessPagesUrl = `https://graph.facebook.com/v18.0/${business.id}/owned_pages?fields=id,name,access_token,category&access_token=${userAccessToken}`;
+            const businessPagesResponse = await fetch(businessPagesUrl);
+            const businessPagesData = await businessPagesResponse.json();
+            
+            if (businessPagesData.data && businessPagesData.data.length > 0) {
+              console.log(`   ✅ Found ${businessPagesData.data.length} page(s) in ${business.name}`);
+              businessPages.push(...businessPagesData.data);
+            } else {
+              console.log(`   ℹ️  No pages found in ${business.name}`);
+            }
+          }
+        } else {
+          console.log('   ℹ️  No Business Portfolios found');
+        }
+      } else {
+        console.log('   ℹ️  business_management permission not granted - skipping Business Pages');
+      }
+    } catch (businessError: any) {
+      console.warn('   ⚠️  Error fetching Business Pages:', businessError.message);
+    }
+    
+    // Combine personal and business pages
+    const allPages = [...pages, ...businessPages];
+    console.log(`\n📊 TOTAL PAGES: ${allPages.length} (${pages.length} personal + ${businessPages.length} business)`);
+
+    if (allPages.length === 0) {
+      console.error('\n╔═══════════════════════════════════════════════════════════╗');
+      console.error('║  ❌ ZERO PAGES FOUND - SOMETHING CHANGED                 ║');
+      console.error('╚═══════════════════════════════════════════════════════════╝');
+      console.error('\n🔍 WHAT COULD HAVE CHANGED:');
+      console.error('   1. ❌ Account was REMOVED as Admin from the Page');
+      console.error('   2. ❌ Page was UNPUBLISHED or DELETED');
+      console.error('   3. ❌ User REVOKED app permissions');
+      console.error('   4. ❌ Logging in with DIFFERENT account than before');
+      console.error('   5. ❌ Facebook changed Page settings/visibility');
+      console.error('\n💡 TO DEBUG:');
+      console.error('   A. Log into facebook.com with the SAME account you used before');
+      console.error('   B. Go to: https://www.facebook.com/pages/');
+      console.error('   C. Do you see YOUR Page listed?');
+      console.error('      ✅ YES → Check your role (must be Admin, not Editor)');
+      console.error('      ❌ NO  → Someone removed you OR you\'re using wrong account');
+      console.error('\n   D. If Page is there but role changed:');
+      console.error('      → Have Page owner make you Admin again');
+      console.error('\n   E. If using different account than before:');
+      console.error('      → Use the ORIGINAL account that worked');
+      console.error('\n   F. Check Page status:');
+      console.error('      → Page Settings → General → Page Visibility');
+      console.error('      → Must be "Page published"');
+      console.error('\n🧪 QUICK TEST:');
+      console.error('   - Graph API Explorer: https://developers.facebook.com/tools/explorer/');
+      console.error('   - Query: me/accounts');
+      console.error('   - If empty → No Admin access to any Page');
+      console.error('   - If has data → Permission issue in your app');
+      console.error('╚═══════════════════════════════════════════════════════════╝\n');
+      
       return {
         success: false,
-        error: 'No Facebook Pages found. Possible reasons: 1) You don\'t have admin access to any Pages, 2) The Page is in a different Facebook account, 3) The Page needs to be reconnected. Please verify: a) You are Admin of the Facebook Page, b) The Page exists and is published, c) You\'re logged in with the correct Facebook account that owns the Page.',
+        error: 'No Facebook Pages found. This account does not have Admin access to any personal Pages or Business Portfolio Pages. Either create a personal Page at facebook.com/pages/create, or ensure you have Admin access to a Page in your Business Portfolio.',
       };
     }
 
     return {
       success: true,
-      pages: pages,
+      pages: allPages,
     };
   } catch (error: any) {
     console.error('❌ Exception getting user pages:', error);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import {
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
+import ImageUpload from "@/components/ImageUpload";
 import toast from "react-hot-toast";
 import Link from "next/link";
 
@@ -30,6 +31,12 @@ export default function ContentGeneratorPage() {
   const [targetPlatform, setTargetPlatform] = useState("reddit");
   const [userBrand, setUserBrand] = useState("");
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
+  const [imageUrl, setImageUrl] = useState(""); // For Instagram posts
+  
+  // Brand Voice
+  const [brandVoices, setBrandVoices] = useState<any[]>([]);
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
+  const [loadingVoices, setLoadingVoices] = useState(false);
 
   // Step 2: Diagnostic Scan Results
   const [diagnosticResults, setDiagnosticResults] = useState<any>(null);
@@ -51,6 +58,31 @@ export default function ContentGeneratorPage() {
     { value: "linkedin", label: "LinkedIn", desc: "Professional network", icon: "/linkedin.svg" },
     { value: "instagram", label: "Instagram", desc: "Visual social media", icon: "/instagram-1-svgrepo-com.svg" },
   ];
+
+  // Load brand voices on mount
+  useEffect(() => {
+    const loadBrandVoices = async () => {
+      setLoadingVoices(true);
+      try {
+        const response = await fetch("/api/brand-voice");
+        if (response.ok) {
+          const data = await response.json();
+          setBrandVoices(data.voices || []);
+          // Auto-select default voice if available
+          const defaultVoice = data.voices?.find((v: any) => v.is_default);
+          if (defaultVoice) {
+            setSelectedVoiceId(defaultVoice.id);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading brand voices:", error);
+      } finally {
+        setLoadingVoices(false);
+      }
+    };
+
+    loadBrandVoices();
+  }, []);
 
   // Step 1: Diagnostic Scan (using existing API or mock)
   const runDiagnosticScan = async () => {
@@ -108,6 +140,13 @@ export default function ContentGeneratorPage() {
 
     setGeneratingContent(true);
     try {
+      // Check if Instagram requires image
+      if (targetPlatform === 'instagram' && !imageUrl.trim()) {
+        toast.error("Instagram posts require an image URL");
+        setGeneratingContent(false);
+        return;
+      }
+
       // REAL AI Content Generation using OpenAI GPT-4 Turbo
       const response = await fetch('/api/geo-core/content-generate', {
         method: 'POST',
@@ -120,6 +159,8 @@ export default function ContentGeneratorPage() {
           targetPlatform,
           brandMention: userBrand,
           influenceLevel,
+          brandVoiceId: selectedVoiceId, // Include brand voice if selected
+          ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}), // Include imageUrl if provided
         }),
       });
 
@@ -139,6 +180,19 @@ export default function ContentGeneratorPage() {
         humanScore: data.metadata.humanScore || 95,
       });
       
+      // Schema is ALWAYS generated automatically in the background
+      if (data.schema && (data.schema.jsonLd || data.schema.scriptTags)) {
+        console.log("✅ SEO Schema Generated Automatically:", {
+          type: Array.isArray(data.schema.jsonLd) 
+            ? data.schema.jsonLd[0]?.["@type"] || "Article"
+            : data.schema.jsonLd?.["@type"] || "Article",
+          available: true,
+          jsonLd: data.schema.jsonLd,
+          scriptTagsLength: data.schema.scriptTags?.length || 0,
+        });
+        console.log("📋 Schema Script Tags (for embedding):", data.schema.scriptTags);
+      }
+      
       toast.success("Content generated successfully!");
     } catch (error) {
       console.error('Generation error:', error);
@@ -155,6 +209,7 @@ export default function ContentGeneratorPage() {
     toast.success("Content copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
   };
+
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -306,6 +361,93 @@ export default function ContentGeneratorPage() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
+
+                {/* Brand Voice Profile Selection */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Brand Voice Profile (Optional)
+                    </label>
+                    <Link
+                      href="/dashboard/settings?tab=brand-voice"
+                      className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+                    >
+                      + Create New
+                    </Link>
+                  </div>
+                  <select
+                    value={selectedVoiceId || ""}
+                    onChange={(e) => setSelectedVoiceId(e.target.value || null)}
+                    disabled={loadingVoices}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="">No voice profile (generic)</option>
+                    {brandVoices.map((voice) => (
+                      <option key={voice.id} value={voice.id}>
+                        {voice.brand_name} - {voice.tone} 
+                        {voice.is_default ? " ⭐" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedVoiceId && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs text-blue-900 font-semibold mb-1">
+                        🎭 Brand Voice Active:
+                      </p>
+                      <p className="text-xs text-blue-700">
+                        Content will maintain consistent {brandVoices.find(v => v.id === selectedVoiceId)?.brand_name} personality
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Image Upload (Required for Instagram, Optional for others) */}
+                {targetPlatform === 'instagram' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Image (Required for Instagram) *
+                    </label>
+                    <ImageUpload
+                      onImageUploaded={(url) => setImageUrl(url)}
+                      currentImageUrl={imageUrl}
+                      maxSizeMB={8}
+                      className="w-full"
+                    />
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-xs text-blue-900 font-semibold mb-1">
+                        📸 Instagram Image Requirements:
+                      </p>
+                      <ul className="text-xs text-blue-700 space-y-0.5 ml-4">
+                        <li>• <strong>Required</strong> for all Instagram posts</li>
+                        <li>• Formats: JPEG, PNG, WebP</li>
+                        <li>• <strong>Max size: 8MB</strong> (Instagram API limit)</li>
+                        <li>• Aspect ratio: 4:5 (portrait) to 1.91:1 (landscape)</li>
+                        <li>• Min width: 320px</li>
+                        <li>• Stored securely in your cloud storage</li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Optional Image Upload for Other Platforms */}
+                {(targetPlatform === 'facebook' || targetPlatform === 'linkedin' || targetPlatform === 'medium') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Image (Optional - Enhances Engagement)
+                    </label>
+                    <ImageUpload
+                      onImageUploaded={(url) => setImageUrl(url)}
+                      currentImageUrl={imageUrl}
+                      maxSizeMB={20}
+                      className="w-full"
+                    />
+                    <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-lg">
+                      <p className="text-xs text-gray-600">
+                        💡 <strong>Tip:</strong> Posts with images get 2-3x more engagement on {targetPlatform}!
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Influence Level */}
                 <div>
@@ -537,6 +679,7 @@ export default function ContentGeneratorPage() {
                           <li>• Reddit platform typically scores highest (96%+)</li>
                           <li>• Use "Subtle" influence for maximum authenticity</li>
                           <li>• Add personal context for even better results</li>
+                          <li>• SEO schema is automatically generated in the background (check console/terminal)</li>
                         </ul>
                       </div>
                     </div>

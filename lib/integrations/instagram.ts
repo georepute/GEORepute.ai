@@ -62,14 +62,44 @@ async function createMediaContainer(
   caption: string
 ): Promise<string> {
   try {
-    // Download image from URL
-    const imageResponse = await fetch(imageUrl);
-    if (!imageResponse.ok) {
-      throw new Error(`Failed to download image: ${imageResponse.status}`);
+    console.log(`🔍 Validating image URL: ${imageUrl}`);
+    
+    // Validate image URL format
+    const validExtensions = ['.jpg', '.jpeg', '.png'];
+    const urlLower = imageUrl.toLowerCase();
+    const hasValidExtension = validExtensions.some(ext => urlLower.includes(ext));
+    
+    if (!hasValidExtension) {
+      console.warn(`⚠️  Image URL doesn't have a common image extension (.jpg, .jpeg, .png)`);
+      console.warn(`   URL: ${imageUrl}`);
     }
+    
+    // Test if image is accessible and get content type
+    console.log(`📥 Testing image accessibility...`);
+    const imageResponse = await fetch(imageUrl, { method: 'HEAD' });
+    
+    if (!imageResponse.ok) {
+      throw new Error(`Image URL is not accessible (HTTP ${imageResponse.status}). Instagram cannot download the image. Please use a publicly accessible image URL.`);
+    }
+    
+    const contentType = imageResponse.headers.get('content-type') || '';
+    console.log(`   Content-Type: ${contentType}`);
+    console.log(`   Status: ${imageResponse.status}`);
+    
+    // Validate content type
+    const validContentTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (!validContentTypes.some(type => contentType.toLowerCase().includes(type))) {
+      throw new Error(
+        `Invalid image format. Instagram only supports JPEG and PNG images. ` +
+        `Detected format: ${contentType || 'unknown'}. ` +
+        `Please provide a direct link to a .jpg or .png file.`
+      );
+    }
+    
+    console.log(`✅ Image validation passed`);
+    console.log(`📤 Creating Instagram media container...`);
 
-    // For Instagram, we need to upload the image
-    // Since we have a URL, we'll use it directly in the media container
+    // For Instagram, we use the image URL directly
     const response = await fetch(
       `https://graph.facebook.com/v18.0/${instagramAccountId}/media`,
       {
@@ -87,10 +117,20 @@ async function createMediaContainer(
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw new Error(`Instagram API error: ${response.status} - ${error.error?.message || 'Failed to create media container'}`);
+      console.error(`❌ Instagram API error:`, error);
+      
+      let errorMessage = error.error?.message || 'Failed to create media container';
+      
+      // Provide more helpful error messages
+      if (errorMessage.includes('format') || errorMessage.includes('image')) {
+        errorMessage += '. The image URL must be a direct link to a JPEG or PNG file that Instagram can access. Try uploading to a service like Imgur or imgbb and use the direct image link.';
+      }
+      
+      throw new Error(`Instagram API error: ${response.status} - ${errorMessage}`);
     }
 
     const data = await response.json();
+    console.log(`✅ Media container created: ${data.id}`);
     return data.id; // Returns creation_id
   } catch (error: any) {
     throw new Error(`Failed to create media container: ${error.message}`);
