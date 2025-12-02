@@ -193,6 +193,7 @@ export async function GET(request: NextRequest) {
             platform_post_id: (platform === "github" ? gitHubResult?.discussionNumber?.toString() : redditResult?.postId) || null,
             error_message: (gitHubResult?.error || redditResult?.error) || null,
             metadata: {
+              ...content.metadata, // Include all metadata including structuredSEO and schema
               auto_published: true,
               scheduled: true,
               scheduled_at: content.scheduled_at,
@@ -208,7 +209,6 @@ export async function GET(request: NextRequest) {
                 postId: redditResult.postId,
                 error: redditResult.error,
               } : null,
-              ...content.metadata,
             },
           })
           .select()
