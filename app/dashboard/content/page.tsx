@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { 
   FileText, 
   Search,
@@ -16,7 +17,11 @@ import {
   TrendingDown,
   RefreshCw,
   Trash2,
-  Minus
+  Minus,
+  ArrowLeft,
+  MessageSquare,
+  ExternalLink,
+  Loader2
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -46,7 +51,10 @@ interface ContentItem {
   }>;
 }
 
+
 export default function Content() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"all" | "draft" | "review" | "scheduled" | "published">("all");
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +66,7 @@ export default function Content() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [viewContent, setViewContent] = useState<ContentItem | null>(null);
   const [showSchema, setShowSchema] = useState(false);
+  const [viewMode, setViewMode] = useState<'content' | 'schema' | 'image'>('content');
   const [refreshing, setRefreshing] = useState(false);
   const [publishingContentId, setPublishingContentId] = useState<string | null>(null);
   const [stats, setStats] = useState({
@@ -67,6 +76,7 @@ export default function Content() {
     review: 0,
     draft: 0,
   });
+
 
   useEffect(() => {
     loadContent();
@@ -430,16 +440,178 @@ export default function Content() {
             </p>
           </motion.div>
         ) : (
-          contentItems.map((item, index) => {
-            const statusConfig = getStatusColor(item.status);
-            const StatusIcon = statusConfig.icon;
+          (() => {
+            // Group content items by title/prompt
+            const groupedByTitle: Record<string, typeof contentItems> = {};
+            contentItems.forEach((item) => {
+              const titleKey = item.title?.trim().toLowerCase() || 'untitled';
+              if (!groupedByTitle[titleKey]) {
+                groupedByTitle[titleKey] = [];
+              }
+              groupedByTitle[titleKey].push(item);
+            });
 
-            return (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
+            return Object.entries(groupedByTitle).map(([titleKey, items], groupIndex) => {
+              const firstItem = items[0];
+              
+              // Check if this is a grouped card (multiple platforms for same prompt)
+              const isGrouped = items.length > 1;
+
+              if (isGrouped) {
+                // Render grouped card for multiple platforms
+                return (
+                  <motion.div
+                    key={titleKey}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: groupIndex * 0.1 }}
+                    className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg transition-all"
+                  >
+                    {/* Prompt Header */}
+                    <div className="bg-gradient-to-r from-gray-50 to-gray-100/50 p-4 border-b border-gray-200">
+                      <div className="flex items-start gap-3">
+                        <FileText className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-gray-900">{firstItem.title}</h3>
+                          <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mt-1">
+                            <span className="font-medium">{firstItem.type}</span>
+                            <span>•</span>
+                            <span>
+                              {firstItem.publishDate
+                                ? new Date(firstItem.publishDate).toLocaleDateString()
+                                : "Not scheduled"}
+                            </span>
+                            <span>•</span>
+                            <span className="text-purple-600 font-medium">{items.length} platforms</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Platform Cards */}
+                    <div className="divide-y divide-gray-100">
+                      {items.map((item) => {
+                        const statusConfig = getStatusColor(item.status);
+                        const StatusIcon = statusConfig.icon;
+                        const platform = item.platforms[0] || 'unknown';
+
+                        return (
+                          <div key={item.id} className="p-4 hover:bg-gray-50/50 transition-colors">
+                            <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+                              {/* Platform & Keywords */}
+                              <div className="flex-1 flex items-center gap-3">
+                                <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium capitalize">
+                                  {platform}
+                                </span>
+                                {item.keywordMetrics && item.keywordMetrics.length > 0 && (
+                                  <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">
+                                    {item.keywordMetrics[0].keyword} - {item.keywordMetrics[0].percent}%
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Status & Actions */}
+                              <div className="flex items-center gap-3">
+                                {/* Status Badge */}
+                                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm ${statusConfig.bg} ${statusConfig.text}`}>
+                                  <StatusIcon className="w-4 h-4" />
+                                  <span className="font-medium capitalize">{item.status}</span>
+                                </div>
+
+                                {/* Action Buttons */}
+                                {item.status === "draft" && (
+                                  <button
+                                    onClick={() => handleApprove(item.id)}
+                                    className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 transition-colors text-sm font-medium flex items-center gap-1.5"
+                                  >
+                                    <CheckCircle className="w-4 h-4" />
+                                    Approve
+                                  </button>
+                                )}
+                                {item.status === "review" && (
+                                  <>
+                                    <button
+                                      onClick={() => handleReviewAction("publish", item.id)}
+                                      disabled={publishingContentId === item.id}
+                                      className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
+                                      title="Publish"
+                                    >
+                                      <CheckCircle className="w-5 h-5" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => handleScheduleClick(item.id, e)}
+                                      className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                      title="Schedule"
+                                    >
+                                      <Clock className="w-5 h-5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleReviewAction("reject", item.id)}
+                                      className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                      title="Reject"
+                                    >
+                                      <XCircle className="w-5 h-5" />
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  onClick={() => {
+                                    setViewContent(item);
+                                    setShowViewModal(true);
+                                  }}
+                                  className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                                  title="View"
+                                >
+                                  <Eye className="w-5 h-5" />
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(item.id)}
+                                  className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-5 h-5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Published URL */}
+                            {item.status === "published" && item.published_records && item.published_records.length > 0 && (
+                              <div className="mt-2 ml-0">
+                                {item.published_records.map((pub, idx) => (
+                                  pub.published_url ? (
+                                    <a
+                                      key={idx}
+                                      href={pub.published_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                      View on {pub.platform || platform}
+                                    </a>
+                                  ) : null
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                );
+              }
+
+              // Single item - render normally
+              const item = firstItem;
+              const statusConfig = getStatusColor(item.status);
+              const StatusIcon = statusConfig.icon;
+
+              return (
+                <motion.div
+                  key={item.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: groupIndex * 0.1 }}
                 className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-all"
               >
                 <div className="flex flex-col lg:flex-row lg:items-start gap-4">
@@ -659,9 +831,10 @@ export default function Content() {
                     </div>
                   </div>
                 </div>
-              </motion.div>
-            );
-          })
+                </motion.div>
+              );
+            });
+          })()
         )}
       </div>
 
@@ -809,41 +982,78 @@ export default function Content() {
             className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col"
           >
             {/* Header */}
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <FileText className="w-5 h-5 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">{viewContent.title}</h3>
-                  <div className="flex items-center gap-3 text-sm text-gray-600 mt-1">
-                    <span className="font-medium">{viewContent.type}</span>
-                    <span>•</span>
-                    <span className="capitalize">{viewContent.raw?.target_platform || viewContent.platforms[0]}</span>
-                    {viewContent.raw?.word_count && (
-                      <>
-                        <span>•</span>
-                        <span>{viewContent.raw.word_count} words</span>
-                      </>
-                    )}
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">{viewContent.title}</h3>
+                    <div className="flex items-center gap-3 text-sm text-gray-600 mt-1">
+                      <span className="font-medium">{viewContent.type}</span>
+                      <span>•</span>
+                      <span className="capitalize">{viewContent.raw?.target_platform || viewContent.platforms[0]}</span>
+                      {viewContent.raw?.word_count && (
+                        <>
+                          <span>•</span>
+                          <span>{viewContent.raw.word_count} words</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
+                <button
+                  onClick={() => {
+                    setShowViewModal(false);
+                    setViewContent(null);
+                    setViewMode('content');
+                  }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <XCircle className="w-6 h-6" />
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  setShowViewModal(false);
-                  setViewContent(null);
-                }}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <XCircle className="w-6 h-6" />
-              </button>
+              
+              {/* View Mode Toggle */}
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setViewMode('content')}
+                  className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                    viewMode === 'content'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  Content
+                </button>
+                <button
+                  onClick={() => setViewMode('schema')}
+                  className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                    viewMode === 'schema'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  Schema
+                </button>
+                <button
+                  onClick={() => setViewMode('image')}
+                  className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                    viewMode === 'image'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  Image
+                </button>
+              </div>
             </div>
 
             {/* Content Body */}
             <div className="flex-1 overflow-y-auto p-6">
               <div className="prose prose-sm max-w-none">
-                {!showSchema ? (
+                {viewMode === 'content' && (
                   <>
                     {/* Show Content */}
                     {viewContent.raw?.generated_content ? (
@@ -881,7 +1091,54 @@ export default function Content() {
                       </div>
                     )}
                   </>
-                ) : (
+                )}
+
+                {viewMode === 'image' && (
+                  <div className="flex flex-col items-center justify-center py-8">
+                    {viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image ? (
+                      <div className="w-full max-w-2xl">
+                        <div className="relative aspect-video rounded-xl overflow-hidden border border-gray-200 shadow-lg">
+                          <img
+                            src={viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image}
+                            alt={viewContent.title}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="mt-4 text-center">
+                          <p className="text-sm text-gray-600">
+                            This image will be published with your content to supported platforms.
+                          </p>
+                          <div className="mt-2 flex flex-wrap justify-center gap-2">
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Reddit</span>
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Medium</span>
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Quora</span>
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Facebook</span>
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">LinkedIn</span>
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Instagram</span>
+                            <span className="px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs line-through">GitHub</span>
+                          </div>
+                        </div>
+                        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                          <p className="text-xs text-gray-500 break-all">
+                            <strong>Image URL:</strong> {viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 text-center py-12">
+                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                          <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                        </div>
+                        <p className="font-medium text-gray-700">No Image Available</p>
+                        <p className="text-sm mt-1">This content doesn&apos;t have an associated image.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {viewMode === 'schema' && (
                   <>
                     {/* Show Schema */}
                     <div className="space-y-4">
@@ -1006,7 +1263,7 @@ export default function Content() {
                 ))}
               </div>
               <div className="flex gap-3">
-                {!showSchema && (
+                {viewMode === 'content' && (
                   <button
                     onClick={() => {
                       if (viewContent.raw?.generated_content) {
@@ -1016,10 +1273,10 @@ export default function Content() {
                     }}
                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
                   >
-                    Copy
+                    Copy Content
                   </button>
                 )}
-                {showSchema && (
+                {viewMode === 'schema' && (
                   <button
                     onClick={() => {
                       const schemaText = viewContent.raw?.metadata?.schema?.scriptTags || JSON.stringify(viewContent.raw?.metadata?.schema?.jsonLd || {}, null, 2);
@@ -1033,19 +1290,25 @@ export default function Content() {
                     Copy Schema
                   </button>
                 )}
-                <button
-                  onClick={() => {
-                    setShowSchema(!showSchema);
-                  }}
-                  className="px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium text-sm border border-blue-200"
-                >
-                  {showSchema ? "View Content" : "View Schema"}
-                </button>
+                {viewMode === 'image' && (viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image) && (
+                  <button
+                    onClick={() => {
+                      const imageUrl = viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image;
+                      if (imageUrl) {
+                        navigator.clipboard.writeText(imageUrl);
+                        toast.success("Image URL copied to clipboard!");
+                      }
+                    }}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
+                  >
+                    Copy Image URL
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setShowViewModal(false);
                     setViewContent(null);
-                    setShowSchema(false);
+                    setViewMode('content');
                   }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
                 >

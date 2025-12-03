@@ -910,7 +910,7 @@ export async function POST(request: NextRequest) {
                     console.log("ℹ️ Schema Automation: Schema available but Instagram doesn't support HTML in posts");
                     console.log("💡 Schema is stored in metadata for your website use");
                   }
-                  
+
                   instagramResult = await publishToInstagram(instagramConfig, {
                     title: contentStrategy.topic || "Untitled",
                     content: instagramContent,

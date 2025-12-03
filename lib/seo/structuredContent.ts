@@ -23,6 +23,7 @@ export interface StructuredContentInput {
   brandVoice?: any;
   brandName?: string;
   imageUrl?: string;
+  publishedUrl?: string; // Actual published URL on the platform (used as canonical after publishing)
 }
 
 export interface StructuredContentOutput {
@@ -200,7 +201,7 @@ Respond in JSON format:
         title: input.topic.length > 70 ? input.topic.substring(0, 67) + "..." : input.topic,
         description: description.length > 200 ? description.substring(0, 197) + "..." : description,
         image: input.imageUrl || `${baseUrl}/og-default.png`,
-        url: `${baseUrl}/content/${slugifiedTopic}`,
+        url: input.publishedUrl || `${baseUrl}/content/${slugifiedTopic}`,
         type: "article",
         siteName: input.brandName || "GeoRepute.ai",
       };
@@ -228,8 +229,8 @@ Respond in JSON format:
       return suggestions;
     })();
     
-    // Generate canonical URL if not provided
-    const canonicalUrl = result.canonicalUrl || defaultCanonicalUrl;
+    // Generate canonical URL - prefer publishedUrl if available, then result, then default
+    const canonicalUrl = input.publishedUrl || result.canonicalUrl || defaultCanonicalUrl;
 
     // Ensure structuredContent is always a string
     const finalStructuredContent = typeof result.structuredContent === "string" 
@@ -259,7 +260,7 @@ Respond in JSON format:
       title: input.topic.length > 70 ? input.topic.substring(0, 67) + "..." : input.topic,
       description: fallbackDescription.length > 200 ? fallbackDescription.substring(0, 197) + "..." : fallbackDescription,
       image: input.imageUrl || `${baseUrl}/og-default.png`,
-      url: `${baseUrl}/content/${slugifiedTopic}`,
+      url: input.publishedUrl || `${baseUrl}/content/${slugifiedTopic}`,
       type: "article",
       siteName: input.brandName || "GeoRepute.ai",
     };
@@ -284,7 +285,7 @@ Respond in JSON format:
       wordCount: input.content.split(/\s+/).length,
       ogTags: fallbackOGTags,
       internalLinks: fallbackInternalLinks,
-      canonicalUrl: `${baseUrl}/content/${slugifiedTopic}`,
+      canonicalUrl: input.publishedUrl || `${baseUrl}/content/${slugifiedTopic}`,
     };
   }
 }

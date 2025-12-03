@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
@@ -26,7 +27,9 @@ import {
   X,
   StopCircle,
   Trash2,
-  MoreVertical
+  MoreVertical,
+  Send,
+  Pencil
 } from "lucide-react";
 import {
   PieChart,
@@ -73,6 +76,7 @@ interface Session {
 
 export default function AIVisibility() {
   const supabase = createClientComponentClient();
+  const router = useRouter();
   
   // View mode: 'projects' (list), 'form' (new analysis), 'details' (project details)
   const [viewMode, setViewMode] = useState<ViewMode>('projects');
@@ -106,6 +110,7 @@ export default function AIVisibility() {
   const [stoppingAnalysis, setStoppingAnalysis] = useState<string | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
+  const [viewResponseModal, setViewResponseModal] = useState<{ open: boolean; response: any; prompt: string } | null>(null);
 
   const industries = [
     "Marketing", "Technology", "Healthcare", "Finance", "Education",
@@ -148,6 +153,32 @@ export default function AIVisibility() {
       }
     }
   }, [viewMode, projects, projectSessions, selectedProject]);
+
+  // Fetch responses when switching to results tab
+  useEffect(() => {
+    if (viewMode === 'details' && selectedProject && activeTab === 'results') {
+      const latestCompleted = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
+      if (latestCompleted?.id) {
+        console.log('Results tab active, fetching responses for session:', latestCompleted.id);
+        fetchProjectResponses(latestCompleted.id);
+      } else {
+        // Try latest session if no completed session
+        const latestSession = projectSessions.find(s => s.project_id === selectedProject.id);
+        if (latestSession?.id) {
+          console.log('Results tab active, fetching responses for latest session:', latestSession.id);
+          fetchProjectResponses(latestSession.id);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject?.id, activeTab, projectSessions.length, viewMode]);
+
+  // Debug: Log modal state changes
+  useEffect(() => {
+    if (viewResponseModal) {
+      console.log('Modal state changed:', viewResponseModal);
+    }
+  }, [viewResponseModal]);
 
   const fetchProjects = async () => {
     try {
@@ -214,8 +245,13 @@ export default function AIVisibility() {
       const latestCompleted = sessions?.find(s => s.status === 'completed');
       const wasRunning = projectSessions.find(s => s.project_id === projectId && s.status === 'running');
       
-      if (latestCompleted?.results_summary) {
-        setProjectStats(latestCompleted.results_summary);
+      if (latestCompleted) {
+        // Set stats if available
+        if (latestCompleted.results_summary) {
+          setProjectStats(latestCompleted.results_summary);
+        } else {
+          setProjectStats(null);
+        }
         
         // Show notification if analysis just completed
         if (wasRunning && latestCompleted.status === 'completed') {
@@ -223,13 +259,19 @@ export default function AIVisibility() {
           setTimeout(() => setShowCompletionNotification(false), 5000);
         }
         
-        // Fetch responses for the latest completed session
+        // Always fetch responses for the latest completed session
         if (latestCompleted.id) {
+          console.log('Fetching responses for completed session:', latestCompleted.id);
           await fetchProjectResponses(latestCompleted.id);
         }
-    } else {
+      } else {
+        // If no completed session, try to fetch from latest session (even if running)
+        const latestSession = sessions?.[0];
+        if (latestSession?.id) {
+          console.log('No completed session, fetching from latest session:', latestSession.id);
+          await fetchProjectResponses(latestSession.id);
+        }
         setProjectStats(null);
-        setProjectResponses([]);
       }
     } catch (error) {
       console.error('Error fetching project details:', error);
@@ -238,13 +280,29 @@ export default function AIVisibility() {
 
   const fetchProjectResponses = async (sessionId: string) => {
     try {
+      console.log('Fetching responses from ai_platform_responses table for session:', sessionId);
       const { data: responses, error } = await supabase
         .from('ai_platform_responses')
         .select('*')
         .eq('session_id', sessionId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error fetching responses:', error);
+        throw error;
+      }
+      
+      console.log('Fetched responses:', responses?.length || 0, 'responses');
+      if (responses && responses.length > 0) {
+        console.log('Sample response:', {
+          id: responses[0].id,
+          platform: responses[0].platform,
+          prompt: responses[0].prompt?.substring(0, 50),
+          hasResponse: !!responses[0].response,
+          hasMetadata: !!responses[0].response_metadata
+        });
+      }
+      
       setProjectResponses(responses || []);
     } catch (error) {
       console.error('Error fetching responses:', error);
@@ -1241,10 +1299,20 @@ export default function AIVisibility() {
                     <div>
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-lg font-semibold text-gray-900">
-                          {resultsView === 'mentioned' 
-                            ? `Mentioned Prompts (${projectResponses.filter(r => r.response_metadata?.brand_mentioned).length})`
-                            : `Missed Prompts (${projectResponses.filter(r => !r.response_metadata?.brand_mentioned).length})`
-                          }
+                          {(() => {
+                            const filteredResponses = resultsView === 'mentioned'
+                              ? projectResponses.filter(r => r.response_metadata?.brand_mentioned)
+                              : projectResponses.filter(r => !r.response_metadata?.brand_mentioned);
+                            
+                            // Group by prompt to count unique prompts
+                            const uniquePrompts = new Set(
+                              filteredResponses.map(r => r.prompt?.trim().toLowerCase() || '').filter(Boolean)
+                            );
+                            
+                            return resultsView === 'mentioned'
+                              ? `Mentioned Prompts (${uniquePrompts.size})`
+                              : `Missed Prompts (${uniquePrompts.size})`;
+                          })()}
                         </h3>
                         <div className="flex gap-2">
                           <button 
@@ -1274,8 +1342,24 @@ export default function AIVisibility() {
                         <div className="text-center py-12 text-gray-500">
                           <Search className="w-12 h-12 mx-auto mb-4 text-gray-400" />
                           <p>No Analysis Results</p>
-                          {projectSessions[0]?.status === 'running' && (
+                          {projectSessions.find(s => s.project_id === selectedProject?.id)?.status === 'running' && (
                             <p className="text-sm mt-2">Analysis is still running. Results will appear here when complete.</p>
+                          )}
+                          {projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed') && (
+                            <div className="mt-4">
+                              <p className="text-sm text-gray-600 mb-2">No responses found in database.</p>
+                              <button
+                                onClick={() => {
+                                  const session = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
+                                  if (session?.id) {
+                                    fetchProjectResponses(session.id);
+                                  }
+                                }}
+                                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
+                              >
+                                Refresh Responses
+                              </button>
+                            </div>
                           )}
                         </div>
                       ) : (
@@ -1298,72 +1382,164 @@ export default function AIVisibility() {
                               );
                             }
 
-                            return filteredResponses.map((response) => (
-                              <div
-                                key={response.id}
-                                className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
-                              >
-                                <div className="flex items-start justify-between mb-3">
-                                  <div className="flex items-center gap-3">
-                                    <span className={`px-3 py-1 rounded text-sm font-medium capitalize ${
-                                      resultsView === 'mentioned'
-                                        ? 'bg-green-100 text-green-800'
-                                        : 'bg-gray-100 text-gray-800'
-                                    }`}>
-                                      {response.platform}
-                                    </span>
-                                    {resultsView === 'mentioned' && response.response_metadata?.sentiment_score !== null && (
-                                      <span className={`px-2 py-1 rounded text-xs ${
-                                        response.response_metadata.sentiment_score > 0.3
-                                          ? 'bg-green-100 text-green-800'
-                                          : response.response_metadata.sentiment_score < -0.3
-                                          ? 'bg-red-100 text-red-800'
-                                          : 'bg-gray-100 text-gray-800'
-                                      }`}>
-                                        Sentiment: {response.response_metadata.sentiment_score?.toFixed(2)}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                    resultsView === 'mentioned'
-                                      ? 'bg-green-100 text-green-800'
-                                      : 'bg-red-100 text-red-800'
-                                  }`}>
-                                    {resultsView === 'mentioned' ? 'Brand Mentioned' : 'Brand Not Mentioned'}
-                                  </span>
-                                </div>
-                                <div className="mb-2">
-                                  <div className="text-sm font-medium text-gray-700 mb-1">Query:</div>
-                                  <div className="text-sm text-gray-900 bg-gray-50 p-2 rounded">
-                                    {response.prompt}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div className="text-sm font-medium text-gray-700 mb-1">Response:</div>
-                                  <div className="text-sm text-gray-700 line-clamp-3">
-                                    {response.response}
-                                  </div>
-                                </div>
-                                {resultsView === 'mentioned' && response.response_metadata?.sources && response.response_metadata.sources.length > 0 && (
-                                  <div className="mt-3 pt-3 border-t border-gray-200">
-                                    <div className="text-xs font-medium text-gray-600 mb-1">Sources:</div>
-                                    <div className="flex flex-wrap gap-2">
-                                      {response.response_metadata.sources.slice(0, 3).map((source: any, idx: number) => (
-                                        <a
-                                          key={idx}
-                                          href={source.url}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-xs text-blue-600 hover:underline truncate max-w-xs"
+                            // Group responses by prompt (same question)
+                            const groupedByPrompt: Record<string, typeof filteredResponses> = {};
+                            filteredResponses.forEach((response) => {
+                              const promptKey = response.prompt?.trim().toLowerCase() || '';
+                              if (!groupedByPrompt[promptKey]) {
+                                groupedByPrompt[promptKey] = [];
+                              }
+                              groupedByPrompt[promptKey].push(response);
+                            });
+
+                            // Helper function to get model badge color
+                            const getModelBadgeColor = (platform: string) => {
+                              const platformLower = platform?.toLowerCase() || '';
+                              if (platformLower.includes('claude')) return 'bg-orange-100 text-orange-800';
+                              if (platformLower.includes('chatgpt') || platformLower.includes('gpt')) return 'bg-green-100 text-green-800';
+                              if (platformLower.includes('gemini')) return 'bg-blue-100 text-blue-800';
+                              if (platformLower.includes('perplexity')) return 'bg-purple-100 text-purple-800';
+                              if (platformLower.includes('groq') || platformLower.includes('grok')) return 'bg-pink-100 text-pink-800';
+                              return 'bg-gray-100 text-gray-800';
+                            };
+
+                            // Helper function to get model display name
+                            const getModelDisplayName = (platform: string) => {
+                              const platformLower = platform?.toLowerCase() || '';
+                              if (platformLower.includes('claude')) return 'Claude';
+                              if (platformLower.includes('chatgpt') || platformLower.includes('gpt')) return 'GPT';
+                              if (platformLower.includes('gemini')) return 'Gemini';
+                              if (platformLower.includes('perplexity')) return 'Perplexity';
+                              if (platformLower.includes('groq') || platformLower.includes('grok')) return 'Groq';
+                              return platform?.charAt(0).toUpperCase() + platform?.slice(1) || 'Unknown';
+                            };
+
+                            return Object.entries(groupedByPrompt).map(([promptKey, responses]) => {
+                              const firstResponse = responses[0];
+                              const uniquePrompt = firstResponse.prompt;
+
+                              return (
+                                <div
+                                  key={promptKey}
+                                  className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                                >
+                                  {/* Query Section - Show once at top */}
+                                  <div className="mb-4">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <div className="text-sm font-medium text-gray-700">Query:</div>
+                                      {resultsView === 'missed' && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            // Store data in sessionStorage for the edit page
+                                            const editData = {
+                                              prompt: uniquePrompt,
+                                              responses: responses.map(r => ({
+                                                id: r.id,
+                                                platform: r.platform,
+                                                response: r.response,
+                                                response_metadata: r.response_metadata
+                                              })),
+                                              projectId: selectedProject?.id,
+                                              brandName: selectedProject?.brand_name,
+                                              industry: selectedProject?.industry,
+                                              keywords: selectedProject?.keywords || [],
+                                              competitors: selectedProject?.competitors || []
+                                            };
+                                            sessionStorage.setItem('editPromptData', JSON.stringify(editData));
+                                            router.push('/dashboard/ai-visibility/edit');
+                                          }}
+                                          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors"
+                                          title="Generate new optimized content for this prompt"
                                         >
-                                          {source.domain || source.url}
-                                        </a>
-                                      ))}
+                                          <Pencil className="w-3.5 h-3.5" />
+                                          Generate New Content
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="text-sm text-gray-900 bg-gray-50 p-2 rounded">
+                                      {uniquePrompt}
                                     </div>
                                   </div>
-                                )}
-                              </div>
-                            ));
+
+                                  {/* Status Badge */}
+                                  <div className="flex items-center justify-end mb-4">
+                                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                      resultsView === 'mentioned'
+                                        ? 'bg-green-100 text-green-800'
+                                        : 'bg-red-100 text-red-800'
+                                    }`}>
+                                      {resultsView === 'mentioned' ? 'Brand Mentioned' : 'Brand Not Mentioned'}
+                                    </span>
+                                  </div>
+
+                                  {/* All Responses from Different Models */}
+                                  <div className="space-y-3">
+                                    {responses.map((response) => (
+                                      <div
+                                        key={response.id}
+                                        className="border-l-2 border-gray-200 pl-3 py-2 bg-gray-50 rounded-r"
+                                      >
+                                        <div className="flex items-center justify-between mb-2">
+                                          <span className={`px-2 py-1 rounded text-xs font-medium capitalize ${getModelBadgeColor(response.platform)}`}>
+                                            {getModelDisplayName(response.platform)}
+                                          </span>
+                                          {resultsView === 'mentioned' && response.response_metadata?.sentiment_score !== null && (
+                                            <span className={`px-2 py-1 rounded text-xs ${
+                                              response.response_metadata.sentiment_score > 0.3
+                                                ? 'bg-green-100 text-green-800'
+                                                : response.response_metadata.sentiment_score < -0.3
+                                                ? 'bg-red-100 text-red-800'
+                                                : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                              Sentiment: {response.response_metadata.sentiment_score?.toFixed(2)}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex items-start gap-2">
+                                          <div className="flex-1 text-sm text-gray-700 line-clamp-3">
+                                            {response.response}
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              console.log('View button clicked', { response: response.id, prompt: uniquePrompt });
+                                              setViewResponseModal({ open: true, response, prompt: uniquePrompt });
+                                            }}
+                                            className="flex-shrink-0 p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors cursor-pointer"
+                                            title="View full response"
+                                          >
+                                            <Eye className="w-4 h-4" />
+                                          </button>
+                                        </div>
+                                        {resultsView === 'mentioned' && response.response_metadata?.sources && response.response_metadata.sources.length > 0 && (
+                                          <div className="mt-2 pt-2 border-t border-gray-200">
+                                            <div className="text-xs font-medium text-gray-600 mb-1">Sources:</div>
+                                            <div className="flex flex-wrap gap-2">
+                                              {response.response_metadata.sources.slice(0, 3).map((source: any, idx: number) => (
+                                                <a
+                                                  key={idx}
+                                                  href={source.url}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="text-xs text-blue-600 hover:underline truncate max-w-xs"
+                                                >
+                                                  {source.domain || source.url}
+                                                </a>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            });
                           })()}
                         </div>
                       )}
@@ -1904,6 +2080,7 @@ export default function AIVisibility() {
                     )}
                   </button>
                 )}
+
               </div>
 
               {/* Analysis Start Notification */}
@@ -2074,9 +2251,84 @@ export default function AIVisibility() {
             </div>
           </div>
         )}
-      </div>
-    );
-  }
+
+      {/* View Response Modal for Details View */}
+      {viewResponseModal?.open && viewResponseModal?.response && (
+        <div 
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ 
+            zIndex: 99999,
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setViewResponseModal(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Full Response</h3>
+              <button
+                onClick={() => setViewResponseModal(null)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="mb-4">
+                <div className="text-sm font-medium text-gray-700 mb-2">Query:</div>
+                <div className="text-sm text-gray-900 bg-gray-50 p-3 rounded">
+                  {viewResponseModal.prompt}
+                </div>
+              </div>
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`px-3 py-1 rounded text-sm font-medium capitalize ${
+                    viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'bg-orange-100 text-orange-800' :
+                    viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'bg-green-100 text-green-800' :
+                    viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'bg-blue-100 text-blue-800' :
+                    viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'bg-purple-100 text-purple-800' :
+                    viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'bg-pink-100 text-pink-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'Claude' :
+                     viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'GPT' :
+                     viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'Gemini' :
+                     viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'Perplexity' :
+                     viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'Groq' :
+                     viewResponseModal.response.platform || 'Unknown'}
+                  </span>
+                </div>
+                <div className="text-sm font-medium text-gray-700 mb-2">Response:</div>
+                <div className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded max-h-80 overflow-y-auto">
+                  {viewResponseModal.response.response}
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200">
+              <button
+                onClick={() => setViewResponseModal(null)}
+                className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
   // Render Form View (existing form code)
   const steps = [
@@ -2401,6 +2653,81 @@ export default function AIVisibility() {
           </div>
         </div>
       </div>
+
+      {/* View Response Modal - Simple fixed modal */}
+      {viewResponseModal?.open && viewResponseModal?.response && (
+        <div 
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ 
+            zIndex: 99999,
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setViewResponseModal(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Full Response</h3>
+              <button
+                onClick={() => setViewResponseModal(null)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="mb-4">
+                <div className="text-sm font-medium text-gray-700 mb-2">Query:</div>
+                <div className="text-sm text-gray-900 bg-gray-50 p-3 rounded">
+                  {viewResponseModal.prompt}
+                </div>
+              </div>
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`px-3 py-1 rounded text-sm font-medium capitalize ${
+                    viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'bg-orange-100 text-orange-800' :
+                    viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'bg-green-100 text-green-800' :
+                    viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'bg-blue-100 text-blue-800' :
+                    viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'bg-purple-100 text-purple-800' :
+                    viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'bg-pink-100 text-pink-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'Claude' :
+                     viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'GPT' :
+                     viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'Gemini' :
+                     viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'Perplexity' :
+                     viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'Groq' :
+                     viewResponseModal.response.platform || 'Unknown'}
+                  </span>
+                </div>
+                <div className="text-sm font-medium text-gray-700 mb-2">Response:</div>
+                <div className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded max-h-80 overflow-y-auto">
+                  {viewResponseModal.response.response}
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200">
+              <button
+                onClick={() => setViewResponseModal(null)}
+                className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

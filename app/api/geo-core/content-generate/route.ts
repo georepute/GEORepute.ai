@@ -29,9 +29,21 @@ export async function POST(request: NextRequest) {
       userContext,
       imageUrl, // Optional image URL for platforms like Instagram
       brandVoiceId, // Optional brand voice profile ID
+      skipGeneration, // Skip AI generation, use provided content
+      generatedContent, // Pre-generated content to use when skipGeneration is true
+      contentType, // Type of content (e.g., 'answer' for AI visibility responses)
+      tone, // Tone of the content
     } = body;
 
-    if (!topic || !targetKeywords || !targetPlatform) {
+    // For skipGeneration mode, we only need topic and targetPlatform
+    if (skipGeneration) {
+      if (!topic || !targetPlatform || !generatedContent) {
+        return NextResponse.json(
+          { error: "Topic, targetPlatform, and generatedContent are required for skipGeneration mode" },
+          { status: 400 }
+        );
+      }
+    } else if (!topic || !targetKeywords || !targetPlatform) {
       return NextResponse.json(
         { error: "Topic, targetKeywords, and targetPlatform are required" },
         { status: 400 }
@@ -81,27 +93,45 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Apply learning rules from previous outcomes
-    const learningRules = await applyLearningRules(
-      session.user.id,
-      {
-        platform: targetPlatform,
-        keywords: targetKeywords,
-        topic,
-      },
-      supabase
-    );
+    // For skipGeneration mode, create a simple result object
+    let result: any;
+    let learningRules: any = {};
 
-    // Generate content with learning rules AND brand voice applied
-    const result = await generateStrategicContent({
-      topic,
-      targetKeywords,
-      targetPlatform,
-      brandMention,
-      influenceLevel: learningRules.tone || influenceLevel || "subtle",
-      userContext,
-      brandVoice: brandVoiceProfile, // Pass brand voice profile
-    }, learningRules);
+    if (skipGeneration && generatedContent) {
+      // Use provided content, skip AI generation
+      console.log("⏭️ Skipping AI generation, using provided content");
+      result = {
+        content: generatedContent,
+        keywordDensity: 0,
+        seoScore: 70,
+        readabilityScore: 75,
+        contentType: contentType || "answer",
+        tone: tone || "informative",
+        wordCount: generatedContent.split(/\s+/).length,
+      };
+    } else {
+      // Apply learning rules from previous outcomes
+      learningRules = await applyLearningRules(
+        session.user.id,
+        {
+          platform: targetPlatform,
+          keywords: targetKeywords || [],
+          topic,
+        },
+        supabase
+      );
+
+      // Generate content with learning rules AND brand voice applied
+      result = await generateStrategicContent({
+        topic,
+        targetKeywords: targetKeywords || [],
+        targetPlatform,
+        brandMention,
+        influenceLevel: learningRules.tone || influenceLevel || "subtle",
+        userContext,
+        brandVoice: brandVoiceProfile, // Pass brand voice profile
+      }, learningRules);
+    }
 
     // Generate Structured SEO Elements (headings, FAQs, meta description, OG tags, internal links, canonical) for SCHEMA DATA - AUTOMATIC
     // NOTE: These are for schema only, NOT added to content text (content stays natural)
@@ -114,7 +144,9 @@ export async function POST(request: NextRequest) {
     let canonicalUrl: string | undefined = undefined;
 
     try {
-      const keywordsArray = Array.isArray(targetKeywords) ? targetKeywords : targetKeywords.split(",").map((k: string) => k.trim()).filter(Boolean);
+      const keywordsArray = targetKeywords 
+        ? (Array.isArray(targetKeywords) ? targetKeywords : targetKeywords.split(",").map((k: string) => k.trim()).filter(Boolean))
+        : [];
       const structuredResult = await generatePlatformStructuredContent({
         content: result.content, // Original content (not modified)
         topic,
