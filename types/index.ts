@@ -192,3 +192,104 @@ export interface StructuredSEOContent {
   generatedAt: string;
 }
 
+// Google Search Console Types
+export interface GSCIntegration {
+  id: string;
+  user_id: string;
+  platform: 'google_search_console';
+  access_token: string;
+  refresh_token?: string;
+  token_type: string;
+  expires_at: string;
+  scope?: string;
+  status: 'connected' | 'disconnected' | 'expired' | 'error';
+  metadata?: {
+    connected_at?: string;
+    [key: string]: any;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCDomain {
+  id: string;
+  user_id: string;
+  integration_id: string;
+  domain_url: string;
+  site_url: string;
+  verification_method: 'DNS_TXT' | 'HTML_FILE' | 'HTML_TAG' | 'ANALYTICS' | 'TAG_MANAGER';
+  verification_token?: string;
+  verification_status: 'pending' | 'verified' | 'failed';
+  permission_level: 'siteOwner' | 'siteFullUser' | 'siteRestrictedUser';
+  last_synced_at?: string;
+  metadata?: {
+    verified_at?: string;
+    error?: string;
+    failed_at?: string;
+    [key: string]: any;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCAnalytics {
+  id: string;
+  domain_id: string;
+  user_id: string;
+  date: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  query?: string;
+  page?: string;
+  country?: string;
+  device?: 'MOBILE' | 'DESKTOP' | 'TABLET';
+  search_appearance?: string;
+  data_type: 'summary' | 'query' | 'page' | 'country' | 'device' | 'search_appearance';
+  metadata?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCQuery {
+  id: string;
+  domain_id: string;
+  user_id: string;
+  date: string;
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  metadata?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCPage {
+  id: string;
+  domain_id: string;
+  user_id: string;
+  date: string;
+  page: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  metadata?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCSummary {
+  totalClicks: number;
+  totalImpressions: number;
+  avgCTR: number;
+  avgPosition: number;
+  trends: {
+    clicks: number;
+    impressions: number;
+  };
+}
+

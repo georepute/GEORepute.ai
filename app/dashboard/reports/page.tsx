@@ -225,20 +225,20 @@ export default function Reports() {
         .eq("user_id", user.id)
         .lt("created_at", startDate.toISOString());
 
-      // Fetch AI Visibility Data
-      const { data: aiVisibility } = await supabase
-        .from("ai_visibility")
+      // Fetch Brand Analysis Projects Data (replacing AI Visibility)
+      const { data: brandProjects } = await supabase
+        .from("brand_analysis_projects")
         .select("*")
         .eq("user_id", user.id)
-        .gte("check_date", startDate.toISOString())
-        .order("check_date", { ascending: false });
+        .gte("created_at", startDate.toISOString())
+        .order("created_at", { ascending: false });
 
-      const { data: aiVisibilityPrevious } = await supabase
-        .from("ai_visibility")
+      const { data: brandProjectsPrevious } = await supabase
+        .from("brand_analysis_projects")
         .select("*")
         .eq("user_id", user.id)
-        .gte("check_date", previousPeriodStart.toISOString())
-        .lt("check_date", startDate.toISOString());
+        .gte("created_at", previousPeriodStart.toISOString())
+        .lt("created_at", startDate.toISOString());
 
       // Fetch Brand Analysis Data
       const { data: projects } = await supabase
@@ -345,85 +345,81 @@ export default function Reports() {
           created: format(new Date(c.created_at), "MMM dd, yyyy"),
         })) || [];
 
-      // Process AI Visibility Data
-      const avgVisibilityScore =
-        aiVisibility?.reduce((sum, v) => sum + (Number(v.visibility_score) || 0), 0) /
-          (aiVisibility?.length || 1) || 0;
-
-      const avgVisibilityPrevious =
-        aiVisibilityPrevious?.reduce(
-          (sum, v) => sum + (Number(v.visibility_score) || 0),
-          0
-        ) /
-          (aiVisibilityPrevious?.length || 1) || 0;
-
-      const visibilityChange = calculatePercentageChange(
-        avgVisibilityScore,
-        avgVisibilityPrevious
+      // Process Brand Analysis Projects Data
+      // Calculate project-based metrics
+      const totalBrandProjects = brandProjects?.length || 0;
+      const totalBrandProjectsPrevious = brandProjectsPrevious?.length || 0;
+      
+      const projectsChange = calculatePercentageChange(
+        totalBrandProjects,
+        totalBrandProjectsPrevious
       );
 
-      const totalMentions =
-        aiVisibility?.reduce((sum, v) => sum + (v.mention_count || 0), 0) || 0;
+      // Calculate total platforms across all projects
+      const activePlatformsSet = new Set<string>();
+      brandProjects?.forEach((project) => {
+        project.active_platforms?.forEach((platform: string) => {
+          activePlatformsSet.add(platform);
+        });
+      });
+      const totalActivePlatforms = activePlatformsSet.size;
 
-      const totalMentionsPrevious =
-        aiVisibilityPrevious?.reduce(
-          (sum, v) => sum + (v.mention_count || 0),
-          0
-        ) || 0;
-
-      const mentionsChange = calculatePercentageChange(
-        totalMentions,
-        totalMentionsPrevious
+      // Calculate platforms change
+      const activePlatformsPreviousSet = new Set<string>();
+      brandProjectsPrevious?.forEach((project) => {
+        project.active_platforms?.forEach((platform: string) => {
+          activePlatformsPreviousSet.add(platform);
+        });
+      });
+      const platformsChange = calculatePercentageChange(
+        totalActivePlatforms,
+        activePlatformsPreviousSet.size
       );
 
-      // Visibility by platform
-      const visibilityByPlatformMap: Record<
-        string,
-        { scores: number[]; mentions: number[]; sentiments: number[] }
-      > = {};
+      // Calculate project metrics by platform
+      const projectsByPlatformMap: Record<string, { count: number; keywords: number; competitors: number }> = {};
 
-      aiVisibility?.forEach((v) => {
-        const platform = v.platform || "unknown";
-        if (!visibilityByPlatformMap[platform]) {
-          visibilityByPlatformMap[platform] = {
-            scores: [],
-            mentions: [],
-            sentiments: [],
-          };
-        }
-        visibilityByPlatformMap[platform].scores.push(
-          Number(v.visibility_score) || 0
-        );
-        visibilityByPlatformMap[platform].mentions.push(v.mention_count || 0);
-        visibilityByPlatformMap[platform].sentiments.push(
-          Number(v.sentiment_score) || 0
-        );
+      brandProjects?.forEach((project) => {
+        project.active_platforms?.forEach((platform: string) => {
+          if (!projectsByPlatformMap[platform]) {
+            projectsByPlatformMap[platform] = {
+              count: 0,
+              keywords: 0,
+              competitors: 0,
+            };
+          }
+          projectsByPlatformMap[platform].count++;
+          projectsByPlatformMap[platform].keywords += project.target_keywords?.length || 0;
+          projectsByPlatformMap[platform].competitors += project.competitors?.length || 0;
+        });
       });
 
-      const visibilityByPlatform = Object.entries(visibilityByPlatformMap).map(
+      const visibilityByPlatform = Object.entries(projectsByPlatformMap).map(
         ([platform, data]) => ({
           platform,
-          score:
-            data.scores.reduce((sum, s) => sum + s, 0) / data.scores.length ||
-            0,
-          mentions: data.mentions.reduce((sum, m) => sum + m, 0),
-          sentiment:
-            data.sentiments.reduce((sum, s) => sum + s, 0) /
-              data.sentiments.length || 0,
+          score: Math.min((data.count / Math.max(totalBrandProjects, 1)) * 100, 100), // % of projects using this platform
+          mentions: data.keywords, // Total target keywords for this platform
+          sentiment: Math.min((data.competitors / Math.max(data.count, 1)) * 20, 100), // Avg competitors per project (normalized)
         })
       );
 
-      // Visibility trend
+      // Project creation trend
       const visibilityTrend = calculateDailyTrend(
-        aiVisibility || [],
+        brandProjects || [],
         daysAgo,
-        "check_date",
+        "created_at",
         (items) => ({
-          score:
-            items.reduce((sum, v) => sum + (Number(v.visibility_score) || 0), 0) /
-            items.length,
+          score: items.length * 10, // Projects created that day * 10 as a score
         })
       );
+
+      // Use projects-based metrics instead of visibility
+      const avgVisibilityScore = totalBrandProjects > 0 
+        ? Math.min((totalBrandProjects / daysAgo) * 100, 100) 
+        : 0; // Activity score based on project creation rate
+      const visibilityChange = projectsChange;
+      const totalMentions = totalActivePlatforms;
+      const mentionsChange = platformsChange;
 
       // Process Brand Analysis Data
       const responsesByPlatform: Record<string, number> = {};
@@ -447,7 +443,7 @@ export default function Reports() {
           target: 85,
         },
         {
-          metric: "AI Visibility",
+          metric: "Brand Projects",
           value: avgVisibilityScore,
           target: 80,
         },
@@ -457,8 +453,8 @@ export default function Reports() {
           target: 90,
         },
         {
-          metric: "Brand Mentions",
-          value: Math.min((totalMentions / daysAgo) * 5, 100),
+          metric: "Active Platforms",
+          value: Math.min((totalMentions / 5) * 100, 100), // Normalized to 5 platforms
           target: 75,
         },
         {
@@ -564,17 +560,17 @@ export default function Reports() {
       ["Platform", "Count"],
       ...reportData.contentByPlatform.map((p) => [p.platform, p.count]),
       [""],
-      ["=== AI VISIBILITY ==="],
-      ["Average Score", reportData.avgVisibilityScore.toFixed(2)],
-      ["Total Mentions", reportData.totalMentions],
+      ["=== BRAND ANALYSIS PROJECTS ==="],
+      ["Activity Score", reportData.avgVisibilityScore.toFixed(2)],
+      ["Active Platforms", reportData.totalMentions],
       [""],
-      ["Visibility by Platform:"],
-      ["Platform", "Score", "Mentions", "Sentiment"],
+      ["Platform Coverage:"],
+      ["Platform", "Coverage %", "Keywords", "Avg Competitors"],
       ...reportData.visibilityByPlatform.map((p) => [
         p.platform,
         p.score.toFixed(2),
         p.mentions,
-        p.sentiment.toFixed(2),
+        (p.sentiment / 20).toFixed(2),
       ]),
     ];
 
@@ -619,8 +615,8 @@ export default function Reports() {
             avgRanking: reportData.avgRanking,
             totalContent: reportData.totalContent,
             publishedContent: reportData.publishedContent,
-            avgVisibilityScore: reportData.avgVisibilityScore,
-            totalMentions: reportData.totalMentions,
+            brandProjectsActivity: reportData.avgVisibilityScore,
+            activePlatforms: reportData.totalMentions,
             topKeywords: reportData.topKeywords.slice(0, 10),
             visibilityByPlatform: reportData.visibilityByPlatform.slice(0, 5),
           },
@@ -701,8 +697,8 @@ export default function Reports() {
             avgRanking: reportData.avgRanking,
             totalContent: reportData.totalContent,
             publishedContent: reportData.publishedContent,
-            avgVisibilityScore: reportData.avgVisibilityScore,
-            totalMentions: reportData.totalMentions,
+            brandProjectsActivity: reportData.avgVisibilityScore,
+            activePlatforms: reportData.totalMentions,
             topKeywords: reportData.topKeywords.slice(0, 10),
             visibilityByPlatform: reportData.visibilityByPlatform.slice(0, 5),
           },
@@ -925,8 +921,8 @@ export default function Reports() {
       ["Metric", "Value", "Change (%)"],
       ["Total Keywords", reportData.totalKeywords, reportData.keywordsChange.toFixed(2)],
       ["Content Created", reportData.totalContent, reportData.contentChange.toFixed(2)],
-      ["AI Visibility Score", reportData.avgVisibilityScore.toFixed(2) + "%", reportData.visibilityChange.toFixed(2)],
-      ["Brand Mentions", reportData.totalMentions, reportData.mentionsChange.toFixed(2)],
+      ["Brand Projects Activity", reportData.avgVisibilityScore.toFixed(2), reportData.visibilityChange.toFixed(2)],
+      ["Active Platforms", reportData.totalMentions, reportData.mentionsChange.toFixed(2)],
       ["Average Ranking", reportData.avgRanking.toFixed(2), ""],
       ["Published Content", reportData.publishedContent, ""],
       ["Draft Content", reportData.draftContent, ""],
@@ -949,13 +945,13 @@ export default function Reports() {
         ((p.count / reportData.totalContent) * 100).toFixed(1) + "%",
       ]),
       [""],
-      ["=== AI VISIBILITY BY PLATFORM ==="],
-      ["Platform", "Visibility Score (%)", "Mentions", "Sentiment Score"],
+      ["=== BRAND ANALYSIS PLATFORM COVERAGE ==="],
+      ["Platform", "Coverage (%)", "Keywords", "Avg Competitors"],
       ...reportData.visibilityByPlatform.map((p) => [
         p.platform,
         p.score.toFixed(2),
         p.mentions,
-        p.sentiment.toFixed(2),
+        (p.sentiment / 20).toFixed(1),
       ]),
       [""],
       ["=== BRAND ANALYSIS ==="],
@@ -1110,14 +1106,14 @@ export default function Reports() {
           color="purple"
         />
         <MetricCard
-          label="AI Visibility"
-          value={`${reportData.avgVisibilityScore.toFixed(1)}%`}
+          label="Brand Projects"
+          value={`${reportData.avgVisibilityScore.toFixed(0)}`}
           change={reportData.visibilityChange}
           icon={Eye}
           color="green"
         />
         <MetricCard
-          label="Brand Mentions"
+          label="Active Platforms"
           value={reportData.totalMentions.toString()}
           change={reportData.mentionsChange}
           icon={Zap}
@@ -1299,7 +1295,7 @@ export default function Reports() {
           </div>
         </motion.div>
 
-        {/* AI Visibility Trend */}
+        {/* Brand Projects Activity Trend */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1308,11 +1304,11 @@ export default function Reports() {
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">
-              AI Visibility Trend
+              Brand Projects Activity Trend
             </h2>
             <div className="flex items-center gap-2 text-sm">
               <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span className="text-gray-600">Visibility Score</span>
+              <span className="text-gray-600">Activity Score</span>
           </div>
         </div>
           <ResponsiveContainer width="100%" height={300}>
@@ -1441,7 +1437,7 @@ export default function Reports() {
         className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
       >
         <h2 className="text-xl font-bold text-gray-900 mb-6">
-          AI Platform Visibility Performance
+          Brand Analysis Platform Coverage
         </h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {reportData.visibilityByPlatform.map((platform, index) => (
@@ -1475,7 +1471,7 @@ export default function Reports() {
                       </div>
               <div className="space-y-3">
                 <div>
-                  <p className="text-sm text-gray-600 mb-1">Visibility Score</p>
+                  <p className="text-sm text-gray-600 mb-1">Project Coverage</p>
                   <div className="flex items-center gap-3">
                     <p className="text-3xl font-bold text-gray-900">
                       {platform.score.toFixed(1)}%
@@ -1489,23 +1485,23 @@ export default function Reports() {
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Mentions:</span>
+                  <span className="text-gray-600">Target Keywords:</span>
                   <span className="font-semibold text-gray-900">
                     {platform.mentions}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Sentiment:</span>
+                  <span className="text-gray-600">Avg Competitors:</span>
                   <span
                     className={`font-semibold ${
-                      platform.sentiment >= 0.7
+                      platform.sentiment >= 70
                         ? "text-green-600"
-                        : platform.sentiment >= 0.4
+                        : platform.sentiment >= 40
                         ? "text-yellow-600"
                         : "text-red-600"
                     }`}
                   >
-                    {platform.sentiment.toFixed(2)}
+                    {(platform.sentiment / 20).toFixed(1)}
                   </span>
                     </div>
                   </div>
@@ -1913,7 +1909,7 @@ export default function Reports() {
                     <p>• {dateRange === "7d" ? "Last 7 Days" : dateRange === "30d" ? "Last 30 Days" : "Last 90 Days"} data</p>
                     <p>• {reportData?.totalKeywords || 0} keywords tracked</p>
                     <p>• {reportData?.totalContent || 0} content pieces</p>
-                    <p>• {reportData?.visibilityByPlatform.length || 0} AI platforms analyzed</p>
+                    <p>• {reportData?.visibilityByPlatform.length || 0} platforms covered</p>
                   </div>
                 </div>
               </div>
