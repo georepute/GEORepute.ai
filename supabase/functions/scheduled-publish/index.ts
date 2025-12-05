@@ -48,7 +48,19 @@ interface QuoraConfig {
   formkey: string;
 }
 
+// CORS headers for browser requests
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+};
+
 Deno.serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
   try {
     // Get environment variables
     // Note: SUPABASE_URL is automatically available in Edge Functions
@@ -60,7 +72,7 @@ Deno.serve(async (req) => {
     if (!supabaseUrl || !supabaseServiceKey) {
       return new Response(
         JSON.stringify({ error: "Missing Supabase configuration" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -80,7 +92,7 @@ Deno.serve(async (req) => {
       console.error("Error fetching scheduled content:", fetchError);
       return new Response(
         JSON.stringify({ error: fetchError.message }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -91,7 +103,7 @@ Deno.serve(async (req) => {
           message: "No scheduled content to publish",
           published: 0,
         }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -283,13 +295,21 @@ Deno.serve(async (req) => {
 
               if (redditConfig.clientId && redditConfig.clientSecret && redditConfig.accessToken) {
                 const subreddit = content.metadata?.subreddit || "test";
+                const imageUrl = content.metadata?.imageUrl;
+
+                // Prepare content with image if available
+                let postContent = content.generated_content || "";
+                if (imageUrl) {
+                  // Add image link at the beginning of the post
+                  postContent = `![Image](${imageUrl})\n\n${postContent}`;
+                }
 
                 // Prepare Reddit post data
                 const postData = new URLSearchParams({
                   title: content.topic || "Untitled",
                   sr: subreddit,
                   kind: "self",
-                  text: content.generated_content || "",
+                  text: postContent,
                   api_type: "json",
                 });
 
@@ -392,6 +412,23 @@ Deno.serve(async (req) => {
                 shareText = content.generated_content || "";
               }
 
+              // LinkedIn has a 3000 character limit for posts
+              const LINKEDIN_CHAR_LIMIT = 3000;
+              if (shareText.length > LINKEDIN_CHAR_LIMIT) {
+                console.log(`⚠️ LinkedIn post text exceeds ${LINKEDIN_CHAR_LIMIT} chars (${shareText.length} chars). Truncating...`);
+                const truncateAt = LINKEDIN_CHAR_LIMIT - 3;
+                let truncatedText = shareText.substring(0, truncateAt);
+                
+                // Try to break at last space to avoid cutting words
+                const lastSpaceIndex = truncatedText.lastIndexOf(' ');
+                if (lastSpaceIndex > truncateAt - 100) {
+                  truncatedText = truncatedText.substring(0, lastSpaceIndex);
+                }
+                
+                shareText = truncatedText + '...';
+                console.log(`✅ Truncated to ${shareText.length} characters`);
+              }
+
               // Prepare UGC Post payload
               const ugcPost: any = {
                 author: personUrn,
@@ -409,8 +446,95 @@ Deno.serve(async (req) => {
                 },
               };
 
-              // Add link if provided
-              if (content.metadata?.link) {
+              // Add image if provided (requires upload to LinkedIn first)
+              const imageUrl = content.metadata?.imageUrl;
+              if (imageUrl) {
+                console.log(`🖼️ Uploading image to LinkedIn: ${imageUrl}`);
+                
+                try {
+                  // Step 1: Register the upload
+                  const registerPayload = {
+                    registerUploadRequest: {
+                      recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+                      owner: personUrn,
+                      serviceRelationships: [
+                        {
+                          relationshipType: 'OWNER',
+                          identifier: 'urn:li:userGeneratedContent',
+                        },
+                      ],
+                    },
+                  };
+
+                  const registerResponse = await fetch(
+                    'https://api.linkedin.com/v2/assets?action=registerUpload',
+                    {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${linkedInIntegration.access_token}`,
+                        'Content-Type': 'application/json',
+                        'X-Restli-Protocol-Version': '2.0.0',
+                      },
+                      body: JSON.stringify(registerPayload),
+                    }
+                  );
+
+                  if (!registerResponse.ok) {
+                    const error = await registerResponse.json().catch(() => ({}));
+                    throw new Error(`Failed to register media: ${error.message || registerResponse.statusText}`);
+                  }
+
+                  const registerResult = await registerResponse.json();
+                  const mediaAsset = registerResult.value.asset;
+                  const uploadUrl = registerResult.value.uploadMechanism[
+                    'com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest'
+                  ].uploadUrl;
+
+                  console.log(`✅ Registered LinkedIn media asset: ${mediaAsset}`);
+
+                  // Step 2: Download and upload the image
+                  const imageResponse = await fetch(imageUrl);
+                  if (!imageResponse.ok) {
+                    throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+                  }
+                  const imageBuffer = await imageResponse.arrayBuffer();
+
+                  const uploadResponse = await fetch(uploadUrl, {
+                    method: 'PUT',
+                    headers: {
+                      'Content-Type': 'application/octet-stream',
+                    },
+                    body: imageBuffer,
+                  });
+
+                  if (!uploadResponse.ok) {
+                    throw new Error(`Failed to upload image: ${uploadResponse.status}`);
+                  }
+
+                  console.log(`✅ Image uploaded to LinkedIn`);
+
+                  // Step 3: Use the asset URN in the post
+                  ugcPost.specificContent['com.linkedin.ugc.ShareContent'].shareMediaCategory = 'IMAGE';
+                  ugcPost.specificContent['com.linkedin.ugc.ShareContent'].media = [
+                    {
+                      status: 'READY',
+                      description: {
+                        text: content.topic || 'Image',
+                      },
+                      media: mediaAsset,
+                      title: {
+                        text: content.topic || 'Shared Image',
+                      },
+                    },
+                  ];
+                  console.log(`✅ Image ready for LinkedIn post`);
+                } catch (uploadError: any) {
+                  console.error(`❌ Failed to upload image to LinkedIn:`, uploadError.message);
+                  console.log(`⚠️ Falling back to text-only post without image`);
+                }
+              }
+              // Add link if provided (only if no image)
+              else if (content.metadata?.link) {
                 ugcPost.specificContent['com.linkedin.ugc.ShareContent'].shareMediaCategory = 'ARTICLE';
                 ugcPost.specificContent['com.linkedin.ugc.ShareContent'].media = [
                   {
@@ -934,7 +1058,16 @@ Deno.serve(async (req) => {
                  quoraResult?.error || null;
         };
 
-        // Create published_content record
+        // Check if schema exists in content metadata
+        const schemaData = content.metadata?.schema;
+        if (schemaData) {
+          console.log(`✅ Schema found for content ${content.id}`);
+          console.log(`📋 Schema Type: ${Array.isArray(schemaData.jsonLd) ? schemaData.jsonLd[0]?.["@type"] : schemaData.jsonLd?.["@type"] || "Article"}`);
+        } else {
+          console.log(`⚠️ No schema found for content ${content.id}`);
+        }
+
+        // Create published_content record with schema
         const { data: publishedRecord, error: publishError } = await supabase
           .from("published_content")
           .insert({
@@ -950,6 +1083,7 @@ Deno.serve(async (req) => {
               auto_published: true,
               scheduled: true,
               scheduled_at: content.scheduled_at,
+              // Platform results
               github: gitHubResult || null,
               reddit: redditResult || null,
               linkedin: linkedInResult || null,
@@ -957,6 +1091,19 @@ Deno.serve(async (req) => {
               facebook: facebookResult || null,
               medium: mediumResult || null,
               quora: quoraResult || null,
+              // Schema data (for SEO)
+              schema: schemaData ? {
+                jsonLd: schemaData.jsonLd,
+                scriptTags: schemaData.scriptTags,
+                generatedAt: schemaData.generatedAt || new Date().toISOString(),
+              } : null,
+              schema_included: !!schemaData,
+              schema_type: schemaData?.jsonLd 
+                ? (Array.isArray(schemaData.jsonLd) 
+                  ? schemaData.jsonLd[0]?.["@type"] 
+                  : schemaData.jsonLd["@type"])
+                : null,
+              // Include all other metadata (imageUrl, structuredSEO, etc.)
               ...content.metadata,
             },
           })
@@ -1021,13 +1168,13 @@ Deno.serve(async (req) => {
         failed: failedCount,
         results,
       }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
     console.error("Scheduled publish cron error:", error);
     return new Response(
       JSON.stringify({ error: error.message || "Internal server error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

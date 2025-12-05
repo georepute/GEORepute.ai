@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { 
   FileText, 
   Search,
@@ -55,6 +56,7 @@ interface ContentItem {
 export default function Content() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const supabase = createClientComponentClient();
   const [activeTab, setActiveTab] = useState<"all" | "draft" | "review" | "scheduled" | "published">("all");
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,18 +122,35 @@ export default function Content() {
 
   const checkAndPublishScheduled = async () => {
     try {
-      // Call the scheduled publish endpoint to check and publish any ready content
-      const response = await fetch("/api/geo-core/orchestrator/scheduled-publish", {
-        method: "GET",
-      });
+      // Call the Supabase Edge Function for scheduled publishing
+      const { data, error } = await supabase.functions.invoke('scheduled-publish');
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.published > 0) {
-          // Refresh content list if something was published
-          await loadContent();
-          toast.success(`${data.published} scheduled content published!`);
-        }
+      if (error) {
+        console.error("Scheduled publish Edge Function error:", error);
+        return;
+      }
+
+      // Log detailed results for debugging
+      console.log("Scheduled publish results:", data);
+      
+      if (data?.published > 0) {
+        // Refresh content list if something was published
+        await loadContent();
+        toast.success(`${data.published} scheduled content published!`);
+      }
+      
+      // Show errors for failed items
+      if (data?.failed > 0 && data?.results) {
+        const failedItems = data.results.filter((r: any) => !r.success);
+        failedItems.forEach((item: any) => {
+          console.error(`Failed to publish "${item.title}" to ${item.platform}:`, item.error);
+          toast.error(`Failed to publish to ${item.platform}: ${item.error || 'Unknown error'}`);
+        });
+      }
+      
+      // If nothing to publish, log for debugging
+      if (data?.published === 0 && data?.failed === 0) {
+        console.log("No scheduled content ready to publish");
       }
     } catch (error) {
       console.error("Error checking scheduled content:", error);

@@ -228,6 +228,24 @@ export async function publishToLinkedIn(
       shareText = content.content;
     }
 
+    // LinkedIn has a 3000 character limit for posts
+    const LINKEDIN_CHAR_LIMIT = 3000;
+    if (shareText.length > LINKEDIN_CHAR_LIMIT) {
+      console.log(`⚠️ LinkedIn post text exceeds ${LINKEDIN_CHAR_LIMIT} chars (${shareText.length} chars). Truncating...`);
+      // Truncate to limit minus 3 for "..." and try to break at a word boundary
+      const truncateAt = LINKEDIN_CHAR_LIMIT - 3;
+      let truncatedText = shareText.substring(0, truncateAt);
+      
+      // Try to break at last space to avoid cutting words
+      const lastSpaceIndex = truncatedText.lastIndexOf(' ');
+      if (lastSpaceIndex > truncateAt - 100) { // Only use space if within last 100 chars
+        truncatedText = truncatedText.substring(0, lastSpaceIndex);
+      }
+      
+      shareText = truncatedText + '...';
+      console.log(`✅ Truncated to ${shareText.length} characters`);
+    }
+
     // Prepare UGC Post payload
     const ugcPost: any = {
       author: personUrn,
