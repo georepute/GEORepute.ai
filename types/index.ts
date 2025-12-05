@@ -126,3 +126,69 @@ export interface Subscription {
   features: string[];
 }
 
+// Brand Voice Profile
+export interface BrandVoiceProfile {
+  id: string;
+  user_id: string;
+  brand_name: string;
+  description?: string;
+  is_default: boolean;
+  personality_traits: string[];
+  tone: "casual" | "professional" | "formal" | "friendly" | "humorous" | "authoritative" | "neutral";
+  sentence_length: "short" | "medium" | "long" | "mixed";
+  vocabulary_level: "simple" | "intermediate" | "advanced";
+  use_emojis: boolean;
+  emoji_style: "none" | "minimal" | "moderate" | "heavy";
+  preferred_words: string[];
+  avoid_words: string[];
+  signature_phrases: string[];
+  voice_examples: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+// SEO Schema Types (JSON-LD Structured Data)
+export interface SchemaData {
+  "@context": string;
+  "@type": string;
+  [key: string]: any;
+}
+
+export interface ContentSchema {
+  jsonLd: SchemaData | SchemaData[];
+  scriptTags: string;
+  generatedAt: string;
+}
+
+// Structured SEO Content Types
+export interface StructuredSEOContent {
+  metaDescription: string;
+  headings: Array<{
+    level: number;
+    text: string;
+    position: number;
+  }>;
+  faqs: Array<{
+    question: string;
+    answer: string;
+  }>;
+  seoScore: number | null;
+  wordCount: number;
+  ogTags?: {
+    title: string;
+    description: string;
+    image: string;
+    url: string;
+    type: string;
+    siteName?: string;
+  };
+  internalLinks?: Array<{
+    anchorText: string;
+    suggestedUrl: string;
+    relevance: number;
+    reason: string;
+  }>;
+  canonicalUrl?: string;
+  generatedAt: string;
+}
+
