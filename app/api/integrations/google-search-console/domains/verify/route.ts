@@ -72,8 +72,22 @@ export async function POST(request: NextRequest) {
     });
 
     try {
-      // Attempt verification
-      await client.verifySite(domain.site_url, domain.verification_method || 'DNS_TXT');
+      // Determine which verification method to use
+      const verificationMethod = domain.verification_method || 'DNS_TXT';
+      
+      // For domain verification (DNS_TXT, DNS_CNAME), we need just the domain without protocol
+      // For URL verification (META, FILE), we need the full URL
+      let verificationIdentifier: string;
+      
+      if (verificationMethod === 'DNS_TXT' || verificationMethod === 'DNS_CNAME') {
+        // Use domain without protocol for INET_DOMAIN verification
+        verificationIdentifier = domain.domain_url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        await client.verifySite(verificationIdentifier, verificationMethod as 'DNS_TXT' | 'DNS_CNAME');
+      } else {
+        // Use full URL for SITE verification (META, FILE, etc.)
+        verificationIdentifier = domain.site_url;
+        await client.verifyUrlSite(verificationIdentifier, verificationMethod);
+      }
 
       // Update domain status to verified
       const { data: updatedDomain, error: updateError } = await supabase
@@ -83,6 +97,7 @@ export async function POST(request: NextRequest) {
           updated_at: new Date().toISOString(),
           metadata: {
             verified_at: new Date().toISOString(),
+            verification_identifier: verificationIdentifier,
           },
         })
         .eq('id', domainId)
@@ -92,8 +107,15 @@ export async function POST(request: NextRequest) {
       if (updateError) throw updateError;
 
       // Add site to Search Console
+      // For domain verification, use sc-domain: prefix
+      // For URL verification, use the site URL directly
+      const searchConsoleSiteUrl = (verificationMethod === 'DNS_TXT' || verificationMethod === 'DNS_CNAME')
+        ? `sc-domain:${verificationIdentifier}`
+        : domain.site_url;
+      
       try {
-        await client.addSite(domain.site_url);
+        await client.addSite(searchConsoleSiteUrl);
+        console.log(`Successfully added ${searchConsoleSiteUrl} to Search Console`);
       } catch (addSiteError: any) {
         // Site might already be added, that's okay
         console.log('Site add result:', addSiteError.message);

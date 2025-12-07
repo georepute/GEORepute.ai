@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
-import { Copy, Check, AlertCircle, Trash2, RefreshCw, ExternalLink } from 'lucide-react';
+import { Copy, Check, AlertCircle, Trash2, RefreshCw, ExternalLink, X } from 'lucide-react';
 
 interface Domain {
   id: string;
@@ -31,9 +31,13 @@ export default function GoogleSearchConsolePage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [newDomain, setNewDomain] = useState('');
   const [loading, setLoading] = useState(false);
-  const [verificationToken, setVerificationToken] = useState('');
-  const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
-  const [copiedToken, setCopiedToken] = useState(false);
+  const [checkingConnection, setCheckingConnection] = useState(true);
+  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [modalDomain, setModalDomain] = useState<Domain | null>(null);
+  const [dnsCheckResult, setDnsCheckResult] = useState<any>(null);
+  const [checkingDns, setCheckingDns] = useState(false);
+  const [debugResult, setDebugResult] = useState<any>(null);
+  const [debugging, setDebugging] = useState(false);
 
   useEffect(() => {
     checkConnection();
@@ -47,13 +51,15 @@ export default function GoogleSearchConsolePage() {
       window.history.replaceState({}, '', window.location.pathname);
     }
     if (params.get('gsc_error')) {
-      toast.error('Failed to connect to Google Search Console');
+      const errorMsg = decodeURIComponent(params.get('gsc_error') || 'Failed to connect to Google Search Console');
+      toast.error(errorMsg, { duration: 6000 });
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
 
   const checkConnection = async () => {
     try {
+      setCheckingConnection(true);
       const response = await fetch('/api/integrations/google-search-console/status');
       const data = await response.json();
       
@@ -63,6 +69,8 @@ export default function GoogleSearchConsolePage() {
       }
     } catch (error) {
       console.error('Check connection error:', error);
+    } finally {
+      setCheckingConnection(false);
     }
   };
 
@@ -131,8 +139,6 @@ export default function GoogleSearchConsolePage() {
     }
 
     setLoading(true);
-    setVerificationToken('');
-    setSelectedDomainId(null);
     
     try {
       const response = await fetch('/api/integrations/google-search-console/domains', {
@@ -144,11 +150,13 @@ export default function GoogleSearchConsolePage() {
       const data = await response.json();
 
       if (response.ok) {
-        setVerificationToken(data.verificationToken);
-        setSelectedDomainId(data.domain.id);
         toast.success('Domain added! Please add the TXT record to verify.');
-        loadDomains();
+        await loadDomains();
         setNewDomain('');
+        
+        // Open modal with the newly added domain
+        setModalDomain(data.domain);
+        setShowTokenModal(true);
       } else {
         toast.error(data.error || 'Failed to add domain');
       }
@@ -174,8 +182,8 @@ export default function GoogleSearchConsolePage() {
       if (response.ok) {
         toast.success('Domain verified successfully!');
         loadDomains();
-        setVerificationToken('');
-        setSelectedDomainId(null);
+        setShowTokenModal(false);
+        setModalDomain(null);
       } else {
         toast.error(data.error || 'Verification failed');
       }
@@ -242,11 +250,61 @@ export default function GoogleSearchConsolePage() {
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedToken(true);
-    toast.success('Copied to clipboard');
-    setTimeout(() => setCopiedToken(false), 2000);
+  const checkDns = async (domainId: string) => {
+    setCheckingDns(true);
+    setDnsCheckResult(null);
+    try {
+      const response = await fetch('/api/integrations/google-search-console/domains/check-dns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domainId }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setDnsCheckResult(data);
+        if (data.tokenFound) {
+          toast.success('✅ Verification token found in DNS!');
+        } else {
+          toast.error('❌ Verification token not found in DNS yet');
+        }
+      } else {
+        toast.error(data.error || 'Failed to check DNS');
+      }
+    } catch (error) {
+      console.error('Check DNS error:', error);
+      toast.error('Failed to check DNS');
+    } finally {
+      setCheckingDns(false);
+    }
+  };
+
+  const debugVerification = async (domainId: string) => {
+    setDebugging(true);
+    setDebugResult(null);
+    try {
+      const response = await fetch('/api/integrations/google-search-console/domains/debug-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domainId }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setDebugResult(data.debug);
+        console.log('Debug results:', data);
+        toast.success('Debug complete - check the results below');
+      } else {
+        toast.error(data.error || 'Failed to debug verification');
+      }
+    } catch (error) {
+      console.error('Debug verification error:', error);
+      toast.error('Failed to debug verification');
+    } finally {
+      setDebugging(false);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -274,6 +332,30 @@ export default function GoogleSearchConsolePage() {
         return null;
     }
   };
+
+  // Show loading state while checking connection
+  if (checkingConnection) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-6xl mx-auto">
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Google Search Console</h1>
+            <p className="text-gray-600">
+              Connect your Google Search Console account to track your website's search performance.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+              <p className="text-gray-600">Checking connection status...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -306,6 +388,34 @@ export default function GoogleSearchConsolePage() {
               >
                 {loading ? 'Connecting...' : 'Connect Google Search Console'}
               </button>
+              
+              {/* Troubleshooting Info */}
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-left">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-medium text-blue-900 mb-1">Getting "Error 403: access_denied"?</p>
+                    <p className="text-blue-700 mb-2">
+                      If you see this error, you need to add your email as a Test User in Google Cloud Console:
+                    </p>
+                    <ol className="list-decimal list-inside space-y-1 text-blue-700 ml-2">
+                      <li>Go to <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-800">Google Cloud Console</a></li>
+                      <li>Navigate to: APIs & Services → OAuth consent screen</li>
+                      <li>Scroll to "Test users" section and click "Add Users"</li>
+                      <li>Add your email address and save</li>
+                      <li>Try connecting again after 1-2 minutes</li>
+                    </ol>
+                    <a 
+                      href="https://github.com/yourusername/georepute/blob/main/docs/QUICK_FIX_403_ERROR.md" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium mt-2"
+                    >
+                      View detailed guide <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
@@ -352,60 +462,6 @@ export default function GoogleSearchConsolePage() {
                   {loading ? 'Adding...' : 'Add Domain'}
                 </button>
               </div>
-
-              {verificationToken && selectedDomainId && (
-                <div className="mt-6 p-6 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <div className="flex items-start gap-3 mb-4">
-                    <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-yellow-900 mb-2">Verification Required</h3>
-                      <p className="text-sm text-yellow-800 mb-4">
-                        Add this TXT record to your DNS settings to verify domain ownership. Changes may take a few minutes to propagate.
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-white rounded-lg p-4 mb-4">
-                    <div className="grid grid-cols-3 gap-4 text-sm mb-3">
-                      <div>
-                        <span className="font-medium text-gray-700">Type:</span>
-                        <p className="text-gray-900 mt-1">TXT</p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-700">Name:</span>
-                        <p className="text-gray-900 mt-1">@ (or your domain)</p>
-                      </div>
-                      <div>
-                        <span className="font-medium text-gray-700">TTL:</span>
-                        <p className="text-gray-900 mt-1">3600</p>
-                      </div>
-                    </div>
-                    <div>
-                      <span className="font-medium text-gray-700 text-sm">Value:</span>
-                      <div className="flex items-center gap-2 mt-1">
-                        <code className="flex-1 block p-2 bg-gray-50 rounded text-sm break-all font-mono text-gray-900">
-                          {verificationToken}
-                        </code>
-                        <button
-                          onClick={() => copyToClipboard(verificationToken)}
-                          className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                          title="Copy to clipboard"
-                        >
-                          {copiedToken ? <Check className="w-5 h-5 text-green-600" /> : <Copy className="w-5 h-5" />}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => verifyDomain(selectedDomainId)}
-                    disabled={loading}
-                    className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 font-medium"
-                  >
-                    {loading ? 'Verifying...' : 'Verify Domain'}
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Domains List */}
@@ -451,14 +507,18 @@ export default function GoogleSearchConsolePage() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {domain.verification_status === 'pending' && (
+                          {(domain.verification_status === 'pending' || domain.verification_status === 'failed') && (
                             <>
                               <button
                                 onClick={() => {
-                                  setVerificationToken(domain.verification_token || '');
-                                  setSelectedDomainId(domain.id);
+                                  setModalDomain(domain);
+                                  setShowTokenModal(true);
                                 }}
-                                className="px-4 py-2 text-sm font-medium text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg hover:bg-yellow-100 transition-colors"
+                                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                  domain.verification_status === 'failed'
+                                    ? 'text-red-700 bg-red-50 border border-red-200 hover:bg-red-100'
+                                    : 'text-yellow-700 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100'
+                                }`}
                               >
                                 Show Token
                               </button>
@@ -467,7 +527,7 @@ export default function GoogleSearchConsolePage() {
                                 disabled={loading}
                                 className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
                               >
-                                Verify
+                                {domain.verification_status === 'failed' ? 'Retry Verification' : 'Verify'}
                               </button>
                             </>
                           )}
@@ -501,6 +561,317 @@ export default function GoogleSearchConsolePage() {
           </>
         )}
       </div>
+
+      {/* Token Modal */}
+      {showTokenModal && modalDomain && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <div>
+                <h2 className="text-xl font-semibold text-gray-900">Domain Verification Token</h2>
+                <p className="text-sm text-gray-500 mt-1">{modalDomain.domain_url}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowTokenModal(false);
+                  setModalDomain(null);
+                }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              {modalDomain.verification_status === 'failed' && modalDomain.metadata?.error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <h3 className="font-semibold text-red-900 mb-1">Verification Failed</h3>
+                      <p className="text-sm text-red-800 mb-2">
+                        {modalDomain.metadata.error}
+                      </p>
+                      <p className="text-sm text-red-700">
+                        Please ensure you've added the verification token correctly and wait a few minutes for DNS propagation before retrying.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h3 className="font-semibold text-yellow-900 mb-1">Verification Required</h3>
+                    <p className="text-sm text-yellow-800">
+                      Add this TXT record to your DNS settings to verify domain ownership. Changes may take a few minutes to propagate.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* DNS Record Details */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Record Type</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value="TXT"
+                      readOnly
+                      className="flex-1 px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 font-mono"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText('TXT');
+                        toast.success('Copied to clipboard');
+                      }}
+                      className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Name / Host</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value="@"
+                      readOnly
+                      className="flex-1 px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 font-mono"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText('@');
+                        toast.success('Copied to clipboard');
+                      }}
+                      className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">Use @ or leave empty, or use your domain name</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">TTL (Time To Live)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value="3600"
+                      readOnly
+                      className="flex-1 px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 font-mono"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText('3600');
+                        toast.success('Copied to clipboard');
+                      }}
+                      className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">1 hour (can be adjusted based on your DNS provider)</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Value / Content</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={modalDomain.verification_token || ''}
+                      readOnly
+                      className="flex-1 px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 font-mono text-sm break-all"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(modalDomain.verification_token || '');
+                        toast.success('Token copied to clipboard');
+                      }}
+                      className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">The verification token provided by Google Search Console</p>
+                </div>
+              </div>
+
+              {/* Instructions */}
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h4 className="font-semibold text-blue-900 mb-2 text-sm">How to add TXT record:</h4>
+                <ol className="list-decimal list-inside space-y-1 text-sm text-blue-800">
+                  <li>Log in to your domain registrar or DNS provider</li>
+                  <li>Navigate to DNS management / DNS records section</li>
+                  <li>Add a new TXT record with the values shown above</li>
+                  <li>Save the changes and wait for DNS propagation (usually 5-30 minutes)</li>
+                  <li>Come back here and click the "Verify Domain" button</li>
+                </ol>
+              </div>
+
+              {/* DNS Check Button */}
+              {modalDomain.verification_method === 'DNS_TXT' && (
+                <div className="mt-6 space-y-3">
+                  <button
+                    onClick={() => checkDns(modalDomain.id)}
+                    disabled={checkingDns}
+                    className="w-full px-4 py-3 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${checkingDns ? 'animate-spin' : ''}`} />
+                    {checkingDns ? 'Checking DNS...' : 'Check DNS Status'}
+                  </button>
+                  
+                  <button
+                    onClick={() => debugVerification(modalDomain.id)}
+                    disabled={debugging}
+                    className="w-full px-4 py-3 text-sm font-medium text-purple-700 bg-purple-50 border border-purple-300 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <AlertCircle className={`w-4 h-4 ${debugging ? 'animate-spin' : ''}`} />
+                    {debugging ? 'Debugging...' : 'Debug Verification (Advanced)'}
+                  </button>
+                </div>
+              )}
+
+              {/* DNS Check Results */}
+              {dnsCheckResult && (
+                <div className={`mt-4 p-4 rounded-lg border ${
+                  dnsCheckResult.tokenFound 
+                    ? 'bg-green-50 border-green-200' 
+                    : 'bg-orange-50 border-orange-200'
+                }`}>
+                  <h4 className={`font-semibold mb-2 text-sm ${
+                    dnsCheckResult.tokenFound ? 'text-green-900' : 'text-orange-900'
+                  }`}>
+                    DNS Check Results
+                  </h4>
+                  <div className={`text-sm space-y-2 ${
+                    dnsCheckResult.tokenFound ? 'text-green-800' : 'text-orange-800'
+                  }`}>
+                    {dnsCheckResult.advice?.map((tip: string, index: number) => (
+                      <p key={index}>{tip}</p>
+                    ))}
+                    
+                    {dnsCheckResult.allTxtRecords?.length > 0 && (
+                      <div className="mt-3">
+                        <p className="font-medium mb-1">Found TXT Records:</p>
+                        <div className="bg-white bg-opacity-50 rounded p-2 font-mono text-xs space-y-1">
+                          {dnsCheckResult.allTxtRecords.map((record: string, index: number) => (
+                            <div key={index} className="break-all">• {record}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {dnsCheckResult.dnsError && (
+                      <p className="text-red-700 font-medium mt-2">
+                        DNS Error: {dnsCheckResult.dnsError}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Debug Results */}
+              {debugResult && (
+                <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                  <h4 className="font-semibold text-purple-900 mb-2 text-sm">Debug Analysis</h4>
+                  <div className="text-sm space-y-3 text-purple-800">
+                    {/* Steps */}
+                    <div>
+                      <p className="font-medium mb-1">Execution Steps:</p>
+                      <div className="bg-white bg-opacity-50 rounded p-2 space-y-1 text-xs">
+                        {debugResult.steps?.map((step: string, index: number) => (
+                          <div key={index}>{step}</div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Token Analysis */}
+                    {debugResult.token_analysis && (
+                      <div>
+                        <p className="font-medium mb-1">Token Analysis:</p>
+                        <div className="bg-white bg-opacity-50 rounded p-2 space-y-1 text-xs font-mono">
+                          <div>Length: {debugResult.token_analysis.length}</div>
+                          <div>Has Prefix: {debugResult.token_analysis.has_prefix ? '✅ Yes' : '❌ No'}</div>
+                          <div className="break-all">Raw: {debugResult.token_analysis.raw_value?.substring(0, 80)}...</div>
+                          <div className="break-all text-green-700">Expected: {debugResult.token_analysis.expected_dns_format?.substring(0, 80)}...</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Requirements */}
+                    {debugResult.requirements && (
+                      <div>
+                        <p className="font-medium mb-1">Requirements:</p>
+                        <div className="bg-white bg-opacity-50 rounded p-2 space-y-1 text-xs">
+                          <div>Site URL: {debugResult.requirements.site_url_format}</div>
+                          <div>Type: {debugResult.requirements.is_url_prefix ? 'URL-Prefix' : 'Domain'} Property</div>
+                          <div>DNS Record Location: <span className="font-semibold">{debugResult.requirements.dns_record_location}</span></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Verification Error */}
+                    {debugResult.verification_error && (
+                      <div className="bg-red-100 border border-red-300 rounded p-2">
+                        <p className="font-medium text-red-900 mb-1">Verification Error:</p>
+                        <p className="text-xs text-red-800">{debugResult.verification_error.message}</p>
+                      </div>
+                    )}
+
+                    {/* Success */}
+                    {debugResult.verification_result && (
+                      <div className="bg-green-100 border border-green-300 rounded p-2">
+                        <p className="font-medium text-green-900">✅ Verification Successful!</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => {
+                  setShowTokenModal(false);
+                  setModalDomain(null);
+                  setDnsCheckResult(null);
+                  setDebugResult(null);
+                }}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  verifyDomain(modalDomain.id);
+                  setShowTokenModal(false);
+                  setModalDomain(null);
+                  setDnsCheckResult(null);
+                  setDebugResult(null);
+                }}
+                disabled={loading}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                <Check className="w-4 h-4" />
+                Verify Domain Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

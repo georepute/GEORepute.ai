@@ -174,6 +174,11 @@ Visit: http://localhost:3000/dashboard/google-search-console
 
 ## 🐛 Troubleshooting
 
+### "Error 403: access_denied"
+- **Cause**: Your Google OAuth app is in testing mode
+- **Solution**: Add your email as a Test User in Google Cloud Console
+- **Detailed Guide**: See `docs/TROUBLESHOOTING_403_ACCESS_DENIED.md`
+
 ### "Google Search Console not connected"
 - Check environment variables are set
 - Verify OAuth credentials in Google Cloud Console

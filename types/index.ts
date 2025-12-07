@@ -217,7 +217,7 @@ export interface GSCDomain {
   integration_id: string;
   domain_url: string;
   site_url: string;
-  verification_method: 'DNS_TXT' | 'HTML_FILE' | 'HTML_TAG' | 'ANALYTICS' | 'TAG_MANAGER';
+  verification_method: 'DNS_TXT' | 'FILE' | 'META' | 'ANALYTICS' | 'TAG_MANAGER';
   verification_token?: string;
   verification_status: 'pending' | 'verified' | 'failed';
   permission_level: 'siteOwner' | 'siteFullUser' | 'siteRestrictedUser';

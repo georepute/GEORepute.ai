@@ -98,19 +98,59 @@ export async function POST(request: NextRequest) {
       expiry_date: new Date(integration.expires_at).getTime(),
     });
 
-    // Normalize site URL
-    const siteUrl = normalizeSiteUrl(domainUrl);
+    // Clean domain name (remove protocol and trailing slashes)
+    const cleanDomain = domainUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    
+    // For Search Console, we'll use domain properties (sc-domain:) which require INET_DOMAIN verification
+    // This means we use the domain name without protocol for verification
+    const siteUrl = normalizeSiteUrl(domainUrl); // For Search Console site URL (with https://)
+    const domainForVerification = cleanDomain; // For verification API (without protocol)
 
     // Request verification token for DNS method
+    // We'll use domain verification (INET_DOMAIN type) which supports DNS_TXT and DNS_CNAME
     let verificationToken: string;
+    let verificationMethod: 'DNS_TXT' | 'DNS_CNAME' | 'META' = 'DNS_TXT';
+    
     try {
-      verificationToken = await client.getVerificationToken(siteUrl, 'DNS_TXT');
+      // Use getVerificationToken for domain verification (INET_DOMAIN)
+      // This requires just the domain name without protocol
+      verificationToken = await client.getVerificationToken(domainForVerification, 'DNS_TXT');
     } catch (error: any) {
-      console.error('Error getting verification token:', error);
-      return NextResponse.json(
-        { error: 'Failed to get verification token. Please check the domain format.' },
-        { status: 400 }
-      );
+      console.error('Error getting DNS_TXT verification token:', error);
+      console.error('Error details:', JSON.stringify(error?.response?.data || error?.message, null, 2));
+      
+      // Try DNS_CNAME as fallback
+      try {
+        console.log('Trying DNS_CNAME verification as fallback...');
+        verificationToken = await client.getVerificationToken(domainForVerification, 'DNS_CNAME');
+        verificationMethod = 'DNS_CNAME';
+      } catch (cnameError: any) {
+        console.error('DNS_CNAME verification also failed:', cnameError);
+        
+        // Try META (meta tag) verification as last resort (for URL-prefix properties)
+        try {
+          console.log('Trying META (meta tag) verification for URL-prefix property...');
+          verificationToken = await client.getUrlVerificationToken(siteUrl, 'META');
+          verificationMethod = 'META';
+        } catch (metaError: any) {
+          console.error('META verification also failed:', metaError);
+          
+          const errorMessage = error?.response?.data?.error?.message || 
+                             error?.message || 
+                             'Failed to get verification token. Please check the domain format.';
+          return NextResponse.json(
+            { 
+              error: errorMessage,
+              details: error?.response?.data || error?.message || 'Unknown error',
+              siteUrl: siteUrl,
+              domainUrl: domainUrl,
+              cleanDomain: domainForVerification,
+              suggestion: 'Make sure the domain is accessible and properly formatted (e.g., example.com without protocol for domain verification)'
+            },
+            { status: 400 }
+          );
+        }
+      }
     }
 
     // Store domain in database
@@ -121,7 +161,7 @@ export async function POST(request: NextRequest) {
         integration_id: integration.id,
         domain_url: domainUrl,
         site_url: siteUrl,
-        verification_method: 'DNS_TXT',
+        verification_method: verificationMethod,
         verification_token: verificationToken,
         verification_status: 'pending',
       })
@@ -130,16 +170,38 @@ export async function POST(request: NextRequest) {
 
     if (domainError) throw domainError;
 
-    return NextResponse.json({
-      success: true,
-      domain,
-      verificationToken,
-      instructions: {
+    // Prepare response based on verification method
+    let instructions: any;
+    
+    if (verificationMethod === 'DNS_TXT') {
+      instructions = {
         recordType: 'TXT',
         recordName: '@',
         recordValue: verificationToken,
         message: 'Add this TXT record to your DNS settings to verify ownership. It may take a few minutes for DNS changes to propagate.',
-      },
+      };
+    } else if (verificationMethod === 'DNS_CNAME') {
+      instructions = {
+        recordType: 'CNAME',
+        recordName: 'Provided by Google',
+        recordValue: verificationToken,
+        message: 'Add this CNAME record to your DNS settings to verify ownership. It may take a few minutes for DNS changes to propagate.',
+      };
+    } else {
+      // META
+      instructions = {
+        method: 'META',
+        tag: `<meta name="google-site-verification" content="${verificationToken}" />`,
+        message: 'Add this meta tag to the <head> section of your homepage to verify ownership.',
+      };
+    }
+
+    return NextResponse.json({
+      success: true,
+      domain,
+      verificationToken,
+      verificationMethod,
+      instructions,
     });
   } catch (error: any) {
     console.error('Add domain error:', error);

@@ -30,8 +30,7 @@ CREATE TABLE IF NOT EXISTS platform_integrations (
   status TEXT DEFAULT 'connected' CHECK (status IN ('connected', 'disconnected', 'expired', 'error')),
   metadata JSONB DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(user_id, platform, COALESCE(platform_user_id, ''))
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Add indexes for platform_integrations
@@ -39,6 +38,10 @@ CREATE INDEX IF NOT EXISTS idx_platform_integrations_user_id ON platform_integra
 CREATE INDEX IF NOT EXISTS idx_platform_integrations_platform ON platform_integrations(platform);
 CREATE INDEX IF NOT EXISTS idx_platform_integrations_status ON platform_integrations(status);
 CREATE INDEX IF NOT EXISTS idx_platform_integrations_expires_at ON platform_integrations(expires_at);
+
+-- Unique constraint using expression index (allows COALESCE)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_platform_integrations_unique 
+  ON platform_integrations(user_id, platform, COALESCE(platform_user_id, ''));
 
 -- Enable RLS for platform_integrations
 ALTER TABLE platform_integrations ENABLE ROW LEVEL SECURITY;
@@ -74,7 +77,7 @@ CREATE TABLE IF NOT EXISTS gsc_domains (
   integration_id UUID REFERENCES platform_integrations(id) ON DELETE CASCADE,
   domain_url TEXT NOT NULL,
   site_url TEXT NOT NULL, -- Format: sc-domain:example.com or https://example.com
-  verification_method TEXT DEFAULT 'DNS_TXT' CHECK (verification_method IN ('DNS_TXT', 'HTML_FILE', 'HTML_TAG', 'ANALYTICS', 'TAG_MANAGER')),
+  verification_method TEXT DEFAULT 'DNS_TXT' CHECK (verification_method IN ('DNS_TXT', 'FILE', 'META', 'ANALYTICS', 'TAG_MANAGER')),
   verification_token TEXT,
   verification_status TEXT DEFAULT 'pending' CHECK (verification_status IN ('pending', 'verified', 'failed')),
   permission_level TEXT DEFAULT 'siteOwner' CHECK (permission_level IN ('siteOwner', 'siteFullUser', 'siteRestrictedUser')),
@@ -144,10 +147,7 @@ CREATE TABLE IF NOT EXISTS gsc_analytics (
   -- Metadata
   metadata JSONB DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  
-  -- Composite unique constraint
-  UNIQUE(domain_id, date, data_type, COALESCE(query, ''), COALESCE(page, ''), COALESCE(country, ''), COALESCE(device, ''))
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Add indexes for gsc_analytics
@@ -158,6 +158,10 @@ CREATE INDEX IF NOT EXISTS idx_gsc_analytics_data_type ON gsc_analytics(data_typ
 CREATE INDEX IF NOT EXISTS idx_gsc_analytics_query ON gsc_analytics(query) WHERE query IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_gsc_analytics_page ON gsc_analytics(page) WHERE page IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_gsc_analytics_device ON gsc_analytics(device) WHERE device IS NOT NULL;
+
+-- Composite unique constraint using expression index
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gsc_analytics_unique 
+  ON gsc_analytics(domain_id, date, data_type, COALESCE(query, ''), COALESCE(page, ''), COALESCE(country, ''), COALESCE(device, ''));
 
 -- Enable RLS for gsc_analytics
 ALTER TABLE gsc_analytics ENABLE ROW LEVEL SECURITY;

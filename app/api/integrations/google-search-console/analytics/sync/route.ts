@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createGSCClientFromTokens, getDateDaysAgo } from '@/lib/integrations/google-search-console';
+import { createGSCClientFromTokens, getDateDaysAgo, getSearchConsoleSiteUrl } from '@/lib/integrations/google-search-console';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 
@@ -79,7 +79,13 @@ export async function POST(request: NextRequest) {
     const analyticsStartDate = startDate || getDateDaysAgo(30);
     const analyticsEndDate = endDate || getDateDaysAgo(0);
 
-    const rows = await client.queryAnalytics(domain.site_url, {
+    // Get the correct Search Console site URL format based on verification method
+    const verificationMethod = domain.verification_method || 'DNS_TXT';
+    const searchConsoleSiteUrl = getSearchConsoleSiteUrl(domain.domain_url, verificationMethod);
+
+    console.log(`Querying analytics for ${searchConsoleSiteUrl} (verification method: ${verificationMethod})`);
+
+    const rows = await client.queryAnalytics(searchConsoleSiteUrl, {
       startDate: analyticsStartDate,
       endDate: analyticsEndDate,
       dimensions,
@@ -90,7 +96,7 @@ export async function POST(request: NextRequest) {
     let storedCount = 0;
     
     if (dimensions.length === 1 && dimensions[0] === 'date') {
-      // Store summary data
+      // Store summary data in gsc_analytics table
       const analyticsData = rows.map((row) => ({
         domain_id: domainId,
         user_id: session.user.id,
@@ -100,14 +106,26 @@ export async function POST(request: NextRequest) {
         ctr: row.ctr || 0,
         position: row.position || 0,
         data_type: 'summary',
+        query: null,
+        page: null,
+        country: null,
+        device: null,
       }));
 
       if (analyticsData.length > 0) {
+        // Delete existing summary data for this date range to avoid conflicts
+        await supabase
+          .from('gsc_analytics')
+          .delete()
+          .eq('domain_id', domainId)
+          .eq('data_type', 'summary')
+          .gte('date', analyticsStartDate)
+          .lte('date', analyticsEndDate);
+
+        // Insert new data
         const { error: insertError } = await supabase
           .from('gsc_analytics')
-          .upsert(analyticsData, {
-            onConflict: 'domain_id,date,data_type,query,page,country,device',
-          });
+          .insert(analyticsData);
 
         if (insertError) throw insertError;
         storedCount = analyticsData.length;
@@ -126,11 +144,18 @@ export async function POST(request: NextRequest) {
       }));
 
       if (queryData.length > 0) {
+        // Delete existing query data for this date range
+        await supabase
+          .from('gsc_queries')
+          .delete()
+          .eq('domain_id', domainId)
+          .gte('date', analyticsStartDate)
+          .lte('date', analyticsEndDate);
+
+        // Insert new data
         const { error: insertError } = await supabase
           .from('gsc_queries')
-          .upsert(queryData, {
-            onConflict: 'domain_id,date,query',
-          });
+          .insert(queryData);
 
         if (insertError) throw insertError;
         storedCount = queryData.length;
@@ -149,14 +174,129 @@ export async function POST(request: NextRequest) {
       }));
 
       if (pageData.length > 0) {
+        // Delete existing page data for this date range
+        await supabase
+          .from('gsc_pages')
+          .delete()
+          .eq('domain_id', domainId)
+          .gte('date', analyticsStartDate)
+          .lte('date', analyticsEndDate);
+
+        // Insert new data
         const { error: insertError } = await supabase
           .from('gsc_pages')
-          .upsert(pageData, {
-            onConflict: 'domain_id,date,page',
-          });
+          .insert(pageData);
 
         if (insertError) throw insertError;
         storedCount = pageData.length;
+      }
+    } else if (dimensions.includes('country')) {
+      // Store country data in gsc_analytics table
+      const countryData = rows.map((row) => ({
+        domain_id: domainId,
+        user_id: session.user.id,
+        date: row.keys?.[0] || analyticsEndDate,
+        country: row.keys?.[dimensions.indexOf('country')] || '',
+        clicks: row.clicks || 0,
+        impressions: row.impressions || 0,
+        ctr: row.ctr || 0,
+        position: row.position || 0,
+        data_type: 'country',
+        query: null,
+        page: null,
+        device: null,
+        search_appearance: null,
+      }));
+
+      if (countryData.length > 0) {
+        // Delete existing country data for this date range
+        await supabase
+          .from('gsc_analytics')
+          .delete()
+          .eq('domain_id', domainId)
+          .eq('data_type', 'country')
+          .gte('date', analyticsStartDate)
+          .lte('date', analyticsEndDate);
+
+        // Insert new data
+        const { error: insertError } = await supabase
+          .from('gsc_analytics')
+          .insert(countryData);
+
+        if (insertError) throw insertError;
+        storedCount = countryData.length;
+      }
+    } else if (dimensions.includes('device')) {
+      // Store device data in gsc_analytics table
+      const deviceData = rows.map((row) => ({
+        domain_id: domainId,
+        user_id: session.user.id,
+        date: row.keys?.[0] || analyticsEndDate,
+        device: row.keys?.[dimensions.indexOf('device')] || '',
+        clicks: row.clicks || 0,
+        impressions: row.impressions || 0,
+        ctr: row.ctr || 0,
+        position: row.position || 0,
+        data_type: 'device',
+        query: null,
+        page: null,
+        country: null,
+        search_appearance: null,
+      }));
+
+      if (deviceData.length > 0) {
+        // Delete existing device data for this date range
+        await supabase
+          .from('gsc_analytics')
+          .delete()
+          .eq('domain_id', domainId)
+          .eq('data_type', 'device')
+          .gte('date', analyticsStartDate)
+          .lte('date', analyticsEndDate);
+
+        // Insert new data
+        const { error: insertError } = await supabase
+          .from('gsc_analytics')
+          .insert(deviceData);
+
+        if (insertError) throw insertError;
+        storedCount = deviceData.length;
+      }
+    } else if (dimensions.includes('searchAppearance')) {
+      // Store search appearance data in gsc_analytics table
+      const searchAppearanceData = rows.map((row) => ({
+        domain_id: domainId,
+        user_id: session.user.id,
+        date: row.keys?.[0] || analyticsEndDate,
+        search_appearance: row.keys?.[dimensions.indexOf('searchAppearance')] || '',
+        clicks: row.clicks || 0,
+        impressions: row.impressions || 0,
+        ctr: row.ctr || 0,
+        position: row.position || 0,
+        data_type: 'search_appearance',
+        query: null,
+        page: null,
+        country: null,
+        device: null,
+      }));
+
+      if (searchAppearanceData.length > 0) {
+        // Delete existing search appearance data for this date range
+        await supabase
+          .from('gsc_analytics')
+          .delete()
+          .eq('domain_id', domainId)
+          .eq('data_type', 'search_appearance')
+          .gte('date', analyticsStartDate)
+          .lte('date', analyticsEndDate);
+
+        // Insert new data
+        const { error: insertError } = await supabase
+          .from('gsc_analytics')
+          .insert(searchAppearanceData);
+
+        if (insertError) throw insertError;
+        storedCount = searchAppearanceData.length;
       }
     }
 

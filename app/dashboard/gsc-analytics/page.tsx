@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { TrendingUp, TrendingDown, Minus, MousePointerClick, Eye, ExternalLink, Search } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, MousePointerClick, Eye, ExternalLink, Search, Globe } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface Domain {
@@ -49,6 +49,22 @@ interface Page {
   position: number;
 }
 
+interface Country {
+  id: string;
+  country: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+
+interface SearchAppearance {
+  search_appearance: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+}
+
 export default function GSCAnalyticsPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState('');
@@ -56,10 +72,13 @@ export default function GSCAnalyticsPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [topQueries, setTopQueries] = useState<Query[]>([]);
   const [topPages, setTopPages] = useState<Page[]>([]);
+  const [countries, setCountries] = useState<Country[]>([]);
+  const [searchAppearances, setSearchAppearances] = useState<SearchAppearance[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingDomains, setLoadingDomains] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [dateRange, setDateRange] = useState(30);
-  const [activeTab, setActiveTab] = useState<'overview' | 'queries' | 'pages'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'queries' | 'pages' | 'countries' | 'appearances'>('overview');
 
   useEffect(() => {
     loadDomains();
@@ -73,6 +92,7 @@ export default function GSCAnalyticsPage() {
 
   const loadDomains = async () => {
     try {
+      setLoadingDomains(true);
       const response = await fetch('/api/integrations/google-search-console/domains');
       const data = await response.json();
       const verifiedDomains = data.domains?.filter((d: Domain) => d.verification_status === 'verified') || [];
@@ -84,6 +104,8 @@ export default function GSCAnalyticsPage() {
     } catch (error) {
       console.error('Load domains error:', error);
       toast.error('Failed to load domains');
+    } finally {
+      setLoadingDomains(false);
     }
   };
 
@@ -95,6 +117,8 @@ export default function GSCAnalyticsPage() {
         loadAnalytics(),
         loadTopQueries(),
         loadTopPages(),
+        loadCountries(),
+        loadSearchAppearances(),
       ]);
     } catch (error) {
       console.error('Load data error:', error);
@@ -175,6 +199,59 @@ export default function GSCAnalyticsPage() {
     }
   };
 
+  const loadCountries = async () => {
+    try {
+      const startDate = getDateDaysAgo(dateRange);
+      const endDate = getDateDaysAgo(0);
+      
+      const response = await fetch(
+        `/api/integrations/google-search-console/analytics/sync?domainId=${selectedDomain}&startDate=${startDate}&endDate=${endDate}&dataType=country`
+      );
+      const data = await response.json();
+      
+      if (data.success) {
+        setCountries(data.analytics || []);
+      }
+    } catch (error) {
+      console.error('Load countries error:', error);
+    }
+  };
+
+  const loadSearchAppearances = async () => {
+    try {
+      const startDate = getDateDaysAgo(dateRange);
+      const endDate = getDateDaysAgo(0);
+      
+      const response = await fetch(
+        `/api/integrations/google-search-console/analytics/sync?domainId=${selectedDomain}&startDate=${startDate}&endDate=${endDate}&dataType=search_appearance`
+      );
+      const data = await response.json();
+      
+      if (data.success) {
+        // Aggregate search appearance data
+        const appearanceMap = new Map<string, SearchAppearance>();
+        (data.analytics || []).forEach((item: any) => {
+          const appearance = item.search_appearance || 'UNKNOWN';
+          if (appearanceMap.has(appearance)) {
+            const existing = appearanceMap.get(appearance)!;
+            existing.clicks += item.clicks || 0;
+            existing.impressions += item.impressions || 0;
+          } else {
+            appearanceMap.set(appearance, {
+              search_appearance: appearance,
+              clicks: item.clicks || 0,
+              impressions: item.impressions || 0,
+              ctr: item.ctr || 0,
+            });
+          }
+        });
+        setSearchAppearances(Array.from(appearanceMap.values()));
+      }
+    } catch (error) {
+      console.error('Load search appearances error:', error);
+    }
+  };
+
   const syncData = async () => {
     setSyncing(true);
     try {
@@ -216,6 +293,31 @@ export default function GSCAnalyticsPage() {
         }),
       });
 
+      // Sync country data
+      const countryResponse = await fetch('/api/integrations/google-search-console/analytics/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domainId: selectedDomain,
+          startDate: getDateDaysAgo(7),
+          endDate: getDateDaysAgo(0),
+          dimensions: ['date', 'country'],
+          rowLimit: 50,
+        }),
+      });
+
+      // Sync search appearance data
+      const appearanceResponse = await fetch('/api/integrations/google-search-console/analytics/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domainId: selectedDomain,
+          startDate: getDateDaysAgo(7),
+          endDate: getDateDaysAgo(0),
+          dimensions: ['date', 'searchAppearance'],
+        }),
+      });
+
       if (summaryResponse.ok) {
         toast.success('Data synced successfully!');
         loadAllData();
@@ -246,8 +348,34 @@ export default function GSCAnalyticsPage() {
     return new Intl.NumberFormat().format(num);
   };
 
+  const getCountryName = (code: string) => {
+    const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+    try {
+      return regionNames.of(code.toUpperCase()) || code;
+    } catch {
+      return code;
+    }
+  };
+
   const selectedDomainData = domains.find(d => d.id === selectedDomain);
 
+  // Show loading state while checking for domains
+  if (loadingDomains) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+              <p className="text-gray-600">Loading domains...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show empty state only after loading is complete
   if (domains.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 p-6">
@@ -277,9 +405,18 @@ export default function GSCAnalyticsPage() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Search Console Analytics</h1>
-          <p className="text-gray-600">Track your website's search performance and insights</p>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Search Console Analytics</h1>
+            <p className="text-gray-600">Track your website's search performance and insights</p>
+          </div>
+          <a
+            href="/dashboard/google-search-console"
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm whitespace-nowrap"
+          >
+            <ExternalLink className="w-4 h-4" />
+            Add Domain
+          </a>
         </div>
 
         {/* Controls */}
@@ -389,10 +526,10 @@ export default function GSCAnalyticsPage() {
             {/* Tabs */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
               <div className="border-b border-gray-200">
-                <div className="flex">
+                <div className="flex overflow-x-auto">
                   <button
                     onClick={() => setActiveTab('overview')}
-                    className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors ${
+                    className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
                       activeTab === 'overview'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -402,7 +539,7 @@ export default function GSCAnalyticsPage() {
                   </button>
                   <button
                     onClick={() => setActiveTab('queries')}
-                    className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors ${
+                    className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
                       activeTab === 'queries'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -412,7 +549,7 @@ export default function GSCAnalyticsPage() {
                   </button>
                   <button
                     onClick={() => setActiveTab('pages')}
-                    className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors ${
+                    className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
                       activeTab === 'pages'
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-600 hover:text-gray-900'
@@ -420,46 +557,110 @@ export default function GSCAnalyticsPage() {
                   >
                     Top Pages
                   </button>
+                  <button
+                    onClick={() => setActiveTab('countries')}
+                    className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
+                      activeTab === 'countries'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <Globe className="w-4 h-4 inline mr-2" />
+                    Countries
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('appearances')}
+                    className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
+                      activeTab === 'appearances'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Search Appearances
+                  </button>
                 </div>
               </div>
 
               <div className="p-6">
                 {activeTab === 'overview' && (
                   <div className="space-y-8">
-                    {/* Clicks & Impressions Chart */}
+                    {/* Combined Metrics Chart */}
                     <div>
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Clicks & Impressions Over Time</h3>
-                      <ResponsiveContainer width="100%" height={300}>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance Metrics Over Time</h3>
+                      <ResponsiveContainer width="100%" height={400}>
                         <LineChart data={analytics}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                           <XAxis dataKey="date" stroke="#6b7280" style={{ fontSize: '12px' }} />
-                          <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+                          
+                          {/* Left Y-axis for Clicks & Impressions */}
+                          <YAxis 
+                            yAxisId="left" 
+                            stroke="#6b7280" 
+                            style={{ fontSize: '12px' }}
+                            label={{ value: 'Clicks & Impressions', angle: -90, position: 'insideLeft', style: { fontSize: '12px' } }}
+                          />
+                          
+                          {/* Right Y-axis for CTR & Position */}
+                          <YAxis 
+                            yAxisId="right" 
+                            orientation="right" 
+                            stroke="#6b7280" 
+                            style={{ fontSize: '12px' }}
+                            label={{ value: 'CTR (%) & Position', angle: 90, position: 'insideRight', style: { fontSize: '12px' } }}
+                          />
+                          
                           <Tooltip 
                             contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                            formatter={(value: number, name: string) => {
+                              if (name === 'CTR') return `${(value * 100).toFixed(2)}%`;
+                              if (name === 'Position') return value.toFixed(1);
+                              return formatNumber(value);
+                            }}
                           />
                           <Legend />
-                          <Line type="monotone" dataKey="clicks" stroke="#3b82f6" name="Clicks" strokeWidth={2} />
-                          <Line type="monotone" dataKey="impressions" stroke="#10b981" name="Impressions" strokeWidth={2} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    {/* Position Chart */}
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">Average Position</h3>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={analytics}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                          <XAxis dataKey="date" stroke="#6b7280" style={{ fontSize: '12px' }} />
-                          <YAxis reversed domain={[1, 100]} stroke="#6b7280" style={{ fontSize: '12px' }} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                          
+                          {/* Lines with different Y-axes */}
+                          <Line 
+                            yAxisId="left" 
+                            type="linear" 
+                            dataKey="clicks" 
+                            stroke="#3b82f6" 
+                            name="Clicks" 
+                            strokeWidth={2} 
+                            dot={false}
                           />
-                          <Legend />
-                          <Line type="monotone" dataKey="position" stroke="#f97316" name="Position" strokeWidth={2} />
+                          <Line 
+                            yAxisId="left" 
+                            type="linear" 
+                            dataKey="impressions" 
+                            stroke="#10b981" 
+                            name="Impressions" 
+                            strokeWidth={2} 
+                            dot={false}
+                          />
+                          <Line 
+                            yAxisId="right" 
+                            type="linear" 
+                            dataKey="ctr" 
+                            stroke="#8b5cf6" 
+                            name="CTR" 
+                            strokeWidth={2} 
+                            dot={false}
+                          />
+                          <Line 
+                            yAxisId="right" 
+                            type="linear" 
+                            dataKey="position" 
+                            stroke="#f97316" 
+                            name="Position" 
+                            strokeWidth={2} 
+                            dot={false}
+                          />
                         </LineChart>
                       </ResponsiveContainer>
-                      <p className="text-xs text-gray-500 mt-2">Note: Lower position is better</p>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Note: Lower position values indicate better rankings. CTR is shown as a decimal (multiply by 100 for percentage).
+                      </p>
                     </div>
                   </div>
                 )}
@@ -529,6 +730,103 @@ export default function GSCAnalyticsPage() {
                             ))}
                           </tbody>
                         </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'countries' && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance by Country</h3>
+                    {countries.length === 0 ? (
+                      <p className="text-center text-gray-500 py-8">No country data available. Click "Sync Data" to fetch latest data.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Country</th>
+                              <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Clicks</th>
+                              <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Impressions</th>
+                              <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">CTR</th>
+                              <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Position</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200">
+                            {countries.slice(0, 20).map((country, index) => (
+                              <tr key={country.id || index} className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-sm text-gray-900">
+                                  <span className="flex items-center gap-2">
+                                    <Globe className="w-4 h-4 text-gray-400" />
+                                    {getCountryName(country.country)}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-900 text-right">{formatNumber(country.clicks)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 text-right">{formatNumber(country.impressions)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 text-right">{(country.ctr * 100).toFixed(2)}%</td>
+                                <td className="px-4 py-3 text-sm text-gray-900 text-right">{country.position.toFixed(1)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'appearances' && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance by Search Appearance</h3>
+                    {searchAppearances.length === 0 ? (
+                      <p className="text-center text-gray-500 py-8">No search appearance data available. Click "Sync Data" to fetch latest data.</p>
+                    ) : (
+                      <div className="space-y-6">
+                        {/* Bar Chart */}
+                        <div>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={searchAppearances}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                              <XAxis 
+                                dataKey="search_appearance" 
+                                angle={-45} 
+                                textAnchor="end" 
+                                height={100} 
+                                style={{ fontSize: '11px' }}
+                              />
+                              <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+                              <Tooltip 
+                                contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                              />
+                              <Legend />
+                              <Bar dataKey="clicks" fill="#3b82f6" name="Clicks" />
+                              <Bar dataKey="impressions" fill="#10b981" name="Impressions" />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        {/* Table */}
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead className="bg-gray-50 border-b border-gray-200">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Type</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Clicks</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">Impressions</th>
+                                <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase tracking-wider">CTR</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200">
+                              {searchAppearances.map((appearance, index) => (
+                                <tr key={index} className="hover:bg-gray-50">
+                                  <td className="px-4 py-3 text-sm text-gray-900">{appearance.search_appearance}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-900 text-right">{formatNumber(appearance.clicks)}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-900 text-right">{formatNumber(appearance.impressions)}</td>
+                                  <td className="px-4 py-3 text-sm text-gray-900 text-right">{(appearance.ctr * 100).toFixed(2)}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     )}
                   </div>

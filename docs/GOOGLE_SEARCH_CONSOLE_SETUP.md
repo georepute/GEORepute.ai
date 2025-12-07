@@ -229,19 +229,30 @@ You can also trigger manual syncs:
 
 ### Common Issues
 
-1. **"Google Search Console not connected"**
+1. **"Error 403: access_denied - GeoRepute has not completed the Google verification process"**
+   - **Cause**: Your OAuth app is in testing mode
+   - **Solution**: Add your email as a Test User in Google Cloud Console
+   - **Detailed Guide**: See `docs/TROUBLESHOOTING_403_ACCESS_DENIED.md`
+   - **Quick Fix**:
+     1. Go to Google Cloud Console → OAuth consent screen
+     2. Scroll to "Test users" section
+     3. Click "Add Users"
+     4. Add your email address
+     5. Save and try connecting again
+
+2. **"Google Search Console not connected"**
    - Solution: Make sure environment variables are set correctly
    - Verify OAuth credentials in Google Cloud Console
 
-2. **"Verification failed"**
+3. **"Verification failed"**
    - Solution: Wait 10-15 minutes for DNS changes to propagate
    - Check TXT record with: `nslookup -type=txt your-domain.com`
 
-3. **"Token expired"**
+4. **"Token expired"**
    - Solution: Disconnect and reconnect your account
    - The refresh token should auto-refresh, but if it fails, reconnect
 
-4. **No data showing**
+5. **No data showing**
    - Solution: Click "Sync Data" button
    - Wait for cron job to run (every 6 hours)
    - Check that domain is verified in Google Search Console directly

@@ -70,10 +70,10 @@ export class GoogleSearchConsoleClient {
     const { tokens } = await this.oauth2Client.getToken(code);
     return {
       access_token: tokens.access_token!,
-      refresh_token: tokens.refresh_token,
-      expiry_date: tokens.expiry_date,
-      token_type: tokens.token_type,
-      scope: tokens.scope,
+      refresh_token: tokens.refresh_token || undefined,
+      expiry_date: tokens.expiry_date || undefined,
+      token_type: tokens.token_type || undefined,
+      scope: tokens.scope || undefined,
     };
   }
 
@@ -111,9 +111,9 @@ export class GoogleSearchConsoleClient {
     return {
       access_token: credentials.access_token!,
       refresh_token: credentials.refresh_token || refreshToken,
-      expiry_date: credentials.expiry_date,
-      token_type: credentials.token_type,
-      scope: credentials.scope,
+      expiry_date: credentials.expiry_date || undefined,
+      token_type: credentials.token_type || undefined,
+      scope: credentials.scope || undefined,
     };
   }
 
@@ -144,37 +144,119 @@ export class GoogleSearchConsoleClient {
   }
 
   /**
-   * Get verification token for DNS TXT record
+   * Get verification token for domain verification using Site Verification API
+   * This method requests a DNS_TXT or DNS_CNAME token for domain verification
+   * @param domain - The domain to verify (e.g., "example.com")
+   * @param method - Verification method: 'DNS_TXT' or 'DNS_CNAME'
+   * @returns The verification token string to be added to DNS records
    */
-  async getVerificationToken(siteUrl: string, method: string = 'DNS_TXT'): Promise<string> {
+  async getVerificationToken(domain: string, method: 'DNS_TXT' | 'DNS_CNAME' = 'DNS_TXT'): Promise<string> {
     const siteVerification = this.getSiteVerificationClient();
-    const response = await siteVerification.webResource.getToken({
-      requestBody: {
-        site: {
-          identifier: siteUrl,
-          type: 'SITE',
+    
+    try {
+      // POST https://www.googleapis.com/siteVerification/v1/token
+      const response = await siteVerification.webResource.getToken({
+        requestBody: {
+          site: {
+            type: 'INET_DOMAIN',
+            identifier: domain,
+          },
+          verificationMethod: method,
         },
-        verificationMethod: method,
-      },
-    });
-    return response.data.token || '';
+      });
+      return response.data.token || '';
+    } catch (error: any) {
+      console.error('Site Verification API error:', error);
+      console.error('Request details:', { domain, method });
+      console.error('Error response:', error?.response?.data);
+      throw error;
+    }
   }
 
   /**
-   * Verify site ownership
+   * Verify site ownership after DNS record is in place
+   * This method instructs Google to check for the token and verify the domain
+   * @param domain - The domain to verify (e.g., "example.com")
+   * @param method - Verification method: 'DNS_TXT' or 'DNS_CNAME'
+   * @returns Verification response data
    */
-  async verifySite(siteUrl: string, method: string = 'DNS_TXT') {
+  async verifySite(domain: string, method: 'DNS_TXT' | 'DNS_CNAME' = 'DNS_TXT') {
     const siteVerification = this.getSiteVerificationClient();
-    const response = await siteVerification.webResource.insert({
-      verificationMethod: method,
-      requestBody: {
-        site: {
-          identifier: siteUrl,
-          type: 'SITE',
+    
+    try {
+      // POST https://www.googleapis.com/siteVerification/v1/webResource?verificationMethod=DNS_TXT
+      const response = await siteVerification.webResource.insert({
+        verificationMethod: method,
+        requestBody: {
+          site: {
+            type: 'INET_DOMAIN',
+            identifier: domain,
+          },
         },
-      },
-    });
-    return response.data;
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Site verification failed:', error);
+      console.error('Request details:', { domain, method });
+      console.error('Error response:', error?.response?.data);
+      throw error;
+    }
+  }
+
+  /**
+   * Get verification token for URL-prefix site verification
+   * This is different from domain verification and works for URL properties
+   * @param siteUrl - The full URL to verify (e.g., "https://example.com" or "https://example.com/")
+   * @param method - Verification method: 'DNS_TXT', 'META', 'FILE', 'ANALYTICS', 'TAG_MANAGER'
+   * @returns The verification token or HTML meta tag
+   */
+  async getUrlVerificationToken(siteUrl: string, method: string = 'META'): Promise<string> {
+    const siteVerification = this.getSiteVerificationClient();
+    
+    try {
+      const response = await siteVerification.webResource.getToken({
+        requestBody: {
+          site: {
+            type: 'SITE',
+            identifier: siteUrl,
+          },
+          verificationMethod: method,
+        },
+      });
+      return response.data.token || '';
+    } catch (error: any) {
+      console.error('URL Site Verification API error:', error);
+      console.error('Request details:', { siteUrl, method });
+      console.error('Error response:', error?.response?.data);
+      throw error;
+    }
+  }
+
+  /**
+   * Verify URL-prefix site ownership
+   * @param siteUrl - The full URL to verify (e.g., "https://example.com")
+   * @param method - Verification method used
+   */
+  async verifyUrlSite(siteUrl: string, method: string = 'META') {
+    const siteVerification = this.getSiteVerificationClient();
+    
+    try {
+      const response = await siteVerification.webResource.insert({
+        verificationMethod: method,
+        requestBody: {
+          site: {
+            type: 'SITE',
+            identifier: siteUrl,
+          },
+        },
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('URL site verification failed:', error);
+      console.error('Request details:', { siteUrl, method });
+      console.error('Error response:', error?.response?.data);
+      throw error;
+    }
   }
 
   /**
@@ -260,18 +342,51 @@ export function getDateDaysAgo(days: number): string {
 
 /**
  * Helper to normalize site URL for GSC
+ * For now, we'll use URL-prefix properties as they're easier to verify programmatically
  */
 export function normalizeSiteUrl(domainUrl: string): string {
   // Remove protocol and trailing slashes
   let normalized = domainUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
   
-  // For domain properties, use sc-domain: prefix
-  if (!normalized.includes('/')) {
-    return `sc-domain:${normalized}`;
+  // Always use URL-prefix properties with https://
+  // This is easier to verify than domain properties
+  if (!normalized.startsWith('http')) {
+    normalized = `https://${normalized}`;
   }
   
-  // For URL-prefix properties, add https://
-  return `https://${normalized}`;
+  return normalized;
+}
+
+/**
+ * Helper to get the correct Search Console site URL format based on verification method
+ * 
+ * @param domainUrl - The domain URL (e.g., "perfection.marketing" or "https://perfection.marketing")
+ * @param verificationMethod - The verification method used (DNS_TXT, DNS_CNAME, META, FILE, etc.)
+ * @returns The correctly formatted site URL for Search Console API calls
+ * 
+ * @example
+ * // For DNS verification
+ * getSearchConsoleSiteUrl('perfection.marketing', 'DNS_TXT')
+ * // Returns: 'sc-domain:perfection.marketing'
+ * 
+ * @example
+ * // For META verification
+ * getSearchConsoleSiteUrl('https://perfection.marketing', 'META')
+ * // Returns: 'https://perfection.marketing'
+ */
+export function getSearchConsoleSiteUrl(domainUrl: string, verificationMethod: string): string {
+  // Clean domain name (remove protocol and trailing slashes)
+  const cleanDomain = domainUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  
+  // DNS_TXT and DNS_CNAME use domain properties (sc-domain:)
+  // These verify the entire domain including all subdomains and protocols
+  if (verificationMethod === 'DNS_TXT' || verificationMethod === 'DNS_CNAME') {
+    return `sc-domain:${cleanDomain}`;
+  }
+  
+  // META, FILE, ANALYTICS, TAG_MANAGER use URL-prefix properties
+  // These verify only the specific URL
+  return normalizeSiteUrl(domainUrl);
 }
 
 /**

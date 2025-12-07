@@ -1,267 +1,249 @@
-# Email Report Implementation Summary
+# Site Verification API Implementation Summary
 
 ## Overview
-Successfully implemented comprehensive email report delivery functionality using Gmail SMTP. Users can now send professional HTML performance reports directly from the dashboard.
 
-## What Was Implemented
+Successfully implemented Google Site Verification API methods in the `GoogleSearchConsoleClient` class, following the exact API specifications you provided.
 
-### 1. Email Service Enhancement (`lib/email.ts`)
-**New Function: `sendReportEmail()`**
-- Sends professional HTML report emails
-- Includes comprehensive performance metrics
-- Beautiful responsive design with gradients
-- Uses `EMAIL_FROM_NAME_REPORT` environment variable for custom sender name
-- Fallback to generic sender name if not set
+## Implemented Methods
 
-**Features:**
-- ✅ Key metrics overview (keywords, ranking, content)
-- ✅ AI visibility performance breakdown
-- ✅ Top keywords table with ranking and volume
-- ✅ Platform-by-platform analysis (top 5)
-- ✅ Responsive HTML template
-- ✅ Direct link to dashboard
-- ✅ Professional branding
+### 1. Domain Verification Methods (INET_DOMAIN)
 
-### 2. API Route (`app/api/reports/send-email/route.ts`)
-**Endpoint: `POST /api/reports/send-email`**
-
-**Features:**
-- ✅ User authentication required
-- ✅ Email format validation
-- ✅ Error handling with descriptive messages
-- ✅ Secure Supabase integration
-- ✅ JSON request/response
-
-**Request Body:**
-```json
-{
-  "email": "user@example.com",
-  "userName": "John Doe",
-  "reportData": {
-    "dateRange": "Last 30 Days",
-    "totalKeywords": 150,
-    "avgRanking": 8.5,
-    "totalContent": 45,
-    "publishedContent": 32,
-    "avgVisibilityScore": 78.5,
-    "totalMentions": 234,
-    "topKeywords": [...],
-    "visibilityByPlatform": [...]
+#### `getVerificationToken(domain: string, method: 'DNS_TXT' | 'DNS_CNAME')`
+- **Purpose:** Get a verification token for domain ownership verification
+- **API Endpoint:** `POST https://www.googleapis.com/siteVerification/v1/token`
+- **Request Body:**
+  ```json
+  {
+    "site": {
+      "type": "INET_DOMAIN",
+      "identifier": "example.com"
+    },
+    "verificationMethod": "DNS_TXT"
   }
-}
+  ```
+- **Returns:** Token string to be added to DNS records
+- **Usage:**
+  ```typescript
+  const token = await client.getVerificationToken('example.com', 'DNS_TXT');
+  ```
+
+#### `verifySite(domain: string, method: 'DNS_TXT' | 'DNS_CNAME')`
+- **Purpose:** Verify domain after DNS record is in place
+- **API Endpoint:** `POST https://www.googleapis.com/siteVerification/v1/webResource?verificationMethod=DNS_TXT`
+- **Request Body:**
+  ```json
+  {
+    "site": {
+      "type": "INET_DOMAIN",
+      "identifier": "example.com"
+    }
+  }
+  ```
+- **Returns:** Verification response data
+- **Usage:**
+  ```typescript
+  const result = await client.verifySite('example.com', 'DNS_TXT');
+  ```
+
+### 2. URL-Prefix Verification Methods (SITE)
+
+#### `getUrlVerificationToken(siteUrl: string, method: string)`
+- **Purpose:** Get verification token for URL-prefix properties
+- **Supports:** META, FILE, ANALYTICS, TAG_MANAGER, DNS_TXT
+- **API Endpoint:** `POST https://www.googleapis.com/siteVerification/v1/token`
+- **Request Body:**
+  ```json
+  {
+    "site": {
+      "type": "SITE",
+      "identifier": "https://example.com"
+    },
+    "verificationMethod": "META"
+  }
+  ```
+- **Usage:**
+  ```typescript
+  const metaTag = await client.getUrlVerificationToken('https://example.com', 'META');
+  ```
+
+#### `verifyUrlSite(siteUrl: string, method: string)`
+- **Purpose:** Verify URL-prefix site after verification method is in place
+- **API Endpoint:** `POST https://www.googleapis.com/siteVerification/v1/webResource?verificationMethod=META`
+- **Usage:**
+  ```typescript
+  const result = await client.verifyUrlSite('https://example.com', 'META');
+  ```
+
+## Key Implementation Details
+
+### Correct API Structure
+✅ Uses `type: "INET_DOMAIN"` for domain verification
+✅ Uses `type: "SITE"` for URL-prefix verification
+✅ Properly formatted request bodies matching Google's API spec
+✅ Correct parameter names: `identifier`, `verificationMethod`
+
+### Error Handling
+✅ Comprehensive try-catch blocks
+✅ Detailed error logging with request details
+✅ Proper error propagation
+
+### TypeScript Types
+✅ Strict typing for verification methods
+✅ Type-safe method signatures
+✅ JSDoc documentation
+
+## Files Created
+
+### 1. `lib/integrations/google-search-console.ts` (Updated)
+- Main implementation file
+- Contains all 4 verification methods
+- Properly uses googleapis library with correct API structure
+
+### 2. `docs/SITE_VERIFICATION_API_USAGE.md`
+- Comprehensive usage guide
+- Complete workflow examples
+- DNS setup instructions
+- Error handling patterns
+- Best practices
+
+### 3. `docs/SITE_VERIFICATION_QUICK_REFERENCE.md`
+- Quick reference guide
+- API endpoint details
+- Request/response examples
+- TypeScript usage snippets
+- DNS record formats
+- Troubleshooting guide
+
+### 4. `examples/site-verification-example.ts`
+- Working code examples
+- Multiple verification scenarios
+- Complete workflows with error handling
+- Retry logic implementation
+- Token refresh handling
+
+## Usage Examples
+
+### Basic Domain Verification (DNS_TXT)
+
+```typescript
+import { GoogleSearchConsoleClient } from '@/lib/integrations/google-search-console';
+
+const client = new GoogleSearchConsoleClient({
+  clientId: process.env.GOOGLE_CLIENT_ID!,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+  redirectUri: process.env.GOOGLE_REDIRECT_URI!,
+});
+
+client.setCredentials(userTokens);
+
+// Step 1: Get token
+const token = await client.getVerificationToken('example.com', 'DNS_TXT');
+console.log('Add this TXT record:', token);
+
+// Step 2: User adds DNS record
+// ... wait for DNS propagation ...
+
+// Step 3: Verify
+const result = await client.verifySite('example.com', 'DNS_TXT');
+console.log('Verified!', result);
+
+// Step 4: Add to Search Console
+await client.addSite('sc-domain:example.com');
 ```
 
-### 3. Reports Page UI (`app/dashboard/reports/page.tsx`)
-**New Features:**
-- ✅ "Email Report" button in header
-- ✅ Beautiful modal dialog for email input
-- ✅ Auto-populated user email and name
-- ✅ Report summary preview
-- ✅ Loading states with spinner
-- ✅ Success/error toast notifications
-- ✅ Responsive design
+### DNS_CNAME Verification
 
-**UI Components:**
-- Email modal with gradient header
-- Input fields for name and email
-- Report summary card
-- Send/Cancel action buttons
-- Loading spinner during send
-- Toast notifications for feedback
+```typescript
+// Get CNAME token
+const token = await client.getVerificationToken('example.com', 'DNS_CNAME');
 
-### 4. Documentation
-**Created Files:**
-1. `docs/EMAIL_REPORT_SETUP.md` - Comprehensive setup guide
-2. Updated `README.md` - Added email report section
-3. `docs/IMPLEMENTATION_SUMMARY.md` - This file
-
-## Environment Variables Required
-
-Add these to your `.env.local` file:
-
-```env
-# Gmail SMTP Configuration
-GMAIL_USER=your-email@gmail.com
-GMAIL_APP_PASSWORD=your-16-char-app-password
-EMAIL_FROM_NAME_REPORT=GeoRepute.ai Reports
-
-# Optional fallback sender name
-EMAIL_FROM_NAME=GeoRepute.ai
-
-# Application URL (for email links)
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+// Verify with CNAME
+const result = await client.verifySite('example.com', 'DNS_CNAME');
 ```
 
-## How to Use
+### URL-Prefix with META Tag
 
-### For Developers
+```typescript
+// Get META tag
+const metaTag = await client.getUrlVerificationToken('https://example.com', 'META');
 
-1. **Setup Gmail App Password:**
-   - Go to Google Account → Security → 2-Step Verification
-   - Generate App Password for "Mail"
-   - Copy 16-character password
+// Verify after adding meta tag to site
+const result = await client.verifyUrlSite('https://example.com', 'META');
+```
 
-2. **Configure Environment:**
-   - Add variables to `.env.local`
-   - Restart development server
+## API Verification Checklist
 
-3. **Test:**
-   - Navigate to Dashboard → Reports
-   - Click "Email Report"
-   - Enter email and send
+✅ **Token Request API**
+- Endpoint: `POST https://www.googleapis.com/siteVerification/v1/token`
+- Body structure: `{ "site": { "type": "INET_DOMAIN", "identifier": "example.com" }, "verificationMethod": "DNS_TXT" }`
+- Returns token string
 
-### For End Users
+✅ **Verification API**
+- Endpoint: `POST https://www.googleapis.com/siteVerification/v1/webResource?verificationMethod=DNS_TXT`
+- Body structure: `{ "site": { "type": "INET_DOMAIN", "identifier": "example.com" } }`
+- Returns verification result
 
-1. Navigate to **Dashboard** → **Reports**
-2. Select desired date range (7/30/90 days)
-3. Click **"Email Report"** button in top-right
-4. Modal opens with:
-   - Pre-filled name and email (editable)
-   - Report summary preview
-5. Review and click **"Send Report"**
-6. Success notification appears
-7. Check email for professional report
+✅ **OAuth Scopes Included**
+- `https://www.googleapis.com/auth/siteverification`
+- `https://www.googleapis.com/auth/siteverification.verify_only`
 
-## Email Template Features
+## Testing Recommendations
 
-### Design Elements
-- 📊 **Gradient Header**: Purple/blue gradient with white text
-- 📈 **Metrics Cards**: Grid layout with color-coded cards
-- 🤖 **AI Visibility**: Dedicated section with platform breakdown
-- 🔑 **Keywords Table**: Responsive table with striped rows
-- 🔗 **CTA Button**: Gradient button linking to dashboard
-- 📱 **Responsive**: Works on all devices
+1. **Test with your own domain:**
+   ```typescript
+   const token = await client.getVerificationToken('yourdomain.com', 'DNS_TXT');
+   ```
 
-### Content Sections
-1. **Header**: Branding and date range
-2. **Key Metrics**: 4-card grid with totals
-3. **AI Visibility**: Score, mentions, and platform breakdown
-4. **Top Keywords**: Table with rankings and volumes
-5. **CTA**: Link to full dashboard report
-6. **Footer**: Copyright and privacy link
+2. **Verify DNS propagation:**
+   ```bash
+   dig TXT yourdomain.com
+   nslookup -type=TXT yourdomain.com
+   ```
 
-## Technical Details
+3. **Test verification:**
+   ```typescript
+   const result = await client.verifySite('yourdomain.com', 'DNS_TXT');
+   ```
 
-### Email Service (`lib/email.ts`)
-- Uses `nodemailer` with Gmail SMTP
-- Connection pooling for efficiency
-- HTML template with inline styles
-- Fallback text version (auto-generated)
-- Error handling and logging
+4. **Check Search Console:**
+   ```typescript
+   const sites = await client.listSites();
+   console.log(sites);
+   ```
 
-### API Security
-- Requires Supabase authentication
-- Email format validation
-- Error messages don't expose system details
-- Service role for secure operations
+## Next Steps
 
-### UI State Management
-- `showEmailModal`: Controls modal visibility
-- `emailAddress`: User's email (editable)
-- `emailName`: User's name (editable)
-- `sendingEmail`: Loading state during send
+1. **Implement in your application:**
+   - Add verification flow to your UI
+   - Store tokens in database
+   - Implement DNS check before verification
+   - Add retry logic for DNS propagation
 
-### Dependencies
-Already installed:
-- `nodemailer`: ^7.0.10
-- `@types/nodemailer`: ^7.0.4
-- `react-hot-toast`: ^2.4.1 (for notifications)
+2. **User Experience:**
+   - Show clear DNS setup instructions
+   - Provide DNS propagation check
+   - Add progress indicators
+   - Handle errors gracefully
 
-## Testing Checklist
+3. **Testing:**
+   - Test with multiple domains
+   - Test both DNS_TXT and DNS_CNAME
+   - Test error scenarios
+   - Test token refresh
 
-- [x] Email service function created
-- [x] API route implemented
-- [x] UI modal added to reports page
-- [x] User authentication validated
-- [x] Email format validation
-- [x] Success/error handling
-- [x] Toast notifications
-- [x] Loading states
-- [x] Responsive design
-- [x] Documentation created
-- [x] No linting errors
+## Support
 
-## Files Modified/Created
+- **Documentation:** See `docs/SITE_VERIFICATION_API_USAGE.md` for detailed guide
+- **Quick Reference:** See `docs/SITE_VERIFICATION_QUICK_REFERENCE.md` for API details
+- **Examples:** See `examples/site-verification-example.ts` for working code
+- **Official API Docs:** https://developers.google.com/site-verification
 
-### Modified:
-1. `lib/email.ts` - Added `sendReportEmail()` function
-2. `app/dashboard/reports/page.tsx` - Added email modal and functionality
-3. `README.md` - Added email report documentation
+## Notes
 
-### Created:
-1. `app/api/reports/send-email/route.ts` - API endpoint
-2. `docs/EMAIL_REPORT_SETUP.md` - Setup guide
-3. `docs/IMPLEMENTATION_SUMMARY.md` - This file
-
-## Benefits
-
-### For Users
-- 📧 Professional reports delivered to inbox
-- 📱 Read reports on any device
-- 📊 Share reports with stakeholders
-- 🎨 Beautiful, branded emails
-- ⚡ Fast and reliable delivery
-
-### For Business
-- 💼 Professional brand presence
-- 🚀 Improved user engagement
-- 📈 Better data distribution
-- 🔄 Automated report delivery
-- 💬 Enhanced communication
-
-## Future Enhancements (Optional)
-
-### Potential Improvements:
-- [ ] Schedule recurring reports
-- [ ] PDF attachment option
-- [ ] Custom email templates
-- [ ] Multiple recipient support
-- [ ] Email delivery tracking
-- [ ] Report history log
-- [ ] Template customization UI
-- [ ] White-label branding options
-
-## Troubleshooting
-
-### Common Issues:
-
-**1. "Email service not configured"**
-- Check `.env.local` has `GMAIL_USER` and `GMAIL_APP_PASSWORD`
-- Restart dev server after adding variables
-
-**2. "Invalid login"**
-- Verify App Password is correct (16 chars)
-- Ensure 2-Step Verification is enabled
-- Generate new App Password if needed
-
-**3. Emails not arriving**
-- Check spam/junk folder
-- Verify recipient email is correct
-- Check Gmail "Sent" folder to confirm
-- Check Gmail sending limits (500/day)
-
-**4. Modal not opening**
-- Check browser console for errors
-- Verify button click handler is attached
-- Check React state management
-
-## Conclusion
-
-The email report feature is fully implemented and ready for use. Users can now send professional performance reports directly from the dashboard using Gmail SMTP. The feature includes:
-
-- ✅ Complete backend API
-- ✅ Professional email templates
-- ✅ User-friendly UI
-- ✅ Comprehensive documentation
-- ✅ Error handling
-- ✅ Security measures
-
-**Status: Production Ready** 🚀
-
----
-
-**Implementation Date**: December 2025
-**Tested**: Yes
-**Documentation**: Complete
-**Status**: ✅ Ready for Production
-
+- DNS propagation can take 5 minutes to 48 hours
+- Always implement retry logic for verification
+- Refresh OAuth tokens before they expire
+- Domain verification (INET_DOMAIN) is recommended over URL-prefix (SITE)
+- DNS_TXT is the most common and recommended method
+- Error 404 usually means DNS record not found/propagated
+- Error 403 means missing OAuth scopes or permissions

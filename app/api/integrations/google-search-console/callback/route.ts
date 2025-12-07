@@ -17,15 +17,23 @@ export async function GET(request: NextRequest) {
     // Handle OAuth error
     if (error) {
       console.error('OAuth error:', error);
+      const errorDescription = searchParams.get('error_description') || error;
+      
+      // Provide user-friendly error messages
+      let userMessage = error;
+      if (error === 'access_denied') {
+        userMessage = 'Access denied. If you are a developer, make sure your email is added as a Test User in Google Cloud Console OAuth consent screen.';
+      }
+      
       return NextResponse.redirect(
-        new URL(`/dashboard/settings?gsc_error=${encodeURIComponent(error)}`, request.url)
+        new URL(`/dashboard/google-search-console?gsc_error=${encodeURIComponent(userMessage)}`, request.url)
       );
     }
 
     // Validate authorization code
     if (!code) {
       return NextResponse.redirect(
-        new URL('/dashboard/settings?gsc_error=no_code', request.url)
+        new URL('/dashboard/google-search-console?gsc_error=no_code', request.url)
       );
     }
 
@@ -34,7 +42,7 @@ export async function GET(request: NextRequest) {
 
     if (!session) {
       return NextResponse.redirect(
-        new URL('/login?redirect=/dashboard/settings', request.url)
+        new URL('/login?redirect=/dashboard/google-search-console', request.url)
       );
     }
 
@@ -45,7 +53,7 @@ export async function GET(request: NextRequest) {
         if (stateData.userId !== session.user.id) {
           console.error('State user ID mismatch');
           return NextResponse.redirect(
-            new URL('/dashboard/settings?gsc_error=invalid_state', request.url)
+            new URL('/dashboard/google-search-console?gsc_error=invalid_state', request.url)
           );
         }
       } catch (e) {
@@ -73,6 +81,7 @@ export async function GET(request: NextRequest) {
       .upsert({
         user_id: session.user.id,
         platform: 'google_search_console',
+        platform_user_id: null,
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token || null,
         token_type: tokens.token_type || 'Bearer',
@@ -83,24 +92,24 @@ export async function GET(request: NextRequest) {
           connected_at: new Date().toISOString(),
         },
       }, {
-        onConflict: 'user_id,platform,platform_user_id',
+        onConflict: 'user_id,platform',
       });
 
     if (dbError) {
       console.error('Database error:', dbError);
       return NextResponse.redirect(
-        new URL('/dashboard/settings?gsc_error=db_error', request.url)
+        new URL('/dashboard/google-search-console?gsc_error=db_error', request.url)
       );
     }
 
-    // Redirect to settings with success message
+    // Redirect to google-search-console page with success message
     return NextResponse.redirect(
-      new URL('/dashboard/settings?gsc_connected=true', request.url)
+      new URL('/dashboard/google-search-console?gsc_connected=true', request.url)
     );
   } catch (error: any) {
     console.error('GSC callback error:', error);
     return NextResponse.redirect(
-      new URL(`/dashboard/settings?gsc_error=${encodeURIComponent('callback_failed')}`, request.url)
+      new URL(`/dashboard/google-search-console?gsc_error=${encodeURIComponent('callback_failed')}`, request.url)
     );
   }
 }
