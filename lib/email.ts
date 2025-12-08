@@ -80,10 +80,10 @@ export async function sendReportEmail(
   reportData: {
     dateRange: string;
     totalKeywords: number;
-    avgRanking: number;
+    avgRanking?: number;
     totalContent: number;
     publishedContent: number;
-    avgVisibilityScore: number;
+    avgVisibilityScore?: number;
     totalMentions: number;
     topKeywords: Array<{ keyword: string; ranking: number; volume: number }>;
     visibilityByPlatform: Array<{ platform: string; score: number; mentions: number }>;
@@ -134,7 +134,7 @@ export async function sendReportEmail(
             
             <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
               <div style="color: #8b5cf6; font-size: 14px; font-weight: 600; margin-bottom: 8px;">Avg Ranking</div>
-              <div style="font-size: 32px; font-weight: bold; color: #1f2937;">${reportData.avgRanking.toFixed(1)}</div>
+              <div style="font-size: 32px; font-weight: bold; color: #1f2937;">${(reportData.avgRanking ?? 0).toFixed(1)}</div>
             </div>
             
             <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -156,12 +156,12 @@ export async function sendReportEmail(
           <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 20px;">
             <div style="background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #0ea5e9;">
               <div style="color: #64748b; font-size: 13px; margin-bottom: 5px;">Visibility Score</div>
-              <div style="font-size: 28px; font-weight: bold; color: #0ea5e9;">${reportData.avgVisibilityScore.toFixed(1)}%</div>
+              <div style="font-size: 28px; font-weight: bold; color: #0ea5e9;">${(reportData.avgVisibilityScore ?? 0).toFixed(1)}%</div>
             </div>
             
             <div style="background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #06b6d4;">
               <div style="color: #64748b; font-size: 13px; margin-bottom: 5px;">Total Mentions</div>
-              <div style="font-size: 28px; font-weight: bold; color: #06b6d4;">${reportData.totalMentions}</div>
+              <div style="font-size: 28px; font-weight: bold; color: #06b6d4;">${reportData.totalMentions ?? 0}</div>
             </div>
           </div>
 
@@ -170,15 +170,15 @@ export async function sendReportEmail(
             <h3 style="color: #334155; font-size: 16px; margin-bottom: 15px;">Platform Breakdown</h3>
             ${reportData.visibilityByPlatform.slice(0, 5).map((platform) => `
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: white; margin-bottom: 8px; border-radius: 6px; border: 1px solid #e2e8f0;">
-                <div style="font-weight: 600; color: #334155; text-transform: capitalize;">${platform.platform}</div>
+                <div style="font-weight: 600; color: #334155; text-transform: capitalize;">${platform.platform || 'Unknown'}</div>
                 <div style="display: flex; gap: 20px; align-items: center;">
                   <div style="text-align: right;">
                     <div style="font-size: 12px; color: #64748b;">Score</div>
-                    <div style="font-weight: bold; color: #0ea5e9;">${platform.score.toFixed(1)}%</div>
+                    <div style="font-weight: bold; color: #0ea5e9;">${(platform.score ?? 0).toFixed(1)}%</div>
                   </div>
                   <div style="text-align: right;">
                     <div style="font-size: 12px; color: #64748b;">Mentions</div>
-                    <div style="font-weight: bold; color: #06b6d4;">${platform.mentions}</div>
+                    <div style="font-weight: bold; color: #06b6d4;">${platform.mentions ?? 0}</div>
                   </div>
                 </div>
               </div>
@@ -203,9 +203,9 @@ export async function sendReportEmail(
             <tbody>
               ${reportData.topKeywords.slice(0, 10).map((kw, idx) => `
                 <tr style="background: ${idx % 2 === 0 ? 'white' : '#fffbeb'};">
-                  <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-weight: 500; color: #334155;">${kw.keyword}</td>
-                  <td style="text-align: center; padding: 12px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #f59e0b;">${kw.ranking.toFixed(1)}</td>
-                  <td style="text-align: center; padding: 12px; border-bottom: 1px solid #e2e8f0; color: #64748b;">${kw.volume.toLocaleString()}</td>
+                  <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-weight: 500; color: #334155;">${kw.keyword || 'Unknown'}</td>
+                  <td style="text-align: center; padding: 12px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #f59e0b;">${(kw.ranking ?? 0).toFixed(1)}</td>
+                  <td style="text-align: center; padding: 12px; border-bottom: 1px solid #e2e8f0; color: #64748b;">${(kw.volume ?? 0).toLocaleString()}</td>
                 </tr>
               `).join('')}
             </tbody>
