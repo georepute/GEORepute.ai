@@ -106,7 +106,7 @@ export default function GoogleSearchConsolePage() {
   };
 
   const disconnectGSC = async () => {
-    if (!confirm('Are you sure you want to disconnect Google Search Console? This will remove all your domains and analytics data.')) {
+    if (!confirm('Are you sure you want to disconnect Google Search Console? Your domains and analytics data will be preserved.')) {
       return;
     }
 
@@ -117,10 +117,9 @@ export default function GoogleSearchConsolePage() {
       });
       
       if (response.ok) {
-        toast.success('Disconnected successfully');
+        toast.success('Disconnected successfully. Your data has been preserved.');
         setIsConnected(false);
         setIntegration(null);
-        setDomains([]);
       } else {
         toast.error('Failed to disconnect');
       }
@@ -720,29 +719,6 @@ export default function GoogleSearchConsolePage() {
                 </ol>
               </div>
 
-              {/* DNS Check Button */}
-              {modalDomain.verification_method === 'DNS_TXT' && (
-                <div className="mt-6 space-y-3">
-                  <button
-                    onClick={() => checkDns(modalDomain.id)}
-                    disabled={checkingDns}
-                    className="w-full px-4 py-3 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${checkingDns ? 'animate-spin' : ''}`} />
-                    {checkingDns ? 'Checking DNS...' : 'Check DNS Status'}
-                  </button>
-                  
-                  <button
-                    onClick={() => debugVerification(modalDomain.id)}
-                    disabled={debugging}
-                    className="w-full px-4 py-3 text-sm font-medium text-purple-700 bg-purple-50 border border-purple-300 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    <AlertCircle className={`w-4 h-4 ${debugging ? 'animate-spin' : ''}`} />
-                    {debugging ? 'Debugging...' : 'Debug Verification (Advanced)'}
-                  </button>
-                </div>
-              )}
-
               {/* DNS Check Results */}
               {dnsCheckResult && (
                 <div className={`mt-4 p-4 rounded-lg border ${
@@ -777,64 +753,6 @@ export default function GoogleSearchConsolePage() {
                       <p className="text-red-700 font-medium mt-2">
                         DNS Error: {dnsCheckResult.dnsError}
                       </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Debug Results */}
-              {debugResult && (
-                <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                  <h4 className="font-semibold text-purple-900 mb-2 text-sm">Debug Analysis</h4>
-                  <div className="text-sm space-y-3 text-purple-800">
-                    {/* Steps */}
-                    <div>
-                      <p className="font-medium mb-1">Execution Steps:</p>
-                      <div className="bg-white bg-opacity-50 rounded p-2 space-y-1 text-xs">
-                        {debugResult.steps?.map((step: string, index: number) => (
-                          <div key={index}>{step}</div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Token Analysis */}
-                    {debugResult.token_analysis && (
-                      <div>
-                        <p className="font-medium mb-1">Token Analysis:</p>
-                        <div className="bg-white bg-opacity-50 rounded p-2 space-y-1 text-xs font-mono">
-                          <div>Length: {debugResult.token_analysis.length}</div>
-                          <div>Has Prefix: {debugResult.token_analysis.has_prefix ? '✅ Yes' : '❌ No'}</div>
-                          <div className="break-all">Raw: {debugResult.token_analysis.raw_value?.substring(0, 80)}...</div>
-                          <div className="break-all text-green-700">Expected: {debugResult.token_analysis.expected_dns_format?.substring(0, 80)}...</div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Requirements */}
-                    {debugResult.requirements && (
-                      <div>
-                        <p className="font-medium mb-1">Requirements:</p>
-                        <div className="bg-white bg-opacity-50 rounded p-2 space-y-1 text-xs">
-                          <div>Site URL: {debugResult.requirements.site_url_format}</div>
-                          <div>Type: {debugResult.requirements.is_url_prefix ? 'URL-Prefix' : 'Domain'} Property</div>
-                          <div>DNS Record Location: <span className="font-semibold">{debugResult.requirements.dns_record_location}</span></div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Verification Error */}
-                    {debugResult.verification_error && (
-                      <div className="bg-red-100 border border-red-300 rounded p-2">
-                        <p className="font-medium text-red-900 mb-1">Verification Error:</p>
-                        <p className="text-xs text-red-800">{debugResult.verification_error.message}</p>
-                      </div>
-                    )}
-
-                    {/* Success */}
-                    {debugResult.verification_result && (
-                      <div className="bg-green-100 border border-green-300 rounded p-2">
-                        <p className="font-medium text-green-900">✅ Verification Successful!</p>
-                      </div>
                     )}
                   </div>
                 </div>

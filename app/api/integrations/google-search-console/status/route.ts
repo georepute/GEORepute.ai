@@ -34,6 +34,16 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Check if the integration is actually connected (not disconnected)
+    const isConnected = integration.status === 'active' || integration.status === 'connected';
+
+    if (!isConnected) {
+      return NextResponse.json({
+        connected: false,
+        integration: null,
+      });
+    }
+
     // Check if token is expired
     const expiresAt = integration.expires_at ? new Date(integration.expires_at) : null;
     const now = new Date();
@@ -60,7 +70,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * DELETE /api/integrations/google-search-console/status
- * Disconnect GSC integration
+ * Disconnect GSC integration (preserves domains and analytics data)
  */
 export async function DELETE(request: NextRequest) {
   try {
@@ -71,10 +81,19 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Delete integration (will cascade delete domains and analytics)
+    // Update integration status to disconnected instead of deleting
+    // This preserves all domains and analytics data
     const { error } = await supabase
       .from('platform_integrations')
-      .delete()
+      .update({
+        status: 'disconnected',
+        access_token: null,
+        refresh_token: null,
+        expires_at: null,
+        metadata: {
+          disconnected_at: new Date().toISOString(),
+        },
+      })
       .eq('user_id', session.user.id)
       .eq('platform', 'google_search_console');
 

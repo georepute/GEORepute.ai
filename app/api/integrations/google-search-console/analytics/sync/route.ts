@@ -361,7 +361,7 @@ export async function GET(request: NextRequest) {
       .eq('domain_id', domainId)
       .eq('user_id', session.user.id)
       .eq('data_type', dataType)
-      .order('date', { ascending: false });
+      .order('date', { ascending: true });
 
     if (startDate) {
       query = query.gte('date', startDate);
