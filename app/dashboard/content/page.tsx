@@ -57,7 +57,9 @@ export default function Content() {
   const [scheduleTime, setScheduleTime] = useState("");
   const [showViewModal, setShowViewModal] = useState(false);
   const [viewContent, setViewContent] = useState<ContentItem | null>(null);
+  const [showSchema, setShowSchema] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [publishingContentId, setPublishingContentId] = useState<string | null>(null);
   const [stats, setStats] = useState({
     total: 0,
     published: 0,
@@ -149,7 +151,32 @@ export default function Content() {
 
   const handleReviewAction = async (action: "publish" | "schedule" | "reject", contentId: string, scheduledAt?: string) => {
     if (action === "publish") {
-      await handleAction("approve", contentId, { autoPublish: true });
+      // Check if this is Medium publishing
+      const contentItem = contentItems.find(item => item.id === contentId);
+      const isMedium = contentItem?.raw?.target_platform === "medium" || contentItem?.platforms?.includes("medium");
+      
+      if (isMedium) {
+        setPublishingContentId(contentId);
+      }
+      
+      try {
+        await handleAction("approve", contentId, { autoPublish: true });
+        // Reload content after successful publish
+        await loadContent();
+      } catch (error) {
+        // On error, clear loading state immediately
+        if (isMedium) {
+          setPublishingContentId(null);
+        }
+        throw error;
+      } finally {
+        if (isMedium) {
+          // Keep loading state for a bit to show success, then clear
+          setTimeout(() => {
+            setPublishingContentId(null);
+          }, 2000);
+        }
+      }
     } else if (action === "schedule") {
       if (scheduledAt) {
         await handleAction("approve", contentId, { scheduledAt });
@@ -434,16 +461,36 @@ export default function Content() {
                       </div>
                     </div>
 
-                    {/* Platforms - Left Side */}
+                    {/* Platforms with Keywords - Left Side */}
                     <div className="flex flex-wrap gap-2 mt-3">
-                      {item.platforms.map((platform) => (
-                        <span
-                          key={platform}
-                          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium capitalize"
-                        >
-                          {platform}
-                        </span>
-                      ))}
+                      {item.platforms.map((platform) => {
+                        // Get the first keyword for this platform
+                        // Try keywordMetrics first, then fall back to raw target_keywords
+                        const firstKeyword = item.keywordMetrics && item.keywordMetrics.length > 0
+                          ? item.keywordMetrics[0].keyword
+                          : (item.raw?.target_keywords && item.raw.target_keywords.length > 0
+                            ? item.raw.target_keywords[0]
+                            : null);
+                        
+                        // Get keyword percentage if available
+                        const keywordPercent = item.keywordMetrics && item.keywordMetrics.length > 0
+                          ? item.keywordMetrics[0].percent
+                          : null;
+
+                        return (
+                          <div key={platform} className="flex items-center gap-2">
+                            <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium capitalize">
+                              {platform}
+                            </span>
+                            {firstKeyword && (
+                              <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
+                                {firstKeyword}
+                                {keywordPercent !== null && ` - ${keywordPercent}%`}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Performance (if published) */}
@@ -533,64 +580,82 @@ export default function Content() {
 
                     {/* Action Buttons */}
                     <div className="flex items-center gap-2">
-                      {/* Draft: Only Approve button */}
-                      {item.status === "draft" && (
-                        <button
-                          onClick={() => handleApprove(item.id)}
-                          className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium hover:bg-green-100 transition-colors flex items-center gap-2"
-                          title="Approve"
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                          Approve
-                        </button>
-                      )}
-
-                      {/* Review: Reject, Publish, Schedule buttons */}
-                      {item.status === "review" && (
+                      {/* Loading state for Medium publishing */}
+                      {publishingContentId === item.id && (item.raw?.target_platform === "medium" || item.platforms?.includes("medium")) ? (
+                        <div className="flex items-center gap-3 px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg">
+                          <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium">Publishing to Medium...</span>
+                            <span className="text-xs text-blue-600">This typically takes 2-3 minutes</span>
+                          </div>
+                        </div>
+                      ) : (
                         <>
-                          <button
-                            onClick={() => handleReviewAction("publish", item.id)}
-                            className="p-2 text-green-600 hover:bg-green-50 rounded-full transition-colors"
-                            title="Publish"
+                          {/* Draft: Only Approve button */}
+                          {item.status === "draft" && (
+                            <button
+                              onClick={() => handleApprove(item.id)}
+                              className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium hover:bg-green-100 transition-colors flex items-center gap-2"
+                              title="Approve"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                              Approve
+                            </button>
+                          )}
+
+                          {/* Review: Reject, Publish, Schedule buttons */}
+                          {item.status === "review" && (
+                            <>
+                              <button
+                                onClick={() => handleReviewAction("publish", item.id)}
+                                disabled={publishingContentId === item.id}
+                                className="p-2 text-green-600 hover:bg-green-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Publish"
+                              >
+                                <CheckCircle className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={() => handleReviewAction("reject", item.id)}
+                                disabled={publishingContentId === item.id}
+                                className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Reject"
+                              >
+                                <XCircle className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={(e) => handleScheduleClick(item.id, e)}
+                                disabled={publishingContentId === item.id}
+                                className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors relative disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Schedule"
+                              >
+                                <Clock className="w-5 h-5" />
+                              </button>
+                            </>
+                          )}
+
+                          {/* View action for all statuses */}
+                          <button 
+                            onClick={() => {
+                              setViewContent(item);
+                              setShowViewModal(true);
+                            }}
+                            disabled={publishingContentId === item.id}
+                            className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="View"
                           >
-                            <CheckCircle className="w-5 h-5" />
+                            <Eye className="w-5 h-5" />
                           </button>
-                          <button
-                            onClick={() => handleReviewAction("reject", item.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                            title="Reject"
+                          {/* Delete action for all statuses */}
+                          <button 
+                            onClick={() => handleDelete(item.id)}
+                            disabled={publishingContentId === item.id}
+                            className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Delete"
                           >
-                            <XCircle className="w-5 h-5" />
-                          </button>
-                          <button
-                            onClick={(e) => handleScheduleClick(item.id, e)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors relative"
-                            title="Schedule"
-                          >
-                            <Clock className="w-5 h-5" />
+                            <Trash2 className="w-5 h-5" />
                           </button>
                         </>
                       )}
-
-                      {/* View action for all statuses */}
-                      <button 
-                        onClick={() => {
-                          setViewContent(item);
-                          setShowViewModal(true);
-                        }}
-                        className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
-                        title="View"
-                      >
-                        <Eye className="w-5 h-5" />
-                      </button>
-                      {/* Delete action for all statuses */}
-                      <button 
-                        onClick={() => handleDelete(item.id)}
-                        className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -778,39 +843,144 @@ export default function Content() {
             {/* Content Body */}
             <div className="flex-1 overflow-y-auto p-6">
               <div className="prose prose-sm max-w-none">
-                {viewContent.raw?.generated_content ? (
-                  <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
-                    {viewContent.raw.generated_content}
-                  </div>
-                ) : (
-                  <div className="text-gray-500 text-center py-12">
-                    <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>No content available</p>
-                  </div>
-                )}
+                {!showSchema ? (
+                  <>
+                    {/* Show Content */}
+                    {viewContent.raw?.generated_content ? (
+                      <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
+                        {viewContent.raw.generated_content}
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 text-center py-12">
+                        <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                        <p>No content available</p>
+                      </div>
+                    )}
 
-                {/* Published URL Link in View Modal */}
-                {viewContent.status === "published" && viewContent.published_records && viewContent.published_records.length > 0 && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h4 className="text-sm font-semibold text-gray-900 mb-3">Published Links:</h4>
-                    <div className="space-y-2">
-                      {viewContent.published_records.map((pub: any, idx: number) => (
-                        pub.published_url ? (
-                          <a
-                            key={idx}
-                            href={pub.published_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline p-2 rounded-lg hover:bg-blue-50 transition-colors"
-                          >
-                            <Send className="w-4 h-4" />
-                            <span className="break-all">{pub.published_url}</span>
-                            <span className="text-xs text-gray-500 capitalize whitespace-nowrap">({pub.platform || 'external'})</span>
-                          </a>
-                        ) : null
-                      ))}
+                    {/* Published URL Link in View Modal */}
+                    {viewContent.status === "published" && viewContent.published_records && viewContent.published_records.length > 0 && (
+                      <div className="mt-6 pt-6 border-t border-gray-200">
+                        <h4 className="text-sm font-semibold text-gray-900 mb-3">Published Links:</h4>
+                        <div className="space-y-2">
+                          {viewContent.published_records.map((pub: any, idx: number) => (
+                            pub.published_url ? (
+                              <a
+                                key={idx}
+                                href={pub.published_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline p-2 rounded-lg hover:bg-blue-50 transition-colors"
+                              >
+                                <Send className="w-4 h-4" />
+                                <span className="break-all">{pub.published_url}</span>
+                                <span className="text-xs text-gray-500 capitalize whitespace-nowrap">({pub.platform || 'external'})</span>
+                              </a>
+                            ) : null
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Show Schema */}
+                    <div className="space-y-4">
+                      {/* Auto-Generated Schema (includes structured SEO data) */}
+                      <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                        <div className="flex items-center gap-2 mb-3">
+                          <h4 className="text-sm font-semibold text-gray-900">Auto-Generated JSON-LD Schema</h4>
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">Includes Structured SEO Data</span>
+                        </div>
+                        <p className="text-xs text-gray-600 mb-3">
+                          This schema automatically includes: headings (H1/H2/H3), FAQs, meta description, and other structured data from your content.
+                        </p>
+                        {viewContent.raw?.metadata?.schema?.jsonLd ? (
+                          <pre className="text-xs bg-white p-4 rounded border border-gray-200 overflow-x-auto max-h-96 overflow-y-auto">
+                            {JSON.stringify(viewContent.raw.metadata.schema.jsonLd, null, 2)}
+                          </pre>
+                        ) : (
+                          <p className="text-gray-500 text-sm">No schema data available</p>
+                        )}
+                      </div>
+                      
+                      {/* HTML Script Tags (ready to embed) */}
+                      <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <h4 className="text-sm font-semibold text-gray-900 mb-3">HTML Script Tags (Ready to Embed):</h4>
+                        {viewContent.raw?.metadata?.schema?.scriptTags ? (
+                          <pre className="text-xs bg-white p-4 rounded border border-gray-200 overflow-x-auto max-h-96 overflow-y-auto">
+                            {viewContent.raw.metadata.schema.scriptTags}
+                          </pre>
+                        ) : (
+                          <p className="text-gray-500 text-sm">No script tags available</p>
+                        )}
+                      </div>
+
+                      {/* Additional Structured SEO Info (not in schema) */}
+                      {viewContent.raw?.metadata?.structuredSEO && (
+                        <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                          <div className="flex items-center gap-2 mb-3">
+                            <h4 className="text-sm font-semibold text-gray-900">Additional SEO Elements</h4>
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Not in Schema</span>
+                          </div>
+                          <p className="text-xs text-gray-600 mb-3">
+                            These elements are used for meta tags, social sharing, and internal linking (not included in JSON-LD schema).
+                          </p>
+                          <div className="space-y-2 text-sm">
+                            {viewContent.raw.metadata.structuredSEO.metaDescription && (
+                              <div>
+                                <span className="font-medium text-gray-700">Meta Description: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.metaDescription}</span>
+                                <span className="text-xs text-gray-500 ml-2">(also in schema)</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.headings && viewContent.raw.metadata.structuredSEO.headings.length > 0 && (
+                              <div>
+                                <span className="font-medium text-gray-700">Headings Structure: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.headings.length} headings (H1, H2, H3)</span>
+                                <span className="text-xs text-gray-500 ml-2">(included in schema)</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.faqs && viewContent.raw.metadata.structuredSEO.faqs.length > 0 && (
+                              <div>
+                                <span className="font-medium text-gray-700">FAQs: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.faqs.length} FAQs</span>
+                                <span className="text-xs text-gray-500 ml-2">(included in schema if FAQPage type)</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.ogTags && (
+                              <div className="pt-2 border-t border-green-200">
+                                <span className="font-medium text-gray-700">Open Graph Tags: </span>
+                                <span className="text-gray-600 text-xs">For social media sharing previews</span>
+                                <div className="mt-2 ml-4 text-xs text-gray-600 space-y-1">
+                                  <div>Title: {viewContent.raw.metadata.structuredSEO.ogTags.title}</div>
+                                  <div>Description: {viewContent.raw.metadata.structuredSEO.ogTags.description?.substring(0, 80)}...</div>
+                                  <div>Image: {viewContent.raw.metadata.structuredSEO.ogTags.image}</div>
+                                </div>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.internalLinks && viewContent.raw.metadata.structuredSEO.internalLinks.length > 0 && (
+                              <div className="pt-2 border-t border-green-200">
+                                <span className="font-medium text-gray-700">Internal Linking Suggestions: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.internalLinks.length} links</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.canonicalUrl && (
+                              <div className="pt-2 border-t border-green-200">
+                                <span className="font-medium text-gray-700">Canonical URL: </span>
+                                <span className="text-gray-600 break-all text-xs">{viewContent.raw.metadata.structuredSEO.canonicalUrl}</span>
+                              </div>
+                            )}
+                            {viewContent.raw.metadata.structuredSEO.seoScore !== null && viewContent.raw.metadata.structuredSEO.seoScore !== undefined && (
+                              <div className="pt-2 border-t border-green-200">
+                                <span className="font-medium text-gray-700">SEO Score: </span>
+                                <span className="text-gray-600">{viewContent.raw.metadata.structuredSEO.seoScore}/100</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
             </div>
@@ -836,21 +1006,46 @@ export default function Content() {
                 ))}
               </div>
               <div className="flex gap-3">
+                {!showSchema && (
+                  <button
+                    onClick={() => {
+                      if (viewContent.raw?.generated_content) {
+                        navigator.clipboard.writeText(viewContent.raw.generated_content);
+                        toast.success("Content copied to clipboard!");
+                      }
+                    }}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
+                  >
+                    Copy
+                  </button>
+                )}
+                {showSchema && (
+                  <button
+                    onClick={() => {
+                      const schemaText = viewContent.raw?.metadata?.schema?.scriptTags || JSON.stringify(viewContent.raw?.metadata?.schema?.jsonLd || {}, null, 2);
+                      if (schemaText) {
+                        navigator.clipboard.writeText(schemaText);
+                        toast.success("Schema copied to clipboard!");
+                      }
+                    }}
+                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
+                  >
+                    Copy Schema
+                  </button>
+                )}
                 <button
                   onClick={() => {
-                    if (viewContent.raw?.generated_content) {
-                      navigator.clipboard.writeText(viewContent.raw.generated_content);
-                      toast.success("Content copied to clipboard!");
-                    }
+                    setShowSchema(!showSchema);
                   }}
-                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
+                  className="px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors font-medium text-sm border border-blue-200"
                 >
-                  Copy
+                  {showSchema ? "View Content" : "View Schema"}
                 </button>
                 <button
                   onClick={() => {
                     setShowViewModal(false);
                     setViewContent(null);
+                    setShowSchema(false);
                   }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
                 >

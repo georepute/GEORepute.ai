@@ -126,3 +126,170 @@ export interface Subscription {
   features: string[];
 }
 
+// Brand Voice Profile
+export interface BrandVoiceProfile {
+  id: string;
+  user_id: string;
+  brand_name: string;
+  description?: string;
+  is_default: boolean;
+  personality_traits: string[];
+  tone: "casual" | "professional" | "formal" | "friendly" | "humorous" | "authoritative" | "neutral";
+  sentence_length: "short" | "medium" | "long" | "mixed";
+  vocabulary_level: "simple" | "intermediate" | "advanced";
+  use_emojis: boolean;
+  emoji_style: "none" | "minimal" | "moderate" | "heavy";
+  preferred_words: string[];
+  avoid_words: string[];
+  signature_phrases: string[];
+  voice_examples: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+// SEO Schema Types (JSON-LD Structured Data)
+export interface SchemaData {
+  "@context": string;
+  "@type": string;
+  [key: string]: any;
+}
+
+export interface ContentSchema {
+  jsonLd: SchemaData | SchemaData[];
+  scriptTags: string;
+  generatedAt: string;
+}
+
+// Structured SEO Content Types
+export interface StructuredSEOContent {
+  metaDescription: string;
+  headings: Array<{
+    level: number;
+    text: string;
+    position: number;
+  }>;
+  faqs: Array<{
+    question: string;
+    answer: string;
+  }>;
+  seoScore: number | null;
+  wordCount: number;
+  ogTags?: {
+    title: string;
+    description: string;
+    image: string;
+    url: string;
+    type: string;
+    siteName?: string;
+  };
+  internalLinks?: Array<{
+    anchorText: string;
+    suggestedUrl: string;
+    relevance: number;
+    reason: string;
+  }>;
+  canonicalUrl?: string;
+  generatedAt: string;
+}
+
+// Google Search Console Types
+export interface GSCIntegration {
+  id: string;
+  user_id: string;
+  platform: 'google_search_console';
+  access_token: string;
+  refresh_token?: string;
+  token_type: string;
+  expires_at: string;
+  scope?: string;
+  status: 'connected' | 'disconnected' | 'expired' | 'error';
+  metadata?: {
+    connected_at?: string;
+    [key: string]: any;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCDomain {
+  id: string;
+  user_id: string;
+  integration_id: string;
+  domain_url: string;
+  site_url: string;
+  verification_method: 'DNS_TXT' | 'FILE' | 'META' | 'ANALYTICS' | 'TAG_MANAGER';
+  verification_token?: string;
+  verification_status: 'pending' | 'verified' | 'failed';
+  permission_level: 'siteOwner' | 'siteFullUser' | 'siteRestrictedUser';
+  last_synced_at?: string;
+  metadata?: {
+    verified_at?: string;
+    error?: string;
+    failed_at?: string;
+    [key: string]: any;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCAnalytics {
+  id: string;
+  domain_id: string;
+  user_id: string;
+  date: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  query?: string;
+  page?: string;
+  country?: string;
+  device?: 'MOBILE' | 'DESKTOP' | 'TABLET';
+  search_appearance?: string;
+  data_type: 'summary' | 'query' | 'page' | 'country' | 'device' | 'search_appearance';
+  metadata?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCQuery {
+  id: string;
+  domain_id: string;
+  user_id: string;
+  date: string;
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  metadata?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCPage {
+  id: string;
+  domain_id: string;
+  user_id: string;
+  date: string;
+  page: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  metadata?: any;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GSCSummary {
+  totalClicks: number;
+  totalImpressions: number;
+  avgCTR: number;
+  avgPosition: number;
+  trends: {
+    clicks: number;
+    impressions: number;
+  };
+}
+

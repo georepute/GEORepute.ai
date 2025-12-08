@@ -1,382 +1,2406 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useState, useEffect } from "react";
+import Image from "next/image";
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
-  Brain, 
-  TrendingUp, 
-  TrendingDown,
-  Search,
-  MessageSquare,
-  Sparkles,
-  Eye,
   Target,
-  BarChart3
+  ArrowRight,
+  ArrowLeft,
+  ChevronDown,
+  LayoutGrid,
+  Settings,
+  Play,
+  Plus,
+  Search,
+  TrendingUp,
+  Eye,
+  BarChart3,
+  Globe,
+  RefreshCw,
+  Download,
+  FileText,
+  Activity,
+  MessageSquare,
+  Check,
+  X,
+  StopCircle,
+  Trash2,
+  MoreVertical
 } from "lucide-react";
 import {
+  PieChart,
+  Pie,
+  Cell,
   BarChart,
   Bar,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
-} from "recharts";
+  LineChart,
+  Line
+} from 'recharts';
+
+type ViewMode = 'projects' | 'form' | 'details';
+
+interface Project {
+  id: string;
+  brand_name: string;
+  industry: string;
+  website_url?: string;
+  active_platforms?: string[];
+  competitors?: string[];
+  keywords?: string[];
+  last_analysis_at?: string;
+  created_at: string;
+  company_description?: string;
+  company_image_url?: string;
+}
+
+interface Session {
+  id: string;
+  project_id: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  completed_queries?: number;
+  total_queries?: number;
+  results_summary?: any;
+  session_name?: string;
+  started_at: string;
+}
 
 export default function AIVisibility() {
-  const aiPlatforms = [
-    { 
-      name: "ChatGPT", 
-      score: 85, 
-      change: 5, 
-      mentions: 234,
-      citations: 45,
-      icon: MessageSquare,
-      color: "#10a37f",
-      bgColor: "bg-green-100"
-    },
-    { 
-      name: "Google Gemini", 
-      score: 78, 
-      change: 3, 
-      mentions: 189,
-      citations: 38,
-      icon: Sparkles,
-      color: "#4285f4",
-      bgColor: "bg-blue-100"
-    },
-    { 
-      name: "Perplexity AI", 
-      score: 82, 
-      change: -2, 
-      mentions: 167,
-      citations: 52,
-      icon: Search,
-      color: "#ec4899",
-      bgColor: "bg-pink-100"
-    },
-    { 
-      name: "Claude AI", 
-      score: 71, 
-      change: 4, 
-      mentions: 143,
-      citations: 29,
-      icon: Brain,
-      color: "#f59e0b",
-      bgColor: "bg-orange-100"
-    },
-    { 
-      name: "Microsoft Copilot", 
-      score: 68, 
-      change: 2, 
-      mentions: 128,
-      citations: 31,
-      icon: MessageSquare,
-      color: "#0078d4",
-      bgColor: "bg-blue-100"
-    },
-    { 
-      name: "You.com", 
-      score: 75, 
-      change: 6, 
-      mentions: 156,
-      citations: 41,
-      icon: Search,
-      color: "#8b5cf6",
-      bgColor: "bg-purple-100"
-    },
+  const supabase = createClientComponentClient();
+  
+  // View mode: 'projects' (list), 'form' (new analysis), 'details' (project details)
+  const [viewMode, setViewMode] = useState<ViewMode>('projects');
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  // Form state
+  const [currentStep, setCurrentStep] = useState(1);
+  const totalSteps = 4;
+  const [brandName, setBrandName] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [industry, setIndustry] = useState("Marketing");
+  const [competitors, setCompetitors] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [newCompetitor, setNewCompetitor] = useState("");
+  const [newKeyword, setNewKeyword] = useState("");
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["perplexity", "chatgpt"]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Project details state
+  const [projectSessions, setProjectSessions] = useState<Session[]>([]);
+  const [projectStats, setProjectStats] = useState<any>(null);
+  const [projectResponses, setProjectResponses] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState('summary');
+  const [resultsView, setResultsView] = useState<'mentioned' | 'missed'>('mentioned');
+  const [showCompletionNotification, setShowCompletionNotification] = useState(false);
+  const [showAnalysisStartNotification, setShowAnalysisStartNotification] = useState(false);
+  const [showAnalysisStartModal, setShowAnalysisStartModal] = useState(false);
+  const [analysisStartInfo, setAnalysisStartInfo] = useState<any>(null);
+  const [stoppingAnalysis, setStoppingAnalysis] = useState<string | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [deletingProject, setDeletingProject] = useState<string | null>(null);
+
+  const industries = [
+    "Marketing", "Technology", "Healthcare", "Finance", "Education",
+    "Retail", "Real Estate", "Legal", "Consulting", "Manufacturing",
+    "Food & Beverage", "Travel & Hospitality", "Entertainment",
+    "Sports & Fitness", "Non-Profit", "Other"
   ];
 
-  const visibilityTrend = [
-    { month: "May", chatgpt: 72, gemini: 68, perplexity: 70, claude: 62 },
-    { month: "Jun", chatgpt: 76, gemini: 71, perplexity: 74, claude: 65 },
-    { month: "Jul", chatgpt: 79, gemini: 74, perplexity: 78, claude: 67 },
-    { month: "Aug", chatgpt: 82, gemini: 76, perplexity: 80, claude: 69 },
-    { month: "Sep", chatgpt: 83, gemini: 77, perplexity: 81, claude: 70 },
-    { month: "Oct", chatgpt: 85, gemini: 78, perplexity: 82, claude: 71 },
+  const platformOptions = [
+    { id: "perplexity", name: "Perplexity", icon: "/images/perplexity.png" },
+    { id: "chatgpt", name: "ChatGPT", icon: "/images/chatgpt.png" },
+    { id: "gemini", name: "Gemini", icon: "/images/gemini 1.png", iconClass: "object-contain brightness-110 contrast-110" },
+    { id: "claude", name: "Claude", icon: "/images/claude.png" },
+    { id: "groq", name: "Grok", icon: "/images/groq.png" },
   ];
 
-  const competitorData = [
-    { subject: "Mentions", yourBrand: 85, competitor1: 72, competitor2: 68 },
-    { subject: "Citations", yourBrand: 78, competitor1: 82, competitor2: 65 },
-    { subject: "Authority", yourBrand: 92, competitor1: 75, competitor2: 78 },
-    { subject: "Recency", yourBrand: 88, competitor1: 70, competitor2: 72 },
-    { subject: "Context", yourBrand: 80, competitor1: 77, competitor2: 75 },
-  ];
+  // Fetch projects on mount
+  useEffect(() => {
+    if (viewMode === 'projects') {
+      fetchProjects();
+    }
+  }, [viewMode]);
 
-  const topQueries = [
-    { query: "best AI SEO tools", mentions: 45, platforms: ["ChatGPT", "Gemini", "Perplexity"] },
-    { query: "generative engine optimization", mentions: 38, platforms: ["ChatGPT", "Claude"] },
-    { query: "AI-driven reputation management", mentions: 32, platforms: ["Gemini", "Perplexity"] },
-    { query: "SEO automation tools", mentions: 29, platforms: ["ChatGPT", "Copilot"] },
-    { query: "digital visibility optimization", mentions: 27, platforms: ["Perplexity", "You.com"] },
+  // Poll for running sessions
+  useEffect(() => {
+    if (viewMode === 'projects' || viewMode === 'details') {
+      const runningProjects = projects.filter(p => {
+        const session = projectSessions.find(s => s.project_id === p.id);
+        return session?.status === 'running';
+      });
+
+      if (runningProjects.length > 0) {
+        const interval = setInterval(() => {
+          fetchProjects();
+          if (selectedProject) {
+            fetchProjectDetails(selectedProject.id);
+          }
+        }, 5000);
+        return () => clearInterval(interval);
+      }
+    }
+  }, [viewMode, projects, projectSessions, selectedProject]);
+
+  const fetchProjects = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('brand_analysis_projects')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setProjects(data || []);
+
+      // Fetch latest session for each project
+      if (data && data.length > 0) {
+        const projectIds = data.map(p => p.id);
+        const { data: sessions } = await supabase
+          .from('brand_analysis_sessions')
+          .select('*')
+          .in('project_id', projectIds)
+          .order('started_at', { ascending: false });
+
+        // Group sessions by project and get latest
+        const latestSessions = projectIds.map(projectId => {
+          const projectSessions = (sessions || []).filter(s => s.project_id === projectId);
+          return projectSessions[0] || null;
+        }).filter(Boolean);
+
+        setProjectSessions(latestSessions as Session[]);
+      }
+    } catch (error) {
+      console.error('Error fetching projects:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchProjectDetails = async (projectId: string) => {
+    try {
+      // Fetch project
+      const { data: project, error: projectError } = await supabase
+        .from('brand_analysis_projects')
+        .select('*')
+        .eq('id', projectId)
+        .single();
+
+      if (projectError) throw projectError;
+      setSelectedProject(project);
+
+      // Fetch sessions
+      const { data: sessions, error: sessionsError } = await supabase
+        .from('brand_analysis_sessions')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('started_at', { ascending: false })
+        .limit(10);
+
+      if (sessionsError) throw sessionsError;
+      setProjectSessions(sessions || []);
+
+      // Calculate stats from latest completed session
+      const latestCompleted = sessions?.find(s => s.status === 'completed');
+      const wasRunning = projectSessions.find(s => s.project_id === projectId && s.status === 'running');
+      
+      if (latestCompleted?.results_summary) {
+        setProjectStats(latestCompleted.results_summary);
+        
+        // Show notification if analysis just completed
+        if (wasRunning && latestCompleted.status === 'completed') {
+          setShowCompletionNotification(true);
+          setTimeout(() => setShowCompletionNotification(false), 5000);
+        }
+        
+        // Fetch responses for the latest completed session
+        if (latestCompleted.id) {
+          await fetchProjectResponses(latestCompleted.id);
+        }
+    } else {
+        setProjectStats(null);
+        setProjectResponses([]);
+      }
+    } catch (error) {
+      console.error('Error fetching project details:', error);
+    }
+  };
+
+  const fetchProjectResponses = async (sessionId: string) => {
+    try {
+      const { data: responses, error } = await supabase
+        .from('ai_platform_responses')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setProjectResponses(responses || []);
+    } catch (error) {
+      console.error('Error fetching responses:', error);
+      setProjectResponses([]);
+    }
+  };
+
+  const getProjectSession = (projectId: string): Session | null => {
+    return projectSessions.find(s => s.project_id === projectId) || null;
+  };
+
+  const getProjectStats = (projectId: string) => {
+    const session = getProjectSession(projectId);
+    if (!session || session.status !== 'completed') {
+      return { mentions: 0, visibility: 0, sentiment: 0 };
+    }
+    const summary = session.results_summary || {};
+    const totalQueries = summary.total_queries || 0;
+    const mentions = summary.total_mentions || 0;
+    const visibility = totalQueries > 0 ? (mentions / totalQueries) * 100 : 0;
+    return {
+      mentions,
+      visibility: Math.round(visibility),
+      sentiment: summary.avg_sentiment || 0
+    };
+  };
+
+  const handleDeleteProject = async (projectId: string, projectName: string) => {
+    if (!confirm(`Are you sure you want to delete the analysis for "${projectName}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    setDeletingProject(projectId);
+    setOpenDropdown(null);
+
+    try {
+      // Delete the project (cascade will delete related sessions and responses)
+      const { error } = await supabase
+        .from('brand_analysis_projects')
+        .delete()
+        .eq('id', projectId);
+
+      if (error) throw error;
+
+      // Refresh projects list
+      await fetchProjects();
+      
+      // If the deleted project was selected, go back to projects view
+      if (selectedProject?.id === projectId) {
+        setViewMode('projects');
+        setSelectedProject(null);
+      }
+    } catch (error: any) {
+      console.error('Error deleting project:', error);
+      alert(`Failed to delete project: ${error.message}`);
+    } finally {
+      setDeletingProject(null);
+    }
+  };
+
+  const handleAnalyze = async () => {
+      if (!brandName.trim() || !websiteUrl.trim() || !industry) {
+        alert("Please fill in all required fields");
+        return;
+      }
+
+    if (selectedPlatforms.length === 0) {
+      alert("Please select at least one AI platform");
+      return;
+    }
+
+    setIsAnalyzing(true);
+
+    try {
+      // Step 1: Crawl website to get description and image
+      console.log('Crawling website...');
+      const crawlResponse = await fetch("/api/crawl-website", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: websiteUrl }),
+      });
+
+      const crawlData = await crawlResponse.json();
+      let companyDescription = '';
+      let companyImageUrl = '';
+
+      if (crawlResponse.ok && crawlData.success) {
+        companyDescription = crawlData.description || '';
+        companyImageUrl = crawlData.imageUrl || '';
+        console.log('Website crawled successfully:', { description: companyDescription.substring(0, 50), imageUrl: companyImageUrl });
+      } else {
+        console.warn('Website crawl failed, continuing without description/image:', crawlData.error);
+      }
+
+      // Step 2: Create/update project with crawled data
+      const response = await fetch("/api/ai-visibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brandName,
+          websiteUrl,
+          industry,
+          keywords,
+          competitors,
+          platforms: selectedPlatforms,
+          companyDescription,
+          companyImageUrl,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to create project");
+      }
+
+      // Refresh projects and switch to projects view
+      await fetchProjects();
+      setViewMode('projects');
+      
+    // Reset form
+    setCurrentStep(1);
+    setBrandName("");
+    setWebsiteUrl("");
+    setIndustry("Marketing");
+    setCompetitors([]);
+    setKeywords([]);
+    setSelectedPlatforms(["perplexity", "chatgpt"]);
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleRunAnalysis = async (project: Project) => {
+    if (!project.active_platforms || project.active_platforms.length === 0) {
+      alert("Please configure at least one AI platform for this project");
+      return;
+    }
+
+    setIsAnalyzing(true);
+
+    try {
+      // Get Supabase URL and session
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error("You must be logged in to run analysis");
+      }
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+      // Call the brand-analysis edge function
+      const response = await fetch(`${supabaseUrl}/functions/v1/brand-analysis`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          projectId: project.id,
+          platforms: project.active_platforms,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Analysis failed to start");
+      }
+
+      // Store analysis info and show modal
+      setAnalysisStartInfo(data);
+      setShowAnalysisStartModal(true);
+
+      // Show notification banner
+      setShowAnalysisStartNotification(true);
+      setTimeout(() => setShowAnalysisStartNotification(false), 5000);
+
+      // Refresh projects to show updated status
+      await fetchProjects();
+      
+      // If this project is selected, refresh its details
+      if (selectedProject?.id === project.id) {
+        await fetchProjectDetails(project.id);
+      }
+    } catch (error: any) {
+      console.error('Error starting analysis:', error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleProjectClick = (project: Project) => {
+    setSelectedProject(project);
+    fetchProjectDetails(project.id);
+    setViewMode('details');
+  };
+
+  const handleStopAnalysis = async (sessionId: string, projectId: string) => {
+    if (!confirm('Are you sure you want to stop this analysis? Progress will be saved but no new queries will be processed.')) {
+        return;
+      }
+
+    setStoppingAnalysis(sessionId);
+      try {
+      const { error } = await supabase
+          .from('brand_analysis_sessions')
+        .update({
+          status: 'cancelled',
+          completed_at: new Date().toISOString(),
+          results_summary: {
+            cancelled: true,
+            cancelled_at: new Date().toISOString(),
+            partial_results: true
+          }
+        })
+        .eq('id', sessionId);
+
+      if (error) throw error;
+
+      // Refresh data
+      await fetchProjects();
+      if (selectedProject && selectedProject.id === projectId) {
+        await fetchProjectDetails(projectId);
+      }
+    } catch (error) {
+      console.error('Error stopping analysis:', error);
+      alert('Failed to stop analysis. Please try again.');
+    } finally {
+      setStoppingAnalysis(null);
+    }
+  };
+
+  const handleNewAnalysis = () => {
+    setViewMode('form');
+    setCurrentStep(1);
+  };
+
+  const handleBack = () => {
+    if (viewMode === 'details') {
+      setViewMode('projects');
+      setSelectedProject(null);
+    } else if (viewMode === 'form' && currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
+  const handleNext = () => {
+    if (currentStep === 1) {
+      if (!brandName.trim() || !websiteUrl.trim() || !industry) {
+        alert("Please fill in all required fields");
+          return;
+        }
+        }
+    if (currentStep < totalSteps) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const addCompetitor = () => {
+    if (newCompetitor.trim() && !competitors.includes(newCompetitor.trim())) {
+      setCompetitors([...competitors, newCompetitor.trim()]);
+      setNewCompetitor("");
+    }
+  };
+
+  const addKeyword = () => {
+    if (newKeyword.trim() && !keywords.includes(newKeyword.trim())) {
+      setKeywords([...keywords, newKeyword.trim()]);
+      setNewKeyword("");
+    }
+  };
+
+  // Calculate overall stats
+  const overallStats = {
+    totalMentions: projects.reduce((sum, p) => sum + getProjectStats(p.id).mentions, 0),
+    activePlatforms: new Set(projects.flatMap(p => p.active_platforms || [])).size,
+    avgVisibility: projects.length > 0 
+      ? Math.round(projects.reduce((sum, p) => sum + getProjectStats(p.id).visibility, 0) / projects.length)
+      : 0,
+  };
+
+  // Render Projects List View
+  if (viewMode === 'projects') {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <div className="mb-8 flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <h1 className="text-3xl font-bold text-gray-900">Brand Analysis</h1>
+                <TrendingUp className="w-6 h-6 text-green-500" />
+              </div>
+              <p className="text-gray-600">Analyze your brand's AI visibility and competitive positioning</p>
+            </div>
+            <button
+              onClick={handleNewAnalysis}
+              className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              <Plus className="w-5 h-5" />
+              New Analysis
+            </button>
+          </div>
+
+          {/* Key Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <div className="bg-white border-2 border-purple-200 rounded-lg p-6">
+              <div className="flex items-center justify-between mb-2">
+                <Search className="w-5 h-5 text-purple-600" />
+                <span className="text-2xl font-bold text-gray-900">{overallStats.totalMentions}</span>
+              </div>
+              <p className="text-sm text-gray-600">Total Mentions</p>
+              <p className="text-xs text-gray-500 mt-1">across all brands</p>
+            </div>
+            <div className="bg-white border-2 border-purple-200 rounded-lg p-6">
+              <div className="flex items-center justify-between mb-2">
+                <Target className="w-5 h-5 text-purple-600" />
+                <span className="text-2xl font-bold text-gray-900">{overallStats.activePlatforms}</span>
+              </div>
+              <p className="text-sm text-gray-600">AI Platforms</p>
+              <p className="text-xs text-gray-500 mt-1">active platforms</p>
+            </div>
+            <div className="bg-white rounded-lg p-6">
+              <div className="flex items-center justify-between mb-2">
+                <Eye className="w-5 h-5 text-gray-400" />
+                <span className="text-2xl font-bold text-gray-900">{overallStats.avgVisibility}%</span>
+              </div>
+              <p className="text-sm text-gray-600">Avg Visibility</p>
+              <p className="text-xs text-gray-500 mt-1">mention rate</p>
+            </div>
+            <div className="bg-white border-2 border-red-200 rounded-lg p-6">
+              <div className="flex items-center justify-between mb-2">
+                <BarChart3 className="w-5 h-5 text-red-600" />
+                <span className="text-2xl font-bold text-gray-900">0%</span>
+              </div>
+              <p className="text-sm text-gray-600">Avg Sentiment</p>
+              <p className="text-xs text-gray-500 mt-1">-100%</p>
+            </div>
+          </div>
+
+          {/* Projects Grid */}
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">
+              Your Brand Projects ({projects.length})
+            </h2>
+            {loading ? (
+              <div className="flex items-center justify-center p-12">
+                <RefreshCw className="w-6 h-6 animate-spin text-purple-600" />
+              </div>
+            ) : projects.length === 0 ? (
+              <div className="bg-white rounded-lg p-12 text-center">
+                <Target className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No projects yet</h3>
+                <p className="text-gray-600 mb-4">Start by creating your first brand analysis</p>
+                <button
+                  onClick={handleNewAnalysis}
+                  className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                >
+                  New Analysis
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {projects.map((project) => {
+                  const session = getProjectSession(project.id);
+                  const stats = getProjectStats(project.id);
+                  const isRunning = session?.status === 'running';
+                  const isCancelled = session?.status === 'cancelled';
+                  const progress = session && session.total_queries 
+            ? Math.round((session.completed_queries || 0) / session.total_queries * 100)
+            : 0;
+
+                  return (
+                    <div
+                      key={project.id}
+                      className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition-shadow cursor-pointer"
+                      onClick={() => handleProjectClick(project)}
+                    >
+                      {/* Brand Header */}
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3 flex-1">
+                          {project.company_image_url ? (
+                            <img 
+                              src={project.company_image_url} 
+                              alt={project.brand_name}
+                              className="w-12 h-12 rounded-lg object-cover"
+                              onError={(e) => {
+                                // Fallback to initial if image fails to load
+                                e.currentTarget.style.display = 'none';
+                                const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                                if (fallback) fallback.style.display = 'flex';
+                              }}
+                            />
+                          ) : null}
+                          <div className={`w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center ${project.company_image_url ? 'hidden' : ''}`}>
+                            <span className="text-xl font-bold text-purple-600">
+                              {project.brand_name.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-gray-900">{project.brand_name}</h3>
+                            <div className="flex items-center gap-2 mt-1">
+                              {isRunning ? (
+                                <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs flex items-center gap-1">
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                  Running
+                                </span>
+                              ) : isCancelled ? (
+                                <span className="px-2 py-0.5 bg-gray-100 text-gray-800 rounded text-xs flex items-center gap-1">
+                                  <X className="w-3 h-3" />
+                                  Cancelled
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs">Active</span>
+                              )}
+                              <span className="text-xs text-gray-500 capitalize">{project.industry}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="relative">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenDropdown(openDropdown === project.id ? null : project.id);
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded transition-colors"
+                            disabled={deletingProject === project.id}
+                          >
+                            {deletingProject === project.id ? (
+                              <RefreshCw className="w-4 h-4 text-gray-400 animate-spin" />
+                            ) : (
+                              <Settings className="w-4 h-4 text-gray-400 hover:text-gray-600" />
+                            )}
+                          </button>
+                          {openDropdown === project.id && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-10"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenDropdown(null);
+                                }}
+                              />
+                              <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteProject(project.id, project.brand_name);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-4 py-2 text-left text-red-600 hover:bg-red-50 transition-colors rounded-lg"
+                                  disabled={deletingProject === project.id}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  <span>Delete Analysis</span>
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Company Description */}
+                      {project.company_description && (
+                        <div className="text-sm text-gray-600 mb-3 line-clamp-3">
+                          {project.company_description.split('\n').slice(0, 3).join(' ')}
+                        </div>
+                      )}
+
+                      {/* Date */}
+                      <div className="text-xs text-gray-500 mb-4">
+                        {session?.started_at 
+                          ? new Date(session.started_at).toLocaleDateString()
+                          : project.last_analysis_at
+                          ? new Date(project.last_analysis_at).toLocaleDateString()
+                          : 'No analysis yet'}
+                      </div>
+
+                      {/* Progress Bar for Running */}
+                      {isRunning && (
+                        <div className="mb-4">
+                          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                            <span>Progress</span>
+                            <span>{progress}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-600 transition-all duration-300"
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Stats */}
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <div className="text-sm text-gray-600">Mentions</div>
+                          <div className="text-2xl font-bold text-gray-900">{stats.mentions}</div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-gray-600">Visibility</div>
+                          <div className="text-2xl font-bold text-gray-900">{stats.visibility}%</div>
+                        </div>
+                      </div>
+
+                      {/* Platforms */}
+                      <div className="mb-4">
+                        <div className="text-xs text-gray-600 mb-2">Active Platforms</div>
+                        <div className="flex flex-wrap gap-2">
+                          {(project.active_platforms || []).slice(0, 5).map((platform) => {
+                            const platformOption = platformOptions.find(p => p.id === platform);
+                            return (
+                              <span
+                                key={platform}
+                                className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded capitalize flex items-center gap-1"
+                                title={platformOption?.name || platform}
+                              >
+                                {platformOption?.icon ? (
+                                  <Image 
+                                    src={platformOption.icon} 
+                                    alt={platformOption.name} 
+                                    width={platformOption.id === 'gemini' ? 32 : 16} 
+                                    height={platformOption.id === 'gemini' ? 32 : 16} 
+                                    className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                    quality={platformOption.id === 'gemini' ? 100 : 75}
+                                    unoptimized={platformOption.id === 'gemini'}
+                                  />
+                                ) : (
+                                  platform
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-2">
+                        {isRunning && session?.id && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStopAnalysis(session.id, project.id);
+                            }}
+                            disabled={stoppingAnalysis === session.id}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {stoppingAnalysis === session.id ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                Stopping...
+                              </>
+                            ) : (
+                              <>
+                                <StopCircle className="w-4 h-4" />
+                                Stop
+                              </>
+                            )}
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleProjectClick(project);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                        >
+                          <TrendingUp className="w-4 h-4" />
+                          View Results
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render Project Details View
+  if (viewMode === 'details' && selectedProject) {
+    const latestSession = projectSessions[0];
+    const isRunning = latestSession?.status === 'running';
+    const progress = latestSession && latestSession.total_queries 
+      ? Math.round((latestSession.completed_queries || 0) / latestSession.total_queries * 100)
+      : 0;
+
+    return (
+      <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+        <div className="max-w-7xl mx-auto">
+          {/* Analysis Start Notification Banner */}
+          {showAnalysisStartNotification && (
+            <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4 animate-pulse">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-blue-600 animate-spin" />
+                  <div>
+                    <div className="text-sm font-semibold text-blue-900">Analysis Started!</div>
+                    <div className="text-xs text-blue-700">Your analysis is running in the background</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowAnalysisStartNotification(false)}
+                  className="text-blue-400 hover:text-blue-600 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Back Button */}
+          <button
+            onClick={handleBack}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Projects
+          </button>
+
+          {/* Project Header */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2">
+                  {selectedProject.company_image_url ? (
+                    <img 
+                      src={selectedProject.company_image_url} 
+                      alt={selectedProject.brand_name}
+                      className="w-12 h-12 rounded-lg object-cover border border-gray-200"
+                      onError={(e) => {
+                        // Fallback to initial if image fails to load
+                        e.currentTarget.style.display = 'none';
+                        const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  ) : null}
+                  <div className={`w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center ${selectedProject.company_image_url ? 'hidden' : ''}`}>
+                    <span className="text-xl font-bold text-purple-600">
+                      {selectedProject.brand_name.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-gray-900">{selectedProject.brand_name}</h1>
+                    <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-sm capitalize">
+                      {selectedProject.industry}
+                    </span>
+                  </div>
+                </div>
+                {selectedProject.website_url && (
+                  <div className="flex items-center gap-2 text-gray-600 mb-3">
+                    <Globe className="w-4 h-4" />
+                    <span>{selectedProject.website_url}</span>
+                  </div>
+                )}
+                {/* Company Description from Crawler */}
+                {selectedProject.company_description && (
+                  <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="text-xs font-semibold text-gray-700 mb-1">About {selectedProject.brand_name}</div>
+                    <div className="text-sm text-gray-600 whitespace-pre-line">
+                      {selectedProject.company_description}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="text-sm text-gray-500 ml-4">
+                Updated {selectedProject.last_analysis_at 
+                  ? new Date(selectedProject.last_analysis_at).toLocaleString()
+                  : new Date(selectedProject.created_at).toLocaleString()}
+              </div>
+            </div>
+            
+            {/* Selected Platforms/LLMs */}
+            {selectedProject.active_platforms && selectedProject.active_platforms.length > 0 && (
+              <div className="border-t border-gray-200 pt-4 mt-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-semibold text-gray-700">AI Platforms Selected for Analysis:</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {selectedProject.active_platforms.map((platform) => {
+                    const platformOption = platformOptions.find(p => p.id === platform);
+                    return (
+                      <div
+                        key={platform}
+                        className="flex items-center gap-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-lg"
+                      >
+                        {platformOption?.icon ? (
+                          <Image 
+                            src={platformOption.icon} 
+                            alt={platformOption.name} 
+                            width={platformOption.id === 'gemini' ? 36 : 20} 
+                            height={platformOption.id === 'gemini' ? 36 : 20} 
+                            className={`${platformOption.id === 'gemini' ? 'w-9 h-9' : 'w-5 h-5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                            quality={platformOption.id === 'gemini' ? 100 : 75}
+                            unoptimized={platformOption.id === 'gemini'}
+                          />
+                        ) : (
+                          <span className="text-lg">🤖</span>
+                        )}
+                        <span className="text-sm font-medium text-gray-900 capitalize">
+                          {platformOption?.name || platform}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Main Content */}
+            <div className="lg:col-span-3 space-y-6">
+              {/* Metrics Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-sm text-gray-600 mb-1">AI Platforms</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {projectStats?.platforms_analyzed?.length || new Set(projectResponses.map(r => r.platform)).size || selectedProject.active_platforms?.length || 0}
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {(() => {
+                      const platforms = projectStats?.platforms_analyzed || Array.from(new Set(projectResponses.map(r => r.platform))) || selectedProject.active_platforms || [];
+                      return platforms.slice(0, 4).map((platform: string) => {
+                        const platformOption = platformOptions.find(p => p.id === platform);
+                        return (
+                          <span key={platform} className="text-xs flex items-center" title={platformOption?.name || platform}>
+                            {platformOption?.icon ? (
+                              <Image 
+                                src={platformOption.icon} 
+                                alt={platformOption.name} 
+                                width={platformOption.id === 'gemini' ? 32 : 16} 
+                                height={platformOption.id === 'gemini' ? 32 : 16} 
+                                className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                quality={platformOption.id === 'gemini' ? 100 : 75}
+                                unoptimized={platformOption.id === 'gemini'}
+                              />
+                            ) : (
+                              platform
+                            )}
+                          </span>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-sm text-gray-600 mb-1">Total Mentions</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Across {projectStats?.platforms_analyzed?.length || new Set(projectResponses.map(r => r.platform)).size || 0} platforms
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-sm text-gray-600 mb-1">Avg Sentiment</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {(() => {
+                      const sentiments = projectResponses
+                        .filter(r => r.response_metadata?.brand_mentioned && r.response_metadata?.sentiment_score !== null)
+                        .map(r => r.response_metadata.sentiment_score);
+                      if (sentiments.length === 0) return '0%';
+                      const avgSentiment = sentiments.reduce((sum, s) => sum + s, 0) / sentiments.length;
+                      return `${Math.round(avgSentiment * 100)}%`;
+                    })()}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Based on {projectResponses.filter(r => r.response_metadata?.brand_mentioned && r.response_metadata?.sentiment_score !== null).length || 0} mentions
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-sm text-gray-600 mb-1">Competitor Mentions</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {(() => {
+                      const competitorMentions = projectResponses.reduce((total, response) => {
+                        const competitors = response.response_metadata?.competitors_found || [];
+                        return total + competitors.length;
+                      }, 0);
+                      return competitorMentions;
+                    })()}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {(() => {
+                      const competitorMap: Record<string, number> = {};
+                      projectResponses.forEach((response) => {
+                        const competitors = response.response_metadata?.competitors_found || [];
+                        competitors.forEach((comp: string) => {
+                          competitorMap[comp] = (competitorMap[comp] || 0) + 1;
+                        });
+                      });
+                      const topCompetitor = Object.entries(competitorMap).sort((a, b) => b[1] - a[1])[0];
+                      return topCompetitor ? `Top: ${topCompetitor[0]}` : 'Top: -';
+                    })()}
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
+                  <div className="text-sm text-gray-600 mb-1">Visibility Score</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {projectStats 
+                      ? Math.round((projectStats.mention_rate || 0) * 100) 
+                      : projectResponses.length > 0
+                      ? Math.round((projectResponses.filter(r => r.response_metadata?.brand_mentioned).length / projectResponses.length) * 100)
+                      : 0}%
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Your brand appears in {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0} of {projectStats?.total_queries || projectResponses.length || 100} prompts
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="bg-white rounded-lg border border-gray-200">
+                <div className="border-b border-gray-200 flex overflow-x-auto">
+                  {[
+                    { id: 'summary', label: 'Summary', icon: FileText },
+                    { id: 'results', label: 'Results', icon: BarChart3 },
+                    { id: 'competitors', label: 'Competitors', icon: Target },
+                    { id: 'sources', label: 'Sources', icon: Globe },
+                    { id: 'analytics', label: 'Analytics', icon: Activity },
+                  ].map((tab) => {
+                    const Icon = tab.icon;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`flex items-center gap-2 px-6 py-4 border-b-2 transition-colors ${
+                          activeTab === tab.id
+                            ? 'border-purple-600 text-purple-600'
+                            : 'border-transparent text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" />
+                        <span>{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Tab Content */}
+                <div className="p-6">
+                  {activeTab === 'summary' && (
+                    <div className="space-y-6">
+                      {/* Overview Stats */}
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Analysis Overview</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                            <div className="text-sm text-gray-600 mb-1">Total Queries</div>
+                            <div className="text-2xl font-bold text-purple-600">
+                              {projectStats?.total_queries || projectResponses.length || 0}
+                            </div>
+                          </div>
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <div className="text-sm text-gray-600 mb-1">Brand Mentions</div>
+                            <div className="text-2xl font-bold text-green-600">
+                              {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0}
+                            </div>
+                          </div>
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <div className="text-sm text-gray-600 mb-1">Mention Rate</div>
+                            <div className="text-2xl font-bold text-blue-600">
+                              {projectStats 
+                                ? Math.round((projectStats.mention_rate || 0) * 100) 
+                                : projectResponses.length > 0
+                                ? Math.round((projectResponses.filter(r => r.response_metadata?.brand_mentioned).length / projectResponses.length) * 100)
+                                : 0}%
+                            </div>
+                          </div>
+                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                            <div className="text-sm text-gray-600 mb-1">Platforms</div>
+                            <div className="text-2xl font-bold text-orange-600">
+                              {projectStats?.platforms_analyzed?.length || new Set(projectResponses.map(r => r.platform)).size || 0}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Platform Breakdown */}
+                      {projectResponses.length > 0 && (
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-4">Platform Performance</h3>
+                          <div className="space-y-3">
+                            {Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+                              const platformResponses = projectResponses.filter(r => r.platform === platform);
+                              const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+                              const mentionRate = platformResponses.length > 0 ? (mentions / platformResponses.length) * 100 : 0;
+                              const avgSentiment = platformResponses
+                                .filter(r => r.response_metadata?.sentiment_score !== null)
+                                .reduce((sum, r) => sum + (r.response_metadata?.sentiment_score || 0), 0) / 
+                                platformResponses.filter(r => r.response_metadata?.sentiment_score !== null).length || 0;
+
+                              const platformOption = platformOptions.find(p => p.id === platform);
+                              return (
+                                <div key={platform} className="border border-gray-200 rounded-lg p-4">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-3">
+                                      <span className="px-3 py-1 bg-gray-100 text-gray-800 rounded text-sm font-medium capitalize flex items-center gap-2">
+                                        {platformOption?.icon ? (
+                                          <Image 
+                                            src={platformOption.icon} 
+                                            alt={platformOption.name} 
+                                            width={platformOption.id === 'gemini' ? 32 : 16} 
+                                            height={platformOption.id === 'gemini' ? 32 : 16} 
+                                            className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                            quality={platformOption.id === 'gemini' ? 100 : 75}
+                                            unoptimized={platformOption.id === 'gemini'}
+                                          />
+                                        ) : null}
+                                        {platform}
+                                      </span>
+                                      <span className="text-sm text-gray-600">
+                                        {platformResponses.length} queries
+                                      </span>
+                                    </div>
+                                    <span className="text-sm font-semibold text-gray-900">
+                                      {Math.round(mentionRate)}% mention rate
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-4 text-sm">
+                                    <span className="text-gray-600">
+                                      Mentions: <span className="font-semibold text-gray-900">{mentions}</span>
+                                    </span>
+                                    {!isNaN(avgSentiment) && avgSentiment !== 0 && (
+                                      <span className="text-gray-600">
+                                        Avg Sentiment: <span className={`font-semibold ${
+                                          avgSentiment > 0.3 ? 'text-green-600' : avgSentiment < -0.3 ? 'text-red-600' : 'text-gray-600'
+                                        }`}>
+                                          {avgSentiment.toFixed(2)}
+                                        </span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Recent Activity */}
+                      {projectSessions.length > 0 && (
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-4">Analysis Sessions</h3>
+                          <div className="space-y-2">
+                            {projectSessions.slice(0, 5).map((session) => (
+                              <div key={session.id} className="border border-gray-200 rounded-lg p-3 flex items-center justify-between">
+                                <div>
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {session.session_name || 'Analysis Session'}
+                                  </div>
+                                  <div className="text-xs text-gray-500">
+                                    {new Date(session.started_at).toLocaleString()}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-2 py-1 rounded text-xs ${
+                                    session.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                    session.status === 'running' ? 'bg-blue-100 text-blue-800' :
+                                    session.status === 'cancelled' ? 'bg-gray-100 text-gray-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {session.status}
+                                  </span>
+                                  {session.status === 'completed' && session.results_summary && (
+                                    <span className="text-xs text-gray-600">
+                                      {session.results_summary.total_mentions || 0} mentions
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {projectResponses.length === 0 && !projectSessions.find(s => s.status === 'running') && (
+                        <div className="text-center py-12 text-gray-500">
+                          <FileText className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                          <p>No analysis data available</p>
+                          <p className="text-sm mt-2">Run an analysis to see summary data here</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {activeTab === 'results' && (
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900">
+                          {resultsView === 'mentioned' 
+                            ? `Mentioned Prompts (${projectResponses.filter(r => r.response_metadata?.brand_mentioned).length})`
+                            : `Missed Prompts (${projectResponses.filter(r => !r.response_metadata?.brand_mentioned).length})`
+                          }
+                        </h3>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => setResultsView('mentioned')}
+                            className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                              resultsView === 'mentioned'
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            Mentioned Prompts
+                          </button>
+                          <button 
+                            onClick={() => setResultsView('missed')}
+                            className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                              resultsView === 'missed'
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            Missed Prompts
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {projectResponses.length === 0 ? (
+                        <div className="text-center py-12 text-gray-500">
+                          <Search className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                          <p>No Analysis Results</p>
+                          {projectSessions[0]?.status === 'running' && (
+                            <p className="text-sm mt-2">Analysis is still running. Results will appear here when complete.</p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {(() => {
+                            const filteredResponses = resultsView === 'mentioned'
+                              ? projectResponses.filter(r => r.response_metadata?.brand_mentioned)
+                              : projectResponses.filter(r => !r.response_metadata?.brand_mentioned);
+
+                            if (filteredResponses.length === 0) {
+                              return (
+                                <div className="text-center py-8 text-gray-500">
+                                  <p>
+                                    {resultsView === 'mentioned'
+                                      ? `No brand mentions found in ${projectResponses.length} responses`
+                                      : `All ${projectResponses.length} prompts mentioned your brand!`
+                                    }
+                                  </p>
+                                </div>
+                              );
+                            }
+
+                            return filteredResponses.map((response) => (
+                              <div
+                                key={response.id}
+                                className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                              >
+                                <div className="flex items-start justify-between mb-3">
+                                  <div className="flex items-center gap-3">
+                                    <span className={`px-3 py-1 rounded text-sm font-medium capitalize ${
+                                      resultsView === 'mentioned'
+                                        ? 'bg-green-100 text-green-800'
+                                        : 'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {response.platform}
+                                    </span>
+                                    {resultsView === 'mentioned' && response.response_metadata?.sentiment_score !== null && (
+                                      <span className={`px-2 py-1 rounded text-xs ${
+                                        response.response_metadata.sentiment_score > 0.3
+                                          ? 'bg-green-100 text-green-800'
+                                          : response.response_metadata.sentiment_score < -0.3
+                                          ? 'bg-red-100 text-red-800'
+                                          : 'bg-gray-100 text-gray-800'
+                                      }`}>
+                                        Sentiment: {response.response_metadata.sentiment_score?.toFixed(2)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                    resultsView === 'mentioned'
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-red-100 text-red-800'
+                                  }`}>
+                                    {resultsView === 'mentioned' ? 'Brand Mentioned' : 'Brand Not Mentioned'}
+                                  </span>
+                                </div>
+                                <div className="mb-2">
+                                  <div className="text-sm font-medium text-gray-700 mb-1">Query:</div>
+                                  <div className="text-sm text-gray-900 bg-gray-50 p-2 rounded">
+                                    {response.prompt}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-sm font-medium text-gray-700 mb-1">Response:</div>
+                                  <div className="text-sm text-gray-700 line-clamp-3">
+                                    {response.response}
+                                  </div>
+                                </div>
+                                {resultsView === 'mentioned' && response.response_metadata?.sources && response.response_metadata.sources.length > 0 && (
+                                  <div className="mt-3 pt-3 border-t border-gray-200">
+                                    <div className="text-xs font-medium text-gray-600 mb-1">Sources:</div>
+                                    <div className="flex flex-wrap gap-2">
+                                      {response.response_metadata.sources.slice(0, 3).map((source: any, idx: number) => (
+                                        <a
+                                          key={idx}
+                                          href={source.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-xs text-blue-600 hover:underline truncate max-w-xs"
+                                        >
+                                          {source.domain || source.url}
+                                        </a>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ));
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {activeTab === 'competitors' && (
+                    <div className="space-y-6">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Competitor Mentions</h3>
+                        {projectResponses.length === 0 ? (
+                          <div className="text-center py-12 text-gray-500">
+                            <Target className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                            <p>No competitor data available</p>
+                            <p className="text-sm mt-2">Run an analysis to see competitor mentions</p>
+                          </div>
+                        ) : (() => {
+                          // Aggregate competitor mentions from all responses
+                          const competitorData: Record<string, {
+                            mentions: number;
+                            contexts: string[];
+                            sentiment: 'positive' | 'negative' | 'mixed' | 'neutral';
+                            platforms: Set<string>;
+                            comparisons: number;
+                          }> = {};
+
+                          projectResponses.forEach((response) => {
+                            const metadata = response.response_metadata;
+                            if (metadata?.competitors_found && Array.isArray(metadata.competitors_found)) {
+                              metadata.competitors_found.forEach((competitor: string) => {
+                                if (!competitorData[competitor]) {
+                                  competitorData[competitor] = {
+                                    mentions: 0,
+                                    contexts: [],
+                                    sentiment: 'neutral',
+                                    platforms: new Set(),
+                                    comparisons: 0
+                                  };
+                                }
+                                competitorData[competitor].mentions++;
+                                competitorData[competitor].platforms.add(response.platform);
+                                
+                                const competitorContext = metadata.competitor_contexts?.[competitor];
+                                if (competitorContext?.context) {
+                                  competitorData[competitor].contexts.push(competitorContext.context);
+                                }
+                                if (competitorContext?.direct_comparison) {
+                                  competitorData[competitor].comparisons++;
+                                }
+                                if (competitorContext?.sentiment) {
+                                  competitorData[competitor].sentiment = competitorContext.sentiment;
+                                }
+                              });
+                            }
+                          });
+
+                          const competitors = Object.entries(competitorData).sort((a, b) => b[1].mentions - a[1].mentions);
+
+                          return competitors.length === 0 ? (
+                            <div className="text-center py-12 text-gray-500">
+                              <Target className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                              <p>No competitors mentioned in responses</p>
+                              {selectedProject?.competitors && Array.isArray(selectedProject.competitors) && selectedProject.competitors.length > 0 && (
+                                <p className="text-sm mt-2">
+                                  Tracked competitors: {selectedProject.competitors.join(', ')}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              {competitors.map(([competitor, data]) => (
+                                <div key={competitor} className="border border-gray-200 rounded-lg p-4">
+                                  <div className="flex items-start justify-between mb-3">
+                                    <div>
+                                      <h4 className="font-semibold text-gray-900">{competitor}</h4>
+                                      <div className="flex items-center gap-4 mt-1 text-sm text-gray-600">
+                                        <span>{data.mentions} mentions</span>
+                                        <span>{data.platforms.size} platforms</span>
+                                        {data.comparisons > 0 && (
+                                          <span className="text-purple-600">{data.comparisons} direct comparisons</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <span className={`px-2 py-1 rounded text-xs ${
+                                      data.sentiment === 'positive' ? 'bg-green-100 text-green-800' :
+                                      data.sentiment === 'negative' ? 'bg-red-100 text-red-800' :
+                                      data.sentiment === 'mixed' ? 'bg-yellow-100 text-yellow-800' :
+                                      'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {data.sentiment}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 mb-3">
+                                    {Array.from(data.platforms).map((platform) => {
+                                      const platformOption = platformOptions.find(p => p.id === platform);
+                                      return (
+                                        <span key={platform} className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs capitalize flex items-center gap-1">
+                                          {platformOption?.icon ? (
+                                            <Image 
+                                              src={platformOption.icon} 
+                                              alt={platformOption.name} 
+                                              width={platformOption.id === 'gemini' ? 28 : 14} 
+                                              height={platformOption.id === 'gemini' ? 28 : 14} 
+                                              className={`${platformOption.id === 'gemini' ? 'w-7 h-7' : 'w-3.5 h-3.5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                              quality={platformOption.id === 'gemini' ? 100 : 75}
+                                              unoptimized={platformOption.id === 'gemini'}
+                                            />
+                                          ) : null}
+                                          {platform}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                  {data.contexts.length > 0 && (
+                                    <div>
+                                      <div className="text-sm font-medium text-gray-700 mb-2">Mention Context:</div>
+                                      <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded">
+                                        {data.contexts[0]}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                  {activeTab === 'sources' && (
+                    <div className="space-y-6">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Sources & Citations</h3>
+                        {projectResponses.length === 0 ? (
+                          <div className="text-center py-12 text-gray-500">
+                            <Globe className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                            <p>No sources available</p>
+                            <p className="text-sm mt-2">Sources will appear here when analysis completes</p>
+                          </div>
+                        ) : (() => {
+                          // Aggregate all sources from responses
+                          const sourcesMap: Record<string, {
+                            url: string;
+                            domain: string;
+                            title?: string;
+                            mentions: number;
+                            platforms: Set<string>;
+                            contexts: string[];
+                          }> = {};
+
+                          projectResponses.forEach((response) => {
+                            const sources = response.response_metadata?.sources || [];
+                            sources.forEach((source: any) => {
+                              const key = source.url || source.domain;
+                              if (key) {
+                                if (!sourcesMap[key]) {
+                                  sourcesMap[key] = {
+                                    url: source.url || `https://${source.domain}`,
+                                    domain: source.domain || new URL(source.url).hostname,
+                                    title: source.title,
+                                    mentions: 0,
+                                    platforms: new Set(),
+                                    contexts: []
+                                  };
+                                }
+                                sourcesMap[key].mentions++;
+                                sourcesMap[key].platforms.add(response.platform);
+                              }
+                            });
+                          });
+
+                          const sources = Object.values(sourcesMap).sort((a, b) => b.mentions - a.mentions);
+
+                          return sources.length === 0 ? (
+                            <div className="text-center py-12 text-gray-500">
+                              <Globe className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                              <p>No sources found in responses</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {sources.map((source, idx) => (
+                                <div key={idx} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                                  <div className="flex items-start justify-between mb-2">
+                                    <div className="flex-1">
+                                      <a
+                                        href={source.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:underline font-medium"
+                                      >
+                                        {source.title || source.domain}
+                                      </a>
+                                      <div className="text-xs text-gray-500 mt-1">{source.domain}</div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-sm font-semibold text-gray-900">{source.mentions}</div>
+                                      <div className="text-xs text-gray-500">mentions</div>
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2 mt-2">
+                                    {Array.from(source.platforms).map((platform) => {
+                                      const platformOption = platformOptions.find(p => p.id === platform);
+                                      return (
+                                        <span key={platform} className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs capitalize flex items-center gap-1">
+                                          {platformOption?.icon ? (
+                                            <Image 
+                                              src={platformOption.icon} 
+                                              alt={platformOption.name} 
+                                              width={platformOption.id === 'gemini' ? 28 : 14} 
+                                              height={platformOption.id === 'gemini' ? 28 : 14} 
+                                              className={`${platformOption.id === 'gemini' ? 'w-7 h-7' : 'w-3.5 h-3.5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                              quality={platformOption.id === 'gemini' ? 100 : 75}
+                                              unoptimized={platformOption.id === 'gemini'}
+                                            />
+                                          ) : null}
+                                          {platform}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                  {activeTab === 'analytics' && (
+                    <div className="space-y-6">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Analytics & Insights</h3>
+                        {projectResponses.length === 0 ? (
+                          <div className="text-center py-12 text-gray-500">
+                            <Activity className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                            <p>No analytics data available</p>
+                            <p className="text-sm mt-2">Run an analysis to see analytics</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            {/* Sentiment Distribution - Pie Chart */}
+                            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                              <h4 className="text-md font-semibold text-gray-900 mb-4">Sentiment Distribution</h4>
+                              {(() => {
+                                const sentiments = projectResponses
+                                  .filter(r => r.response_metadata?.sentiment_score !== null)
+                                  .map(r => r.response_metadata.sentiment_score);
+                                const positive = sentiments.filter(s => s > 0.3).length;
+                                const negative = sentiments.filter(s => s < -0.3).length;
+                                const neutral = sentiments.filter(s => s >= -0.3 && s <= 0.3).length;
+                                const total = sentiments.length;
+
+                                const sentimentData = [
+                                  { name: 'Positive', value: positive, color: '#10b981', percentage: total > 0 ? Math.round((positive / total) * 100) : 0 },
+                                  { name: 'Neutral', value: neutral, color: '#6b7280', percentage: total > 0 ? Math.round((neutral / total) * 100) : 0 },
+                                  { name: 'Negative', value: negative, color: '#ef4444', percentage: total > 0 ? Math.round((negative / total) * 100) : 0 },
+                                ].filter(item => item.value > 0);
+
+                                if (sentimentData.length === 0) {
+                                  return (
+                                    <div className="text-center py-8 text-gray-500">
+                                      <p>No sentiment data available</p>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    <ResponsiveContainer width="100%" height={300}>
+                                      <PieChart>
+                                        <Pie
+                                          data={sentimentData}
+                                          cx="50%"
+                                          cy="50%"
+                                          labelLine={false}
+                                          label={({ name, percentage }) => `${name}: ${percentage}%`}
+                                          outerRadius={100}
+                                          fill="#8884d8"
+                                          dataKey="value"
+                                        >
+                                          {sentimentData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={entry.color} />
+                                          ))}
+                                        </Pie>
+                                        <Tooltip />
+                                        <Legend />
+                                      </PieChart>
+                                    </ResponsiveContainer>
+                                    <div className="flex flex-col justify-center space-y-4">
+                                      {sentimentData.map((item) => (
+                                        <div key={item.name} className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: `${item.color}15` }}>
+                                          <div className="flex items-center gap-3">
+                                            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: item.color }}></div>
+                                            <span className="font-medium text-gray-900">{item.name}</span>
+                                          </div>
+                                          <div className="text-right">
+                                            <div className="text-lg font-bold" style={{ color: item.color }}>{item.value}</div>
+                                            <div className="text-xs text-gray-500">{item.percentage}%</div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Platform Performance - Bar Chart */}
+                            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                              <h4 className="text-md font-semibold text-gray-900 mb-4">Platform Performance</h4>
+                              {(() => {
+                                const platformData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+                                  const platformResponses = projectResponses.filter(r => r.platform === platform);
+                                  const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+                                  const total = platformResponses.length;
+                                  const mentionRate = total > 0 ? (mentions / total) * 100 : 0;
+                                  const platformOption = platformOptions.find(p => p.id === platform);
+                                  
+                                  return {
+                                    platform: platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1),
+                                    mentions,
+                                    total,
+                                    mentionRate: Math.round(mentionRate),
+                                    icon: platformOption?.icon || null
+                                  };
+                                }).sort((a, b) => b.mentionRate - a.mentionRate);
+
+                                if (platformData.length === 0) {
+                                  return (
+                                    <div className="text-center py-8 text-gray-500">
+                                      <p>No platform data available</p>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <ResponsiveContainer width="100%" height={300}>
+                                    <BarChart data={platformData}>
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                      <XAxis 
+                                        dataKey="platform" 
+                                        stroke="#6b7280"
+                                        tick={{ fill: '#6b7280', fontSize: 12 }}
+                                      />
+                                      <YAxis 
+                                        stroke="#6b7280"
+                                        tick={{ fill: '#6b7280', fontSize: 12 }}
+                                        label={{ value: 'Mention Rate (%)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#6b7280' } }}
+                                      />
+                                      <Tooltip 
+                                        contentStyle={{ 
+                                          backgroundColor: '#fff', 
+                                          border: '1px solid #e5e7eb', 
+                                          borderRadius: '8px',
+                                          padding: '8px'
+                                        }}
+                                        formatter={(value: number, name: string) => {
+                                          if (name === 'mentionRate') return [`${value}%`, 'Mention Rate'];
+                                          if (name === 'mentions') return [`${value}`, 'Mentions'];
+                                          return [value, name];
+                                        }}
+                                      />
+                                      <Legend />
+                                      <Bar 
+                                        dataKey="mentionRate" 
+                                        fill="#9333ea" 
+                                        radius={[8, 8, 0, 0]}
+                                        name="Mention Rate (%)"
+                                      />
+                                    </BarChart>
+                                  </ResponsiveContainer>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Platform Comparison - Stacked Bar Chart */}
+                            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                              <h4 className="text-md font-semibold text-gray-900 mb-4">Platform Comparison</h4>
+                              {(() => {
+                                const comparisonData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+                                  const platformResponses = projectResponses.filter(r => r.platform === platform);
+                                  const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+                                  const total = platformResponses.length;
+                                  const missed = total - mentions;
+                                  const platformOption = platformOptions.find(p => p.id === platform);
+                                  
+                                  return {
+                                    platform: platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1),
+                                    mentioned: mentions,
+                                    missed: missed,
+                                    total: total
+                                  };
+                                });
+
+                                if (comparisonData.length === 0) {
+                                  return (
+                                    <div className="text-center py-8 text-gray-500">
+                                      <p>No comparison data available</p>
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <ResponsiveContainer width="100%" height={300}>
+                                    <BarChart data={comparisonData}>
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                      <XAxis 
+                                        dataKey="platform" 
+                                        stroke="#6b7280"
+                                        tick={{ fill: '#6b7280', fontSize: 12 }}
+                                      />
+                                      <YAxis 
+                                        stroke="#6b7280"
+                                        tick={{ fill: '#6b7280', fontSize: 12 }}
+                                        label={{ value: 'Number of Queries', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: '#6b7280' } }}
+                                      />
+                                      <Tooltip 
+                                        contentStyle={{ 
+                                          backgroundColor: '#fff', 
+                                          border: '1px solid #e5e7eb', 
+                                          borderRadius: '8px',
+                                          padding: '8px'
+                                        }}
+                                      />
+                                      <Legend />
+                                      <Bar 
+                                        dataKey="mentioned" 
+                                        stackId="a" 
+                                        fill="#10b981" 
+                                        name="Mentioned"
+                                        radius={[0, 0, 0, 0]}
+                                      />
+                                      <Bar 
+                                        dataKey="missed" 
+                                        stackId="a" 
+                                        fill="#ef4444" 
+                                        name="Not Mentioned"
+                                        radius={[8, 8, 0, 0]}
+                                      />
+                                    </BarChart>
+                                  </ResponsiveContainer>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Top Queries */}
+                            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                              <h4 className="text-md font-semibold text-gray-900 mb-4">Top Performing Queries</h4>
+                              <div className="space-y-2">
+                                {projectResponses
+                                  .filter(r => r.response_metadata?.brand_mentioned)
+                                  .slice(0, 5)
+                                  .map((response, idx) => (
+                                    <div key={response.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors">
+                                      <div className="flex items-start justify-between">
+                                        <div className="flex-1">
+                                          <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-sm font-semibold text-gray-400">#{idx + 1}</span>
+                                            <span className="text-sm font-medium text-gray-900 line-clamp-1">
+                                              {response.prompt}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                                            <span className="capitalize">{response.platform}</span>
+                                            {response.response_metadata?.sentiment_score !== null && (
+                                              <span className={`${
+                                                response.response_metadata.sentiment_score > 0.3 ? 'text-green-600' :
+                                                response.response_metadata.sentiment_score < -0.3 ? 'text-red-600' :
+                                                'text-gray-600'
+                                              }`}>
+                                                Sentiment: {response.response_metadata.sentiment_score.toFixed(2)}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                {projectResponses.filter(r => r.response_metadata?.brand_mentioned).length === 0 && (
+                                  <div className="text-center py-8 text-gray-500 text-sm">
+                                    No brand mentions found
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Sidebar */}
+            <div className="lg:col-span-1 space-y-4">
+              {/* Visibility Score */}
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <h3 className="font-semibold text-gray-900 mb-4">Visibility Score</h3>
+                <div className="text-4xl font-bold text-gray-900 mb-2">
+                  {projectStats ? Math.round((projectStats.mention_rate || 0) * 100) : 0}%
+                </div>
+                <p className="text-sm text-gray-600">
+                  Your brand appears in {projectStats?.total_mentions || 0} of {projectStats?.total_queries || 0} prompts
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-3">
+                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                  <Settings className="w-4 h-4" />
+                  Configure Project
+                </button>
+                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                  <Download className="w-4 h-4" />
+                  Export Report
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+                {/* Show Run Analysis button when not running */}
+                {!isRunning && (
+                  <button
+                    onClick={() => {
+                      if (!selectedProject) return;
+                      handleRunAnalysis(selectedProject);
+                    }}
+                    disabled={isAnalyzing}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" />
+                        Run Analysis
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {/* Analysis Start Notification */}
+              {showAnalysisStartNotification && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 animate-pulse">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-5 h-5 text-blue-600 animate-spin" />
+                    <div>
+                      <div className="text-sm font-semibold text-blue-900">Analysis Started!</div>
+                      <div className="text-xs text-blue-700">Your analysis is running in the background</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Completion Notification */}
+              {showCompletionNotification && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 animate-pulse">
+                  <div className="flex items-center gap-2">
+                    <Check className="w-5 h-5 text-green-600" />
+                    <div>
+                      <div className="text-sm font-semibold text-green-900">Analysis Complete!</div>
+                      <div className="text-xs text-green-700">Results are now available</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Running Status */}
+              {isRunning && latestSession?.id && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-gray-900">Progress</span>
+                    <span className="text-sm font-semibold text-blue-600">{progress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-blue-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-600 transition-all duration-300"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-gray-600 mt-2 mb-3">
+                    Processing {latestSession.completed_queries || 0} of {latestSession.total_queries || 0} queries
+                  </div>
+                  <button
+                    onClick={() => handleStopAnalysis(latestSession.id, selectedProject!.id)}
+                    disabled={stoppingAnalysis === latestSession.id}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {stoppingAnalysis === latestSession.id ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Stopping...
+                      </>
+                    ) : (
+                      <>
+                        <StopCircle className="w-4 h-4" />
+                        Stop Analysis
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Analysis Start Modal */}
+        {showAnalysisStartModal && analysisStartInfo && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-2xl font-bold text-gray-900">Analysis Started</h2>
+                  <button
+                    onClick={() => {
+                      setShowAnalysisStartModal(false);
+                      setAnalysisStartInfo(null);
+                    }}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Check className="w-5 h-5 text-blue-600" />
+                      <span className="text-sm font-semibold text-blue-900">Analysis is running in the background</span>
+                    </div>
+                    <p className="text-sm text-blue-700">
+                      Your brand analysis has started successfully. You can close this window and continue working. 
+                      Results will be available when the analysis completes.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <div className="text-sm text-gray-600 mb-1">Platforms</div>
+                      <div className="text-lg font-semibold text-gray-900">
+                        {analysisStartInfo.platforms_count || analysisStartInfo.platforms_analyzed?.length || 0}
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {(analysisStartInfo.platforms_analyzed || []).map((platform: string) => {
+                          const platformOption = platformOptions.find(p => p.id === platform);
+                          return (
+                            <span key={platform} className="text-xs px-2 py-1 bg-white rounded border border-gray-200 flex items-center gap-1">
+                              {platformOption?.icon ? (
+                                <Image 
+                                  src={platformOption.icon} 
+                                  alt={platformOption.name} 
+                                  width={platformOption.id === 'gemini' ? 32 : 16} 
+                                  height={platformOption.id === 'gemini' ? 32 : 16} 
+                                  className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                                  quality={platformOption.id === 'gemini' ? 100 : 75}
+                                  unoptimized={platformOption.id === 'gemini'}
+                                />
+                              ) : null}
+                              {platformOption?.name || platform}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <div className="text-sm text-gray-600 mb-1">Total Queries</div>
+                      <div className="text-lg font-semibold text-gray-900">
+                        {analysisStartInfo.total_queries || 0}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Across all platforms
+                      </div>
+                    </div>
+                  </div>
+
+                  {analysisStartInfo.estimated_completion && (
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                      <div className="text-sm font-semibold text-purple-900 mb-1">Estimated Completion</div>
+                      <div className="text-sm text-purple-700">
+                        {new Date(analysisStartInfo.estimated_completion).toLocaleString()}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <div className="text-sm font-semibold text-gray-900 mb-2">Session Information</div>
+                    <div className="text-xs text-gray-600 space-y-1">
+                      <div>Session ID: <span className="font-mono text-gray-900">{analysisStartInfo.session_id}</span></div>
+                      <div>Status: <span className="text-blue-600 font-semibold">Running</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => {
+                      setShowAnalysisStartModal(false);
+                      setAnalysisStartInfo(null);
+                    }}
+                    className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  >
+                    Got it
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Render Form View (existing form code)
+  const steps = [
+    { id: 1, title: "Brand Setup", description: "Basic brand information", icon: LayoutGrid },
+    { id: 2, title: "Competitive Intelligence", description: "Competitors and keywords", icon: Target },
+    { id: 3, title: "Platform Selection", description: "Choose AI platforms to monitor", icon: Settings },
+    { id: 4, title: "Review & Launch", description: "Review settings and start analysis", icon: Play },
   ];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">AI Engine Visibility</h1>
-        <p className="text-gray-600">Track your presence across AI-powered search platforms</p>
-      </div>
-
-      {/* Overall Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-xl p-6 border border-gray-200"
-        >
-          <Eye className="w-8 h-8 text-blue-600 mb-2" />
-          <div className="text-2xl font-bold text-gray-900 mb-1">78%</div>
-          <p className="text-gray-600">Avg. Visibility Score</p>
-          <div className="flex items-center gap-1 text-sm text-green-600 font-semibold mt-2">
-            <TrendingUp className="w-4 h-4" />
-            +4.2% vs last month
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-white rounded-xl p-6 border border-gray-200"
-        >
-          <MessageSquare className="w-8 h-8 text-purple-600 mb-2" />
-          <div className="text-2xl font-bold text-gray-900 mb-1">1,047</div>
-          <p className="text-gray-600">Total Mentions</p>
-          <div className="flex items-center gap-1 text-sm text-green-600 font-semibold mt-2">
-            <TrendingUp className="w-4 h-4" />
-            +12% this week
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="bg-white rounded-xl p-6 border border-gray-200"
-        >
-          <Target className="w-8 h-8 text-green-600 mb-2" />
-          <div className="text-2xl font-bold text-gray-900 mb-1">236</div>
-          <p className="text-gray-600">Citations</p>
-          <div className="flex items-center gap-1 text-sm text-green-600 font-semibold mt-2">
-            <TrendingUp className="w-4 h-4" />
-            +8% this week
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white rounded-xl p-6 border border-gray-200"
-        >
-          <Sparkles className="w-8 h-8 text-orange-600 mb-2" />
-          <div className="text-2xl font-bold text-gray-900 mb-1">15</div>
-          <p className="text-gray-600">AI Platforms</p>
-          <div className="flex items-center gap-1 text-sm text-gray-600 font-semibold mt-2">
-            <span>+3 new this month</span>
-          </div>
-        </motion.div>
-      </div>
-
-      {/* Platform Cards */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {aiPlatforms.map((platform, index) => {
-          const Icon = platform.icon;
-          return (
-            <motion.div
-              key={platform.name}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 + index * 0.1 }}
-              className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-all"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className={`w-12 h-12 ${platform.bgColor} rounded-lg flex items-center justify-center`}>
-                  <Icon className="w-6 h-6" style={{ color: platform.color }} />
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-6xl mx-auto mb-8">
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => setViewMode('projects')}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Projects
+          </button>
+        </div>
+        {/* Progress Indicator */}
+        <div className="flex items-center justify-between">
+          {steps.map((step, index) => {
+            const Icon = step.icon;
+            const isActive = currentStep === step.id;
+            const isCompleted = currentStep > step.id;
+            
+            return (
+              <div key={step.id} className="flex items-center flex-1">
+                <div className="flex flex-col items-center flex-1">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-2 transition-all ${
+                    isActive 
+                      ? 'bg-purple-600 text-white' 
+                      : isCompleted
+                      ? 'bg-purple-400 text-white'
+                      : 'bg-gray-300 text-gray-600'
+                  }`}>
+                    <Icon className="w-6 h-6" />
+                  </div>
+                  <div className="text-center">
+                    <div className={`text-sm font-semibold mb-1 ${
+                      isActive ? 'text-purple-600' : 'text-gray-600'
+                    }`}>
+                      {step.title}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {step.description}
+                    </div>
+                  </div>
                 </div>
-                <div className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold ${
-                  platform.change > 0 ? "bg-green-100 text-green-700" : platform.change < 0 ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-700"
-                }`}>
-                  {platform.change > 0 ? <TrendingUp className="w-4 h-4" /> : platform.change < 0 ? <TrendingDown className="w-4 h-4" /> : null}
-                  {platform.change > 0 ? "+" : ""}{platform.change}%
+                {index < steps.length - 1 && (
+                  <div className={`flex-1 h-0.5 mx-4 ${
+                    isCompleted ? 'bg-purple-600' : 'bg-gray-300'
+                  }`} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Form Card */}
+      <div className="max-w-2xl mx-auto">
+        <div className="bg-gray-100 rounded-2xl p-8 shadow-xl">
+          {/* Step 1: Brand Setup */}
+          {currentStep === 1 && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Brand Name *
+                </label>
+                <input
+                  type="text"
+                  value={brandName}
+                  onChange={(e) => setBrandName(e.target.value)}
+                  placeholder="Enter your brand name"
+                  className="w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Website URL *
+                </label>
+                <input
+                  type="text"
+                  value={websiteUrl}
+                  onChange={(e) => setWebsiteUrl(e.target.value)}
+                  placeholder="example.com"
+                  className="w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Industry *
+                </label>
+                <div className="relative">
+                  <select
+                    value={industry}
+                    onChange={(e) => setIndustry(e.target.value)}
+                    className="w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent appearance-none pr-10"
+                  >
+                    {industries.map((ind) => (
+                      <option key={ind} value={ind}>{ind}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                 </div>
               </div>
+            </div>
+          )}
 
-              <h3 className="text-lg font-bold text-gray-900 mb-2">{platform.name}</h3>
-              
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-gray-600">Visibility Score</span>
-                  <span className="text-2xl font-bold text-gray-900">{platform.score}%</span>
-                </div>
-                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${platform.score}%` }}
-                    transition={{ duration: 1, delay: 0.6 + index * 0.1 }}
-                    className="h-full rounded-full"
-                    style={{ backgroundColor: platform.color }}
+          {/* Step 2: Competitive Intelligence */}
+          {currentStep === 2 && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Competitors
+                </label>
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={newCompetitor}
+                    onChange={(e) => setNewCompetitor(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && addCompetitor()}
+                    placeholder="Add competitor name"
+                    className="flex-1 px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   />
+                  <button
+                    onClick={addCompetitor}
+                    className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  >
+                    Add
+                  </button>
                 </div>
+                {competitors.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {competitors.map((competitor) => (
+                      <span
+                        key={competitor}
+                        className="px-3 py-1 bg-gray-200 text-gray-900 rounded-lg flex items-center gap-2"
+                      >
+                        {competitor}
+                        <button
+                          onClick={() => setCompetitors(competitors.filter(c => c !== competitor))}
+                          className="text-gray-400 hover:text-white"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-gray-600 mb-1">Mentions</p>
-                  <p className="font-bold text-gray-900">{platform.mentions}</p>
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Keywords
+                </label>
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={newKeyword}
+                    onChange={(e) => setNewKeyword(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && addKeyword()}
+                    placeholder="Add keyword"
+                    className="flex-1 px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  />
+                  <button
+                    onClick={addKeyword}
+                    className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  >
+                    Add
+                  </button>
                 </div>
-                <div>
-                  <p className="text-gray-600 mb-1">Citations</p>
-                  <p className="font-bold text-gray-900">{platform.citations}</p>
-                </div>
+                {keywords.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {keywords.map((keyword) => (
+                      <span
+                        key={keyword}
+                        className="px-3 py-1 bg-gray-200 text-gray-900 rounded-lg flex items-center gap-2"
+                      >
+                        {keyword}
+                        <button
+                          onClick={() => setKeywords(keywords.filter(k => k !== keyword))}
+                          className="text-gray-400 hover:text-white"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            </motion.div>
-          );
-        })}
-      </div>
+            </div>
+          )}
 
-      {/* Charts Section */}
-      <div className="grid lg:grid-cols-2 gap-6 mb-8">
-        {/* Visibility Trend */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8 }}
-          className="bg-white rounded-xl p-6 border border-gray-200"
-        >
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Visibility Trends</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={visibilityTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" stroke="#6b7280" />
-              <YAxis stroke="#6b7280" />
-              <Tooltip />
-              <Line type="monotone" dataKey="chatgpt" stroke="#10a37f" strokeWidth={2} dot={{ r: 4 }} />
-              <Line type="monotone" dataKey="gemini" stroke="#4285f4" strokeWidth={2} dot={{ r: 4 }} />
-              <Line type="monotone" dataKey="perplexity" stroke="#ec4899" strokeWidth={2} dot={{ r: 4 }} />
-              <Line type="monotone" dataKey="claude" stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} />
-            </LineChart>
-          </ResponsiveContainer>
-          <div className="flex items-center justify-center gap-6 mt-4 text-sm flex-wrap">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: "#10a37f" }}></div>
-              <span>ChatGPT</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: "#4285f4" }}></div>
-              <span>Gemini</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: "#ec4899" }}></div>
-              <span>Perplexity</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: "#f59e0b" }}></div>
-              <span>Claude</span>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Competitor Comparison */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.9 }}
-          className="bg-white rounded-xl p-6 border border-gray-200"
-        >
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Competitor Comparison</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <RadarChart data={competitorData}>
-              <PolarGrid stroke="#e5e7eb" />
-              <PolarAngleAxis dataKey="subject" stroke="#6b7280" />
-              <PolarRadiusAxis stroke="#6b7280" />
-              <Radar name="Your Brand" dataKey="yourBrand" stroke="#0ea5e9" fill="#0ea5e9" fillOpacity={0.6} />
-              <Radar name="Competitor 1" dataKey="competitor1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
-              <Radar name="Competitor 2" dataKey="competitor2" stroke="#ec4899" fill="#ec4899" fillOpacity={0.3} />
-              <Tooltip />
-            </RadarChart>
-          </ResponsiveContainer>
-          <div className="flex items-center justify-center gap-6 mt-4 text-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-              <span>Your Brand</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-purple-500"></div>
-              <span>Competitor 1</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-pink-500"></div>
-              <span>Competitor 2</span>
-            </div>
-          </div>
-        </motion.div>
-      </div>
-
-      {/* Top Queries */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.0 }}
-        className="bg-white rounded-xl p-6 border border-gray-200"
-      >
-        <h2 className="text-xl font-bold text-gray-900 mb-6">Top Queries Mentioning Your Brand</h2>
-        <div className="space-y-4">
-          {topQueries.map((query, index) => (
-            <div key={query.query} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-2">
-                  <Search className="w-5 h-5 text-gray-400" />
-                  <span className="font-medium text-gray-900">{query.query}</span>
-                </div>
-                <div className="flex items-center gap-2 ml-8">
-                  {query.platforms.map((platform) => (
-                    <span key={platform} className="px-2 py-1 bg-white text-xs font-medium text-gray-700 rounded">
-                      {platform}
-                    </span>
+          {/* Step 3: Platform Selection */}
+          {currentStep === 3 && (
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-4">
+                  Select AI Platforms
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {platformOptions.map((platform) => (
+                    <label
+                      key={platform.id}
+                      className={`flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all ${
+                        selectedPlatforms.includes(platform.id)
+                          ? "border-purple-600 bg-purple-50"
+                          : "border-gray-300 bg-white hover:border-gray-400"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPlatforms.includes(platform.id)}
+                        onChange={() => {
+                          if (selectedPlatforms.includes(platform.id)) {
+                            setSelectedPlatforms(selectedPlatforms.filter(p => p !== platform.id));
+                          } else {
+                            setSelectedPlatforms([...selectedPlatforms, platform.id]);
+                          }
+                        }}
+                        className="w-5 h-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                      />
+                      {platform.icon ? (
+                        <Image 
+                          src={platform.icon} 
+                          alt={platform.name} 
+                          width={platform.id === 'gemini' ? 40 : 24} 
+                          height={platform.id === 'gemini' ? 40 : 24} 
+                          className={`${platform.id === 'gemini' ? 'w-10 h-10' : 'w-6 h-6'} object-contain ${platform.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
+                          quality={platform.id === 'gemini' ? 100 : 75}
+                          unoptimized={platform.id === 'gemini'}
+                        />
+                      ) : null}
+                      <span className={`font-medium ${
+                        selectedPlatforms.includes(platform.id) ? "text-purple-900" : "text-gray-900"
+                      }`}>
+                        {platform.name}
+                      </span>
+                    </label>
                   ))}
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-2xl font-bold text-gray-900">{query.mentions}</div>
-                <div className="text-sm text-gray-600">mentions</div>
+            </div>
+          )}
+
+          {/* Step 4: Review & Launch */}
+          {currentStep === 4 && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-lg p-6 space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Review Your Settings</h3>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Brand Name:</span>
+                  <p className="text-gray-900">{brandName || "Not set"}</p>
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Website URL:</span>
+                  <p className="text-gray-900">{websiteUrl || "Not set"}</p>
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Industry:</span>
+                  <p className="text-gray-900">{industry}</p>
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Competitors:</span>
+                  <p className="text-gray-900">{competitors.length > 0 ? competitors.join(", ") : "None"}</p>
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Keywords:</span>
+                  <p className="text-gray-900">{keywords.length > 0 ? keywords.join(", ") : "None"}</p>
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Platforms:</span>
+                  <p className="text-gray-900">{selectedPlatforms.map(p => platformOptions.find(opt => opt.id === p)?.name).join(", ")}</p>
+                </div>
               </div>
             </div>
-          ))}
-        </div>
-      </motion.div>
+          )}
 
-      {/* AI Insights */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.1 }}
-        className="mt-6 bg-gradient-to-r from-primary-50 to-accent-50 rounded-xl p-6 border border-primary-200"
-      >
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-primary-600 to-accent-600 rounded-lg flex items-center justify-center flex-shrink-0">
-            <Brain className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">AI Recommendation</h3>
-            <p className="text-gray-700 leading-relaxed">
-              Your ChatGPT visibility has increased by 5% this week, driven by mentions in technical documentation. 
-              Consider expanding content on "generative engine optimization" to capitalize on this momentum across 
-              other AI platforms. Perplexity shows strong citation potential with 52 backlinks.
-            </p>
+          {/* Navigation Buttons */}
+          <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-300">
+            <button
+              onClick={() => setViewMode('projects')}
+              className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              Cancel
+            </button>
+            
+            <div className="flex gap-3">
+              {currentStep > 1 && (
+                <button
+                  onClick={handleBack}
+                  className="flex items-center gap-2 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                  Back
+                </button>
+              )}
+              
+              {currentStep < totalSteps ? (
+                <button
+                  onClick={handleNext}
+                  className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                >
+                  Next
+                  <ArrowRight className="w-5 h-5" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleAnalyze}
+                  disabled={isAnalyzing}
+                  className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isAnalyzing ? "Launching..." : "Launch Analysis"}
+                  <Play className="w-5 h-5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }
-

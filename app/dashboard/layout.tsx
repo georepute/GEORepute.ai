@@ -23,6 +23,8 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Activity,
   Lightbulb,
   Shield,
@@ -42,6 +44,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [expandedItems, setExpandedItems] = useState<string[]>(['Analytics']); // Track expanded parent items
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { role, capabilities, loading: permissionsLoading } = usePermissions();
@@ -82,6 +85,14 @@ export default function DashboardLayout({
       .slice(0, 2);
   };
 
+  const toggleExpanded = (itemName: string) => {
+    setExpandedItems(prev => 
+      prev.includes(itemName) 
+        ? prev.filter(name => name !== itemName)
+        : [...prev, itemName]
+    );
+  };
+
   const allNavigation: NavigationItem[] = [
     { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
     { name: "Live View", href: "/dashboard/live-view", icon: Activity, requiredCapability: "canViewAnalytics" },
@@ -92,14 +103,21 @@ export default function DashboardLayout({
     { name: "Publication", href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
     { name: "Rankings", href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
     { name: "AI Visibility", href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
-    { name: "Reputation", href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
-    { name: "Leads", href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
-    { name: "AdSync", href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },
-    { name: "Analytics", href: "/dashboard/analytics", icon: FileText, requiredCapability: "canViewAnalytics" },
-    { name: "Learning", href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
-    { name: "Reports", href: "/dashboard/reports", icon: BarChart3, requiredCapability: "canViewReports" },
-    { name: "Video Reports", href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
-    { name: "Quote Builder", href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
+    // { name: "Reputation", href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
+    // { name: "Leads", href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
+    // { name: "AdSync", href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },
+    { 
+      name: "Analytics", 
+      icon: BarChart3, 
+      requiredCapability: "canViewAnalytics",
+      children: [
+        { name: "GSC Analytics", href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
+        { name: "BI Reports", href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" },
+      ]
+    },
+    // { name: "Learning", href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
+    // { name: "Video Reports", href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
+    // { name: "Quote Builder", href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
     { name: "Team", href: "/dashboard/team", icon: Users, requiredCapability: "canManageTeam" },
     { name: "Settings", href: "/dashboard/settings", icon: Settings, requiredCapability: "canManageSettings" },
   ];
@@ -161,16 +179,58 @@ export default function DashboardLayout({
             <ul className="space-y-1">
               {navigation.map((item) => (
                 <li key={item.name}>
-                  <Link
-                    href={item.href}
-                    className={`flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
-                      sidebarCollapsed ? "justify-center" : ""
-                    }`}
-                    title={sidebarCollapsed ? item.name : undefined}
-                  >
-                    <item.icon className="w-5 h-5 flex-shrink-0" />
-                    {!sidebarCollapsed && <span className="font-medium">{item.name}</span>}
-                  </Link>
+                  {item.children ? (
+                    // Parent item with children
+                    <div>
+                      <button
+                        onClick={() => toggleExpanded(item.name)}
+                        className={`w-full flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
+                          sidebarCollapsed ? "justify-center" : ""
+                        }`}
+                        title={sidebarCollapsed ? item.name : undefined}
+                      >
+                        <item.icon className="w-5 h-5 flex-shrink-0" />
+                        {!sidebarCollapsed && (
+                          <>
+                            <span className="font-medium flex-1 text-left">{item.name}</span>
+                            {expandedItems.includes(item.name) ? (
+                              <ChevronUp className="w-4 h-4" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4" />
+                            )}
+                          </>
+                        )}
+                      </button>
+                      {/* Child items */}
+                      {!sidebarCollapsed && expandedItems.includes(item.name) && (
+                        <ul className="mt-1 ml-4 space-y-1">
+                          {item.children.map((child) => (
+                            <li key={child.name}>
+                              <Link
+                                href={child.href || '#'}
+                                className="flex items-center gap-3 px-3 py-2 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors text-sm"
+                              >
+                                <child.icon className="w-4 h-4 flex-shrink-0" />
+                                <span>{child.name}</span>
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ) : (
+                    // Regular item without children
+                    <Link
+                      href={item.href || '#'}
+                      className={`flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
+                        sidebarCollapsed ? "justify-center" : ""
+                      }`}
+                      title={sidebarCollapsed ? item.name : undefined}
+                    >
+                      <item.icon className="w-5 h-5 flex-shrink-0" />
+                      {!sidebarCollapsed && <span className="font-medium">{item.name}</span>}
+                    </Link>
+                  )}
                 </li>
               ))}
             </ul>
