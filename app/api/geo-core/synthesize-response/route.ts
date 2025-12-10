@@ -41,6 +41,7 @@ interface SynthesizeRequest {
   industry: string;
   keywords: string[];
   competitors: string[];
+  influenceLevel?: "subtle" | "moderate" | "strong";
   brandVoice?: BrandVoice | null;
 }
 
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request
     const body: SynthesizeRequest = await request.json();
-    const { prompt, responses, brandName, industry, keywords, competitors, brandVoice } = body;
+    const { prompt, responses, brandName, industry, keywords, competitors, influenceLevel = "subtle", brandVoice } = body;
 
     // Validation
     if (!prompt || !responses || responses.length === 0 || !brandName) {
@@ -73,6 +74,7 @@ export async function POST(request: NextRequest) {
       responseCount: responses.length,
       brandName,
       industry,
+      influenceLevel,
       brandVoice: brandVoice?.brand_name || 'None'
     });
 
@@ -128,7 +130,7 @@ ${brandVoiceInstructions}
 - Mention "${brandName}" naturally, 1-3 times depending on context
 - Position the brand as a valuable resource, solution, or authority
 - Don't force the brand mention if it doesn't fit naturally
-- The brand mention should feel organic, not like an advertisement
+- The brand mention should feel organic and helpful, not like an advertisement
 - Consider phrases like "platforms like ${brandName}", "solutions such as ${brandName}", or "${brandName}, a leading..."
 
 ## Response Format:
@@ -155,14 +157,60 @@ Now synthesize the best possible response that:
 
 Write the optimized response:`;
 
-    // Call GPT-4 Turbo
+    // ============================================
+    // TEMPERATURE CONTROL SYSTEM
+    // ============================================
+    // Temperature controls how creative/random the AI responses are:
+    // - Lower (0.3-0.5): More focused, precise, consistent
+    // - Medium (0.6-0.7): Balanced creativity and accuracy
+    // - Higher (0.8-1.0): More creative, varied, expressive
+    
+    // Step 1: Base temperature from Influence Level
+    const influenceTemperatureMap = {
+      subtle: 0.5,    // Lower temperature = more controlled, precise responses
+      moderate: 0.7,  // Medium temperature = balanced creativity
+      strong: 0.8    // Higher temperature = more creative, expressive responses
+    };
+    const baseTemperature = influenceTemperatureMap[influenceLevel] || 0.7;
+    
+    // Step 2: Brand Voice tone adjustment (if brand voice is selected)
+    // Different tones need different creativity levels
+    let brandVoiceTemperatureAdjustment = 0;
+    if (brandVoice) {
+      const toneMap: Record<string, number> = {
+        'casual': 0.1,        // Casual needs more creativity (+0.1)
+        'friendly': 0.1,      // Friendly needs more warmth (+0.1)
+        'humorous': 0.15,     // Humorous needs most creativity (+0.15)
+        'professional': -0.05, // Professional needs less variation (-0.05)
+        'formal': -0.1,       // Formal needs most control (-0.1)
+        'authoritative': -0.05, // Authoritative needs less variation (-0.05)
+      };
+      brandVoiceTemperatureAdjustment = toneMap[brandVoice.tone?.toLowerCase()] || 0;
+    }
+    
+    // Step 3: Calculate final temperature
+    // Combine base (from influence level) + adjustment (from brand voice)
+    // Clamp between 0.3 (minimum) and 1.0 (maximum)
+    const finalTemperature = Math.max(0.3, Math.min(1.0, baseTemperature + brandVoiceTemperatureAdjustment));
+    
+    // Log temperature calculation for debugging
+    console.log('🌡️ Temperature Calculation:', {
+      influenceLevel,
+      baseTemperature,
+      brandVoice: brandVoice?.brand_name || 'None',
+      brandVoiceTone: brandVoice?.tone || 'None',
+      brandVoiceAdjustment: brandVoiceTemperatureAdjustment,
+      finalTemperature
+    });
+
+    // Call GPT-4 Turbo with calculated temperature
     const completion = await openai.chat.completions.create({
       model: "gpt-4-turbo-preview",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ],
-      temperature: 0.7,
+      temperature: finalTemperature,
       max_tokens: 1500,
     });
 

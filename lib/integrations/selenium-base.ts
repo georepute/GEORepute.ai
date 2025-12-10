@@ -233,62 +233,62 @@ export class SeleniumBaseService {
           
           // Try to find ChromeDriver and set service
           const driverPath = this.findChromeDriverPath();
-          
-          if (driverPath) {
-            console.log('✅ Using ChromeDriver at:', driverPath);
-            try {
-              // Use absolute path
-              const absoluteDriverPath = path.isAbsolute(driverPath) 
-                ? driverPath 
-                : path.resolve(driverPath);
-              
-              const service = new chrome.ServiceBuilder(absoluteDriverPath);
-              builder.setChromeService(service);
-              console.log('✅ ChromeService configured successfully');
-            } catch (serviceError: any) {
-              console.warn('⚠️ Failed to create ChromeService:', serviceError.message);
-              console.warn('Continuing without explicit service - Selenium Manager will try to find driver');
-            }
-          } else {
-            console.warn('⚠️ ChromeDriver not found in common locations.');
-            console.warn('Searched paths:', [
-              process.env.CHROMEDRIVER_PATH,
-              'node_modules/chromedriver/bin/chromedriver',
-              '/usr/local/bin/chromedriver',
-              '/opt/homebrew/bin/chromedriver',
-            ].filter(Boolean).join(', '));
+        
+        if (driverPath) {
+          console.log('✅ Using ChromeDriver at:', driverPath);
+          try {
+            // Use absolute path
+            const absoluteDriverPath = path.isAbsolute(driverPath) 
+              ? driverPath 
+              : path.resolve(driverPath);
+            
+            const service = new chrome.ServiceBuilder(absoluteDriverPath);
+            builder.setChromeService(service);
+            console.log('✅ ChromeService configured successfully');
+          } catch (serviceError: any) {
+            console.warn('⚠️ Failed to create ChromeService:', serviceError.message);
+            console.warn('Continuing without explicit service - Selenium Manager will try to find driver');
+          }
+        } else {
+          console.warn('⚠️ ChromeDriver not found in common locations.');
+          console.warn('Searched paths:', [
+            process.env.CHROMEDRIVER_PATH,
+            'node_modules/chromedriver/bin/chromedriver',
+            '/usr/local/bin/chromedriver',
+            '/opt/homebrew/bin/chromedriver',
+          ].filter(Boolean).join(', '));
             console.warn('');
             console.warn('💡 TIP: Set SELENIUM_HUB_URL in .env.local to use Railway Selenium Hub');
-            console.warn('');
-            console.warn('Attempting to use Selenium Manager (may download driver automatically)...');
-            console.warn('');
-            console.warn('If this fails, please:');
-            console.warn('  1. Install: npm install --save-dev chromedriver');
-            console.warn('  2. Or: brew install chromedriver');
-            console.warn('  3. Or set CHROMEDRIVER_PATH=/path/to/chromedriver in .env.local');
+          console.warn('');
+          console.warn('Attempting to use Selenium Manager (may download driver automatically)...');
+          console.warn('');
+          console.warn('If this fails, please:');
+          console.warn('  1. Install: npm install --save-dev chromedriver');
+          console.warn('  2. Or: brew install chromedriver');
+          console.warn('  3. Or set CHROMEDRIVER_PATH=/path/to/chromedriver in .env.local');
             console.warn('  4. Or set SELENIUM_HUB_URL to use Railway Selenium Hub');
-          }
-          
-          try {
-            this.driver = await builder.build();
+        }
+        
+        try {
+          this.driver = await builder.build();
             console.log('✅ WebDriver initialized successfully (local)');
-          } catch (buildError: any) {
-            const errorMessage = buildError.message || 'Unknown error';
-            console.error('❌ Failed to build WebDriver:', errorMessage);
-            
-            // Provide helpful error message
-            if (errorMessage.includes('Unable to obtain') || errorMessage.includes('driver')) {
-              throw new Error(
-                `Failed to initialize WebDriver: ${errorMessage}\n\n` +
-                `Please install ChromeDriver:\n` +
-                `  macOS: brew install chromedriver\n` +
-                `  Or: npm install --save-dev chromedriver\n` +
+        } catch (buildError: any) {
+          const errorMessage = buildError.message || 'Unknown error';
+          console.error('❌ Failed to build WebDriver:', errorMessage);
+          
+          // Provide helpful error message
+          if (errorMessage.includes('Unable to obtain') || errorMessage.includes('driver')) {
+            throw new Error(
+              `Failed to initialize WebDriver: ${errorMessage}\n\n` +
+              `Please install ChromeDriver:\n` +
+              `  macOS: brew install chromedriver\n` +
+              `  Or: npm install --save-dev chromedriver\n` +
                 `  Or set CHROMEDRIVER_PATH=/path/to/chromedriver\n` +
                 `  Or set SELENIUM_HUB_URL to use Railway Selenium Hub\n\n` +
-                `After installing, make sure ChromeDriver is in your PATH or set CHROMEDRIVER_PATH.`
-              );
-            }
-            throw buildError;
+              `After installing, make sure ChromeDriver is in your PATH or set CHROMEDRIVER_PATH.`
+            );
+          }
+          throw buildError;
           }
         }
       } else {

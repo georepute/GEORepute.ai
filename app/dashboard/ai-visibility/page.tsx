@@ -1449,7 +1449,7 @@ export default function AIVisibility() {
                                               competitors: selectedProject?.competitors || []
                                             };
                                             sessionStorage.setItem('editPromptData', JSON.stringify(editData));
-                                            router.push('/dashboard/ai-visibility/edit');
+                                            router.push('/dashboard/content?source=ai-visibility&step=content-generation');
                                           }}
                                           className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors"
                                           title="Generate new optimized content for this prompt"

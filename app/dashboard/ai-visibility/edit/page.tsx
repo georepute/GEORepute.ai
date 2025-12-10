@@ -18,14 +18,7 @@ import {
   Mic,
   Star,
   Send,
-  Eye,
-  X,
-  CheckCircle,
-  Globe,
-  Code,
-  ImageIcon,
-  Search,
-  Trash2
+  CheckCircle
 } from "lucide-react";
 
 interface ResponseData {
@@ -66,35 +59,6 @@ interface BrandVoice {
   is_default?: boolean;
 }
 
-interface PlatformSchema {
-  schemaData: any;
-  contentId: string;
-  hasImage?: boolean;
-}
-
-interface PixabayImage {
-  id: number;
-  previewURL: string;
-  webformatURL: string;
-  largeImageURL: string;
-  tags: string;
-  user: string;
-  pageURL: string;
-  likes: number;
-  downloads: number;
-}
-
-// Publishing platforms
-const PUBLISHING_PLATFORMS = [
-  { id: 'reddit', name: 'Reddit', icon: '/reddit-icon.svg', color: 'bg-orange-100 text-orange-700 border-orange-200' },
-  { id: 'medium', name: 'Medium', icon: '/medium-square.svg', color: 'bg-gray-100 text-gray-700 border-gray-200' },
-  { id: 'quora', name: 'Quora', icon: '/quora.svg', color: 'bg-red-100 text-red-700 border-red-200' },
-  { id: 'facebook', name: 'Facebook', icon: '/facebook-color.svg', color: 'bg-blue-100 text-blue-700 border-blue-200' },
-  { id: 'linkedin', name: 'LinkedIn', icon: '/linkedin.svg', color: 'bg-sky-100 text-sky-700 border-sky-200' },
-  { id: 'instagram', name: 'Instagram', icon: '/instagram-1-svgrepo-com.svg', color: 'bg-pink-100 text-pink-700 border-pink-200' },
-  { id: 'github', name: 'GitHub', icon: '/github-142.svg', color: 'bg-gray-800 text-white border-gray-700' },
-];
-
 export default function EditPromptPage() {
   const router = useRouter();
   const supabase = createClientComponentClient();
@@ -110,24 +74,9 @@ export default function EditPromptPage() {
   const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
   const [loadingVoices, setLoadingVoices] = useState(false);
 
-  // Publishing State
-  const [publishingStep, setPublishingStep] = useState<'idle' | 'select-platforms' | 'creating-schemas' | 'review'>('idle');
-  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
-  const [platformSchemas, setPlatformSchemas] = useState<{ [key: string]: PlatformSchema }>({});
+  // Influence Level State
+  const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
 
-  // Image Picker State
-  const [showImagePicker, setShowImagePicker] = useState(false);
-  const [fetchingImages, setFetchingImages] = useState(false);
-  const [pixabayImages, setPixabayImages] = useState<PixabayImage[]>([]);
-  const [selectedImage, setSelectedImage] = useState<PixabayImage | null>(null);
-  const [imageError, setImageError] = useState<string | null>(null);
-  const [imageSearchQuery, setImageSearchQuery] = useState<string>('');
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
-
-  // Schema Creation Progress
-  const [schemaProgress, setSchemaProgress] = useState(0);
-  const [currentPlatform, setCurrentPlatform] = useState<string>('');
 
   // Load brand voices on mount
   useEffect(() => {
@@ -219,6 +168,7 @@ export default function EditPromptPage() {
           industry: editData.industry,
           keywords: editData.keywords,
           competitors: editData.competitors,
+          influenceLevel: influenceLevel,
           brandVoice: selectedVoice ? {
             id: selectedVoice.id,
             brand_name: selectedVoice.brand_name,
@@ -259,249 +209,37 @@ export default function EditPromptPage() {
     }
   };
 
-  // Toggle platform selection
-  const handlePlatformToggle = (platformId: string) => {
-    setSelectedPlatforms(prev => 
-      prev.includes(platformId)
-        ? prev.filter(p => p !== platformId)
-        : [...prev, platformId]
-    );
-  };
-
-  // Start approval flow - show platform selection
+  // Start approval flow - redirect to publication page
   const handleStartApproval = () => {
-    setPublishingStep('select-platforms');
-    setSelectedPlatforms([]);
+    // Store content data for publication page
+    const publicationData = {
+      responses: [{
+        id: `synth-${Date.now()}`,
+        prompt: editedPrompt,
+        response: synthesizedResponse,
+        platform: 'synthesized',
+        response_metadata: {
+          brand_mentioned: true,
+          synthesized: true,
+          source_count: editData?.responses.length || 0
+        },
+        status: 'pending',
+        selectedPlatforms: [],
+        publishedUrls: [],
+        platformSchemas: {},
+      }],
+      projectName: editData?.brandName || 'AI Visibility Response',
+      projectId: editData?.projectId || '',
+      keywords: editData?.keywords || [],
+      industry: editData?.industry || '',
+      brandName: editData?.brandName || '',
+      brandVoice: selectedVoiceId ? brandVoices.find(v => v.id === selectedVoiceId) : null,
+      influenceLevel: influenceLevel,
+    };
+    sessionStorage.setItem('aiVisibilityResponses', JSON.stringify(publicationData));
+    router.push('/dashboard/content?source=ai-visibility&step=image-selection');
   };
 
-  // Platforms that support image publishing
-  const PLATFORMS_WITH_IMAGE_SUPPORT = ['reddit', 'medium', 'quora', 'facebook', 'linkedin', 'instagram'];
-
-  // Create schemas for selected platforms
-  const handleCreateSchemas = async () => {
-    if (selectedPlatforms.length === 0) {
-      toast.error("Please select at least one platform");
-      return;
-    }
-
-    setPublishingStep('creating-schemas');
-    setSchemaProgress(0);
-    setCurrentPlatform('');
-    const schemas: { [key: string]: PlatformSchema } = {};
-    const totalPlatforms = selectedPlatforms.length;
-
-    for (let i = 0; i < selectedPlatforms.length; i++) {
-      const platformId = selectedPlatforms[i];
-      const platformName = PUBLISHING_PLATFORMS.find(p => p.id === platformId)?.name || platformId;
-      
-      // Update progress
-      setCurrentPlatform(platformName);
-      setSchemaProgress(Math.round((i / totalPlatforms) * 100));
-      
-      try {
-        toast.loading(`Creating schema for ${platformName}...`, { id: `schema-${platformId}` });
-
-        // Include image URL for platforms that support it (not GitHub)
-        const includeImage = PLATFORMS_WITH_IMAGE_SUPPORT.includes(platformId) && uploadedImageUrl;
-        
-        const createResponse = await fetch("/api/geo-core/content-generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            topic: editedPrompt,
-            targetPlatform: platformId,
-            tone: "informative",
-            contentType: "answer",
-            targetKeywords: editData?.keywords || [],
-            generatedContent: synthesizedResponse,
-            skipGeneration: true,
-            // Include image data for supported platforms
-            imageUrl: includeImage ? uploadedImageUrl : null,
-            imageData: includeImage && selectedImage ? {
-              url: uploadedImageUrl,
-              alt: selectedImage.tags || editedPrompt,
-              photographer: selectedImage.user,
-            } : null,
-          }),
-        });
-
-        if (!createResponse.ok) {
-          const errorData = await createResponse.json().catch(() => ({}));
-          toast.error(`Failed: ${platformId} - ${errorData.error || 'Unknown error'}`, { id: `schema-${platformId}` });
-          continue;
-        }
-
-        const createData = await createResponse.json();
-        
-        schemas[platformId] = {
-          schemaData: {
-            ...createData.structuredSEO,
-            jsonLd: createData.schema?.jsonLd,
-            scriptTags: createData.schema?.scriptTags,
-            // Add image to schema for platforms that support it
-            ...(includeImage && {
-              image: {
-                url: uploadedImageUrl,
-                alt: selectedImage?.tags || editedPrompt,
-                photographer: selectedImage?.user,
-              }
-            }),
-          },
-          contentId: createData.contentId,
-          // Flag to indicate if this platform should publish with image
-          hasImage: includeImage,
-        };
-
-        // Update progress after successful creation
-        setSchemaProgress(Math.round(((i + 1) / totalPlatforms) * 100));
-        toast.success(`Schema created for ${platformName}!`, { id: `schema-${platformId}` });
-      } catch (platformError: any) {
-        console.error(`Error creating schema for ${platformId}:`, platformError);
-        toast.error(`Error: ${platformId} - ${platformError.message}`, { id: `schema-${platformId}` });
-      }
-    }
-
-    // Final progress update
-    setSchemaProgress(100);
-    setCurrentPlatform('Complete!');
-    
-    // Small delay to show 100% before moving to next step
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    setPlatformSchemas(schemas);
-    setPublishingStep('review');
-    toast.success(`Schemas created for ${Object.keys(schemas).length} platform(s)! Ready for review.`);
-  };
-
-  // Reset publishing flow
-  const handleResetPublishing = () => {
-    setPublishingStep('idle');
-    setSelectedPlatforms([]);
-    setPlatformSchemas({});
-  };
-
-  // Fetch images from Pixabay using custom query or prompt
-  const handleFetchImages = async (customQuery?: string) => {
-    const searchQuery = customQuery || imageSearchQuery || editedPrompt;
-    
-    if (!searchQuery || searchQuery.trim().length === 0) {
-      toast.error('Please enter a search query');
-      return;
-    }
-
-    setFetchingImages(true);
-    setImageError(null);
-    setPixabayImages([]);
-    setShowImagePicker(true);
-
-    try {
-      console.log('Calling pixabay-images with query:', searchQuery);
-      
-      // Call local API route
-      const response = await fetch('/api/geo-core/pixabay-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: searchQuery,
-          keywords: editData?.keywords || [],
-        }),
-      });
-
-      const data = await response.json();
-      console.log('Pixabay response:', data);
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch images');
-      }
-      
-      if (data?.images && data.images.length > 0) {
-        setPixabayImages(data.images);
-        console.log('Found images:', data.images.length);
-      } else {
-        console.log('No images in response:', data);
-        setImageError('No images found. Try a different search query.');
-      }
-    } catch (err) {
-      console.error('Error fetching images:', err);
-      setImageError(err instanceof Error ? err.message : 'Failed to fetch images');
-    } finally {
-      setFetchingImages(false);
-    }
-  };
-
-  // Initialize search query from prompt when it changes
-  useEffect(() => {
-    if (editedPrompt && !imageSearchQuery) {
-      setImageSearchQuery(editedPrompt);
-    }
-  }, [editedPrompt]);
-
-  // Upload image to Supabase Storage
-  const uploadImageToStorage = async (imageUrl: string, imageId: number): Promise<string | null> => {
-    try {
-      setUploadingImage(true);
-      
-      // Fetch the image from Pixabay
-      const response = await fetch(imageUrl);
-      const blob = await response.blob();
-      
-      // Generate unique filename
-      const timestamp = Date.now();
-      const filename = `content-image-${imageId}-${timestamp}.jpg`;
-      
-      // Upload to Supabase Storage
-      const { data, error } = await supabase.storage
-        .from('platform-content-images')
-        .upload(filename, blob, {
-          contentType: 'image/jpeg',
-          upsert: true,
-        });
-
-      if (error) {
-        console.error('Error uploading image:', error);
-        throw error;
-      }
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('platform-content-images')
-        .getPublicUrl(data.path);
-
-      console.log('Image uploaded successfully:', urlData.publicUrl);
-      return urlData.publicUrl;
-    } catch (err) {
-      console.error('Failed to upload image:', err);
-      toast.error('Failed to upload image to storage');
-      return null;
-    } finally {
-      setUploadingImage(false);
-    }
-  };
-
-  // Select an image and upload to Supabase Storage
-  const handleSelectImage = async (image: PixabayImage) => {
-    setSelectedImage(image);
-    setShowImagePicker(false);
-    
-    // Upload image to Supabase Storage in background
-    toast.loading('Uploading image...', { id: 'image-upload' });
-    const publicUrl = await uploadImageToStorage(image.largeImageURL, image.id);
-    
-    if (publicUrl) {
-      setUploadedImageUrl(publicUrl);
-      toast.success('Image uploaded successfully!', { id: 'image-upload' });
-    } else {
-      toast.error('Failed to upload image, but you can still continue', { id: 'image-upload' });
-    }
-  };
-
-  // Remove selected image
-  const handleRemoveImage = async () => {
-    // Optionally delete from storage (keeping it for now as images might be reused)
-    setSelectedImage(null);
-    setUploadedImageUrl(null);
-    toast.success('Image removed');
-  };
 
   if (!editData) {
     return (
@@ -679,6 +417,38 @@ export default function EditPromptPage() {
               </div>
             </div>
 
+            {/* Influence Level Selection */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 bg-gradient-to-r from-cyan-50 to-blue-50 border-b border-gray-200">
+                <h2 className="font-semibold text-gray-900">Influence Level</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Control how prominently your brand is mentioned in the response</p>
+              </div>
+              <div className="p-4">
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { value: "subtle", label: "Subtle", desc: "Natural mention" },
+                    { value: "moderate", label: "Moderate", desc: "Balanced" },
+                    { value: "strong", label: "Strong", desc: "Clear recommendation" },
+                  ].map((level) => (
+                    <button
+                      key={level.value}
+                      onClick={() => setInfluenceLevel(level.value as "subtle" | "moderate" | "strong")}
+                      className={`p-3 rounded-lg border-2 transition-all text-left ${
+                        influenceLevel === level.value
+                          ? "border-cyan-500 bg-cyan-50"
+                          : "border-gray-200 hover:border-gray-300 bg-white"
+                      }`}
+                    >
+                      <div className="font-semibold text-sm text-gray-900">
+                        {level.label}
+                      </div>
+                      <div className="text-xs text-gray-600 mt-0.5">{level.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             {/* LLM Responses */}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="px-4 py-3 bg-gradient-to-r from-gray-50 to-gray-100/50 border-b border-gray-200">
@@ -828,521 +598,27 @@ export default function EditPromptPage() {
               </div>
             )}
 
-            {/* Image Picker Section */}
-            {synthesizedResponse && (
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="px-4 py-3 bg-gradient-to-r from-cyan-50 to-blue-50 border-b border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <ImageIcon className="w-4 h-4 text-cyan-600" />
-                      <h2 className="font-semibold text-gray-900">Content Image</h2>
-                    </div>
-                    {selectedImage && (
-                      <button
-                        onClick={handleRemoveImage}
-                        className="text-xs text-red-500 hover:text-red-600 font-medium flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Add an image to publish with your content
-                  </p>
-                </div>
-                <div className="p-4">
-                  {!selectedImage ? (
-                    <div className="space-y-3">
-                      {/* Editable Search Query */}
-                      <div className="space-y-2">
-                        <label className="text-xs font-medium text-gray-600">Search Query</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={imageSearchQuery}
-                            onChange={(e) => setImageSearchQuery(e.target.value)}
-                            placeholder="Enter search terms for images..."
-                            className="flex-1 px-3 py-2.5 border border-gray-200 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all text-sm text-gray-800"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !fetchingImages) {
-                                handleFetchImages();
-                              }
-                            }}
-                          />
-                          <button
-                            onClick={() => handleFetchImages()}
-                            disabled={fetchingImages || !imageSearchQuery.trim()}
-                            className="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-600 hover:to-blue-700 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
-                          >
-                            {fetchingImages ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Search className="w-4 h-4" />
-                            )}
-                            <span className="hidden sm:inline">Search</span>
-                          </button>
-                        </div>
-                      </div>
-                      
-                      {/* Quick suggestions */}
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="text-xs text-gray-400">Suggestions:</span>
-                        {editData?.keywords.slice(0, 3).map((kw, i) => (
-                          <button
-                            key={i}
-                            onClick={() => setImageSearchQuery(kw)}
-                            className="px-2 py-0.5 bg-cyan-50 text-cyan-700 rounded text-xs hover:bg-cyan-100 transition-colors"
-                          >
-                            {kw}
-                          </button>
-                        ))}
-                        <button
-                          onClick={() => setImageSearchQuery(editedPrompt)}
-                          className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs hover:bg-gray-200 transition-colors"
-                        >
-                          Use prompt
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {/* Selected Image Preview */}
-                      <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-gray-200 group">
-                        <Image
-                          src={uploadedImageUrl || selectedImage.webformatURL}
-                          alt="Selected content image"
-                          fill
-                          className="object-cover"
-                        />
-                        {/* Upload status indicator */}
-                        {uploadingImage && (
-                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                            <div className="bg-white rounded-lg px-4 py-2 flex items-center gap-2">
-                              <Loader2 className="w-4 h-4 animate-spin text-cyan-600" />
-                              <span className="text-sm text-gray-700">Uploading...</span>
-                            </div>
-                          </div>
-                        )}
-                        {uploadedImageUrl && !uploadingImage && (
-                          <div className="absolute top-2 left-2">
-                            <div className="bg-green-500 text-white rounded-full p-1">
-                              <Check className="w-3 h-3" />
-                            </div>
-                          </div>
-                        )}
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                          <button
-                            onClick={handleFetchImages}
-                            className="px-3 py-1.5 bg-white text-gray-700 rounded-lg text-sm font-medium flex items-center gap-1.5 shadow-lg"
-                          >
-                            <RefreshCw className="w-4 h-4" />
-                            Change Image
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between text-xs text-gray-500">
-                        <span>Photo by: <strong className="text-gray-700">{selectedImage.user}</strong></span>
-                        <a
-                          href={selectedImage.pageURL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-cyan-600 hover:text-cyan-700 flex items-center gap-1"
-                        >
-                          View on Pixabay
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                      {/* Platform support note */}
-                      <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
-                        <strong>Note:</strong> Image will be published to Reddit, Medium, Quora, Facebook, LinkedIn, Instagram. GitHub publishes content without images.
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Image Picker Modal */}
-            {showImagePicker && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden">
-                  <div className="px-5 py-4 bg-gradient-to-r from-cyan-50 to-blue-50 border-b border-gray-200 flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                        <ImageIcon className="w-5 h-5 text-cyan-600" />
-                        Select an Image
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        Choose one image from the results below
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setShowImagePicker(false)}
-                      className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <div className="p-5 overflow-y-auto max-h-[60vh]">
-                    {fetchingImages ? (
-                      <div className="py-12 text-center">
-                        <Loader2 className="w-10 h-10 animate-spin text-cyan-600 mx-auto mb-3" />
-                        <p className="text-gray-600">Searching for images...</p>
-                        <p className="text-sm text-gray-400 mt-1">Extracting key terms from your prompt</p>
-                      </div>
-                    ) : imageError ? (
-                      <div className="py-12 text-center">
-                        <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                          <X className="w-6 h-6 text-red-500" />
-                        </div>
-                        <p className="text-red-600 font-medium">{imageError}</p>
-                        <button
-                          onClick={handleFetchImages}
-                          className="mt-4 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors"
-                        >
-                          Try Again
-                        </button>
-                      </div>
-                    ) : pixabayImages.length > 0 ? (
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          {pixabayImages.map((image) => (
-                            <button
-                              key={image.id}
-                              onClick={() => handleSelectImage(image)}
-                              className="relative aspect-video rounded-lg overflow-hidden border-2 border-gray-200 hover:border-cyan-500 transition-all group focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2"
-                            >
-                              <Image
-                                src={image.webformatURL}
-                                alt={image.tags}
-                                fill
-                                className="object-cover"
-                              />
-                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <div className="px-3 py-1.5 bg-white rounded-lg text-sm font-medium text-gray-700 shadow-lg">
-                                    Select
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                                <p className="text-white text-xs truncate">by {image.user}</p>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                        <div className="text-center pt-2 border-t border-gray-100">
-                          <p className="text-xs text-gray-400">
-                            Images powered by{' '}
-                            <a
-                              href="https://pixabay.com"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-cyan-600 hover:underline"
-                            >
-                              Pixabay
-                            </a>
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Publishing Workflow */}
             {synthesizedResponse && (
-              <>
-                {/* Step 1: Approval - Show Publish Button */}
-                {publishingStep === 'idle' && (
-                  <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl p-6 shadow-lg">
-                    <div className="text-center">
-                      <div className="inline-flex items-center justify-center w-12 h-12 bg-white/10 rounded-xl mb-3 backdrop-blur-sm">
-                        <Send className="w-6 h-6 text-white" />
-                      </div>
-                      <h3 className="text-lg font-bold text-white mb-2">Ready to Publish?</h3>
-                      <p className="text-emerald-100 text-sm mb-4">
-                        Approve and publish this response to your platforms with auto-generated SEO schemas
-                      </p>
-                      <button
-                        onClick={handleStartApproval}
-                        className="inline-flex items-center gap-2 px-6 py-2.5 bg-white text-emerald-700 font-semibold rounded-lg hover:bg-emerald-50 transition-all shadow-lg"
-                      >
-                        <CheckCircle className="w-5 h-5" />
-                        Approve & Select Platforms
-                      </button>
-                    </div>
+              <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl p-6 shadow-lg">
+                <div className="text-center">
+                  <div className="inline-flex items-center justify-center w-12 h-12 bg-white/10 rounded-xl mb-3 backdrop-blur-sm">
+                    <Send className="w-6 h-6 text-white" />
                   </div>
-                )}
-
-                {/* Step 2: Platform Selection */}
-                {publishingStep === 'select-platforms' && (
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Globe className="w-4 h-4 text-blue-600" />
-                        <h2 className="font-semibold text-gray-900">Select Publishing Platforms</h2>
-                      </div>
-                      <button
-                        onClick={handleResetPublishing}
-                        className="text-gray-400 hover:text-gray-600"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="p-4">
-                      <p className="text-sm text-gray-600 mb-4">
-                        Choose where to publish this optimized response. Schemas will be auto-generated for each platform.
-                      </p>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-                        {PUBLISHING_PLATFORMS.map((platform) => (
-                          <button
-                            key={platform.id}
-                            onClick={() => handlePlatformToggle(platform.id)}
-                            className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border-2 transition-all ${
-                              selectedPlatforms.includes(platform.id)
-                                ? 'border-blue-500 bg-blue-50'
-                                : 'border-gray-200 hover:border-gray-300 bg-white'
-                            }`}
-                          >
-                            <div className="relative w-5 h-5 flex-shrink-0">
-                              <Image
-                                src={platform.icon}
-                                alt={platform.name}
-                                fill
-                                className="object-contain"
-                              />
-                            </div>
-                            <span className="text-sm font-medium text-gray-700">{platform.name}</span>
-                            {selectedPlatforms.includes(platform.id) && (
-                              <Check className="w-4 h-4 text-blue-600 ml-auto" />
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                        <span className="text-sm text-gray-500">
-                          {selectedPlatforms.length} platform{selectedPlatforms.length !== 1 ? 's' : ''} selected
-                        </span>
-                        <button
-                          onClick={handleCreateSchemas}
-                          disabled={selectedPlatforms.length === 0}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <Code className="w-4 h-4" />
-                          Generate Schemas
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 3: Creating Schemas with Progress */}
-                {publishingStep === 'creating-schemas' && (
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                    <div className="p-6">
-                      <div className="text-center mb-6">
-                        <div className="relative w-20 h-20 mx-auto mb-4">
-                          {/* Circular Progress */}
-                          <svg className="w-20 h-20 transform -rotate-90">
-                            <circle
-                              cx="40"
-                              cy="40"
-                              r="36"
-                              stroke="#E5E7EB"
-                              strokeWidth="6"
-                              fill="none"
-                            />
-                            <circle
-                              cx="40"
-                              cy="40"
-                              r="36"
-                              stroke="url(#progressGradient)"
-                              strokeWidth="6"
-                              fill="none"
-                              strokeLinecap="round"
-                              strokeDasharray={`${2 * Math.PI * 36}`}
-                              strokeDashoffset={`${2 * Math.PI * 36 * (1 - schemaProgress / 100)}`}
-                              className="transition-all duration-500 ease-out"
-                            />
-                            <defs>
-                              <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" stopColor="#3B82F6" />
-                                <stop offset="100%" stopColor="#8B5CF6" />
-                              </linearGradient>
-                            </defs>
-                          </svg>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span className="text-xl font-bold text-gray-900">{schemaProgress}%</span>
-                          </div>
-                        </div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-1">Creating Platform Schemas</h3>
-                        <p className="text-sm text-gray-500">
-                          {currentPlatform ? (
-                            <>Processing: <span className="font-medium text-blue-600">{currentPlatform}</span></>
-                          ) : (
-                            'Initializing...'
-                          )}
-                        </p>
-                      </div>
-                      
-                      {/* Linear Progress Bar */}
-                      <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                        <div 
-                          className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500 ease-out"
-                          style={{ width: `${schemaProgress}%` }}
-                        />
-                      </div>
-                      
-                      {/* Platform Status */}
-                      <div className="mt-4 flex flex-wrap justify-center gap-2">
-                        {selectedPlatforms.map((platformId, index) => {
-                          const platform = PUBLISHING_PLATFORMS.find(p => p.id === platformId);
-                          const currentIndex = selectedPlatforms.findIndex(p => 
-                            PUBLISHING_PLATFORMS.find(pl => pl.id === p)?.name === currentPlatform
-                          );
-                          const isComplete = index < currentIndex || (currentPlatform === 'Complete!');
-                          const isCurrent = PUBLISHING_PLATFORMS.find(p => p.id === platformId)?.name === currentPlatform;
-                          
-                          return (
-                            <div
-                              key={platformId}
-                              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                                isComplete 
-                                  ? 'bg-green-100 text-green-700' 
-                                  : isCurrent 
-                                    ? 'bg-blue-100 text-blue-700 animate-pulse' 
-                                    : 'bg-gray-100 text-gray-400'
-                              }`}
-                            >
-                              {platform && (
-                                <div className="relative w-3.5 h-3.5">
-                                  <Image src={platform.icon} alt={platform.name} fill className="object-contain" />
-                                </div>
-                              )}
-                              <span>{platform?.name}</span>
-                              {isComplete && <Check className="w-3 h-3" />}
-                              {isCurrent && <Loader2 className="w-3 h-3 animate-spin" />}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Step 4: Schemas Created - Redirect to Publication */}
-                {publishingStep === 'review' && (
-                  <div className="bg-white rounded-xl border border-green-200 shadow-sm overflow-hidden ring-2 ring-green-100">
-                    <div className="px-4 py-3 bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-200">
-                      <h2 className="font-semibold text-green-900 flex items-center gap-2">
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                        Schemas Created Successfully!
-                      </h2>
-                      <p className="text-xs text-green-700 mt-0.5">
-                        {Object.keys(platformSchemas).length} platform schema{Object.keys(platformSchemas).length !== 1 ? 's' : ''} ready for publishing
-                      </p>
-                    </div>
-                    <div className="p-4">
-                      {/* Platform badges */}
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        {Object.keys(platformSchemas).map((platformId) => {
-                          const platform = PUBLISHING_PLATFORMS.find(p => p.id === platformId);
-                          return (
-                            <div
-                              key={platformId}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg text-sm"
-                            >
-                              {platform && (
-                                <div className="relative w-4 h-4">
-                                  <Image src={platform.icon} alt={platform.name} fill className="object-contain" />
-                                </div>
-                              )}
-                              <span className="text-green-700">{platform?.name || platformId}</span>
-                              <Check className="w-3.5 h-3.5 text-green-600" />
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <p className="text-sm text-gray-600 mb-4">
-                        Your content and schemas are ready. Go to the Publication page to:
-                      </p>
-                      
-                      <ul className="space-y-2 text-sm text-gray-600 mb-6">
-                        <li className="flex items-center gap-2">
-                          <Check className="w-4 h-4 text-green-500" />
-                          <span>Publish immediately to selected platforms</span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <Check className="w-4 h-4 text-green-500" />
-                          <span>Schedule for later publication</span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <Check className="w-4 h-4 text-green-500" />
-                          <span>View and review full schemas</span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <Check className="w-4 h-4 text-green-500" />
-                          <span>Edit or cancel before publishing</span>
-                        </li>
-                      </ul>
-
-                      <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                        <button
-                          onClick={handleResetPublishing}
-                          className="text-sm text-gray-500 hover:text-gray-700"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={() => {
-                            // Store data for publication page
-                            const publicationData = {
-                              responses: [{
-                                id: `synth-${Date.now()}`,
-                                prompt: editedPrompt,
-                                response: synthesizedResponse,
-                                platform: 'synthesized',
-                                response_metadata: {
-                                  brand_mentioned: true,
-                                  synthesized: true,
-                                  source_count: editData?.responses.length || 0
-                                },
-                                status: 'review',
-                                selectedPlatforms: Object.keys(platformSchemas),
-                                publishedUrls: [],
-                                platformSchemas: platformSchemas,
-                                // Include selected image data with Supabase Storage URL
-                                image: selectedImage ? {
-                                  id: selectedImage.id,
-                                  url: uploadedImageUrl || selectedImage.largeImageURL, // Prefer Supabase URL
-                                  storageUrl: uploadedImageUrl, // Supabase Storage URL
-                                  originalUrl: selectedImage.largeImageURL, // Original Pixabay URL
-                                  previewUrl: selectedImage.webformatURL,
-                                  photographer: selectedImage.user,
-                                  sourceUrl: selectedImage.pageURL,
-                                  tags: selectedImage.tags,
-                                } : null,
-                              }],
-                              projectName: editData?.brandName || 'AI Visibility Response',
-                              projectId: editData?.projectId || '',
-                            };
-                            sessionStorage.setItem('aiVisibilityResponses', JSON.stringify(publicationData));
-                            router.push('/dashboard/content?source=ai-visibility');
-                          }}
-                          className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all shadow-lg"
-                        >
-                          <Send className="w-5 h-5" />
-                          Go to Publication Page
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
+                  <h3 className="text-lg font-bold text-white mb-2">Ready to Publish?</h3>
+                  <p className="text-emerald-100 text-sm mb-4">
+                    Approve this response to continue to publication page where you can select images and platforms
+                  </p>
+                  <button
+                    onClick={handleStartApproval}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-white text-emerald-700 font-semibold rounded-lg hover:bg-emerald-50 transition-all shadow-lg"
+                  >
+                    <CheckCircle className="w-5 h-5" />
+                    Approve
+                  </button>
+                </div>
+              </div>
             )}
 
 
