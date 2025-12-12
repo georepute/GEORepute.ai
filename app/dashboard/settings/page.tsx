@@ -2532,10 +2532,8 @@ function FacebookIntegrationSettings() {
     email: "",
     accessToken: "",
   });
-  const [showToken, setShowToken] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [pageName, setPageName] = useState("");
-  const [showManualEntry, setShowManualEntry] = useState(false);
 
   useEffect(() => {
     loadFacebookConfig();
@@ -2606,45 +2604,6 @@ function FacebookIntegrationSettings() {
     window.location.href = facebookAuthUrl;
   };
 
-  const handleSave = async () => {
-    if (!config.email || !config.accessToken) {
-      toast.error("Please enter both email and access token");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await fetch("/api/integrations/facebook", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: config.email.trim(),
-          accessToken: config.accessToken.trim(),
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (response.ok && data.success) {
-        toast.success("Facebook configuration saved!");
-        setIsConnected(true);
-        setPageName(data.config?.pageName || "");
-        setConfig({ email: "", accessToken: "" });
-        await loadFacebookConfig();
-      } else {
-        toast.error(data.error || "Failed to save configuration");
-        if (data.suggestions) {
-          console.log("Suggestions:", data.suggestions);
-        }
-      }
-    } catch (error: any) {
-      console.error("Save error:", error);
-      toast.error("Failed to save configuration: " + (error.message || "Unknown error"));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleDisconnect = async () => {
     if (!confirm("Are you sure you want to disconnect Facebook integration?")) {
       return;
@@ -2701,133 +2660,34 @@ function FacebookIntegrationSettings() {
             </p>
           </div>
 
-          {/* OAuth Connect Button (Primary Method) */}
-          {!showManualEntry ? (
-            <>
-              <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
-                <Image src="/facebook-color.svg" alt="Facebook" width={64} height={64} className="w-16 h-16 mb-4" />
-                <h4 className="text-lg font-semibold text-gray-900 mb-2">
-                  Connect with Facebook
-                </h4>
-                <p className="text-sm text-gray-600 mb-6 text-center max-w-md">
-                  Click the button below to securely connect your Facebook account. 
-                  We'll automatically detect your pages and set up publishing.
-                </p>
-                <button
-                  onClick={handleConnectFacebook}
-                  disabled={loading}
-                  className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-semibold"
-                >
-                  {loading ? (
-                    <>
-                      <Loader className="w-5 h-5 animate-spin" />
-                      Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <Image src="/facebook-color.svg" alt="Facebook" width={20} height={20} className="w-5 h-5" />
-                      Connect Facebook
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => setShowManualEntry(true)}
-                  className="mt-4 text-sm text-gray-600 hover:text-gray-900 underline"
-                >
-                  Or enter token manually
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Manual Token Entry (Fallback) */}
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-sm font-semibold text-gray-900">Manual Token Entry</h4>
-                <button
-                  onClick={() => setShowManualEntry(false)}
-                  className="text-sm text-primary-600 hover:text-primary-700"
-                >
-                  Use OAuth instead
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email *
-                </label>
-                <input
-                  type="email"
-                  value={config.email}
-                  onChange={(e) => setConfig({ ...config, email: e.target.value })}
-                  placeholder="your@email.com"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Your Facebook account email (used for identification)
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Access Token *
-                </label>
-                <div className="relative">
-                  <input
-                    type={showToken ? "text" : "password"}
-                    value={config.accessToken}
-                    onChange={(e) => setConfig({ ...config, accessToken: e.target.value })}
-                    placeholder="EAAxxxxxxxxxxxxx"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none pr-12 font-mono text-sm"
-                  />
-                  <button
-                    onClick={() => setShowToken(!showToken)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showToken ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Your Facebook Access Token (User Access Token or Page Access Token)
-                </p>
-              </div>
-
-              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                <h4 className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4" />
-                  How to get Access Token:
-                </h4>
-                <ol className="text-xs text-gray-700 space-y-2 list-decimal list-inside">
-                  <li>Go to <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">Facebook Graph API Explorer</a></li>
-                  <li>Select your Facebook App (or create one if needed)</li>
-                  <li>Click "Generate Access Token"</li>
-                  <li>If you have a Page: Select your Page and grant permissions: <code className="bg-blue-100 px-1 rounded">pages_manage_posts</code>, <code className="bg-blue-100 px-1 rounded">pages_read_engagement</code></li>
-                  <li>If you don't have a Page: Use User Access Token with <code className="bg-blue-100 px-1 rounded">pages_show_list</code> permission - we'll get your pages automatically</li>
-                  <li>Copy the generated token (starts with "EAA...")</li>
-                  <li><strong>Note:</strong> Short-lived tokens expire in ~1 hour. For long-lived tokens (60 days), use the token exchange endpoint.</li>
-                </ol>
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={handleSave}
-                  disabled={loading || !config.email || !config.accessToken}
-                  className="px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {loading ? (
-                    <>
-                      <Loader className="w-4 h-4 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4" />
-                      Save Configuration
-                    </>
-                  )}
-                </button>
-              </div>
-            </>
-          )}
+          {/* OAuth Connect Button */}
+          <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+            <Image src="/facebook-color.svg" alt="Facebook" width={64} height={64} className="w-16 h-16 mb-4" />
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">
+              Connect with Facebook
+            </h4>
+            <p className="text-sm text-gray-600 mb-6 text-center max-w-md">
+              Click the button below to securely connect your Facebook account. 
+              We'll automatically detect your pages and set up publishing.
+            </p>
+            <button
+              onClick={handleConnectFacebook}
+              disabled={loading}
+              className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-semibold"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-5 h-5 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Image src="/facebook-color.svg" alt="Facebook" width={20} height={20} className="w-5 h-5" />
+                  Connect Facebook
+                </>
+              )}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="pt-4">

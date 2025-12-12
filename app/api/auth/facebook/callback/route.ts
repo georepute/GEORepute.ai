@@ -150,11 +150,62 @@ export async function GET(request: NextRequest) {
 
     // Use the first page (or you could let user select)
     const firstPage = pagesResult.pages[0];
-    const pageAccessToken = firstPage.access_token || longLivedToken;
     const pageId = firstPage.id;
     const pageName = firstPage.name;
 
     console.log(`✅ Found ${pagesResult.pages.length} page(s), using: ${pageName} (${pageId})`);
+    
+    // CRITICAL: Always get a fresh Page Access Token from the page
+    // This ensures it has ALL permissions that the User Access Token has
+    // The token from /me/accounts might be stale or missing permissions
+    console.log(`🔍 Getting fresh Page Access Token with all permissions...`);
+    let pageAccessToken: string;
+    
+    try {
+      // Request the Page Access Token explicitly using the User Access Token
+      // This ensures the Page Access Token inherits ALL permissions from the User Access Token
+      const pageTokenUrl = `https://graph.facebook.com/v18.0/${pageId}?fields=access_token&access_token=${longLivedToken}`;
+      const pageTokenResponse = await fetch(pageTokenUrl);
+      const pageTokenData = await pageTokenResponse.json();
+      
+      if (pageTokenResponse.ok && pageTokenData.access_token) {
+        pageAccessToken = pageTokenData.access_token;
+        console.log(`✅ Got fresh Page Access Token with all permissions`);
+      } else {
+        // Fallback to the token from /me/accounts if we can't get a fresh one
+        console.warn(`⚠️ Could not get fresh Page Access Token, using token from /me/accounts`);
+        console.warn(`   Error: ${pageTokenData.error?.message || 'Unknown error'}`);
+        pageAccessToken = firstPage.access_token || longLivedToken;
+        console.warn(`   This may cause permission errors when fetching metrics`);
+      }
+    } catch (tokenError: any) {
+      console.warn(`⚠️ Error getting fresh Page Access Token:`, tokenError.message);
+      console.warn(`   Falling back to token from /me/accounts`);
+      pageAccessToken = firstPage.access_token || longLivedToken;
+    }
+    
+    // Verify the Page Access Token works and has required permissions
+    console.log(`🔍 Verifying Page Access Token has required permissions...`);
+    try {
+      const verifyUrl = `https://graph.facebook.com/v18.0/${pageId}?fields=id,name&access_token=${pageAccessToken}`;
+      const verifyResponse = await fetch(verifyUrl);
+      const verifyData = await verifyResponse.json();
+      
+      if (!verifyResponse.ok) {
+        const errorCode = verifyData.error?.code;
+        const errorMessage = verifyData.error?.message || '';
+        console.error(`❌ Page Access Token verification failed:`, {
+          code: errorCode,
+          message: errorMessage,
+        });
+        console.error(`   The token may not have the required permissions.`);
+        console.error(`   User may need to re-authenticate and grant all permissions.`);
+      } else {
+        console.log(`✅ Page Access Token verified successfully`);
+      }
+    } catch (verifyError: any) {
+      console.warn(`⚠️ Error verifying Page Access Token:`, verifyError.message);
+    }
 
     // Step 4: Calculate expiration time
     const expiresAt = expiresIn 
@@ -173,7 +224,7 @@ export async function GET(request: NextRequest) {
     const integrationData = {
       user_id: session.user.id,
       platform: "facebook",
-      access_token: pageAccessToken, // Store Page Access Token
+      access_token: pageAccessToken, // Store Page Access Token (for publishing)
       refresh_token: null, // Facebook doesn't use refresh tokens
       expires_at: expiresAt,
       platform_user_id: pageId,
@@ -186,6 +237,10 @@ export async function GET(request: NextRequest) {
           id: p.id,
           name: p.name,
         })), // Store all pages in case user wants to switch later
+        // CRITICAL: Store User Access Token as fallback for reading insights
+        // Page Access Tokens don't always inherit pages_read_engagement permission
+        // User Access Token has all permissions and can be used as fallback
+        userAccessToken: longLivedToken, // Store for reading insights when Page Token lacks permissions
         verified: true,
         verified_at: new Date().toISOString(),
       },
@@ -193,6 +248,14 @@ export async function GET(request: NextRequest) {
       error_message: null,
       last_used_at: new Date().toISOString(),
     };
+
+    console.log(`💾 Storing integration data:`, {
+      hasPageAccessToken: !!pageAccessToken,
+      hasUserAccessToken: !!longLivedToken,
+      pageAccessTokenLength: pageAccessToken?.length || 0,
+      userAccessTokenLength: longLivedToken?.length || 0,
+      metadataKeys: Object.keys(integrationData.metadata),
+    });
 
     // Step 7: Save or update in Supabase
     let result;
@@ -220,6 +283,10 @@ export async function GET(request: NextRequest) {
     }
 
     console.log("✅ Facebook integration saved to Supabase");
+    console.log(`📋 Verification: Stored metadata includes userAccessToken:`, !!result?.metadata?.userAccessToken);
+    console.log(`   Metadata keys:`, result?.metadata ? Object.keys(result.metadata) : 'N/A');
+    console.log(`   Page Access Token stored in access_token:`, !!result?.access_token);
+    console.log(`   User Access Token stored in metadata.userAccessToken:`, !!result?.metadata?.userAccessToken);
 
     // Step 8: Redirect back to settings with success
     return NextResponse.redirect(

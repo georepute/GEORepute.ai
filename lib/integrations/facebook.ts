@@ -194,12 +194,32 @@ export async function publishToFacebook(
     console.log(`   Type: ${content.metadata?.imageUrl ? 'Photo Post' : 'Text Post'}`);
     
     // Construct Facebook post URL
-    // For photo posts, the ID format is: {page-id}_{photo-id}
-    // For regular posts: {page-id}_{post-id}
+    // For photo posts: Facebook returns just the photo ID (fbid) - numeric only, no underscore
+    // URL format: https://www.facebook.com/photo/?fbid={photo-id}
+    // For regular posts: ID format is {page-id}_{post-id}
     // URL format: https://www.facebook.com/{page-id}/posts/{post-id}
-    const url = postId 
-      ? `https://www.facebook.com/${postId.replace('_', '/posts/')}`
-      : undefined;
+    let url: string | undefined;
+    if (postId) {
+      // Check if postId is a photo ID (numeric only, no underscore)
+      // Photo posts return just the photo ID (e.g., "122109933585122775")
+      // Regular posts return page-id_post-id format (e.g., "8966166763530326_1234567890")
+      const isPhotoId = /^\d+$/.test(postId) && !postId.includes('_');
+      
+      if (isPhotoId) {
+        // Photo post - always use fbid format for numeric-only IDs
+        url = `https://www.facebook.com/photo/?fbid=${postId}`;
+        console.log(`   Detected photo post ID (numeric only), using fbid format`);
+      } else if (postId.includes('_')) {
+        // Regular post with page-id_post-id format
+        url = `https://www.facebook.com/${postId.replace('_', '/posts/')}`;
+        console.log(`   Detected regular post ID (with underscore), using /posts/ format`);
+      } else {
+        // Fallback: if it's not numeric and has no underscore, might be a different format
+        // Default to fbid format as it's more common
+        url = `https://www.facebook.com/photo/?fbid=${postId}`;
+        console.log(`   Unknown post ID format, defaulting to fbid format`);
+      }
+    }
 
     console.log(`   URL: ${url}`);
 
