@@ -241,10 +241,11 @@ export async function publishToInstagram(
     }
 
     // Get Instagram Business Account ID if not provided
-    let instagramAccountId = config.instagramBusinessAccountId;
+    let instagramAccountId: string | undefined = config.instagramBusinessAccountId;
     if (!instagramAccountId) {
       console.log('🔍 Getting Instagram Business Account ID...');
-      instagramAccountId = await getInstagramBusinessAccount(config.pageId, config.accessToken);
+      const accountId = await getInstagramBusinessAccount(config.pageId, config.accessToken);
+      instagramAccountId = accountId || undefined;
       console.log('✅ Got Instagram Account ID:', instagramAccountId);
     }
 
@@ -340,9 +341,10 @@ export async function verifyInstagramConfig(
 ): Promise<{ success: boolean; error?: string; accountInfo?: any }> {
   try {
     // Get Instagram Business Account ID if not provided
-    let instagramAccountId = config.instagramBusinessAccountId;
+    let instagramAccountId: string | undefined = config.instagramBusinessAccountId;
     if (!instagramAccountId) {
-      instagramAccountId = await getInstagramBusinessAccount(config.pageId, config.accessToken);
+      const accountId = await getInstagramBusinessAccount(config.pageId, config.accessToken);
+      instagramAccountId = accountId || undefined;
     }
 
     if (!instagramAccountId) {

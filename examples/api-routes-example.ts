@@ -84,7 +84,7 @@ async function updateVerificationStatus(userId: string, domain: string, verified
  * 
  * Initiates the domain verification process by requesting a token
  */
-export async function startDomainVerification(
+async function startDomainVerification(
   req: NextApiRequest,
   res: NextApiResponse<StartVerificationResponse>
 ) {
@@ -157,7 +157,7 @@ export async function startDomainVerification(
  * 
  * Checks if the DNS record is in place and verifies the domain
  */
-export async function checkDomainVerification(
+async function checkDomainVerification(
   req: NextApiRequest,
   res: NextApiResponse<CheckVerificationResponse>
 ) {
@@ -229,7 +229,7 @@ export async function checkDomainVerification(
  * 
  * Gets the current verification status from database
  */
-export async function getVerificationStatus(
+async function getVerificationStatus(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
@@ -271,7 +271,7 @@ export async function getVerificationStatus(
  * 
  * Retries verification with exponential backoff
  */
-export async function retryVerification(
+async function retryVerification(
   req: NextApiRequest,
   res: NextApiResponse
 ) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { 
@@ -64,7 +64,7 @@ interface ContentItem {
 }
 
 
-export default function Content() {
+function ContentInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const supabase = createClientComponentClient();
@@ -1434,7 +1434,7 @@ export default function Content() {
                                 )}
 
                                 {/* PDCA: Track Performance button for published content in grouped view */}
-                                {(item.published_records?.length > 0 || item.status === "published" || item.raw?.status === "published") && (
+                                {((item.published_records?.length ?? 0) > 0 || item.status === "published" || item.raw?.status === "published") && (
                                   <button
                                     onClick={async () => {
                                       setPerformanceContentId(item.id);
@@ -1449,7 +1449,7 @@ export default function Content() {
                                 )}
 
                                 {/* PDCA: Optimize & Republish button for published content in grouped view */}
-                                {(item.published_records?.length > 0 || item.status === "published" || item.raw?.status === "published") && (
+                                {((item.published_records?.length ?? 0) > 0 || item.status === "published" || item.raw?.status === "published") && (
                                   <button
                                     onClick={() => {
                                       setOptimizeContentId(item.id);
@@ -1715,7 +1715,7 @@ export default function Content() {
                           )}
 
                           {/* PDCA: Track Performance button for published content - Show if has published_records OR status is published */}
-                          {(item.published_records?.length > 0 || item.status === "published" || item.raw?.status === "published") && (
+                          {((item.published_records?.length ?? 0) > 0 || item.status === "published" || item.raw?.status === "published") && (
                             <button
                               onClick={async () => {
                                 setPerformanceContentId(item.id);
@@ -1731,7 +1731,7 @@ export default function Content() {
                           )}
 
                           {/* PDCA: Optimize & Republish button for published content - Show if has published_records OR status is published */}
-                          {(item.published_records?.length > 0 || item.status === "published" || item.raw?.status === "published") && (
+                          {((item.published_records?.length ?? 0) > 0 || item.status === "published" || item.raw?.status === "published") && (
                             <button
                               onClick={() => {
                                 setOptimizeContentId(item.id);
@@ -3329,6 +3329,18 @@ export default function Content() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Content() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    }>
+      <ContentInner />
+    </Suspense>
   );
 }
 

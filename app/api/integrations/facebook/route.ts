@@ -208,7 +208,7 @@ export async function POST(request: NextRequest) {
     };
 
     // Skip verification if requested (for testing/debugging)
-    let verification = { success: true };
+    let verification: { success: boolean; error?: string } = { success: true };
     if (!skipVerification) {
       console.log("🔍 Starting Facebook verification...");
       const startTime = Date.now();

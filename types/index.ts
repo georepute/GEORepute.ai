@@ -9,6 +9,37 @@ export interface User {
   updatedAt: Date;
 }
 
+// Organization Types
+export interface Organization {
+  id: string;
+  name: string;
+  description?: string;
+  website?: string;
+  logo_url?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description?: string;
+  permissions?: any;
+  created_at?: string;
+}
+
+export interface OrganizationUser {
+  id: string;
+  user_id: string;
+  organization_id: string;
+  role_id: string;
+  invited_by?: string;
+  invited_at?: string;
+  joined_at?: string;
+  organization?: Organization;
+  role?: Role;
+}
+
 // Keyword Types
 export interface Keyword {
   id: string;

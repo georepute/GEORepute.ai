@@ -1310,8 +1310,9 @@ export async function POST(request: NextRequest) {
         }
         let publishUrl = actionData.publishedUrl || null;
         const platformPostId = actionData.platformPostId || null;
-        let gitHubResult = null;
-        let redditResult = null;
+        let gitHubResult: any = null;
+        let redditResult: any = null;
+        let linkedInResult: any = null;
         let githubIntegration: any = null;
         let redditIntegration: any = null;
 
