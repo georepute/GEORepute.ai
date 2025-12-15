@@ -53,8 +53,8 @@ export async function GET(request: NextRequest) {
     // Get Facebook App credentials from environment
     const appId = process.env.FACEBOOK_APP_ID?.trim();
     const appSecret = process.env.FACEBOOK_APP_SECRET?.trim();
-    const redirectUri = process.env.FACEBOOK_REDIRECT_URI?.trim() || 
-      `${request.nextUrl.origin}/api/auth/facebook/callback`;
+    // Always use dynamic origin to match frontend (works for both localhost and production)
+    const redirectUri = `${request.nextUrl.origin}/api/auth/facebook/callback`;
 
     if (!appId || !appSecret) {
       console.error("Facebook App credentials not configured", {

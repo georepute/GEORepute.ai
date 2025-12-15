@@ -464,16 +464,17 @@ export default function Content() {
         throw new Error('Content not found');
       }
 
-      // Get published records to find Instagram/Facebook posts
+      // Get published records to find Instagram/Facebook/LinkedIn posts
       const publishedRecords = contentItem.published_records || [];
       const instagramPost = publishedRecords.find((r: any) => r.platform === 'instagram');
       const facebookPost = publishedRecords.find((r: any) => r.platform === 'facebook');
+      const linkedinPost = publishedRecords.find((r: any) => r.platform === 'linkedin');
       
       // Determine which platform to show metrics for
-      const platform = instagramPost ? 'instagram' : (facebookPost ? 'facebook' : null);
+      const platform = instagramPost ? 'instagram' : (facebookPost ? 'facebook' : (linkedinPost ? 'linkedin' : null));
       setPerformancePlatform(platform);
 
-      // If it's Instagram or Facebook, load existing metrics from database (if any)
+      // If it's Instagram, Facebook, or LinkedIn, load existing metrics from database (if any)
       if (platform) {
         // Load existing metrics from database (don't auto-fetch from API)
         if (contentItem.raw?.metadata?.performance) {
@@ -511,7 +512,7 @@ export default function Content() {
           });
         }
       } else {
-        // For non-Instagram/Facebook platforms, show message
+        // For non-Instagram/Facebook/LinkedIn platforms, show message
         setCurrentMetrics(null);
       }
     } catch (error: any) {
@@ -1788,13 +1789,13 @@ export default function Content() {
                   Track Content Performance
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {performancePlatform === 'instagram' || performancePlatform === 'facebook' 
-                    ? 'Live metrics from ' + (performancePlatform === 'instagram' ? 'Instagram' : 'Facebook')
+                  {performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin'
+                    ? 'Live metrics from ' + (performancePlatform === 'instagram' ? 'Instagram' : performancePlatform === 'facebook' ? 'Facebook' : 'LinkedIn')
                     : 'Measure your content performance to enable optimization'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {(performancePlatform === 'instagram' || performancePlatform === 'facebook') && (
+                {(performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin') && (
                   <div className="flex flex-col items-end gap-1">
                     <button
                       onClick={handleRefreshMetrics}
@@ -1836,8 +1837,8 @@ export default function Content() {
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                   <span className="ml-3 text-gray-600">Loading metrics...</span>
                 </div>
-              ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook') && currentMetrics ? (
-                // Show live metrics for Instagram/Facebook with charts
+              ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin') && currentMetrics ? (
+                // Show live metrics for Instagram/Facebook/LinkedIn with charts
                 <div className="space-y-6">
                   {/* Engagement Metrics Bar Chart */}
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
@@ -1953,14 +1954,14 @@ export default function Content() {
                   )}
                 </div>
               ) : (
-                // No metrics available or not Instagram/Facebook
+                // No metrics available or not Instagram/Facebook/LinkedIn
                 <div className="flex flex-col items-center justify-center py-12">
                   <TrendingUp className="w-16 h-16 text-gray-300 mb-4" />
                   <h4 className="text-lg font-semibold text-gray-900 mb-2">No Performance Data Available</h4>
                   <p className="text-sm text-gray-600 text-center max-w-md">
                     {performancePlatform 
-                      ? 'Performance tracking is only available for Instagram and Facebook posts. Please ensure your content is published to one of these platforms.'
-                      : 'This content is not published to Instagram or Facebook. Performance tracking is currently only available for these platforms.'}
+                      ? 'Performance tracking is only available for Instagram, Facebook, and LinkedIn posts. Please ensure your content is published to one of these platforms.'
+                      : 'This content is not published to Instagram, Facebook, or LinkedIn. Performance tracking is currently only available for these platforms.'}
                   </p>
                 </div>
               )}

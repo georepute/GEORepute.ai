@@ -2161,6 +2161,8 @@ function LinkedInIntegrationSettings() {
     // Get LinkedIn Client ID from environment
     const clientId = process.env.NEXT_PUBLIC_LINKEDIN_CLIENT_ID;
     const redirectUri = `${window.location.origin}/api/auth/linkedin/callback`;
+    // Note: w_member_social grants access to Social Actions API endpoints
+    // r_social_actions is not a valid OAuth scope - Social Actions API is accessible via w_member_social
     const scope = "openid profile w_member_social";
     const state = Date.now().toString(); // Simple state for CSRF protection
     

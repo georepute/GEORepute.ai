@@ -1073,6 +1073,7 @@ export async function POST(request: NextRequest) {
                               platform === "quora" ? quoraResult?.answerId :
                               platform === "facebook" ? facebookResult?.postId :
                               platform === "instagram" ? instagramResult?.postId :
+                              platform === "linkedin" ? linkedInResult?.postId :
                               platformPostId) || null,
             error_message: ((gitHubResult && !gitHubResult.success && gitHubResult.error) || 
                            (redditResult && !redditResult.success && redditResult.error) ||
@@ -1497,7 +1498,10 @@ export async function POST(request: NextRequest) {
             published_url: publishUrl,
             published_at: new Date().toISOString(),
             status: publishUrl ? "published" : "pending",
-            platform_post_id: (publishPlatform === "github" ? gitHubResult?.discussionNumber?.toString() : redditResult?.postId) || platformPostId || null,
+            platform_post_id: (publishPlatform === "github" ? gitHubResult?.discussionNumber?.toString() : 
+                              publishPlatform === "reddit" ? redditResult?.postId :
+                              publishPlatform === "linkedin" ? linkedInResult?.postId :
+                              platformPostId) || null,
             error_message: (gitHubResult?.error || redditResult?.error) || actionData.errorMessage || null,
             metadata: {
               ...contentStrategy.metadata, // Include all metadata including structuredSEO

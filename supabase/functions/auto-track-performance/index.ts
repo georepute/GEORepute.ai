@@ -25,6 +25,175 @@ interface FacebookMetrics {
   engagement?: number;
 }
 
+interface LinkedInMetrics {
+  likes: number;
+  comments: number;
+  shares: number;
+  engagement?: number;
+}
+
+/**
+ * Fetch LinkedIn post metrics using Social Actions API
+ */
+async function fetchLinkedInMetrics(
+  ugcPostId: string,
+  accessToken: string
+): Promise<LinkedInMetrics> {
+  try {
+    console.log(`📊 Fetching LinkedIn metrics for Post ID: ${ugcPostId}`);
+
+    // Handle different LinkedIn post ID formats:
+    // - urn:li:ugcPost:xxxxx (UGC Posts created via API)
+    // - urn:li:share:xxxxx (Regular shares/posts)
+    // - Plain numeric ID (format as UGC Post)
+    let postId = ugcPostId.trim();
+    
+    if (postId.startsWith('urn:li:ugcPost:') || postId.startsWith('urn:li:share:')) {
+      // Already in correct URN format - use as-is
+      console.log(`✅ Post ID is already in URN format: ${postId}`);
+    } else if (postId && !postId.includes(':')) {
+      // Plain numeric ID - format as UGC Post (default assumption)
+      postId = `urn:li:ugcPost:${postId}`;
+      console.log(`📋 Formatted plain ID to UGC Post URN: ${postId}`);
+    } else {
+      // Unknown format - try to use as-is, but log a warning
+      console.warn(`⚠️ Unknown LinkedIn post ID format: ${ugcPostId}. Attempting to use as-is.`);
+      // Don't throw error - let the API call determine if it's valid
+    }
+
+    // Fetch social actions (likes, comments, shares) using Social Actions API
+    // Note: Social Actions API typically works with urn:li:ugcPost:xxxxx
+    // Share posts (urn:li:share:xxxxx) may not be accessible via Social Actions API
+    const isSharePost = postId.startsWith('urn:li:share:');
+    const isUgcPost = postId.startsWith('urn:li:ugcPost:');
+    
+    console.log(`📊 Post ID type: ${isUgcPost ? 'UGC Post' : isSharePost ? 'Share' : 'Unknown'}`);
+    
+    if (isSharePost) {
+      console.warn(`⚠️ Share posts (urn:li:share:xxxxx) may not be accessible via Social Actions API.`);
+      console.warn(`   LinkedIn's Social Actions API typically only works with UGC Posts (urn:li:ugcPost:xxxxx).`);
+      console.warn(`   Attempting to fetch anyway, but this may fail with permission errors.`);
+    }
+    
+    const socialActionsUrl = `https://api.linkedin.com/v2/socialActions/${encodeURIComponent(postId)}`;
+    console.log(`📊 Fetching LinkedIn social actions from: ${socialActionsUrl.replace(accessToken, 'TOKEN_HIDDEN')}`);
+    
+    const socialActionsResponse = await fetch(socialActionsUrl, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'X-Restli-Protocol-Version': '2.0.0',
+      },
+    });
+
+    if (!socialActionsResponse.ok) {
+      const errorData = await socialActionsResponse.json().catch(() => ({}));
+      const errorMessage = errorData.message || errorData.error?.message || 'Unknown error';
+      const errorCode = errorData.status || socialActionsResponse.status;
+      
+      console.error(`❌ LinkedIn Social Actions API error:`, {
+        status: socialActionsResponse.status,
+        code: errorCode,
+        message: errorMessage,
+        fullError: errorData,
+        postIdType: isUgcPost ? 'UGC Post' : isSharePost ? 'Share' : 'Unknown',
+      });
+
+      // If it's a Share post and we get a 403, it's likely because Share posts aren't accessible
+      if (isSharePost && socialActionsResponse.status === 403) {
+        console.error(`❌ LinkedIn Share posts cannot be tracked via Social Actions API.`);
+        console.error(`   Share posts (urn:li:share:xxxxx) are regular LinkedIn posts and are not accessible via API.`);
+        console.error(`   Only UGC Posts (urn:li:ugcPost:xxxxx) created via the UGC Posts API can be tracked.`);
+        console.error(`   Solution: Re-publish the content via the app to get a UGC Post ID that can be tracked.`);
+        throw new Error(`LinkedIn Share posts (urn:li:share:xxxxx) cannot be tracked via API. Only UGC Posts (urn:li:ugcPost:xxxxx) created via the API can be tracked. Please re-publish this content to get a trackable UGC Post ID.`);
+      }
+
+      // Check if it's a permission issue
+      if (socialActionsResponse.status === 403 || errorMessage.includes('permission')) {
+        throw new Error(`LinkedIn API permission denied. Please ensure your app has the "w_member_social" permission and Social Actions API is enabled in your LinkedIn app settings.`);
+      }
+
+      if (socialActionsResponse.status === 401) {
+        throw new Error(`LinkedIn Access Token has expired or is invalid. Please reconnect your LinkedIn integration.`);
+      }
+
+      throw new Error(`LinkedIn API error: ${errorCode} - ${errorMessage}`);
+    }
+
+    const socialActionsData = await socialActionsResponse.json();
+    console.log(`📊 Raw LinkedIn social actions response:`, JSON.stringify(socialActionsData, null, 2));
+
+    // Extract metrics from social actions response
+    // LinkedIn Social Actions API returns:
+    // - likesSummary.totalLikes (or similar structure)
+    // - commentsSummary.totalFirstLevelComments (or similar structure)
+    // - sharesSummary.totalShares (or similar structure)
+    
+    let likes = 0;
+    let comments = 0;
+    let shares = 0;
+
+    // Handle different possible response structures
+    if (socialActionsData.likesSummary) {
+      likes = socialActionsData.likesSummary.totalLikes || 
+              socialActionsData.likesSummary.total || 
+              socialActionsData.likesSummary.count || 
+              0;
+    } else if (socialActionsData.likes) {
+      likes = typeof socialActionsData.likes === 'number' 
+        ? socialActionsData.likes 
+        : (socialActionsData.likes.total || socialActionsData.likes.count || 0);
+    } else if (socialActionsData.totalLikes !== undefined) {
+      likes = socialActionsData.totalLikes;
+    }
+
+    if (socialActionsData.commentsSummary) {
+      comments = socialActionsData.commentsSummary.totalFirstLevelComments || 
+                 socialActionsData.commentsSummary.total || 
+                 socialActionsData.commentsSummary.count || 
+                 0;
+    } else if (socialActionsData.comments) {
+      comments = typeof socialActionsData.comments === 'number' 
+        ? socialActionsData.comments 
+        : (socialActionsData.comments.total || socialActionsData.comments.count || 0);
+    } else if (socialActionsData.totalComments !== undefined) {
+      comments = socialActionsData.totalComments;
+    }
+
+    if (socialActionsData.sharesSummary) {
+      shares = socialActionsData.sharesSummary.totalShares || 
+               socialActionsData.sharesSummary.total || 
+               socialActionsData.sharesSummary.count || 
+               0;
+    } else if (socialActionsData.shares) {
+      shares = typeof socialActionsData.shares === 'number' 
+        ? socialActionsData.shares 
+        : (socialActionsData.shares.total || socialActionsData.shares.count || 0);
+    } else if (socialActionsData.totalShares !== undefined) {
+      shares = socialActionsData.totalShares;
+    }
+
+    console.log(`✅ LinkedIn metrics extracted: ${likes} likes, ${comments} comments, ${shares} shares`);
+
+    // Calculate engagement (likes + comments + shares)
+    const totalEngagement = likes + comments + shares;
+    const engagement = totalEngagement > 0 ? Number((totalEngagement).toFixed(2)) : 0;
+
+    const metrics: LinkedInMetrics = {
+      likes,
+      comments,
+      shares,
+      engagement,
+    };
+
+    console.log(`📊 Final LinkedIn metrics:`, metrics);
+    
+    return metrics;
+  } catch (error: any) {
+    console.error('❌ Error fetching LinkedIn metrics:', error);
+    throw new Error(`Failed to fetch LinkedIn metrics: ${error.message}`);
+  }
+}
+
 /**
  * Fetch Instagram post metrics using Graph API
  */
@@ -679,15 +848,15 @@ serve(async (req) => {
         platform_post_id,
         published_at,
         user_id,
-        metadata
+        metadata,
+        status
       `)
-      .in("platform", ["instagram", "facebook"])
-      .eq("status", "published")
-      .not("platform_post_id", "is", null);
+      .in("platform", ["instagram", "facebook", "linkedin"]);
 
     // If contentStrategyId is provided, filter to that specific content
     if (contentStrategyId) {
       query = query.eq("content_strategy_id", contentStrategyId);
+      console.log(`🔍 Querying for content strategy ID: ${contentStrategyId}`);
     }
 
     const { data: publishedContent, error: fetchError } = await query;
@@ -697,7 +866,44 @@ serve(async (req) => {
       throw fetchError;
     }
 
-    if (!publishedContent || publishedContent.length === 0) {
+    console.log(`📊 Found ${publishedContent?.length || 0} published content records (before filtering)`);
+    
+    // Filter for published status and non-null platform_post_id
+    const filteredContent = (publishedContent || []).filter((post: any) => {
+      const hasStatus = post.status === "published";
+      const hasPostId = post.platform_post_id !== null && post.platform_post_id !== undefined && post.platform_post_id !== "";
+      
+      // Also check metadata for post ID (for posts published before fix)
+      let hasPostIdInMetadata = false;
+      if (!hasPostId && post.metadata) {
+        if (post.platform === "linkedin" && post.metadata.linkedin?.postId) {
+          hasPostIdInMetadata = true;
+        } else if (post.platform === "instagram" && post.metadata.instagram?.postId) {
+          hasPostIdInMetadata = true;
+        } else if (post.platform === "facebook" && post.metadata.facebook?.postId) {
+          hasPostIdInMetadata = true;
+        }
+      }
+      
+      if (!hasStatus) {
+        console.log(`⚠️ Skipping ${post.platform} post ${post.id}: status is "${post.status}" (expected "published")`);
+      }
+      if (!hasPostId && !hasPostIdInMetadata) {
+        console.log(`⚠️ Skipping ${post.platform} post ${post.id}: platform_post_id is null/empty`);
+        if (post.metadata) {
+          console.log(`   Metadata keys: ${Object.keys(post.metadata).join(', ')}`);
+          if (post.platform === "linkedin") {
+            console.log(`   LinkedIn metadata:`, JSON.stringify(post.metadata.linkedin || {}, null, 2));
+          }
+        }
+      }
+      
+      return hasStatus && (hasPostId || hasPostIdInMetadata);
+    });
+
+    console.log(`📊 Filtered to ${filteredContent.length} posts with published status and valid platform_post_id`);
+
+    if (!filteredContent || filteredContent.length === 0) {
       console.log("ℹ️ No content to track");
       return new Response(
         JSON.stringify({ 
@@ -715,14 +921,14 @@ serve(async (req) => {
       );
     }
 
-    console.log(`📊 Found ${publishedContent.length} posts to track`);
+    console.log(`📊 Found ${filteredContent.length} posts to track`);
 
     let tracked = 0;
     let errors = 0;
     const errorDetails: any[] = [];
 
     // Process each post
-    for (const post of publishedContent) {
+    for (const post of filteredContent) {
       try {
         console.log(`\n📝 Processing ${post.platform} post:`);
         console.log(`   - Published Content ID: ${post.id}`);
@@ -740,6 +946,9 @@ serve(async (req) => {
           } else if (post.platform === "facebook" && post.metadata.facebook?.postId) {
             platformPostId = post.metadata.facebook.postId;
             console.log(`📋 Found Facebook post ID in metadata: ${platformPostId}`);
+          } else if (post.platform === "linkedin" && post.metadata.linkedin?.postId) {
+            platformPostId = post.metadata.linkedin.postId;
+            console.log(`📋 Found LinkedIn post ID in metadata: ${platformPostId}`);
           }
         }
 
@@ -1047,6 +1256,55 @@ serve(async (req) => {
               postId: post.id,
               platform: post.platform,
               error: `Facebook metrics error: ${facebookError.message}`,
+            });
+            
+            console.log(`⚠️ Error state marked - existing metrics will be preserved`);
+          }
+          metricsFetched = true; // Mark as fetched even if it failed (we have error state)
+        } else if (post.platform === "linkedin") {
+          console.log(`📱 Fetching LinkedIn metrics for post ID: ${platformPostId}`);
+          
+          try {
+            const linkedInMetrics = await fetchLinkedInMetrics(
+              platformPostId,
+              accessToken
+            );
+
+            console.log(`✅ LinkedIn metrics fetched:`, {
+              likes: linkedInMetrics.likes,
+              comments: linkedInMetrics.comments,
+              shares: linkedInMetrics.shares,
+              engagement: linkedInMetrics.engagement,
+            });
+
+            metrics = {
+              engagement: linkedInMetrics.engagement,
+              traffic: 0, // LinkedIn doesn't provide views/impressions via Social Actions API
+              likes: linkedInMetrics.likes,
+              comments: linkedInMetrics.comments,
+              shares: linkedInMetrics.shares,
+              lastUpdated: new Date().toISOString(),
+            };
+            
+            console.log(`💾 Saving LinkedIn metrics to database:`, metrics);
+          } catch (linkedInError: any) {
+            console.error(`❌ Error fetching LinkedIn metrics:`, linkedInError);
+            console.error(`   Error message: ${linkedInError.message}`);
+            console.error(`   ⚠️ Will preserve existing metrics and only update error state`);
+            
+            // Mark as error - actual metrics will be preserved from existing data
+            metrics = {
+              error: linkedInError.message || "Failed to fetch LinkedIn metrics",
+              lastUpdated: new Date().toISOString(),
+              // Don't set metrics to 0 here - we'll preserve existing values later
+              // This prevents overwriting good data with zeros
+            };
+            
+            // Add to error details but don't throw - we want to preserve existing data
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: `LinkedIn metrics error: ${linkedInError.message}`,
             });
             
             console.log(`⚠️ Error state marked - existing metrics will be preserved`);

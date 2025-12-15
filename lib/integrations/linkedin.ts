@@ -369,14 +369,20 @@ export async function publishToLinkedIn(
     
     console.log(`✅ Successfully published to LinkedIn!`);
     console.log(`   Post ID: ${postId}`);
+    console.log(`   Post ID Type: ${postId?.startsWith('urn:li:ugcPost:') ? 'UGC Post (trackable)' : postId?.startsWith('urn:li:share:') ? 'Share (may not be trackable)' : 'Unknown'}`);
+    console.log(`   Full API Response:`, JSON.stringify(result, null, 2));
     console.log(`   Type: ${postType}`);
     
     // Construct LinkedIn post URL
     // Format: https://www.linkedin.com/feed/update/{postId}
     // Note: LinkedIn doesn't always return a direct URL, so we'll construct it
-    const url = postId 
-      ? `https://www.linkedin.com/feed/update/${postId.replace('urn:li:ugcPost:', '')}`
-      : undefined;
+    // Handle both UGC Post IDs (urn:li:ugcPost:xxxxx) and Share IDs (urn:li:share:xxxxx)
+    let url: string | undefined;
+    if (postId) {
+      // Extract numeric ID from URN format
+      const numericId = postId.replace('urn:li:ugcPost:', '').replace('urn:li:share:', '');
+      url = `https://www.linkedin.com/feed/update/${numericId}`;
+    }
 
     console.log(`   URL: ${url}`);
 
