@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
       message: "Report sent successfully",
       reportId: savedReport?.id || null,
       publicUrl: savedReport?.id 
-        ? `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/public/report/${savedReport.id}`
+        ? `${process.env.NEXT_PUBLIC_APP_URL}/public/report/${savedReport.id}`
         : null,
     });
   } catch (error: any) {
