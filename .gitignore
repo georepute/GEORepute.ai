@@ -35,6 +35,8 @@ next-env.d.ts
 
 # Supabase
 .supabase/
+supabase/.temp/
+supabase/.temp
 
 # IDE
 .vscode/
@@ -46,3 +48,59 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+# Large files and media
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.flv
+*.wmv
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.dmg
+*.pkg
+*.iso
+
+# Large images (keep small ones, ignore huge ones)
+# Uncomment if you have very large images:
+# *.psd
+# *.ai
+# *.sketch
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+logs/
+*.cache
+
+# Build and cache directories
+.next/cache/
+.next/standalone/
+.next/static/
+dist/
+build/
+.cache/
+
+# Package manager
+package-lock.json.backup
+yarn.lock.backup
+pnpm-lock.yaml.backup
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Large documentation files
+*.pdf
+docs/*.pdf
+
+# Backup files
+*.bak
+*.backup
+*~

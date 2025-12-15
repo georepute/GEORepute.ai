@@ -2,9 +2,10 @@ import { UserRole, hasCapability, RoleCapabilities } from './roles';
 
 export interface NavigationItem {
   name: string;
-  href: string;
+  href?: string;
   icon: any;
   requiredCapability?: keyof RoleCapabilities;
+  children?: NavigationItem[];
 }
 
 export function filterNavigationByRole(
@@ -14,8 +15,19 @@ export function filterNavigationByRole(
   if (!role) return [];
 
   return navigation.filter((item) => {
-    if (!item.requiredCapability) return true;
-    return hasCapability(role, item.requiredCapability);
+    if (!item.requiredCapability) {
+      // If item has children, filter them too
+      if (item.children) {
+        item.children = filterNavigationByRole(role, item.children);
+      }
+      return true;
+    }
+    const hasAccess = hasCapability(role, item.requiredCapability);
+    // If item has children, filter them too
+    if (hasAccess && item.children) {
+      item.children = filterNavigationByRole(role, item.children);
+    }
+    return hasAccess;
   });
 }
 
