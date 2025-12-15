@@ -4,15 +4,16 @@ import type { NextRequest } from 'next/server'
 
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
+  
+  try {
   const supabase = createMiddlewareClient({ req, res })
   
   // This is critical - it refreshes the session and sets cookies
-  await supabase.auth.getSession()
-
-  // Get the session after refresh
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
+    const { data: { session }, error } = await supabase.auth.getSession()
+    
+    if (error) {
+      console.error('Middleware session error:', error)
+    }
 
   // Check if user is accessing dashboard without being authenticated
   if (!session && req.nextUrl.pathname.startsWith('/dashboard')) {
@@ -20,6 +21,9 @@ export async function middleware(req: NextRequest) {
     redirectUrl.pathname = '/login'
     redirectUrl.searchParams.set('redirect', req.nextUrl.pathname)
     return NextResponse.redirect(redirectUrl)
+    }
+  } catch (e) {
+    console.error('Middleware error:', e)
   }
 
   // IMPORTANT: Return res to ensure cookies are set

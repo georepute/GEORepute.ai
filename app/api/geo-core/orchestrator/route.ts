@@ -910,7 +910,7 @@ export async function POST(request: NextRequest) {
                     console.log("ℹ️ Schema Automation: Schema available but Instagram doesn't support HTML in posts");
                     console.log("💡 Schema is stored in metadata for your website use");
                   }
-                  
+
                   instagramResult = await publishToInstagram(instagramConfig, {
                     title: contentStrategy.topic || "Untitled",
                     content: instagramContent,
@@ -944,6 +944,31 @@ export async function POST(request: NextRequest) {
                     // If Instagram is the primary platform but failed, don't use other platform URLs
                     console.error("❌ Instagram is primary platform but publish failed. Not using other platform URLs as fallback.");
                     publishUrl = null;
+                    
+                    // Check if it's a token/authorization error from the result
+                    const resultErrorCode = instagramResult.code;
+                    const resultErrorSubcode = instagramResult.error_subcode;
+                    const isResultTokenError = 
+                      resultErrorCode === 190 ||
+                      resultErrorCode === 200 ||
+                      resultErrorSubcode === 458 ||
+                      instagramResult.error?.includes('not authorized') ||
+                      instagramResult.error?.includes('authorized application');
+                    
+                    if (isResultTokenError && instagramIntegration?.id) {
+                      let userFriendlyError = instagramResult.error;
+                      if (resultErrorSubcode === 458 || instagramResult.error?.includes('not authorized')) {
+                        userFriendlyError = "Your Instagram account needs to be reconnected. Please go to Settings → Integrations → Instagram and reconnect your account.";
+                      }
+                      
+                      await supabase
+                        .from("platform_integrations")
+                        .update({
+                          error_message: userFriendlyError,
+                          status: "disconnected",
+                        })
+                        .eq("id", instagramIntegration.id);
+                    }
                   }
                 } else {
                   throw new Error("Instagram integration not found or not connected. Please connect your Instagram account in Settings.");
@@ -953,26 +978,49 @@ export async function POST(request: NextRequest) {
               }
             } catch (instagramError: any) {
               console.error("Instagram publish error (approve case):", instagramError);
+              
+              // Extract error details
+              const errorMessage = instagramError.message || instagramError.error || "Instagram publish failed";
+              const errorCode = instagramError.code || instagramError.error?.code;
+              const errorSubcode = instagramError.error_subcode || instagramError.error?.error_subcode;
+              
+              // Check if it's a token/authorization error
+              const isTokenError = 
+                errorCode === 190 || // OAuthException
+                errorCode === 200 || // Permissions error
+                errorSubcode === 458 || // User has not authorized application
+                errorMessage?.includes('not authorized') ||
+                errorMessage?.includes('authorized application') ||
+                errorMessage?.includes('Error validating access token') ||
+                errorMessage?.includes('expired') ||
+                errorMessage?.includes('Invalid') ||
+                errorMessage?.includes('401') ||
+                errorMessage?.includes('403');
+              
+              // Create user-friendly error message
+              let userFriendlyError = errorMessage;
+              if (isTokenError) {
+                if (errorMessage.includes('not authorized') || errorSubcode === 458) {
+                  userFriendlyError = "Your Instagram account needs to be reconnected. Please go to Settings → Integrations → Instagram and reconnect your account.";
+                } else if (errorMessage.includes('expired')) {
+                  userFriendlyError = "Your Instagram access token has expired. Please reconnect your Instagram account in Settings.";
+                } else {
+                  userFriendlyError = "Instagram authentication failed. Please reconnect your Instagram account in Settings → Integrations.";
+                }
+              }
+              
               instagramResult = {
                 success: false,
-                error: instagramError.message || instagramError.error || "Instagram publish failed",
+                error: userFriendlyError,
               };
-              
-              // Check if it's a token-related error
-              const isTokenError = 
-                instagramError.error?.includes('expired') ||
-                instagramError.error?.includes('Invalid') ||
-                instagramError.error?.includes('401') ||
-                instagramError.message?.includes('expired') ||
-                instagramError.message?.includes('Invalid');
               
               // Update integration with error and mark as disconnected if token is invalid
               if (instagramIntegration?.id) {
                 await supabase
                   .from("platform_integrations")
                   .update({
-                    error_message: instagramError.message || instagramError.error || "Instagram publish failed",
-                    status: isTokenError ? "disconnected" : instagramIntegration.status, // Only disconnect if token error
+                    error_message: userFriendlyError,
+                    status: isTokenError ? "disconnected" : instagramIntegration.status, // Disconnect if token/auth error
                   })
                   .eq("id", instagramIntegration.id);
               }
@@ -1024,13 +1072,17 @@ export async function POST(request: NextRequest) {
                               platform === "medium" ? mediumResult?.postId :
                               platform === "quora" ? quoraResult?.answerId :
                               platform === "facebook" ? facebookResult?.postId :
+                              platform === "instagram" ? instagramResult?.postId :
+                              platform === "linkedin" ? linkedInResult?.postId :
                               platformPostId) || null,
             error_message: ((gitHubResult && !gitHubResult.success && gitHubResult.error) || 
                            (redditResult && !redditResult.success && redditResult.error) ||
                            (mediumResult && !mediumResult.success && mediumResult.error) ||
                            (quoraResult && !quoraResult.success && quoraResult.error) ||
-                           (facebookResult && !facebookResult.success && facebookResult.error)) ? 
-                           (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error) : null,
+                           (facebookResult && !facebookResult.success && facebookResult.error) ||
+                           (instagramResult && !instagramResult.success && instagramResult.error) ||
+                           (linkedInResult && !linkedInResult.success && linkedInResult.error)) ? 
+                           (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error || instagramResult?.error || linkedInResult?.error) : null,
             metadata: {
               ...contentStrategy.metadata, // Include all metadata including structuredSEO
               auto_published: true,
@@ -1076,6 +1128,18 @@ export async function POST(request: NextRequest) {
                 url: facebookResult.url,
                 postId: facebookResult.postId,
                 error: facebookResult.error,
+              } : null,
+              instagram: instagramResult ? {
+                success: instagramResult.success,
+                url: instagramResult.url,
+                postId: instagramResult.postId,
+                error: instagramResult.error,
+              } : null,
+              linkedin: linkedInResult ? {
+                success: linkedInResult.success,
+                url: linkedInResult.url,
+                postId: linkedInResult.postId,
+                error: linkedInResult.error,
               } : null,
             },
           };
@@ -1434,7 +1498,10 @@ export async function POST(request: NextRequest) {
             published_url: publishUrl,
             published_at: new Date().toISOString(),
             status: publishUrl ? "published" : "pending",
-            platform_post_id: (publishPlatform === "github" ? gitHubResult?.discussionNumber?.toString() : redditResult?.postId) || platformPostId || null,
+            platform_post_id: (publishPlatform === "github" ? gitHubResult?.discussionNumber?.toString() : 
+                              publishPlatform === "reddit" ? redditResult?.postId :
+                              publishPlatform === "linkedin" ? linkedInResult?.postId :
+                              platformPostId) || null,
             error_message: (gitHubResult?.error || redditResult?.error) || actionData.errorMessage || null,
             metadata: {
               ...contentStrategy.metadata, // Include all metadata including structuredSEO

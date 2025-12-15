@@ -33,7 +33,34 @@ interface RedditConfig {
   accessToken: string;
 }
 
+interface FacebookConfig {
+  pageAccessToken: string;
+  pageId: string;
+}
+
+interface MediumConfig {
+  accessToken: string;
+  authorId: string;
+}
+
+interface QuoraConfig {
+  sessionCookie: string;
+  formkey: string;
+}
+
+// CORS headers for browser requests
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+};
+
 Deno.serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
   try {
     // Get environment variables
     // Note: SUPABASE_URL is automatically available in Edge Functions
@@ -45,7 +72,7 @@ Deno.serve(async (req) => {
     if (!supabaseUrl || !supabaseServiceKey) {
       return new Response(
         JSON.stringify({ error: "Missing Supabase configuration" }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -65,7 +92,7 @@ Deno.serve(async (req) => {
       console.error("Error fetching scheduled content:", fetchError);
       return new Response(
         JSON.stringify({ error: fetchError.message }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -76,7 +103,7 @@ Deno.serve(async (req) => {
           message: "No scheduled content to publish",
           published: 0,
         }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -93,6 +120,9 @@ Deno.serve(async (req) => {
         let redditResult: any = null;
         let linkedInResult: any = null;
         let instagramResult: any = null;
+        let facebookResult: any = null;
+        let mediumResult: any = null;
+        let quoraResult: any = null;
 
         // Get GitHub integration if platform is GitHub
         if (platform === "github") {
@@ -265,13 +295,21 @@ Deno.serve(async (req) => {
 
               if (redditConfig.clientId && redditConfig.clientSecret && redditConfig.accessToken) {
                 const subreddit = content.metadata?.subreddit || "test";
+                const imageUrl = content.metadata?.imageUrl;
+
+                // Prepare content with image if available
+                let postContent = content.generated_content || "";
+                if (imageUrl) {
+                  // Add image link at the beginning of the post
+                  postContent = `![Image](${imageUrl})\n\n${postContent}`;
+                }
 
                 // Prepare Reddit post data
                 const postData = new URLSearchParams({
                   title: content.topic || "Untitled",
                   sr: subreddit,
                   kind: "self",
-                  text: content.generated_content || "",
+                  text: postContent,
                   api_type: "json",
                 });
 
@@ -374,6 +412,23 @@ Deno.serve(async (req) => {
                 shareText = content.generated_content || "";
               }
 
+              // LinkedIn has a 3000 character limit for posts
+              const LINKEDIN_CHAR_LIMIT = 3000;
+              if (shareText.length > LINKEDIN_CHAR_LIMIT) {
+                console.log(`⚠️ LinkedIn post text exceeds ${LINKEDIN_CHAR_LIMIT} chars (${shareText.length} chars). Truncating...`);
+                const truncateAt = LINKEDIN_CHAR_LIMIT - 3;
+                let truncatedText = shareText.substring(0, truncateAt);
+                
+                // Try to break at last space to avoid cutting words
+                const lastSpaceIndex = truncatedText.lastIndexOf(' ');
+                if (lastSpaceIndex > truncateAt - 100) {
+                  truncatedText = truncatedText.substring(0, lastSpaceIndex);
+                }
+                
+                shareText = truncatedText + '...';
+                console.log(`✅ Truncated to ${shareText.length} characters`);
+              }
+
               // Prepare UGC Post payload
               const ugcPost: any = {
                 author: personUrn,
@@ -391,8 +446,95 @@ Deno.serve(async (req) => {
                 },
               };
 
-              // Add link if provided
-              if (content.metadata?.link) {
+              // Add image if provided (requires upload to LinkedIn first)
+              const imageUrl = content.metadata?.imageUrl;
+              if (imageUrl) {
+                console.log(`🖼️ Uploading image to LinkedIn: ${imageUrl}`);
+                
+                try {
+                  // Step 1: Register the upload
+                  const registerPayload = {
+                    registerUploadRequest: {
+                      recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+                      owner: personUrn,
+                      serviceRelationships: [
+                        {
+                          relationshipType: 'OWNER',
+                          identifier: 'urn:li:userGeneratedContent',
+                        },
+                      ],
+                    },
+                  };
+
+                  const registerResponse = await fetch(
+                    'https://api.linkedin.com/v2/assets?action=registerUpload',
+                    {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${linkedInIntegration.access_token}`,
+                        'Content-Type': 'application/json',
+                        'X-Restli-Protocol-Version': '2.0.0',
+                      },
+                      body: JSON.stringify(registerPayload),
+                    }
+                  );
+
+                  if (!registerResponse.ok) {
+                    const error = await registerResponse.json().catch(() => ({}));
+                    throw new Error(`Failed to register media: ${error.message || registerResponse.statusText}`);
+                  }
+
+                  const registerResult = await registerResponse.json();
+                  const mediaAsset = registerResult.value.asset;
+                  const uploadUrl = registerResult.value.uploadMechanism[
+                    'com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest'
+                  ].uploadUrl;
+
+                  console.log(`✅ Registered LinkedIn media asset: ${mediaAsset}`);
+
+                  // Step 2: Download and upload the image
+                  const imageResponse = await fetch(imageUrl);
+                  if (!imageResponse.ok) {
+                    throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+                  }
+                  const imageBuffer = await imageResponse.arrayBuffer();
+
+                  const uploadResponse = await fetch(uploadUrl, {
+                    method: 'PUT',
+                    headers: {
+                      'Content-Type': 'application/octet-stream',
+                    },
+                    body: imageBuffer,
+                  });
+
+                  if (!uploadResponse.ok) {
+                    throw new Error(`Failed to upload image: ${uploadResponse.status}`);
+                  }
+
+                  console.log(`✅ Image uploaded to LinkedIn`);
+
+                  // Step 3: Use the asset URN in the post
+                  ugcPost.specificContent['com.linkedin.ugc.ShareContent'].shareMediaCategory = 'IMAGE';
+                  ugcPost.specificContent['com.linkedin.ugc.ShareContent'].media = [
+                    {
+                      status: 'READY',
+                      description: {
+                        text: content.topic || 'Image',
+                      },
+                      media: mediaAsset,
+                      title: {
+                        text: content.topic || 'Shared Image',
+                      },
+                    },
+                  ];
+                  console.log(`✅ Image ready for LinkedIn post`);
+                } catch (uploadError: any) {
+                  console.error(`❌ Failed to upload image to LinkedIn:`, uploadError.message);
+                  console.log(`⚠️ Falling back to text-only post without image`);
+                }
+              }
+              // Add link if provided (only if no image)
+              else if (content.metadata?.link) {
                 ugcPost.specificContent['com.linkedin.ugc.ShareContent'].shareMediaCategory = 'ARTICLE';
                 ugcPost.specificContent['com.linkedin.ugc.ShareContent'].media = [
                   {
@@ -600,7 +742,332 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Create published_content record
+        // Get Facebook integration if platform is Facebook
+        if (platform === "facebook") {
+          try {
+            const { data: facebookIntegration } = await supabase
+              .from("platform_integrations")
+              .select("*")
+              .eq("user_id", content.user_id)
+              .eq("platform", "facebook")
+              .eq("status", "connected")
+              .maybeSingle();
+
+            if (facebookIntegration && facebookIntegration.access_token) {
+              const pageId = facebookIntegration.metadata?.pageId || facebookIntegration.platform_user_id;
+              
+              if (!pageId) {
+                throw new Error("Facebook Page ID not found. Please reconnect your Facebook integration.");
+              }
+
+              // Combine title and content
+              let message = '';
+              if (content.topic && content.topic.trim()) {
+                message = `${content.topic}\n\n${content.generated_content || ""}`;
+              } else {
+                message = content.generated_content || "";
+              }
+
+              let response;
+              let endpoint;
+
+              // Check if we have an image to post
+              if (content.metadata?.imageUrl) {
+                // Use /photos endpoint to post as actual photo
+                endpoint = `https://graph.facebook.com/v18.0/${pageId}/photos`;
+                
+                const photoData: any = {
+                  url: content.metadata.imageUrl,
+                  caption: message,
+                  access_token: facebookIntegration.access_token,
+                };
+
+                // Add link if provided
+                if (content.metadata?.link) {
+                  photoData.caption = `${message}\n\n🔗 ${content.metadata.link}`;
+                }
+
+                response = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(photoData),
+                });
+              } else {
+                // No image - use /feed endpoint for text post
+                endpoint = `https://graph.facebook.com/v18.0/${pageId}/feed`;
+                
+                const postData: any = {
+                  message: message,
+                  access_token: facebookIntegration.access_token,
+                };
+
+                if (content.metadata?.link) {
+                  postData.link = content.metadata.link;
+                }
+
+                response = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(postData),
+                });
+              }
+
+              const result = await response.json();
+
+              if (response.ok && (result.id || result.post_id)) {
+                const postId = result.id || result.post_id;
+                const url = `https://www.facebook.com/${postId.replace('_', '/posts/')}`;
+
+                publishUrl = url;
+                facebookResult = {
+                  success: true,
+                  url: url,
+                  postId: postId,
+                };
+
+                // Update last_used_at
+                await supabase
+                  .from("platform_integrations")
+                  .update({ last_used_at: new Date().toISOString() })
+                  .eq("id", facebookIntegration.id);
+              } else {
+                const errorMessage = result.error?.message || 'Unknown Facebook API error';
+                facebookResult = {
+                  success: false,
+                  error: `Facebook API Error (${response.status}): ${errorMessage}`,
+                };
+              }
+            } else {
+              throw new Error("Facebook integration not found or not connected.");
+            }
+          } catch (facebookError: any) {
+            console.error(`Facebook publish error for content ${content.id}:`, facebookError);
+            facebookResult = {
+              success: false,
+              error: facebookError.message || "Facebook publish failed",
+            };
+          }
+        }
+
+        // Get Medium integration if platform is Medium
+        if (platform === "medium") {
+          try {
+            const { data: mediumIntegration } = await supabase
+              .from("platform_integrations")
+              .select("*")
+              .eq("user_id", content.user_id)
+              .eq("platform", "medium")
+              .eq("status", "connected")
+              .maybeSingle();
+
+            if (mediumIntegration && mediumIntegration.access_token) {
+              const authorId = mediumIntegration.metadata?.authorId || mediumIntegration.platform_user_id;
+              
+              if (!authorId) {
+                throw new Error("Medium Author ID not found. Please reconnect your Medium integration.");
+              }
+
+              // Prepare content for Medium (supports Markdown and HTML)
+              let contentBody = content.generated_content || "";
+              
+              // Add image at the beginning if provided
+              if (content.metadata?.imageUrl) {
+                contentBody = `![${content.topic || 'Image'}](${content.metadata.imageUrl})\n\n${contentBody}`;
+              }
+
+              // Prepare tags
+              const tags = content.metadata?.tags || content.target_keywords?.slice(0, 5) || [];
+
+              // Publish to Medium
+              const mediumResponse = await fetch(
+                `https://api.medium.com/v1/users/${authorId}/posts`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${mediumIntegration.access_token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    title: content.topic || 'Untitled',
+                    contentFormat: 'markdown',
+                    content: contentBody,
+                    tags: tags.slice(0, 5), // Medium allows max 5 tags
+                    publishStatus: 'public', // 'public', 'draft', or 'unlisted'
+                    canonicalUrl: content.metadata?.canonicalUrl || undefined,
+                  }),
+                }
+              );
+
+              const mediumData = await mediumResponse.json();
+
+              if (mediumResponse.ok && mediumData.data?.id) {
+                const postUrl = mediumData.data.url;
+
+                publishUrl = postUrl;
+                mediumResult = {
+                  success: true,
+                  url: postUrl,
+                  postId: mediumData.data.id,
+                };
+
+                // Update last_used_at
+                await supabase
+                  .from("platform_integrations")
+                  .update({ last_used_at: new Date().toISOString() })
+                  .eq("id", mediumIntegration.id);
+              } else {
+                const errorMessage = mediumData.errors?.[0]?.message || 'Unknown Medium API error';
+                mediumResult = {
+                  success: false,
+                  error: `Medium API Error (${mediumResponse.status}): ${errorMessage}`,
+                };
+              }
+            } else {
+              throw new Error("Medium integration not found or not connected.");
+            }
+          } catch (mediumError: any) {
+            console.error(`Medium publish error for content ${content.id}:`, mediumError);
+            mediumResult = {
+              success: false,
+              error: mediumError.message || "Medium publish failed",
+            };
+          }
+        }
+
+        // Get Quora integration if platform is Quora
+        if (platform === "quora") {
+          try {
+            const { data: quoraIntegration } = await supabase
+              .from("platform_integrations")
+              .select("*")
+              .eq("user_id", content.user_id)
+              .eq("platform", "quora")
+              .eq("status", "connected")
+              .maybeSingle();
+
+            if (quoraIntegration) {
+              // Quora doesn't have a public API, so we use session-based posting
+              const sessionCookie = quoraIntegration.access_token || quoraIntegration.metadata?.sessionCookie;
+              const formkey = quoraIntegration.metadata?.formkey;
+
+              if (!sessionCookie) {
+                throw new Error("Quora session not found. Please reconnect your Quora integration.");
+              }
+
+              // Prepare content for Quora
+              let answerContent = content.generated_content || "";
+              
+              // Add image if provided (as markdown)
+              if (content.metadata?.imageUrl) {
+                answerContent = `![Image](${content.metadata.imageUrl})\n\n${answerContent}`;
+              }
+
+              // For Quora, we typically answer a question or create a post
+              // Since Quora API is not public, we'll create a Space post if configured
+              const spaceId = quoraIntegration.metadata?.spaceId;
+              
+              if (spaceId) {
+                // Post to Quora Space using internal API
+                const quoraResponse = await fetch('https://www.quora.com/graphql/gql_para_POST', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Cookie': `m-s=${sessionCookie}`,
+                    'Quora-Formkey': formkey || '',
+                  },
+                  body: JSON.stringify({
+                    queryName: 'CreateTribePostMutation',
+                    variables: {
+                      input: {
+                        tribeId: spaceId,
+                        title: content.topic || '',
+                        text: answerContent,
+                      },
+                    },
+                  }),
+                });
+
+                if (quoraResponse.ok) {
+                  const quoraData = await quoraResponse.json();
+                  
+                  if (quoraData.data?.createTribePost?.post?.url) {
+                    const postUrl = `https://www.quora.com${quoraData.data.createTribePost.post.url}`;
+
+                    publishUrl = postUrl;
+                    quoraResult = {
+                      success: true,
+                      url: postUrl,
+                      postId: quoraData.data.createTribePost.post.id,
+                    };
+
+                    // Update last_used_at
+                    await supabase
+                      .from("platform_integrations")
+                      .update({ last_used_at: new Date().toISOString() })
+                      .eq("id", quoraIntegration.id);
+                  } else {
+                    quoraResult = {
+                      success: false,
+                      error: 'Failed to get Quora post URL from response',
+                    };
+                  }
+                } else {
+                  quoraResult = {
+                    success: false,
+                    error: `Quora API Error (${quoraResponse.status})`,
+                  };
+                }
+              } else {
+                throw new Error("Quora Space ID not configured. Please set up a Space in your Quora integration.");
+              }
+            } else {
+              throw new Error("Quora integration not found or not connected.");
+            }
+          } catch (quoraError: any) {
+            console.error(`Quora publish error for content ${content.id}:`, quoraError);
+            quoraResult = {
+              success: false,
+              error: quoraError.message || "Quora publish failed",
+            };
+          }
+        }
+
+        // Get platform post ID based on platform
+        const getPlatformPostId = () => {
+          switch (platform) {
+            case "github": return gitHubResult?.discussionNumber?.toString();
+            case "reddit": return redditResult?.postId;
+            case "linkedin": return linkedInResult?.postId?.replace('urn:li:ugcPost:', '');
+            case "instagram": return instagramResult?.postId;
+            case "facebook": return facebookResult?.postId;
+            case "medium": return mediumResult?.postId;
+            case "quora": return quoraResult?.postId;
+            default: return null;
+          }
+        };
+
+        // Get error message from platform result
+        const getErrorMessage = () => {
+          return gitHubResult?.error || redditResult?.error || linkedInResult?.error || 
+                 instagramResult?.error || facebookResult?.error || mediumResult?.error || 
+                 quoraResult?.error || null;
+        };
+
+        // Check if schema exists in content metadata
+        const schemaData = content.metadata?.schema;
+        if (schemaData) {
+          console.log(`✅ Schema found for content ${content.id}`);
+          console.log(`📋 Schema Type: ${Array.isArray(schemaData.jsonLd) ? schemaData.jsonLd[0]?.["@type"] : schemaData.jsonLd?.["@type"] || "Article"}`);
+        } else {
+          console.log(`⚠️ No schema found for content ${content.id}`);
+        }
+
+        // Create published_content record with schema
         const { data: publishedRecord, error: publishError } = await supabase
           .from("published_content")
           .insert({
@@ -610,16 +1077,33 @@ Deno.serve(async (req) => {
             published_url: publishUrl,
             published_at: new Date().toISOString(),
             status: publishUrl ? "published" : "pending",
-            platform_post_id: (platform === "github" ? gitHubResult?.discussionNumber?.toString() : platform === "reddit" ? redditResult?.postId : platform === "linkedin" ? linkedInResult?.postId?.replace('urn:li:ugcPost:', '') : instagramResult?.postId) || null,
-            error_message: (gitHubResult?.error || redditResult?.error || linkedInResult?.error || instagramResult?.error) || null,
+            platform_post_id: getPlatformPostId() || null,
+            error_message: getErrorMessage(),
             metadata: {
               auto_published: true,
               scheduled: true,
               scheduled_at: content.scheduled_at,
+              // Platform results
               github: gitHubResult || null,
               reddit: redditResult || null,
               linkedin: linkedInResult || null,
               instagram: instagramResult || null,
+              facebook: facebookResult || null,
+              medium: mediumResult || null,
+              quora: quoraResult || null,
+              // Schema data (for SEO)
+              schema: schemaData ? {
+                jsonLd: schemaData.jsonLd,
+                scriptTags: schemaData.scriptTags,
+                generatedAt: schemaData.generatedAt || new Date().toISOString(),
+              } : null,
+              schema_included: !!schemaData,
+              schema_type: schemaData?.jsonLd 
+                ? (Array.isArray(schemaData.jsonLd) 
+                  ? schemaData.jsonLd[0]?.["@type"] 
+                  : schemaData.jsonLd["@type"])
+                : null,
+              // Include all other metadata (imageUrl, structuredSEO, etc.)
               ...content.metadata,
             },
           })
@@ -684,13 +1168,13 @@ Deno.serve(async (req) => {
         failed: failedCount,
         results,
       }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
     console.error("Scheduled publish cron error:", error);
     return new Response(
       JSON.stringify({ error: error.message || "Internal server error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

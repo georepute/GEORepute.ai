@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { chromium } from 'playwright';
 
 // Dynamic import for cheerio (install with: npm install cheerio)
 let cheerio: any;
@@ -12,6 +13,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 export async function POST(request: NextRequest) {
+  let browser: any = null;
+  
   try {
     const { url } = await request.json();
 
@@ -28,21 +31,39 @@ export async function POST(request: NextRequest) {
       normalizedUrl = 'https://' + normalizedUrl;
     }
 
-    console.log(`Crawling website: ${normalizedUrl}`);
+    console.log(`Crawling website with Playwright: ${normalizedUrl}`);
 
-    // Fetch website HTML
-    const response = await fetch(normalizedUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; BrandAnalysisBot/1.0)',
-      },
-      redirect: 'follow',
+    // Launch Playwright browser to bypass Cloudflare and bot protection
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+      ],
     });
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch website: ${response.status} ${response.statusText}`);
-    }
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      viewport: { width: 1920, height: 1080 },
+      locale: 'en-US',
+    });
 
-    const html = await response.text();
+    const page = await context.newPage();
+
+    // Navigate to the URL and wait for network to be idle
+    // This will handle Cloudflare challenges automatically
+    await page.goto(normalizedUrl, {
+      waitUntil: 'networkidle',
+      timeout: 30000, // 30 second timeout
+    });
+
+    // Wait a bit more for any JavaScript to finish rendering
+    await page.waitForTimeout(2000);
+
+    // Get the fully rendered HTML
+    const html = await page.content();
     
     if (!cheerio) {
       // Fallback: simple text extraction without cheerio
@@ -73,35 +94,72 @@ export async function POST(request: NextRequest) {
 
     const rawContent = aboutSections[0] || metaDescription || ogDescription || title || '';
 
-    // Extract image
+    // Extract brand logo image (prioritize logo-specific sources)
     let imageUrl = null;
     
-    // Priority 1: Open Graph image
-    const ogImage = $('meta[property="og:image"]').attr('content');
-    if (ogImage) {
-      imageUrl = ogImage.startsWith('http') ? ogImage : new URL(ogImage, normalizedUrl).href;
+    // Priority 1: Logo-specific meta tags
+    const logoMeta = $('meta[property="og:logo"]').attr('content') || 
+                     $('meta[name="logo"]').attr('content');
+    if (logoMeta) {
+      imageUrl = logoMeta.startsWith('http') ? logoMeta : new URL(logoMeta, normalizedUrl).href;
     }
     
-    // Priority 2: Twitter card image
+    // Priority 2: Open Graph image (often the logo)
     if (!imageUrl) {
-      const twitterImage = $('meta[name="twitter:image"]').attr('content') || 
-                          $('meta[property="twitter:image"]').attr('content');
-      if (twitterImage) {
-        imageUrl = twitterImage.startsWith('http') ? twitterImage : new URL(twitterImage, normalizedUrl).href;
+      const ogImage = $('meta[property="og:image"]').attr('content');
+      if (ogImage) {
+        imageUrl = ogImage.startsWith('http') ? ogImage : new URL(ogImage, normalizedUrl).href;
       }
     }
     
-    // Priority 3: Logo from common paths
+    // Priority 3: Logo from HTML elements with logo-specific selectors
+    if (!imageUrl) {
+      const logoSelectors = [
+        'img[class*="logo" i]',
+        'img[id*="logo" i]',
+        'img[alt*="logo" i]',
+        'img[alt*="brand" i]',
+        'header img',
+        'nav img',
+        '.logo img',
+        '#logo img',
+        '[class*="brand"] img',
+        '[class*="header"] img',
+      ];
+      
+      for (const selector of logoSelectors) {
+        const logoImg = $(selector).first();
+        if (logoImg.length) {
+          const src = logoImg.attr('src') || logoImg.attr('data-src') || logoImg.attr('data-lazy-src');
+          if (src) {
+            try {
+              imageUrl = src.startsWith('http') ? src : new URL(src, normalizedUrl).href;
+              break;
+            } catch (e) {
+              // Continue to next selector
+            }
+          }
+        }
+      }
+    }
+    
+    // Priority 4: Logo from common file paths
     if (!imageUrl) {
       const logoPaths = [
         '/logo.png',
         '/logo.svg',
+        '/logo.jpg',
+        '/logo.jpeg',
         '/images/logo.png',
         '/images/logo.svg',
         '/assets/logo.png',
         '/assets/logo.svg',
         '/img/logo.png',
         '/img/logo.svg',
+        '/static/logo.png',
+        '/static/logo.svg',
+        '/brand/logo.png',
+        '/brand/logo.svg',
       ];
       
       for (const path of logoPaths) {
@@ -118,10 +176,20 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // Priority 4: Favicon
+    // Priority 5: Twitter card image (often logo)
+    if (!imageUrl) {
+      const twitterImage = $('meta[name="twitter:image"]').attr('content') || 
+                          $('meta[property="twitter:image"]').attr('content');
+      if (twitterImage) {
+        imageUrl = twitterImage.startsWith('http') ? twitterImage : new URL(twitterImage, normalizedUrl).href;
+      }
+    }
+    
+    // Priority 6: Favicon (as last resort, usually not ideal for brand logo)
     if (!imageUrl) {
       const favicon = $('link[rel="icon"]').attr('href') || 
                      $('link[rel="shortcut icon"]').attr('href') ||
+                     $('link[rel="apple-touch-icon"]').attr('href') ||
                      '/favicon.ico';
       try {
         const faviconUrl = new URL(favicon, normalizedUrl).href;
@@ -131,28 +199,6 @@ export async function POST(request: NextRequest) {
         }
       } catch (e) {
         // Continue to next option
-      }
-    }
-    
-    // Priority 5: First large image from homepage
-    if (!imageUrl) {
-      const images = $('img').toArray();
-      for (const img of images) {
-        const src = $(img).attr('src') || $(img).attr('data-src');
-        if (src) {
-          try {
-            const imgUrl = src.startsWith('http') ? src : new URL(src, normalizedUrl).href;
-            // Check if image is reasonably sized (not a tiny icon)
-            const width = parseInt($(img).attr('width') || '0');
-            const height = parseInt($(img).attr('height') || '0');
-            if (width > 100 || height > 100 || (!width && !height)) {
-              imageUrl = imgUrl;
-              break;
-            }
-          } catch (e) {
-            // Continue
-          }
-        }
       }
     }
 
@@ -222,6 +268,15 @@ export async function POST(request: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    // Always close the browser, even if there's an error
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('Error closing browser:', closeError);
+      }
+    }
   }
 }
 

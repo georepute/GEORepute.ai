@@ -126,13 +126,28 @@ async function createMediaContainer(
         errorMessage += '. The image URL must be a direct link to a JPEG or PNG file that Instagram can access. Try uploading to a service like Imgur or imgbb and use the direct image link.';
       }
       
-      throw new Error(`Instagram API error: ${response.status} - ${errorMessage}`);
+      // Create error object with code and subcode for better error handling
+      const apiError: any = new Error(`Instagram API error: ${response.status} - ${errorMessage}`);
+      apiError.code = error.error?.code;
+      apiError.error_subcode = error.error?.error_subcode;
+      apiError.error = error.error;
+      apiError.type = error.error?.type;
+      throw apiError;
     }
 
     const data = await response.json();
     console.log(`✅ Media container created: ${data.id}`);
     return data.id; // Returns creation_id
   } catch (error: any) {
+    // Preserve error codes if they exist
+    if (error.code || error.error_subcode) {
+      const apiError: any = new Error(`Failed to create media container: ${error.message}`);
+      apiError.code = error.code;
+      apiError.error_subcode = error.error_subcode;
+      apiError.error = error.error;
+      apiError.type = error.type;
+      throw apiError;
+    }
     throw new Error(`Failed to create media container: ${error.message}`);
   }
 }
@@ -162,7 +177,15 @@ async function publishMedia(
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw new Error(`Instagram API error: ${response.status} - ${error.error?.message || 'Failed to publish media'}`);
+      const errorMessage = error.error?.message || 'Failed to publish media';
+      
+      // Create error object with code and subcode for better error handling
+      const apiError: any = new Error(`Instagram API error: ${response.status} - ${errorMessage}`);
+      apiError.code = error.error?.code;
+      apiError.error_subcode = error.error?.error_subcode;
+      apiError.error = error.error;
+      apiError.type = error.error?.type;
+      throw apiError;
     }
 
     const data = await response.json();
@@ -188,6 +211,15 @@ async function publishMedia(
       permalink,
     };
   } catch (error: any) {
+    // Preserve error codes if they exist
+    if (error.code || error.error_subcode) {
+      const apiError: any = new Error(`Failed to publish media: ${error.message}`);
+      apiError.code = error.code;
+      apiError.error_subcode = error.error_subcode;
+      apiError.error = error.error;
+      apiError.type = error.type;
+      throw apiError;
+    }
     throw new Error(`Failed to publish media: ${error.message}`);
   }
 }
@@ -283,9 +315,19 @@ export async function publishToInstagram(
     };
   } catch (error: any) {
     console.error('Instagram publish error:', error);
+    
+    // Extract error details for better error handling upstream
+    const errorMessage = error.message || 'Unknown error publishing to Instagram';
+    const errorCode = error.code;
+    const errorSubcode = error.error_subcode;
+    
     return {
       success: false,
-      error: error.message || 'Unknown error publishing to Instagram',
+      error: errorMessage,
+      // Include error codes in result for better error handling
+      ...(errorCode && { code: errorCode }),
+      ...(errorSubcode && { error_subcode: errorSubcode }),
+      ...(error.error && { error_details: error.error }),
     };
   }
 }

@@ -52,8 +52,8 @@ export async function GET(request: NextRequest) {
     // Get LinkedIn App credentials from environment
     const clientId = process.env.LINKEDIN_CLIENT_ID?.trim();
     const clientSecret = process.env.LINKEDIN_CLIENT_SECRET?.trim();
-    const redirectUri = process.env.LINKEDIN_REDIRECT_URI?.trim() || 
-      `${request.nextUrl.origin}/api/auth/linkedin/callback`;
+    // Always use dynamic origin to match frontend (works for both localhost and production)
+    const redirectUri = `${request.nextUrl.origin}/api/auth/linkedin/callback`;
 
     if (!clientId || !clientSecret) {
       console.error("LinkedIn App credentials not configured", {

@@ -55,6 +55,8 @@ export function generateArticleSchema(input: SchemaGeneratorInput): SchemaOutput
       "@type": "WebPage",
       "@id": input.url || "#",
     },
+    // Add URL for canonical reference
+    ...(input.url && { url: input.url }),
   };
 
   // Add headings structure if provided (for structured SEO content)

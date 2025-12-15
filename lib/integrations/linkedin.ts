@@ -228,6 +228,24 @@ export async function publishToLinkedIn(
       shareText = content.content;
     }
 
+    // LinkedIn has a 3000 character limit for posts
+    const LINKEDIN_CHAR_LIMIT = 3000;
+    if (shareText.length > LINKEDIN_CHAR_LIMIT) {
+      console.log(`⚠️ LinkedIn post text exceeds ${LINKEDIN_CHAR_LIMIT} chars (${shareText.length} chars). Truncating...`);
+      // Truncate to limit minus 3 for "..." and try to break at a word boundary
+      const truncateAt = LINKEDIN_CHAR_LIMIT - 3;
+      let truncatedText = shareText.substring(0, truncateAt);
+      
+      // Try to break at last space to avoid cutting words
+      const lastSpaceIndex = truncatedText.lastIndexOf(' ');
+      if (lastSpaceIndex > truncateAt - 100) { // Only use space if within last 100 chars
+        truncatedText = truncatedText.substring(0, lastSpaceIndex);
+      }
+      
+      shareText = truncatedText + '...';
+      console.log(`✅ Truncated to ${shareText.length} characters`);
+    }
+
     // Prepare UGC Post payload
     const ugcPost: any = {
       author: personUrn,
@@ -351,14 +369,20 @@ export async function publishToLinkedIn(
     
     console.log(`✅ Successfully published to LinkedIn!`);
     console.log(`   Post ID: ${postId}`);
+    console.log(`   Post ID Type: ${postId?.startsWith('urn:li:ugcPost:') ? 'UGC Post (trackable)' : postId?.startsWith('urn:li:share:') ? 'Share (may not be trackable)' : 'Unknown'}`);
+    console.log(`   Full API Response:`, JSON.stringify(result, null, 2));
     console.log(`   Type: ${postType}`);
     
     // Construct LinkedIn post URL
     // Format: https://www.linkedin.com/feed/update/{postId}
     // Note: LinkedIn doesn't always return a direct URL, so we'll construct it
-    const url = postId 
-      ? `https://www.linkedin.com/feed/update/${postId.replace('urn:li:ugcPost:', '')}`
-      : undefined;
+    // Handle both UGC Post IDs (urn:li:ugcPost:xxxxx) and Share IDs (urn:li:share:xxxxx)
+    let url: string | undefined;
+    if (postId) {
+      // Extract numeric ID from URN format
+      const numericId = postId.replace('urn:li:ugcPost:', '').replace('urn:li:share:', '');
+      url = `https://www.linkedin.com/feed/update/${numericId}`;
+    }
 
     console.log(`   URL: ${url}`);
 

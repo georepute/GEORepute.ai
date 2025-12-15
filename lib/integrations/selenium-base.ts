@@ -166,9 +166,13 @@ export class SeleniumBaseService {
 
   /**
    * Initialize WebDriver
+   * Supports both local ChromeDriver and remote Railway Selenium Hub
    */
   async initialize(): Promise<void> {
     try {
+      // Check if Railway Selenium Hub URL is configured
+      const seleniumHubUrl = process.env.SELENIUM_HUB_URL;
+      
       if (this.config.browser === 'chrome') {
         const options = new chrome.Options();
         
@@ -189,12 +193,46 @@ export class SeleniumBaseService {
         // Exclude automation flags (using addArguments instead of setExcludeSwitches)
         options.addArguments('--exclude-switches=enable-automation');
         
-        // Try to find ChromeDriver and set service
-        const driverPath = this.findChromeDriverPath();
-        
         const builder = new Builder()
           .forBrowser('chrome')
           .setChromeOptions(options);
+        
+        // If Railway Selenium Hub URL is provided, connect to it (remote)
+        if (seleniumHubUrl) {
+          console.log('🔗 Connecting to Railway Selenium Hub...');
+          console.log(`   URL: ${seleniumHubUrl}`);
+          console.log('⏳ Note: If Railway is sleeping, this may take 30-60 seconds to wake up...');
+          
+          builder.usingServer(seleniumHubUrl);
+          
+          try {
+            // Set longer timeout for Railway wake-up (2 minutes)
+            const startTime = Date.now();
+            this.driver = await builder.build();
+            const connectionTime = ((Date.now() - startTime) / 1000).toFixed(2);
+            console.log(`✅ Connected to Railway Selenium Hub in ${connectionTime}s`);
+          } catch (railwayError: any) {
+            const errorMessage = railwayError.message || 'Unknown error';
+            console.error('❌ Failed to connect to Railway Selenium Hub:', errorMessage);
+            
+            if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('timeout')) {
+              throw new Error(
+                `Failed to connect to Railway Selenium Hub: ${errorMessage}\n\n` +
+                `Possible causes:\n` +
+                `  1. Railway service is not running or still waking up\n` +
+                `  2. Railway URL is incorrect: ${seleniumHubUrl}\n` +
+                `  3. Railway service hasn't finished deploying\n\n` +
+                `Try again in 30-60 seconds, or check Railway dashboard.`
+              );
+            }
+            throw railwayError;
+          }
+        } else {
+          // Local mode - use local ChromeDriver
+          console.log('🖥️ Using local ChromeDriver (no SELENIUM_HUB_URL found)');
+          
+          // Try to find ChromeDriver and set service
+          const driverPath = this.findChromeDriverPath();
         
         if (driverPath) {
           console.log('✅ Using ChromeDriver at:', driverPath);
@@ -219,6 +257,8 @@ export class SeleniumBaseService {
             '/usr/local/bin/chromedriver',
             '/opt/homebrew/bin/chromedriver',
           ].filter(Boolean).join(', '));
+            console.warn('');
+            console.warn('💡 TIP: Set SELENIUM_HUB_URL in .env.local to use Railway Selenium Hub');
           console.warn('');
           console.warn('Attempting to use Selenium Manager (may download driver automatically)...');
           console.warn('');
@@ -226,11 +266,12 @@ export class SeleniumBaseService {
           console.warn('  1. Install: npm install --save-dev chromedriver');
           console.warn('  2. Or: brew install chromedriver');
           console.warn('  3. Or set CHROMEDRIVER_PATH=/path/to/chromedriver in .env.local');
+            console.warn('  4. Or set SELENIUM_HUB_URL to use Railway Selenium Hub');
         }
         
         try {
           this.driver = await builder.build();
-          console.log('✅ WebDriver initialized successfully');
+            console.log('✅ WebDriver initialized successfully (local)');
         } catch (buildError: any) {
           const errorMessage = buildError.message || 'Unknown error';
           console.error('❌ Failed to build WebDriver:', errorMessage);
@@ -242,11 +283,13 @@ export class SeleniumBaseService {
               `Please install ChromeDriver:\n` +
               `  macOS: brew install chromedriver\n` +
               `  Or: npm install --save-dev chromedriver\n` +
-              `  Or set CHROMEDRIVER_PATH=/path/to/chromedriver\n\n` +
+                `  Or set CHROMEDRIVER_PATH=/path/to/chromedriver\n` +
+                `  Or set SELENIUM_HUB_URL to use Railway Selenium Hub\n\n` +
               `After installing, make sure ChromeDriver is in your PATH or set CHROMEDRIVER_PATH.`
             );
           }
           throw buildError;
+          }
         }
       } else {
         const options = new firefox.Options();

@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       // Check if project exists for this user and brand
       const { data: existingProject } = await supabase
         .from('brand_analysis_projects')
-        .select('id')
+        .select('id, company_description, company_image_url')
         .eq('user_id', session.user.id)
         .eq('brand_name', brandName)
         .maybeSingle()
