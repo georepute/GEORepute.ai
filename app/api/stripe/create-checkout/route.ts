@@ -5,7 +5,7 @@ import { cookies } from 'next/headers';
 import Stripe from 'stripe';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-11-20.acacia',
+  apiVersion: '2025-11-17.clover',
 });
 
 // Create Supabase client with service role for database operations
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     if (paymentError || !payment) {
       console.error('Failed to create payment record:', paymentError);
       return NextResponse.json(
-        { error: 'Failed to create payment record', details: paymentError.message },
+        { error: 'Failed to create payment record', details: paymentError?.message || 'Unknown error' },
         { status: 500 }
       );
     }

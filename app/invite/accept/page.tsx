@@ -1,13 +1,13 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle, XCircle, Loader2, Mail, Building2, Shield } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import Link from "next/link";
 
-export default function AcceptInvitation() {
+function AcceptInvitationInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
@@ -252,6 +252,18 @@ export default function AcceptInvitation() {
         </p>
       </motion.div>
     </div>
+  );
+}
+
+export default function AcceptInvitation() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      </div>
+    }>
+      <AcceptInvitationInner />
+    </Suspense>
   );
 }
 
