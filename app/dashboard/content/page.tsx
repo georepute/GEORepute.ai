@@ -117,6 +117,21 @@ function ContentInner() {
   const [brandVoices, setBrandVoices] = useState<any[]>([]);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
   const [loadingVoices, setLoadingVoices] = useState(false);
+  
+  // AI Detection State
+  const [isDetectingAI, setIsDetectingAI] = useState(false);
+  const [aiDetectionResults, setAiDetectionResults] = useState<{
+    aiPercentage: number;
+    highlightedHtml: string;
+    topPhrases: Array<{ phrase: string; confidence: number; reason: string; count: number }>;
+    summary: string;
+    metrics?: {
+      burstiness: number;
+      clichés: number;
+      avgSentenceLength: number;
+      signals?: string[];
+    };
+  } | null>(null);
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
 
   // PDCA Loop: Performance Tracking & Optimization State
@@ -348,14 +363,8 @@ function ContentInner() {
       
       try {
         await handleAction("approve", contentId, { autoPublish: true });
-        // Longer delay to ensure database consistency and published_records are created
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        // Reload content after successful publish
-        await loadContent();
-        // Additional reload after a short delay to catch any late database updates
-        setTimeout(() => {
-          loadContent();
-        }, 2000);
+        // Note: loadContent() is already called in handleAction (line 438), no need to call it again here
+        // This prevents double refresh
       } catch (error) {
         // On error, clear loading state immediately
         if (isMedium) {
@@ -833,6 +842,7 @@ function ContentInner() {
     setIsGenerating(true);
     setError(null);
     setSynthesizedResponse(null);
+    setAiDetectionResults(null); // Reset AI detection results
 
     try {
       const selectedVoice = selectedVoiceId ? brandVoices.find(v => v.id === selectedVoiceId) : null;
@@ -874,6 +884,105 @@ function ContentInner() {
 
       const data = await response.json();
       setSynthesizedResponse(data.synthesizedResponse);
+      
+      // Automatically run AI detection after response is generated
+      if (data.synthesizedResponse) {
+        console.log('🔍 Starting AI detection for generated response...');
+        console.log('📝 Response text preview:', data.synthesizedResponse.substring(0, 100) + '...');
+        setIsDetectingAI(true);
+        try {
+          console.log('📤 Calling detect-ai Edge Function with text length:', data.synthesizedResponse.length);
+          
+          let detectionData: any = null;
+          let detectionError: any = null;
+          
+          // Try using supabase.functions.invoke first
+          try {
+            console.log('🔄 Attempting to call via supabase.functions.invoke...');
+            const invokeResult = await supabase.functions.invoke('detect-ai', {
+              body: { text: data.synthesizedResponse }
+            });
+            detectionData = invokeResult.data;
+            detectionError = invokeResult.error;
+            console.log('📥 Invoke result:', { hasData: !!detectionData, hasError: !!detectionError });
+          } catch (invokeErr: any) {
+            console.warn('⚠️ supabase.functions.invoke failed, trying direct fetch:', invokeErr);
+            
+            // Fallback: Use direct fetch to Edge Function (same pattern as brand-analysis)
+            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+            const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+            
+            if (!supabaseUrl || !supabaseAnonKey) {
+              throw new Error('Supabase configuration missing. Check environment variables.');
+            }
+            
+            const edgeFunctionUrl = `${supabaseUrl}/functions/v1/detect-ai`;
+            console.log('🔄 Attempting direct fetch to Edge Function:', edgeFunctionUrl.replace(supabaseAnonKey, 'KEY_HIDDEN'));
+            
+            const fetchResponse = await fetch(edgeFunctionUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${supabaseAnonKey}`,
+              },
+              body: JSON.stringify({ text: data.synthesizedResponse })
+            });
+            
+            console.log('📥 Fetch response status:', fetchResponse.status, fetchResponse.statusText);
+            
+            if (!fetchResponse.ok) {
+              const errorText = await fetchResponse.text();
+              console.error('❌ Fetch error response:', errorText);
+              throw new Error(`Edge Function returned ${fetchResponse.status}: ${errorText.substring(0, 200)}`);
+            }
+            
+            detectionData = await fetchResponse.json();
+            console.log('✅ Fetch successful, got data:', { 
+              hasAiPercentage: !!detectionData?.aiPercentage,
+              aiPercentage: detectionData?.aiPercentage 
+            });
+          }
+          
+          console.log('📥 Final AI Detection Response:', { 
+            hasData: !!detectionData, 
+            hasError: !!detectionError,
+            error: detectionError,
+            aiPercentage: detectionData?.aiPercentage 
+          });
+          
+          if (detectionError) {
+            console.error('❌ AI detection error:', detectionError);
+            toast.error(`AI detection failed: ${detectionError.message || JSON.stringify(detectionError)}`);
+          } else if (detectionData) {
+            console.log('✅ AI detection successful:', {
+              aiPercentage: detectionData.aiPercentage,
+              topPhrasesCount: detectionData.topPhrases?.length || 0,
+              hasHighlightedHtml: !!detectionData.highlightedHtml
+            });
+            
+            setAiDetectionResults({
+              aiPercentage: detectionData.aiPercentage || 0,
+              highlightedHtml: detectionData.highlightedHtml || data.synthesizedResponse,
+              topPhrases: detectionData.topPhrases || [],
+              summary: detectionData.summary || '',
+              metrics: detectionData.metrics
+            });
+            
+            toast.success(`AI detection complete: ${detectionData.aiPercentage}% AI detected`);
+          } else {
+            console.warn('⚠️ AI detection returned no data and no error');
+            toast.error('AI detection returned no data');
+          }
+        } catch (detectionErr: any) {
+          console.error('❌ Error calling AI detection:', detectionErr);
+          console.error('❌ Error stack:', detectionErr?.stack);
+          toast.error(`AI detection error: ${detectionErr?.message || 'Unknown error'}. Check console for details.`);
+        } finally {
+          setIsDetectingAI(false);
+        }
+      } else {
+        console.warn('⚠️ No synthesized response to analyze');
+      }
     } catch (err) {
       console.error('Error generating optimized response:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate optimized response');
@@ -2899,10 +3008,153 @@ function ContentInner() {
                         </button>
                       </div>
                       <div className="p-4">
-                        <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
-                          {synthesizedResponse}
+                        {aiDetectionResults?.highlightedHtml ? (
+                          <div 
+                            className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap"
+                            dangerouslySetInnerHTML={{ __html: aiDetectionResults.highlightedHtml }}
+                          />
+                        ) : (
+                          <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
+                            {synthesizedResponse}
+                          </div>
+                        )}
+                        {/* CSS for AI detection highlights */}
+                        <style jsx>{`
+                          :global(.gltr-red) {
+                            background-color: #fee2e2;
+                            padding: 2px 4px;
+                            border-radius: 3px;
+                            cursor: help;
+                          }
+                          :global(.gltr-yellow) {
+                            background-color: #fef3c7;
+                            padding: 2px 4px;
+                            border-radius: 3px;
+                            cursor: help;
+                          }
+                          :global(.gltr-green) {
+                            background-color: #d1fae5;
+                            padding: 2px 4px;
+                            border-radius: 3px;
+                            cursor: help;
+                          }
+                        `}</style>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AI Detection Results - Displayed below the response */}
+                  {synthesizedResponse && (
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                      <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                              {isDetectingAI ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                  Analyzing AI Content...
+                                </>
+                              ) : aiDetectionResults ? (
+                                <>
+                                  <MessageSquare className="w-4 h-4 text-blue-600" />
+                                  AI Content Analysis
+                                </>
+                              ) : (
+                                <>
+                                  <MessageSquare className="w-4 h-4 text-gray-400" />
+                                  AI Detection
+                                </>
+                              )}
+                            </h3>
+                            {aiDetectionResults && (
+                              <p className="text-xs text-gray-600 mt-0.5">{aiDetectionResults.summary}</p>
+                            )}
+                          </div>
+                          {aiDetectionResults && (
+                            <div className="flex items-center gap-2">
+                              <div className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                                aiDetectionResults.aiPercentage >= 70 
+                                  ? 'bg-red-100 text-red-700' 
+                                  : aiDetectionResults.aiPercentage >= 40
+                                  ? 'bg-yellow-100 text-yellow-700'
+                                  : 'bg-green-100 text-green-700'
+                              }`}>
+                                {aiDetectionResults.aiPercentage}% AI
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
+                      
+                      {aiDetectionResults && (
+                        <div className="p-4 space-y-4">
+                          {/* Metrics Summary */}
+                          {aiDetectionResults.metrics && (
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div className="text-center p-2 bg-gray-50 rounded-lg">
+                                <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.burstiness?.toFixed(1) || 'N/A'}</div>
+                                <div className="text-xs text-gray-600">Burstiness</div>
+                              </div>
+                              <div className="text-center p-2 bg-gray-50 rounded-lg">
+                                <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.clichés || 0}</div>
+                                <div className="text-xs text-gray-600">Clichés</div>
+                              </div>
+                              <div className="text-center p-2 bg-gray-50 rounded-lg">
+                                <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.avgSentenceLength || 0}</div>
+                                <div className="text-xs text-gray-600">Avg Sentence</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Top Detected Phrases */}
+                          {aiDetectionResults.topPhrases && aiDetectionResults.topPhrases.length > 0 && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                                Detected AI Phrases ({aiDetectionResults.topPhrases.length})
+                              </h4>
+                              <div className="space-y-2 max-h-48 overflow-y-auto">
+                                {aiDetectionResults.topPhrases.slice(0, 10).map((phrase, idx) => (
+                                  <div 
+                                    key={idx} 
+                                    className="p-2 bg-gray-50 rounded border border-gray-200 text-sm"
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <span className="text-gray-700 flex-1">"{phrase.phrase}"</span>
+                                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                        phrase.confidence >= 90 
+                                          ? 'bg-red-100 text-red-700' 
+                                          : phrase.confidence >= 75
+                                          ? 'bg-yellow-100 text-yellow-700'
+                                          : 'bg-green-100 text-green-700'
+                                      }`}>
+                                        {phrase.confidence}%
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1">{phrase.reason}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Legend for Highlighted Text */}
+                          <div className="flex items-center gap-4 text-xs text-gray-600 pt-2 border-t border-gray-200">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 bg-red-200 rounded"></span>
+                              <span>High AI (90%+)</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 bg-yellow-200 rounded"></span>
+                              <span>Medium AI (75-89%)</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 bg-green-200 rounded"></span>
+                              <span>Low AI (60-74%)</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
