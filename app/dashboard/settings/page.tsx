@@ -1091,7 +1091,7 @@ function RedditIntegrationSettings() {
       if (response.ok) {
         toast.success("Reddit integration disconnected");
         setIsConnected(false);
-        setConfig({ clientId: "", clientSecret: "", accessToken: "", username: "" });
+        setUsername("");
       } else {
         const data = await response.json();
         toast.error(data.error || "Failed to disconnect");
