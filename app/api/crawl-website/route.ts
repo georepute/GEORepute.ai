@@ -12,9 +12,11 @@ try {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
+// Get crawler service URL from environment variable
+// If set, use external service (production). If not, use local Playwright (development)
+const CRAWLER_SERVICE_URL = process.env.CRAWLER_SERVICE_URL;
+
 export async function POST(request: NextRequest) {
-  let browser: any = null;
-  
   try {
     const { url } = await request.json();
 
@@ -31,6 +33,83 @@ export async function POST(request: NextRequest) {
       normalizedUrl = 'https://' + normalizedUrl;
     }
 
+    // If CRAWLER_SERVICE_URL is set, use external service (production)
+    if (CRAWLER_SERVICE_URL) {
+      console.log(`🌐 Using external crawler service: ${CRAWLER_SERVICE_URL}/crawl`);
+      console.log(`📝 Target URL: ${normalizedUrl}`);
+
+      const crawlResponse = await fetch(`${CRAWLER_SERVICE_URL}/crawl`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: normalizedUrl }),
+      });
+
+      if (!crawlResponse.ok) {
+        const errorText = await crawlResponse.text();
+        console.error(`❌ Crawler service error (${crawlResponse.status}):`, errorText);
+        return NextResponse.json(
+          { 
+            error: `Crawler service error: ${crawlResponse.status} - ${errorText.substring(0, 200)}`,
+            success: false 
+          },
+          { status: crawlResponse.status }
+        );
+      }
+
+      const crawlData = await crawlResponse.json();
+      
+      if (!crawlData.success) {
+        console.error('❌ Crawler service returned error:', crawlData.error);
+        return NextResponse.json(
+          { 
+            error: crawlData.error || 'Failed to crawl website',
+            success: false 
+          },
+          { status: 500 }
+        );
+      }
+
+      console.log('✅ Crawler service success:', {
+        hasDescription: !!crawlData.description,
+        hasImageUrl: !!crawlData.imageUrl,
+        descriptionLength: crawlData.description?.length || 0,
+      });
+
+      // Return the data in the same format expected by the frontend
+      return NextResponse.json({
+        success: true,
+        description: crawlData.description || '',
+        imageUrl: crawlData.imageUrl || null,
+        metadata: crawlData.metadata || {
+          title: crawlData.title || '',
+          metaDescription: crawlData.metaDescription || '',
+          ogDescription: crawlData.ogDescription || '',
+        },
+      });
+    }
+
+    // Local development: Use Playwright directly
+    console.log(`🏠 Using local Playwright crawler: ${normalizedUrl}`);
+    return await crawlWithPlaywright(normalizedUrl);
+  } catch (error: any) {
+    console.error('Error crawling website:', error);
+    return NextResponse.json(
+      { 
+        error: error.message || 'Failed to crawl website',
+        success: false 
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// Local Playwright crawler function (for development)
+async function crawlWithPlaywright(normalizedUrl: string) {
+  let browser: any = null;
+  
+  try {
     console.log(`Crawling website with Playwright: ${normalizedUrl}`);
 
     // Launch Playwright browser to bypass Cloudflare and bot protection
@@ -260,7 +339,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error('Error crawling website:', error);
+    console.error('Error crawling website with Playwright:', error);
     return NextResponse.json(
       { 
         error: error.message || 'Failed to crawl website',

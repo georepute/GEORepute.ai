@@ -6,7 +6,8 @@
 export interface RedditConfig {
   clientId: string;
   clientSecret: string;
-  accessToken: string; // Use access token directly instead of refresh token
+  accessToken: string;
+  refreshToken?: string; // Optional refresh token for automatic renewal
   username?: string;
 }
 
@@ -26,8 +27,47 @@ export interface RedditPublishResult {
 }
 
 /**
- * Get Reddit access token - use directly from config
- * Note: Access tokens expire after ~1 hour, so you'll need to get a new one periodically
+ * Refresh Reddit access token using refresh token
+ */
+export async function refreshRedditToken(
+  clientId: string,
+  clientSecret: string,
+  refreshToken: string
+): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number }> {
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  
+  const tokenUrl = "https://www.reddit.com/api/v1/access_token";
+  const tokenParams = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Basic ${credentials}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "web:GeoRepute.ai:1.0.0 (by /u/georepute)",
+    },
+    body: tokenParams.toString(),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to refresh Reddit token: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json();
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || refreshToken, // Reddit may return new refresh token
+    expiresIn: data.expires_in || 3600,
+  };
+}
+
+/**
+ * Get Reddit access token - use directly from config or refresh if needed
+ * Note: Access tokens expire after ~1 hour, refresh tokens can be used to get new ones
  */
 async function getAccessToken(config: RedditConfig): Promise<string> {
   // Validate inputs
@@ -35,7 +75,9 @@ async function getAccessToken(config: RedditConfig): Promise<string> {
     throw new Error("Missing required Reddit access token");
   }
 
-  // Return the access token directly (no refresh needed)
+  // Return the access token directly
+  // Note: In production, you might want to check expiration and refresh automatically
+  // For now, we'll rely on the orchestrator to handle token refresh when needed
   const trimmedToken = config.accessToken.trim();
   
   if (!trimmedToken) {
