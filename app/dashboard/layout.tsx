@@ -31,6 +31,7 @@ import {
   Zap,
   Globe,
   Brain,
+  Database,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -44,7 +45,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<string[]>(['Analytics']); // Track expanded parent items
+  const [expandedItems, setExpandedItems] = useState<string[]>(['Digital Assets Hub', 'Analytics']); // Track expanded parent items
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { role, capabilities, loading: permissionsLoading } = usePermissions();
@@ -106,6 +107,14 @@ export default function DashboardLayout({
     // { name: "Reputation", href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
     // { name: "Leads", href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
     // { name: "AdSync", href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },
+    { 
+      name: "Digital Assets Hub", 
+      icon: Database, 
+      requiredCapability: "canViewAnalytics",
+      children: [
+        { name: "Google search console", href: "/dashboard/google-search-console", icon: Search, requiredCapability: "canViewAnalytics" },
+      ]
+    },
     { 
       name: "Analytics", 
       icon: BarChart3, 

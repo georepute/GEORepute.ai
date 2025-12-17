@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
-import { Copy, Check, AlertCircle, Trash2, RefreshCw, ExternalLink, X } from 'lucide-react';
+import { Copy, Check, AlertCircle, Trash2, RefreshCw, ExternalLink, X, BarChart3 } from 'lucide-react';
 
 interface Domain {
   id: string;
@@ -26,6 +27,7 @@ interface Integration {
 }
 
 export default function GoogleSearchConsolePage() {
+  const router = useRouter();
   const [isConnected, setIsConnected] = useState(false);
   const [integration, setIntegration] = useState<Integration | null>(null);
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -532,14 +534,23 @@ export default function GoogleSearchConsolePage() {
                           )}
                           
                           {domain.verification_status === 'verified' && (
-                            <button
-                              onClick={() => syncAnalytics(domain.id)}
-                              disabled={loading}
-                              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
-                            >
-                              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                              Sync Data
-                            </button>
+                            <>
+                              <button
+                                onClick={() => router.push(`/dashboard/gsc-analytics?domainId=${domain.id}`)}
+                                className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-2"
+                              >
+                                <BarChart3 className="w-4 h-4" />
+                                View Analytics
+                              </button>
+                              <button
+                                onClick={() => syncAnalytics(domain.id)}
+                                disabled={loading}
+                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                              >
+                                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                                Sync Data
+                              </button>
+                            </>
                           )}
                           
                           <button
