@@ -134,6 +134,12 @@ function ContentInner() {
   } | null>(null);
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
 
+  // Humanization State
+  const [isHumanizing, setIsHumanizing] = useState(false);
+  const [humanizedResponse, setHumanizedResponse] = useState<string | null>(null);
+  const [originalResponse, setOriginalResponse] = useState<string | null>(null);
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
+
   // PDCA Loop: Performance Tracking & Optimization State
   const [showPerformanceModal, setShowPerformanceModal] = useState(false);
   const [performanceContentId, setPerformanceContentId] = useState<string | null>(null);
@@ -841,7 +847,12 @@ function ContentInner() {
 
     setIsGenerating(true);
     setError(null);
-    setSynthesizedResponse(null);
+      setSynthesizedResponse(null);
+      // Reset humanization state
+      setHumanizedResponse(null);
+      setOriginalResponse(null);
+      setShowComparisonModal(false);
+      setAiDetectionResults(null);
     setAiDetectionResults(null); // Reset AI detection results
 
     try {
@@ -999,15 +1010,141 @@ function ContentInner() {
     }
   };
 
+  const handleMakeItHuman = async () => {
+    if (!synthesizedResponse || !aiDetectionResults) {
+      toast.error('No content to humanize');
+      return;
+    }
+
+    setIsHumanizing(true);
+    try {
+      // Extract detected phrases for the Edge Function
+      const detectedPhrases = aiDetectionResults.topPhrases?.map(p => p.phrase) || [];
+      
+      console.log('🤖 Starting humanization...', {
+        textLength: synthesizedResponse.length,
+        detectedPhrasesCount: detectedPhrases.length
+      });
+
+      // Store original response for comparison
+      if (!originalResponse) {
+        setOriginalResponse(synthesizedResponse);
+      }
+
+      // Try using supabase.functions.invoke first
+      let humanizedData: any = null;
+      let humanizeError: any = null;
+
+      try {
+        console.log('🔄 Attempting to call make-it-human via supabase.functions.invoke...');
+        const invokeResult = await supabase.functions.invoke('make-it-human', {
+          body: {
+            text: synthesizedResponse,
+            detectedPhrases: detectedPhrases,
+            passes: 5
+          }
+        });
+        humanizedData = invokeResult.data;
+        humanizeError = invokeResult.error;
+        console.log('📥 Invoke result:', { hasData: !!humanizedData, hasError: !!humanizeError });
+      } catch (invokeErr: any) {
+        console.warn('⚠️ supabase.functions.invoke failed, trying direct fetch:', invokeErr);
+        
+        // Fallback: Use direct fetch to Edge Function
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+        
+        if (!supabaseUrl || !supabaseAnonKey) {
+          throw new Error('Supabase configuration missing. Check environment variables.');
+        }
+        
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/make-it-human`;
+        console.log('🔄 Attempting direct fetch to Edge Function:', edgeFunctionUrl.replace(supabaseAnonKey, 'KEY_HIDDEN'));
+        
+        const fetchResponse = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            text: synthesizedResponse,
+            detectedPhrases: detectedPhrases,
+            passes: 5
+          })
+        });
+        
+        console.log('📥 Fetch response status:', fetchResponse.status, fetchResponse.statusText);
+        
+        if (!fetchResponse.ok) {
+          const errorText = await fetchResponse.text();
+          console.error('❌ Fetch error response:', errorText);
+          throw new Error(`Edge Function returned ${fetchResponse.status}: ${errorText.substring(0, 200)}`);
+        }
+        
+        humanizedData = await fetchResponse.json();
+        console.log('✅ Fetch successful, got humanized data');
+      }
+
+      if (humanizeError) {
+        console.error('❌ Humanization error:', humanizeError);
+        toast.error(`Humanization failed: ${humanizeError.message || JSON.stringify(humanizeError)}`);
+      } else if (humanizedData && humanizedData.humanVersion) {
+        console.log('✅ Humanization successful:', {
+          originalLength: humanizedData.length?.original,
+          humanizedLength: humanizedData.length?.humanized,
+          phrasesRemoved: humanizedData.detectedPhrasesRemoved
+        });
+        
+        setHumanizedResponse(humanizedData.humanVersion);
+        setShowComparisonModal(true); // Open comparison modal
+        toast.success(`Content humanized! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
+      } else {
+        console.warn('⚠️ Humanization returned no data');
+        toast.error('Humanization returned no data');
+      }
+    } catch (err: any) {
+      console.error('❌ Error calling humanization:', err);
+      toast.error(`Humanization error: ${err?.message || 'Unknown error'}. Check console for details.`);
+    } finally {
+      setIsHumanizing(false);
+    }
+  };
+
+  const handleUseHumanized = () => {
+    if (humanizedResponse) {
+      setSynthesizedResponse(humanizedResponse);
+      setAiDetectionResults(null); // Reset AI detection since content is now humanized
+      setShowComparisonModal(false); // Close comparison modal
+      setOriginalResponse(null); // Clear original since we're using humanized
+      setHumanizedResponse(null); // Clear humanized since we've applied it
+      toast.success('Using humanized version');
+    }
+  };
+
+  const handleRevertToOriginal = () => {
+    if (originalResponse) {
+      setSynthesizedResponse(originalResponse);
+      setHumanizedResponse(null);
+      setShowComparisonModal(false); // Close comparison modal
+      setOriginalResponse(null); // Clear since we're reverting
+      setAiDetectionResults(null); // Remove AI detection banner
+      toast.success('Reverted to original version');
+    }
+  };
+
   const handleApproveContent = () => {
-    if (!synthesizedResponse || !editData) return;
+    // Use humanized response if available, otherwise use synthesized response
+    const contentToApprove = humanizedResponse || synthesizedResponse;
+    
+    if (!contentToApprove || !editData) return;
 
     // Store content data for next modal (Image Selection)
     const publicationData = {
       responses: [{
         id: `synth-${Date.now()}`,
         prompt: editedPrompt,
-        response: synthesizedResponse,
+        response: contentToApprove,
         platform: 'synthesized',
         response_metadata: {
           brand_mentioned: true,
@@ -2725,13 +2862,17 @@ function ContentInner() {
                   Edit prompt, select brand voice, and generate optimized content
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  setShowContentModal(false);
-                  router.push('/dashboard/content');
-                }}
-                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-              >
+                  <button
+                    onClick={() => {
+                      setShowContentModal(false);
+                      // Reset humanization state
+                      setHumanizedResponse(null);
+                      setOriginalResponse(null);
+                      setShowComparisonModal(false);
+                      router.push('/dashboard/content');
+                    }}
+                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -3044,7 +3185,7 @@ function ContentInner() {
                   )}
 
                   {/* AI Detection Results - Displayed below the response */}
-                  {synthesizedResponse && (
+                  {(isDetectingAI || aiDetectionResults) && synthesizedResponse && (
                     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                       <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200">
                         <div className="flex items-center justify-between">
@@ -3153,10 +3294,32 @@ function ContentInner() {
                               <span>Low AI (60-74%)</span>
                             </div>
                           </div>
+
+                          {/* Make it Human Button */}
+                          <div className="pt-4 border-t border-gray-200 mt-4">
+                            <button
+                              onClick={handleMakeItHuman}
+                              disabled={isHumanizing}
+                              className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {isHumanizing ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  Humanizing Content...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-4 h-4" />
+                                  Make it Human
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
                   )}
+
                 </div>
               </div>
             </div>
@@ -3171,6 +3334,10 @@ function ContentInner() {
                   <button
                     onClick={() => {
                       setShowContentModal(false);
+                      // Reset humanization state
+                      setHumanizedResponse(null);
+                      setOriginalResponse(null);
+                      setShowComparisonModal(false);
                       router.push('/dashboard/content');
                     }}
                     className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
@@ -3366,6 +3533,90 @@ function ContentInner() {
                       Confirm
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comparison Modal: Original vs Humanized */}
+      {showComparisonModal && originalResponse && humanizedResponse && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
+                  <Sparkles className="w-5 h-5 text-purple-600" />
+                  Comparison: Original vs Humanized
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Review both versions side-by-side and choose which one to use
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowComparisonModal(false);
+                }}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <div className="grid grid-cols-2 gap-0 border-t border-gray-200 flex-1 overflow-hidden">
+                {/* Original Version */}
+                <div className="border-r border-gray-200 flex flex-col overflow-hidden">
+                  <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-gray-900">Original Version</h4>
+                      <span className="text-xs text-gray-500 px-2 py-1 bg-gray-200 rounded">
+                        {aiDetectionResults?.aiPercentage || 0}% AI
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-4 overflow-y-auto flex-1">
+                    <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
+                      {originalResponse}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Humanized Version */}
+                <div className="flex flex-col overflow-hidden">
+                  <div className="px-4 py-3 bg-green-50 border-b border-gray-200 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                        Humanized Version
+                        <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-medium">
+                          New
+                        </span>
+                      </h4>
+                    </div>
+                  </div>
+                  <div className="p-4 overflow-y-auto flex-1">
+                    <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
+                      {humanizedResponse}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-3 flex-shrink-0">
+                <button
+                  onClick={handleRevertToOriginal}
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                >
+                  Use Original
+                </button>
+                <button
+                  onClick={handleUseHumanized}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center gap-2 text-sm font-medium"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Use Humanized
                 </button>
               </div>
             </div>

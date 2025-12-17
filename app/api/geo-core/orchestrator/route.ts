@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import { publishToGitHub, GitHubConfig } from "@/lib/integrations/github";
-import { publishToReddit, RedditConfig } from "@/lib/integrations/reddit";
+import { publishToReddit, RedditConfig, refreshRedditToken } from "@/lib/integrations/reddit";
 import { publishToMedium, MediumConfig } from "@/lib/integrations/medium";
 import { publishToQuora, QuoraConfig } from "@/lib/integrations/quora";
 import { publishToFacebook, FacebookConfig } from "@/lib/integrations/facebook";
@@ -433,16 +433,60 @@ export async function POST(request: NextRequest) {
                     clientId: redditIntegration.metadata?.clientId || "",
                     clientSecret: redditIntegration.metadata?.clientSecret || "",
                     accessToken: redditIntegration.access_token || "",
+                    refreshToken: redditIntegration.refresh_token || undefined,
                     username: redditIntegration.platform_username || redditIntegration.platform_user_id || "",
                     verified: redditIntegration.status === "connected",
+                    expiresAt: redditIntegration.expires_at || null,
                   }
                 : null;
 
               if (redditConfig && redditConfig.clientId && redditConfig.clientSecret && redditConfig.accessToken) {
+                // Check if access token is expired and refresh if needed
+                let accessToken = redditConfig.accessToken;
+                let refreshToken = redditConfig.refreshToken;
+                
+                if (redditConfig.expiresAt && redditConfig.refreshToken) {
+                  const expiresAt = new Date(redditConfig.expiresAt);
+                  const now = new Date();
+                  const timeUntilExpiry = expiresAt.getTime() - now.getTime();
+                  
+                  // Refresh if token expires in less than 5 minutes
+                  if (timeUntilExpiry < 5 * 60 * 1000) {
+                    try {
+                      console.log("🔄 Reddit access token expiring soon, refreshing...");
+                      const refreshed = await refreshRedditToken(
+                        redditConfig.clientId,
+                        redditConfig.clientSecret,
+                        redditConfig.refreshToken
+                      );
+                      
+                      accessToken = refreshed.accessToken;
+                      refreshToken = refreshed.refreshToken || redditConfig.refreshToken;
+                      
+                      // Update the integration with new tokens
+                      const newExpiresAt = new Date(Date.now() + refreshed.expiresIn * 1000).toISOString();
+                      await supabase
+                        .from("platform_integrations")
+                        .update({
+                          access_token: accessToken,
+                          refresh_token: refreshToken,
+                          expires_at: newExpiresAt,
+                        })
+                        .eq("id", redditIntegration.id);
+                      
+                      console.log("✅ Reddit token refreshed successfully");
+                    } catch (refreshError: any) {
+                      console.error("❌ Failed to refresh Reddit token:", refreshError);
+                      // Continue with existing token, might still work
+                    }
+                  }
+                }
+                
                 const redditPublishConfig: RedditConfig = {
                   clientId: redditConfig.clientId,
                   clientSecret: redditConfig.clientSecret,
-                  accessToken: redditConfig.accessToken,
+                  accessToken: accessToken,
+                  refreshToken: refreshToken,
                   username: redditConfig.username || undefined,
                 };
 
