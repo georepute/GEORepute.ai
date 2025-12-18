@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Minus, MousePointerClick, Eye, ExternalLink, Search, Globe } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -66,6 +67,7 @@ interface SearchAppearance {
 }
 
 export default function GSCAnalyticsPage() {
+  const searchParams = useSearchParams();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState('');
   const [analytics, setAnalytics] = useState<AnalyticsData[]>([]);
@@ -98,7 +100,14 @@ export default function GSCAnalyticsPage() {
       const verifiedDomains = data.domains?.filter((d: Domain) => d.verification_status === 'verified') || [];
       setDomains(verifiedDomains);
       
-      if (verifiedDomains.length > 0 && !selectedDomain) {
+      // Check if domainId is in URL query params
+      const domainIdFromUrl = searchParams.get('domainId');
+      
+      if (domainIdFromUrl && verifiedDomains.some((d: Domain) => d.id === domainIdFromUrl)) {
+        // If valid domainId in URL, select it
+        setSelectedDomain(domainIdFromUrl);
+      } else if (verifiedDomains.length > 0 && !selectedDomain) {
+        // Otherwise select first domain
         setSelectedDomain(verifiedDomains[0].id);
       }
     } catch (error) {
@@ -307,6 +316,7 @@ export default function GSCAnalyticsPage() {
       });
 
       // Sync search appearance data
+      // Note: searchAppearance cannot be combined with other dimensions per GSC API restrictions
       const appearanceResponse = await fetch('/api/integrations/google-search-console/analytics/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -314,7 +324,7 @@ export default function GSCAnalyticsPage() {
           domainId: selectedDomain,
           startDate: getDateDaysAgo(7),
           endDate: getDateDaysAgo(0),
-          dimensions: ['date', 'searchAppearance'],
+          dimensions: ['searchAppearance'],
         }),
       });
 
