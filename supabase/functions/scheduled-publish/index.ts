@@ -565,8 +565,10 @@ Deno.serve(async (req) => {
 
               if (linkedInResponse.ok && linkedInData.id) {
                 const postId = linkedInData.id;
+                // Use full URN format with trailing slash (required by LinkedIn)
+                // Format: https://www.linkedin.com/feed/update/{fullUrn}/
                 const url = postId 
-                  ? `https://www.linkedin.com/feed/update/${postId.replace('urn:li:ugcPost:', '')}`
+                  ? `https://www.linkedin.com/feed/update/${postId}/`
                   : undefined;
 
                 publishUrl = url;

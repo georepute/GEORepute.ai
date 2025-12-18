@@ -1183,6 +1183,7 @@ export async function POST(request: NextRequest) {
                 success: linkedInResult.success,
                 url: linkedInResult.url,
                 postId: linkedInResult.postId,
+                authorUrn: linkedInResult.authorUrn || linkedInIntegration?.metadata?.personUrn || linkedInIntegration?.platform_user_id, // Store author URN for metrics validation
                 error: linkedInResult.error,
               } : null,
             },
