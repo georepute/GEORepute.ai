@@ -311,12 +311,12 @@ export async function POST(request: NextRequest) {
               });
 
               // Discussions don't use labels, but will automatically select "General" category or first available
-              // Include schema in GitHub content (GitHub supports HTML in Markdown)
+              // Strip schema from content - schema should only be on website, not in GitHub Discussions
               let githubContent = contentStrategy.generated_content || "";
-              if (schemaData?.scriptTags) {
-                githubContent += `\n\n<!-- SEO Schema (JSON-LD) - Automatically Generated -->\n${schemaData.scriptTags}`;
-                console.log("✅ Schema Automation: Schema included in GitHub post");
-              }
+              // Remove any schema script tags that might be in the content
+              githubContent = githubContent.replace(/<script[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, "").trim();
+              // Remove any HTML comments related to schema
+              githubContent = githubContent.replace(/<!--\s*SEO Schema.*?-->/gis, "").trim();
               
               gitHubResult = await publishToGitHub(gitHubPublishConfig, {
                 title: contentStrategy.topic || "Untitled",
@@ -1394,12 +1394,12 @@ export async function POST(request: NextRequest) {
               };
 
               // Discussions don't use labels, but will automatically select "General" category or first available
-              // Include schema in GitHub content (GitHub supports HTML in Markdown)
+              // Strip schema from content - schema should only be on website, not in GitHub Discussions
               let githubContent = contentStrategy.generated_content || "";
-              if (schemaData?.scriptTags) {
-                githubContent += `\n\n<!-- SEO Schema (JSON-LD) - Automatically Generated -->\n${schemaData.scriptTags}`;
-                console.log("✅ Schema Automation: Schema included in GitHub post");
-              }
+              // Remove any schema script tags that might be in the content
+              githubContent = githubContent.replace(/<script[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, "").trim();
+              // Remove any HTML comments related to schema
+              githubContent = githubContent.replace(/<!--\s*SEO Schema.*?-->/gis, "").trim();
               
               gitHubResult = await publishToGitHub(gitHubPublishConfig, {
                 title: contentStrategy.topic || "Untitled",

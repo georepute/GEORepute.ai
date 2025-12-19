@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
       branch: integration.metadata?.branch || "main",
       verified: integration.status === "connected",
       username: integration.platform_username || integration.platform_user_id || "",
+      metadata: integration.metadata || {}, // Include full metadata (repositories, etc.)
     };
 
     return NextResponse.json(
@@ -294,6 +295,107 @@ export async function PUT(request: NextRequest) {
     );
   } catch (error: any) {
     console.error("GitHub test error:", error);
+    return NextResponse.json(
+      { error: error.message || "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const supabase = createRouteHandlerClient({ cookies });
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { owner, repo, branch } = body;
+
+    if (!owner || !repo) {
+      return NextResponse.json(
+        { error: "Missing required fields: owner, repo" },
+        { status: 400 }
+      );
+    }
+
+    // Get existing integration
+    const { data: existingIntegration, error: fetchError } = await supabase
+      .from("platform_integrations")
+      .select("*")
+      .eq("user_id", session.user.id)
+      .eq("platform", "github")
+      .maybeSingle();
+
+    if (fetchError || !existingIntegration) {
+      return NextResponse.json(
+        { error: "GitHub integration not found. Please connect your GitHub account first." },
+        { status: 404 }
+      );
+    }
+
+    // Verify repository access with existing token
+    const gitHubConfig: GitHubConfig = {
+      token: existingIntegration.access_token,
+      owner,
+      repo,
+      branch: branch || "main",
+    };
+
+    const verification = await verifyGitHubConfig(gitHubConfig);
+    
+    if (!verification.success) {
+      return NextResponse.json(
+        { error: verification.error || "Failed to verify repository access" },
+        { status: 400 }
+      );
+    }
+
+    // Update metadata with new repository
+    const updatedMetadata = {
+      ...existingIntegration.metadata,
+      owner,
+      repo,
+      branch: branch || "main",
+      verified: true,
+      verified_at: new Date().toISOString(),
+    };
+
+    const { data: updatedIntegration, error: updateError } = await supabase
+      .from("platform_integrations")
+      .update({
+        metadata: updatedMetadata,
+        platform_user_id: owner, // Update owner if changed
+        last_used_at: new Date().toISOString(),
+      })
+      .eq("id", existingIntegration.id)
+      .eq("user_id", session.user.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      console.error("Update error:", updateError);
+      throw updateError;
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Repository updated successfully",
+        config: {
+          owner,
+          repo,
+          branch: branch || "main",
+        },
+      },
+      { status: 200 }
+    );
+  } catch (error: any) {
+    console.error("GitHub PATCH error:", error);
     return NextResponse.json(
       { error: error.message || "Internal server error" },
       { status: 500 }
