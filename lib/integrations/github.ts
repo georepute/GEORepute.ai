@@ -103,11 +103,21 @@ export async function publishToGitHub(
 
 /**
  * Format content as markdown for GitHub Discussion
- * Returns only the content without metadata
+ * Returns only the content without metadata or schema
  */
 function formatAsMarkdown(content: PublishContent): string {
-  // Return only the content, no metadata
-  return content.content;
+  let markdown = content.content || "";
+  
+  // Remove any schema script tags (JSON-LD) - schema should only be on website, not in GitHub
+  markdown = markdown.replace(/<script[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, "").trim();
+  
+  // Remove any HTML comments related to schema
+  markdown = markdown.replace(/<!--\s*SEO Schema.*?-->/gis, "").trim();
+  
+  // Remove any other schema-related HTML comments
+  markdown = markdown.replace(/<!--\s*Schema.*?-->/gis, "").trim();
+  
+  return markdown;
 }
 
 /**

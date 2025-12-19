@@ -230,7 +230,15 @@ Deno.serve(async (req) => {
                         repositoryId: repositoryId,
                         categoryId: categoryId,
                         title: content.topic || "Untitled",
-                        body: content.generated_content || "",
+                        body: (() => {
+                          // Strip schema from content - schema should only be on website, not in GitHub Discussions
+                          let githubContent = content.generated_content || "";
+                          // Remove any schema script tags (JSON-LD)
+                          githubContent = githubContent.replace(/<script[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, "").trim();
+                          // Remove any HTML comments related to schema
+                          githubContent = githubContent.replace(/<!--\s*SEO Schema.*?-->/gis, "").trim();
+                          return githubContent;
+                        })(),
                       },
                     },
                   }),
@@ -565,8 +573,10 @@ Deno.serve(async (req) => {
 
               if (linkedInResponse.ok && linkedInData.id) {
                 const postId = linkedInData.id;
+                // Use full URN format with trailing slash (required by LinkedIn)
+                // Format: https://www.linkedin.com/feed/update/{fullUrn}/
                 const url = postId 
-                  ? `https://www.linkedin.com/feed/update/${postId.replace('urn:li:ugcPost:', '')}`
+                  ? `https://www.linkedin.com/feed/update/${postId}/`
                   : undefined;
 
                 publishUrl = url;

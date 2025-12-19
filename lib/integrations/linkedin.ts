@@ -24,6 +24,7 @@ export interface LinkedInPublishResult {
   success: boolean;
   url?: string;
   postId?: string;
+  authorUrn?: string; // Person URN of the post author (for validation)
   error?: string;
 }
 
@@ -374,14 +375,13 @@ export async function publishToLinkedIn(
     console.log(`   Type: ${postType}`);
     
     // Construct LinkedIn post URL
-    // Format: https://www.linkedin.com/feed/update/{postId}
-    // Note: LinkedIn doesn't always return a direct URL, so we'll construct it
+    // Format: https://www.linkedin.com/feed/update/{fullUrn}/
+    // Note: LinkedIn requires the full URN format (urn:li:ugcPost:xxxxx or urn:li:share:xxxxx) with trailing slash
     // Handle both UGC Post IDs (urn:li:ugcPost:xxxxx) and Share IDs (urn:li:share:xxxxx)
     let url: string | undefined;
     if (postId) {
-      // Extract numeric ID from URN format
-      const numericId = postId.replace('urn:li:ugcPost:', '').replace('urn:li:share:', '');
-      url = `https://www.linkedin.com/feed/update/${numericId}`;
+      // Use full URN format with trailing slash (required by LinkedIn)
+      url = `https://www.linkedin.com/feed/update/${postId}/`;
     }
 
     console.log(`   URL: ${url}`);
@@ -390,6 +390,7 @@ export async function publishToLinkedIn(
       success: true,
       url,
       postId,
+      authorUrn: personUrn, // Store author URN for validation when fetching metrics
     };
   } catch (error: any) {
     console.error('LinkedIn publish error:', error);

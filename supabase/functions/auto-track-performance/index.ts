@@ -37,145 +37,162 @@ interface LinkedInMetrics {
  */
 async function fetchLinkedInMetrics(
   ugcPostId: string,
-  accessToken: string
+  accessToken: string,
+  authorUrn?: string,
+  tokenAuthorUrn?: string
 ): Promise<LinkedInMetrics> {
   try {
     console.log(`📊 Fetching LinkedIn metrics for Post ID: ${ugcPostId}`);
 
-    // Handle different LinkedIn post ID formats:
-    // - urn:li:ugcPost:xxxxx (UGC Posts created via API)
-    // - urn:li:share:xxxxx (Regular shares/posts)
-    // - Plain numeric ID (format as UGC Post)
+    // ✅ 1️⃣ ONLY support UGC posts (hard rule)
+    // Extract URN from URL if needed, then validate
     let postId = ugcPostId.trim();
     
-    if (postId.startsWith('urn:li:ugcPost:') || postId.startsWith('urn:li:share:')) {
-      // Already in correct URN format - use as-is
-      console.log(`✅ Post ID is already in URN format: ${postId}`);
+    // Extract URN from LinkedIn URL if it's a full URL
+    if (postId.includes('linkedin.com/feed/update/')) {
+      const urlMatch = postId.match(/linkedin\.com\/feed\/update\/(urn:li:(?:ugcPost|share):[^\/]+)/);
+      if (urlMatch && urlMatch[1]) {
+        postId = urlMatch[1];
+        console.log(`📋 Extracted URN from URL: ${postId}`);
+      } else {
+        const numericMatch = postId.match(/linkedin\.com\/feed\/update\/(\d+)/);
+        if (numericMatch && numericMatch[1]) {
+          postId = `urn:li:ugcPost:${numericMatch[1]}`;
+          console.log(`📋 Extracted numeric ID from URL and formatted as UGC Post URN: ${postId}`);
+        }
+      }
     } else if (postId && !postId.includes(':')) {
-      // Plain numeric ID - format as UGC Post (default assumption)
+      // Plain numeric ID - format as UGC Post
       postId = `urn:li:ugcPost:${postId}`;
       console.log(`📋 Formatted plain ID to UGC Post URN: ${postId}`);
+    }
+
+    // HARD RULE: Only UGC posts are supported
+    if (!postId.startsWith("urn:li:ugcPost:")) {
+      throw new Error(
+        "LinkedIn metrics are only available for UGC posts created via API. Share posts (urn:li:share:) cannot be tracked."
+      );
+    }
+
+    console.log(`✅ Validated UGC Post ID: ${postId}`);
+
+    // ✅ 4️⃣ Ensure token owner = post author
+    if (authorUrn && tokenAuthorUrn) {
+      if (tokenAuthorUrn !== authorUrn) {
+        throw new Error(
+          `Access token does not belong to post author. Token owner: ${tokenAuthorUrn}, Post author: ${authorUrn}`
+        );
+      }
+      console.log(`✅ Token owner matches post author: ${authorUrn}`);
     } else {
-      // Unknown format - try to use as-is, but log a warning
-      console.warn(`⚠️ Unknown LinkedIn post ID format: ${ugcPostId}. Attempting to use as-is.`);
-      // Don't throw error - let the API call determine if it's valid
+      console.warn(`⚠️ Author URN validation skipped (authorUrn or tokenAuthorUrn not provided)`);
     }
 
-    // Fetch social actions (likes, comments, shares) using Social Actions API
-    // Note: Social Actions API typically works with urn:li:ugcPost:xxxxx
-    // Share posts (urn:li:share:xxxxx) may not be accessible via Social Actions API
-    const isSharePost = postId.startsWith('urn:li:share:');
-    const isUgcPost = postId.startsWith('urn:li:ugcPost:');
+    // Note: LinkedIn metrics may take time to populate after posting
+    // If metrics return 0, they may not be available yet (try again later)
+
+    // Fetch social actions (likes, comments) using Social Actions REST API
+    // Note: w_member_social scope allows reading social actions for posts created via UGC Posts API
+    // Use separate REST API endpoints for each metric type
     
-    console.log(`📊 Post ID type: ${isUgcPost ? 'UGC Post' : isSharePost ? 'Share' : 'Unknown'}`);
+    // Use REST API endpoints (not v2) - separate calls for each metric type
+    const encodedPostId = encodeURIComponent(postId);
+    const baseUrl = `https://api.linkedin.com/rest/socialActions/${encodedPostId}`;
     
-    if (isSharePost) {
-      console.warn(`⚠️ Share posts (urn:li:share:xxxxx) may not be accessible via Social Actions API.`);
-      console.warn(`   LinkedIn's Social Actions API typically only works with UGC Posts (urn:li:ugcPost:xxxxx).`);
-      console.warn(`   Attempting to fetch anyway, but this may fail with permission errors.`);
-    }
-    
-    const socialActionsUrl = `https://api.linkedin.com/v2/socialActions/${encodeURIComponent(postId)}`;
-    console.log(`📊 Fetching LinkedIn social actions from: ${socialActionsUrl.replace(accessToken, 'TOKEN_HIDDEN')}`);
-    
-    const socialActionsResponse = await fetch(socialActionsUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'X-Restli-Protocol-Version': '2.0.0',
-      },
-    });
-
-    if (!socialActionsResponse.ok) {
-      const errorData = await socialActionsResponse.json().catch(() => ({}));
-      const errorMessage = errorData.message || errorData.error?.message || 'Unknown error';
-      const errorCode = errorData.status || socialActionsResponse.status;
-      
-      console.error(`❌ LinkedIn Social Actions API error:`, {
-        status: socialActionsResponse.status,
-        code: errorCode,
-        message: errorMessage,
-        fullError: errorData,
-        postIdType: isUgcPost ? 'UGC Post' : isSharePost ? 'Share' : 'Unknown',
-      });
-
-      // If it's a Share post and we get a 403, it's likely because Share posts aren't accessible
-      if (isSharePost && socialActionsResponse.status === 403) {
-        console.error(`❌ LinkedIn Share posts cannot be tracked via Social Actions API.`);
-        console.error(`   Share posts (urn:li:share:xxxxx) are regular LinkedIn posts and are not accessible via API.`);
-        console.error(`   Only UGC Posts (urn:li:ugcPost:xxxxx) created via the UGC Posts API can be tracked.`);
-        console.error(`   Solution: Re-publish the content via the app to get a UGC Post ID that can be tracked.`);
-        throw new Error(`LinkedIn Share posts (urn:li:share:xxxxx) cannot be tracked via API. Only UGC Posts (urn:li:ugcPost:xxxxx) created via the API can be tracked. Please re-publish this content to get a trackable UGC Post ID.`);
-      }
-
-      // Check if it's a permission issue
-      if (socialActionsResponse.status === 403 || errorMessage.includes('permission')) {
-        throw new Error(`LinkedIn API permission denied. Please ensure your app has the "w_member_social" permission and Social Actions API is enabled in your LinkedIn app settings.`);
-      }
-
-      if (socialActionsResponse.status === 401) {
-        throw new Error(`LinkedIn Access Token has expired or is invalid. Please reconnect your LinkedIn integration.`);
-      }
-
-      throw new Error(`LinkedIn API error: ${errorCode} - ${errorMessage}`);
-    }
-
-    const socialActionsData = await socialActionsResponse.json();
-    console.log(`📊 Raw LinkedIn social actions response:`, JSON.stringify(socialActionsData, null, 2));
-
-    // Extract metrics from social actions response
-    // LinkedIn Social Actions API returns:
-    // - likesSummary.totalLikes (or similar structure)
-    // - commentsSummary.totalFirstLevelComments (or similar structure)
-    // - sharesSummary.totalShares (or similar structure)
+    const headers = {
+      'Authorization': `Bearer ${accessToken}`,
+      'X-Restli-Protocol-Version': '2.0.0',
+      'LinkedIn-Version': '202409', // Use latest API version
+    };
     
     let likes = 0;
     let comments = 0;
     let shares = 0;
-
-    // Handle different possible response structures
-    if (socialActionsData.likesSummary) {
-      likes = socialActionsData.likesSummary.totalLikes || 
-              socialActionsData.likesSummary.total || 
-              socialActionsData.likesSummary.count || 
-              0;
-    } else if (socialActionsData.likes) {
-      likes = typeof socialActionsData.likes === 'number' 
-        ? socialActionsData.likes 
-        : (socialActionsData.likes.total || socialActionsData.likes.count || 0);
-    } else if (socialActionsData.totalLikes !== undefined) {
-      likes = socialActionsData.totalLikes;
+    
+    // Fetch likes
+    try {
+      const likesUrl = `${baseUrl}/likes`;
+      console.log(`📊 Fetching likes from: ${likesUrl.replace(accessToken, 'TOKEN_HIDDEN')}`);
+      
+      const likesResponse = await fetch(likesUrl, { headers });
+      
+      if (likesResponse.ok) {
+        const likesData = await likesResponse.json();
+        console.log(`📊 Likes response:`, JSON.stringify(likesData, null, 2));
+        
+        // Handle paginated response - LinkedIn returns elements array with paging info
+        if (likesData.elements && Array.isArray(likesData.elements)) {
+          likes = likesData.paging?.total || likesData.elements.length;
+        } else if (likesData.total !== undefined) {
+          likes = likesData.total;
+        } else if (typeof likesData === 'number') {
+          likes = likesData;
+        }
+        console.log(`✅ Extracted ${likes} likes`);
+      } else {
+        const errorData = await likesResponse.json().catch(() => ({}));
+        console.warn(`⚠️ Could not fetch likes: ${likesResponse.status} - ${errorData.message || errorData.error?.message || 'Unknown error'}`);
+      }
+    } catch (likesError: any) {
+      console.warn(`⚠️ Error fetching likes:`, likesError.message);
     }
-
-    if (socialActionsData.commentsSummary) {
-      comments = socialActionsData.commentsSummary.totalFirstLevelComments || 
-                 socialActionsData.commentsSummary.total || 
-                 socialActionsData.commentsSummary.count || 
-                 0;
-    } else if (socialActionsData.comments) {
-      comments = typeof socialActionsData.comments === 'number' 
-        ? socialActionsData.comments 
-        : (socialActionsData.comments.total || socialActionsData.comments.count || 0);
-    } else if (socialActionsData.totalComments !== undefined) {
-      comments = socialActionsData.totalComments;
+    
+    // Fetch comments
+    try {
+      const commentsUrl = `${baseUrl}/comments`;
+      console.log(`📊 Fetching comments from: ${commentsUrl.replace(accessToken, 'TOKEN_HIDDEN')}`);
+      
+      const commentsResponse = await fetch(commentsUrl, { headers });
+      
+      if (commentsResponse.ok) {
+        const commentsData = await commentsResponse.json();
+        console.log(`📊 Comments response:`, JSON.stringify(commentsData, null, 2));
+        
+        // Handle paginated response
+        if (commentsData.elements && Array.isArray(commentsData.elements)) {
+          comments = commentsData.paging?.total || commentsData.elements.length;
+        } else if (commentsData.total !== undefined) {
+          comments = commentsData.total;
+        } else if (typeof commentsData === 'number') {
+          comments = commentsData;
+        }
+        console.log(`✅ Extracted ${comments} comments`);
+      } else {
+        const errorData = await commentsResponse.json().catch(() => ({}));
+        const errorMsg = errorData.message || errorData.error?.message || 'Unknown error';
+        console.warn(`⚠️ Could not fetch comments: ${commentsResponse.status} - ${errorMsg}`);
+        
+        // Check for permission errors
+        if (commentsResponse.status === 403) {
+          console.error(`❌ Permission denied for comments. Ensure w_member_social scope is granted.`);
+        }
+      }
+    } catch (commentsError: any) {
+      console.warn(`⚠️ Error fetching comments:`, commentsError.message);
     }
-
-    if (socialActionsData.sharesSummary) {
-      shares = socialActionsData.sharesSummary.totalShares || 
-               socialActionsData.sharesSummary.total || 
-               socialActionsData.sharesSummary.count || 
-               0;
-    } else if (socialActionsData.shares) {
-      shares = typeof socialActionsData.shares === 'number' 
-        ? socialActionsData.shares 
-        : (socialActionsData.shares.total || socialActionsData.shares.count || 0);
-    } else if (socialActionsData.totalShares !== undefined) {
-      shares = socialActionsData.totalShares;
+    
+    // ✅ 2️⃣ STOP calling the shares endpoint
+    // LinkedIn does not reliably expose share counts via Social Actions API
+    shares = 0;
+    console.log(`ℹ️ Shares set to 0 (LinkedIn does not reliably expose share counts)`);
+    
+    // ✅ 5️⃣ Treat comments as optional - already handled with try-catch above
+    // Comments may return 403 or 0, which is acceptable
+    
+    // If all requests failed, provide helpful error message
+    if (likes === 0 && comments === 0) {
+      console.warn(`⚠️ All metric requests returned 0 or failed.`);
+      console.warn(`   This might indicate:`);
+      console.warn(`   1. Post is too new and metrics haven't populated yet (try again later)`);
+      console.warn(`   2. w_member_social scope is not properly granted`);
+      console.warn(`   3. Post was not created via UGC Posts API`);
     }
 
     console.log(`✅ LinkedIn metrics extracted: ${likes} likes, ${comments} comments, ${shares} shares`);
 
-    // Calculate engagement (likes + comments + shares)
-    const totalEngagement = likes + comments + shares;
+    // ✅ 6️⃣ Final expected output (REALISTIC)
+    // Calculate engagement (likes + comments only - shares always 0)
+    const totalEngagement = likes + comments;
     const engagement = totalEngagement > 0 ? Number((totalEngagement).toFixed(2)) : 0;
 
     const metrics: LinkedInMetrics = {
@@ -1264,10 +1281,19 @@ serve(async (req) => {
         } else if (post.platform === "linkedin") {
           console.log(`📱 Fetching LinkedIn metrics for post ID: ${platformPostId}`);
           
+          // Note: LinkedIn metrics may take time to populate, but we fetch immediately
+          // If metrics are 0, they may not be available yet (try again later)
+          
+          // Get author URN from metadata if available
+          const authorUrn = post.metadata?.linkedin?.authorUrn || post.metadata?.linkedin?.personUrn;
+          const tokenAuthorUrn = integration.metadata?.personUrn || integration.platform_user_id;
+          
           try {
             const linkedInMetrics = await fetchLinkedInMetrics(
               platformPostId,
-              accessToken
+              accessToken,
+              authorUrn,
+              tokenAuthorUrn
             );
 
             console.log(`✅ LinkedIn metrics fetched:`, {
@@ -1277,12 +1303,13 @@ serve(async (req) => {
               engagement: linkedInMetrics.engagement,
             });
 
+            // ✅ 6️⃣ Final expected output (REALISTIC)
             metrics = {
               engagement: linkedInMetrics.engagement,
-              traffic: 0, // LinkedIn doesn't provide views/impressions via Social Actions API
-              likes: linkedInMetrics.likes,
-              comments: linkedInMetrics.comments,
-              shares: linkedInMetrics.shares,
+              traffic: 0, // LinkedIn does not provide views/impressions via Social Actions API
+              likes: linkedInMetrics.likes, // reliable
+              comments: linkedInMetrics.comments, // may be 0
+              shares: 0, // always 0 - LinkedIn does not reliably expose share counts
               lastUpdated: new Date().toISOString(),
             };
             

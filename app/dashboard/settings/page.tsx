@@ -1216,14 +1216,32 @@ function RedditIntegrationSettings() {
 function GitHubIntegrationSettings() {
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState({
-    token: "",
     repository: "", // Format: "owner/repo"
   });
-  const [showToken, setShowToken] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [username, setUsername] = useState("");
+  const [repositories, setRepositories] = useState<Array<{name: string; full_name: string; owner: string; default_branch: string}>>([]);
 
   useEffect(() => {
     loadGitHubConfig();
+    
+    // Check for OAuth callback in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const githubStatus = urlParams.get("github");
+    
+    if (githubStatus === "connected") {
+      const name = urlParams.get("name");
+      toast.success(`GitHub connected successfully!${name ? ` Connected as: ${name}` : ""}`);
+      // Reload config
+      loadGitHubConfig();
+      // Clean URL
+      window.history.replaceState({}, "", "/dashboard/settings");
+    } else if (githubStatus === "error") {
+      const errorMessage = urlParams.get("message");
+      toast.error(`GitHub connection failed: ${errorMessage || "Unknown error"}`);
+      // Clean URL
+      window.history.replaceState({}, "", "/dashboard/settings");
+    }
   }, []);
 
   const loadGitHubConfig = async () => {
@@ -1237,25 +1255,81 @@ function GitHubIntegrationSettings() {
           const repository = owner && repo ? `${owner}/${repo}` : "";
           
           setConfig({
-            token: data.config.token || "",
             repository: repository,
           });
           setIsConnected(data.config.verified || false);
+          setUsername(data.config.username || "");
+          // Load repositories from metadata if available
+          if (data.config.metadata?.repositories) {
+            setRepositories(data.config.metadata.repositories);
+          }
         } else {
           // No config found
           setIsConnected(false);
+          setUsername("");
+          setRepositories([]);
         }
       }
     } catch (error) {
       console.error("Error loading GitHub config:", error);
       setIsConnected(false);
+      setUsername("");
+      setRepositories([]);
     }
   };
 
+  const handleConnectGitHub = () => {
+    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
+    if (!clientId) {
+      toast.error(
+        "GitHub OAuth is not configured. Please create a GitHub OAuth App and add GITHUB_CLIENT_ID to your environment variables.",
+        { duration: 6000 }
+      );
+      // Open GitHub OAuth app creation page in new tab
+      window.open("https://github.com/settings/applications/new", "_blank");
+      return;
+    }
 
-  const handleSave = async () => {
-    if (!config.token || !config.repository) {
-      toast.error("Please enter API key and repository name");
+    // Use the current origin - this must match EXACTLY what's in your GitHub OAuth app
+    const redirectUri = `${window.location.origin}/api/auth/github/callback`;
+    const scope = "repo user:email"; // repo for discussions, user:email for user info
+    const state = Date.now().toString();
+    
+    // Store state in sessionStorage for CSRF protection
+    sessionStorage.setItem("github_oauth_state", state);
+
+    // Detect environment and log helpful information
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const environment = isLocalhost ? 'DEVELOPMENT' : 'PRODUCTION';
+    
+    console.log("🔍 GitHub OAuth Configuration:", {
+      environment,
+      clientId: clientId.substring(0, 4) + "***",
+      redirectUri,
+      hostname: window.location.hostname,
+    });
+    
+    if (isLocalhost) {
+      console.log("⚠️ DEVELOPMENT: Make sure your LOCAL GitHub OAuth app has callback URL:", redirectUri);
+      console.log("⚠️ And your .env.local has the LOCAL app's Client ID");
+    } else {
+      console.log("⚠️ PRODUCTION: Make sure your PRODUCTION GitHub OAuth app has callback URL:", redirectUri);
+      console.log("⚠️ And your Vercel environment variables have the PRODUCTION app's Client ID");
+    }
+
+    const authUrl = `https://github.com/login/oauth/authorize?` +
+      `client_id=${clientId}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&scope=${encodeURIComponent(scope)}` +
+      `&state=${state}`;
+
+    window.location.href = authUrl;
+  };
+
+
+  const handleSaveRepository = async () => {
+    if (!config.repository) {
+      toast.error("Please select a repository");
       return;
     }
 
@@ -1268,35 +1342,38 @@ function GitHubIntegrationSettings() {
 
     setLoading(true);
     try {
-      const response = await fetch("/api/integrations/github", {
-        method: "POST",
+      // Get the current integration to update repository
+      const response = await fetch("/api/integrations/github");
+      const data = await response.json();
+      
+      if (!data.success || !data.config) {
+        toast.error("Please connect your GitHub account first");
+        return;
+      }
+
+      // Update repository in metadata
+      const updateResponse = await fetch("/api/integrations/github", {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          token: config.token,
           owner: owner,
           repo: repo,
           branch: "main", // Default branch
         }),
       });
 
-      const data = await response.json();
+      const updateData = await updateResponse.json();
       
-      if (response.ok && data.success) {
-        toast.success("GitHub configuration saved!");
-        setIsConnected(true);
-        // Clear form fields after successful save
-        setConfig({ token: "", repository: "" });
-        // Reload config to show updated data
+      if (updateResponse.ok && updateData.success) {
+        toast.success("Repository updated successfully!");
         await loadGitHubConfig();
       } else {
-        const errorMsg = data.error || "Failed to save configuration";
-        const details = data.details ? ` (${data.details.message || data.details.code || ""})` : "";
-        console.error("Save error:", data);
-        toast.error(errorMsg + details);
+        const errorMsg = updateData.error || "Failed to update repository";
+        toast.error(errorMsg);
       }
     } catch (error: any) {
       console.error("Save error:", error);
-      toast.error("Failed to save configuration: " + (error.message || "Unknown error"));
+      toast.error("Failed to update repository: " + (error.message || "Unknown error"));
     } finally {
       setLoading(false);
     }
@@ -1317,7 +1394,7 @@ function GitHubIntegrationSettings() {
       if (response.ok) {
         toast.success("GitHub integration disconnected");
         setIsConnected(false);
-        setConfig({ token: "", repository: "" });
+        setConfig({ repository: "" });
       } else {
         const data = await response.json();
         toast.error(data.error || "Failed to disconnect");
@@ -1353,56 +1430,151 @@ function GitHubIntegrationSettings() {
           </span>
         </div>
 
-        {/* Show form fields only when not connected */}
+        {/* Show OAuth connect button when not connected */}
         {!isConnected ? (
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                GitHub Personal Access Token *
-              </label>
-              <div className="relative">
-                <input
-                  type={showToken ? "text" : "password"}
-                  value={config.token}
-                  onChange={(e) => setConfig({ ...config, token: e.target.value })}
-                  placeholder="ghp_xxxxxxxxxxxx"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none pr-12"
-                />
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-900 mb-3">
+                Connect your GitHub account to automatically publish content as GitHub Discussions. 
+                You'll be able to select a repository after connecting.
+              </p>
+              {typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID ? (
+                <div className="space-y-3">
+                  <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p className="text-xs text-yellow-900 mb-2">
+                      <strong>Setup Required:</strong> You need to create a GitHub OAuth App first.
+                    </p>
+                    <ol className="text-xs text-yellow-800 space-y-1 ml-4 list-decimal">
+                      <li>Go to <a href="https://github.com/settings/applications/new" target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline font-medium">GitHub OAuth Apps</a></li>
+                      <li>Click <strong>"New OAuth App"</strong></li>
+                      <li>Fill in:
+                        <ul className="ml-4 mt-1 list-disc">
+                          <li><strong>Application name:</strong> GeoRepute AI</li>
+                          <li><strong>Homepage URL:</strong> Your production domain (e.g., <code className="bg-yellow-100 px-1 rounded">https://geo-repute.com</code>)</li>
+                          <li><strong>Authorization callback URL:</strong> 
+                            <div className="mt-1 space-y-1">
+                              <div><strong>For Production:</strong> <code className="bg-yellow-100 px-1 rounded">https://yourdomain.com/api/auth/github/callback</code></div>
+                              <div><strong>For Local Testing:</strong> <code className="bg-yellow-100 px-1 rounded">http://localhost:3000/api/auth/github/callback</code></div>
+                              <div className="text-red-600 font-semibold mt-2">⚠️ CRITICAL: The callback URL must match EXACTLY!</div>
+                              <div className="text-xs">If you're testing locally, update your GitHub OAuth app's callback URL to: <code className="bg-yellow-100 px-1 rounded">http://localhost:3000/api/auth/github/callback</code></div>
+                              <div className="text-xs">After testing, change it back to your production URL before deploying.</div>
+                            </div>
+                          </li>
+                          <li><strong>Application description:</strong> (Optional) Auto-publish content to GitHub Discussions</li>
+                        </ul>
+                      </li>
+                      <li><strong>"Enable Device Flow"</strong> - Optional: You can check this if you want, but it's not needed for web apps. It's for devices without browsers (smart TVs, IoT devices). Enabling it won't cause any issues.</li>
+                      <li>Click <strong>"Register application"</strong></li>
+                      <li>Copy the <strong>Client ID</strong> and generate a <strong>Client Secret</strong></li>
+                      <li className="mt-2"><strong>Create TWO separate OAuth apps:</strong>
+                        <div className="ml-4 mt-2 space-y-3">
+                          <div className="p-2 bg-blue-50 border border-blue-200 rounded">
+                            <strong className="text-blue-900">1. Development App (for localhost):</strong>
+                            <ul className="text-xs text-blue-800 mt-1 ml-4 list-disc">
+                              <li>Application name: <code className="bg-blue-100 px-1 rounded">GeoRepute AI (Development)</code></li>
+                              <li>Homepage URL: <code className="bg-blue-100 px-1 rounded">http://localhost:3000</code></li>
+                              <li>Callback URL: <code className="bg-blue-100 px-1 rounded">http://localhost:3000/api/auth/github/callback</code></li>
+                              <li>Add to <code className="bg-blue-100 px-1 rounded">.env.local</code>:
+                                <pre className="mt-1 p-2 bg-blue-100 rounded text-xs overflow-x-auto">
+{`GITHUB_CLIENT_ID=dev_client_id
+GITHUB_CLIENT_SECRET=dev_client_secret
+NEXT_PUBLIC_GITHUB_CLIENT_ID=dev_client_id`}
+                                </pre>
+                              </li>
+                            </ul>
+                          </div>
+                          <div className="p-2 bg-green-50 border border-green-200 rounded">
+                            <strong className="text-green-900">2. Production App (for your domain):</strong>
+                            <ul className="text-xs text-green-800 mt-1 ml-4 list-disc">
+                              <li>Application name: <code className="bg-green-100 px-1 rounded">GeoRepute AI (Production)</code></li>
+                              <li>Homepage URL: <code className="bg-green-100 px-1 rounded">https://yourdomain.com</code></li>
+                              <li>Callback URL: <code className="bg-green-100 px-1 rounded">https://yourdomain.com/api/auth/github/callback</code></li>
+                              <li>Add to your production environment variables (Vercel, etc.):
+                                <pre className="mt-1 p-2 bg-green-100 rounded text-xs overflow-x-auto">
+{`GITHUB_CLIENT_ID=prod_client_id
+GITHUB_CLIENT_SECRET=prod_client_secret
+NEXT_PUBLIC_GITHUB_CLIENT_ID=prod_client_id`}
+                                </pre>
+                              </li>
+                            </ul>
+                          </div>
+                        </div>
+                      </li>
+                      <li className="mt-2"><strong>Note:</strong> Each OAuth app will be used by ALL users in that environment. Users authenticate with their own GitHub accounts, but they all use the same OAuth app credentials for that environment.</li>
+                      <li>Restart your development server after adding environment variables</li>
+                    </ol>
+                  </div>
+                  <button
+                    onClick={() => window.open("https://github.com/settings/applications/new", "_blank")}
+                    className="px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm flex items-center gap-2 font-medium"
+                  >
+                    <Image src="/github-142.svg" alt="GitHub" width={20} height={20} className="w-5 h-5" />
+                    Create GitHub OAuth App
+                  </button>
+                </div>
+              ) : (
                 <button
-                  onClick={() => setShowToken(!showToken)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  onClick={handleConnectGitHub}
+                  disabled={loading}
+                  className="px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
                 >
-                  {showToken ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  {loading ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      Connecting...
+                    </>
+                  ) : (
+                    <>
+                      <Image src="/github-142.svg" alt="GitHub" width={20} height={20} className="w-5 h-5" />
+                      Connect GitHub Account
+                    </>
+                  )}
                 </button>
-              </div>
-              <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-xs text-blue-900 mb-2">
-                  <strong>How to generate API key:</strong>
-                </p>
-                <ol className="text-xs text-blue-800 space-y-1 ml-4 list-decimal">
-                  <li>Go to <a href="https://github.com/settings/tokens/new" target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline font-medium">GitHub Personal Access Tokens</a></li>
-                  <li>Click <strong>"Generate new token"</strong> → <strong>"Generate new token (classic)"</strong></li>
-                  <li>Give it a name (e.g., "GeoRepute Auto-Publish")</li>
-                  <li>Select expiration (30 days, 90 days, or no expiration)</li>
-                  <li>Check permissions: <code className="bg-blue-100 px-1 rounded">repo</code> (Discussions API uses repo scope)</li>
-                  <li>Click <strong>"Generate token"</strong> at the bottom</li>
-                  <li>Copy the token (starts with <code className="bg-blue-100 px-1 rounded">ghp_</code>) and paste it above</li>
-                  <li className="mt-2"><strong>Important:</strong> Make sure Discussions are enabled in your repository settings (Settings → General → Features → Discussions)</li>
-                </ol>
-              </div>
+              )}
             </div>
-
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <p className="text-xs text-gray-600 mb-2">
+                <strong>Note:</strong> Make sure Discussions are enabled in your repository settings 
+                (Settings → General → Features → Discussions)
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {username && (
+              <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-900">
+                  <strong>Connected as:</strong> {username}
+                </p>
+              </div>
+            )}
+            
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Repository Name *
+                Repository *
               </label>
-              <input
-                type="text"
-                value={config.repository}
-                onChange={(e) => setConfig({ ...config, repository: e.target.value })}
-                placeholder="georepute/my-blog"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-              />
+              {repositories.length > 0 ? (
+                <select
+                  value={config.repository}
+                  onChange={(e) => setConfig({ ...config, repository: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                >
+                  <option value="">Select a repository</option>
+                  {repositories.map((repo) => (
+                    <option key={repo.full_name} value={repo.full_name}>
+                      {repo.full_name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={config.repository}
+                  onChange={(e) => setConfig({ ...config, repository: e.target.value })}
+                  placeholder="georepute/my-blog"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                />
+              )}
               <p className="text-xs text-gray-500 mt-1">
                 Format: <code className="bg-gray-100 px-1 rounded">owner/repository-name</code> (e.g., georepute/my-blog)
               </p>
@@ -1410,8 +1582,8 @@ function GitHubIntegrationSettings() {
 
             <div className="flex gap-3 pt-4">
               <button
-                onClick={handleSave}
-                disabled={loading || !config.token || !config.repository}
+                onClick={handleSaveRepository}
+                disabled={loading || !config.repository}
                 className="px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {loading ? (
@@ -1422,14 +1594,16 @@ function GitHubIntegrationSettings() {
                 ) : (
                   <>
                     <Save className="w-4 h-4" />
-                    Save Configuration
+                    Save Repository
                   </>
                 )}
               </button>
             </div>
           </div>
-        ) : (
-          /* Show disconnect button when connected */
+        )}
+
+        {/* Show disconnect button when connected */}
+        {isConnected && (
           <div className="pt-4">
             <button
               onClick={handleDisconnect}
