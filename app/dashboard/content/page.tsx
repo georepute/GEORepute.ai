@@ -215,6 +215,8 @@ function ContentInner() {
     const source = searchParams.get('source');
     const step = searchParams.get('step');
     
+    // Only open modals if we're coming from AI Visibility AND data exists
+    // Don't reopen if content was already published (sessionStorage would be cleared)
     if (source === 'ai-visibility') {
       // Check for content-generation step (Modal 1)
       if (step === 'content-generation') {
@@ -227,6 +229,8 @@ function ContentInner() {
             setShowContentModal(true);
           } catch (error) {
             console.error('Error parsing edit data:', error);
+            // Clear invalid data
+            sessionStorage.removeItem('editPromptData');
           }
         }
       } else {
@@ -235,6 +239,13 @@ function ContentInner() {
         if (storedData) {
           try {
             const data = JSON.parse(storedData);
+            // Only show modal if we have valid data and haven't completed the flow
+            // Check if content was already published by looking for published content IDs
+            const hasPublishedContent = data.responses?.[0]?.platformSchemas && 
+              Object.keys(data.responses[0].platformSchemas).length > 0;
+            
+            // If schemas exist but no published flag, allow continuing
+            // If published, sessionStorage should have been cleared
             setAiVisibilityData(data);
             
             // Initialize image search query from prompt
@@ -243,11 +254,14 @@ function ContentInner() {
             }
             
             // Show image modal if step is image-selection or no step specified
-            if (step === 'image-selection' || !step) {
+            // Only if we haven't already completed the flow
+            if ((step === 'image-selection' || !step) && !hasPublishedContent) {
               setShowImageModal(true);
             }
           } catch (error) {
             console.error('Error parsing AI Visibility data:', error);
+            // Clear invalid data
+            sessionStorage.removeItem('aiVisibilityResponses');
           }
         }
       }
@@ -448,6 +462,27 @@ function ContentInner() {
 
       const result = await response.json();
       toast.success(result.message || "Action completed successfully");
+      
+      // If content was published successfully, clear AI Visibility flow state
+      if (action === "approve" && additionalData?.autoPublish) {
+        // Clear sessionStorage to prevent modal from reopening
+        sessionStorage.removeItem('aiVisibilityResponses');
+        sessionStorage.removeItem('editPromptData');
+        // Clear state
+        setAiVisibilityData(null);
+        setShowContentModal(false);
+        setShowImageModal(false);
+        setShowPlatformModal(false);
+        setSelectedPlatforms([]);
+        setPlatformSchemas({});
+        setSelectedImage(null);
+        setUploadedImageUrl(null);
+        // Clear URL params if present
+        if (searchParams.get('source') === 'ai-visibility') {
+          router.replace('/dashboard/content', { scroll: false });
+        }
+      }
+      
       // Longer delay to ensure database consistency before reloading
       await new Promise(resolve => setTimeout(resolve, 1000));
       loadContent();
@@ -479,17 +514,18 @@ function ContentInner() {
         throw new Error('Content not found');
       }
 
-      // Get published records to find Instagram/Facebook/LinkedIn posts
+      // Get published records to find Instagram/Facebook/LinkedIn/GitHub posts
       const publishedRecords = contentItem.published_records || [];
       const instagramPost = publishedRecords.find((r: any) => r.platform === 'instagram');
       const facebookPost = publishedRecords.find((r: any) => r.platform === 'facebook');
       const linkedinPost = publishedRecords.find((r: any) => r.platform === 'linkedin');
+      const githubPost = publishedRecords.find((r: any) => r.platform === 'github');
       
       // Determine which platform to show metrics for
-      const platform = instagramPost ? 'instagram' : (facebookPost ? 'facebook' : (linkedinPost ? 'linkedin' : null));
+      const platform = instagramPost ? 'instagram' : (facebookPost ? 'facebook' : (linkedinPost ? 'linkedin' : (githubPost ? 'github' : null)));
       setPerformancePlatform(platform);
 
-      // If it's Instagram, Facebook, or LinkedIn, load existing metrics from database (if any)
+      // If it's Instagram, Facebook, LinkedIn, or GitHub, load existing metrics from database (if any)
       if (platform) {
         // Load existing metrics from database (don't auto-fetch from API)
         if (contentItem.raw?.metadata?.performance) {
@@ -508,6 +544,7 @@ function ContentInner() {
             saved: platformMetrics.saved || 0,
             reactions: platformMetrics.reactions || 0,
             clicks: platformMetrics.clicks || 0,
+            upvotes: platformMetrics.upvotes || 0, // For GitHub
             lastUpdated: platformMetrics.lastUpdated || null, // Preserve timestamp from database
           });
         } else {
@@ -523,11 +560,12 @@ function ContentInner() {
             saved: 0,
             reactions: 0,
             clicks: 0,
+            upvotes: 0, // For GitHub
             lastUpdated: null,
           });
         }
       } else {
-        // For non-Instagram/Facebook/LinkedIn platforms, show message
+        // For non-Instagram/Facebook/LinkedIn/GitHub platforms, show message
         setCurrentMetrics(null);
       }
     } catch (error: any) {
@@ -594,7 +632,14 @@ function ContentInner() {
               saved: platformMetrics.saved || 0,
               reactions: platformMetrics.reactions || 0,
               clicks: platformMetrics.clicks || 0,
+              upvotes: platformMetrics.upvotes || 0, // For GitHub - was missing!
               lastUpdated: lastUpdated, // Always set timestamp
+            });
+            
+            console.log('🔄 Updated metrics after refresh:', {
+              platform: performancePlatform,
+              upvotes: platformMetrics.upvotes,
+              allMetrics: platformMetrics,
             });
             
             toast.success('Metrics refreshed successfully!', { id: 'refresh-metrics' });
@@ -611,6 +656,7 @@ function ContentInner() {
               saved: 0,
               reactions: 0,
               clicks: 0,
+              upvotes: 0, // For GitHub
               lastUpdated: new Date().toISOString(), // Set timestamp even if no data
             });
             toast.success('Refresh completed. No metrics available yet.', { id: 'refresh-metrics' });
@@ -2035,13 +2081,13 @@ function ContentInner() {
                   Track Content Performance
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin'
-                    ? 'Live metrics from ' + (performancePlatform === 'instagram' ? 'Instagram' : performancePlatform === 'facebook' ? 'Facebook' : 'LinkedIn')
+                  {performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github'
+                    ? 'Live metrics from ' + (performancePlatform === 'instagram' ? 'Instagram' : performancePlatform === 'facebook' ? 'Facebook' : performancePlatform === 'linkedin' ? 'LinkedIn' : 'GitHub')
                     : 'Measure your content performance to enable optimization'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {(performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin') && (
+                {(performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github') && (
                   <div className="flex flex-col items-end gap-1">
                     <button
                       onClick={handleRefreshMetrics}
@@ -2083,8 +2129,8 @@ function ContentInner() {
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                   <span className="ml-3 text-gray-600">Loading metrics...</span>
                 </div>
-              ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin') && currentMetrics ? (
-                // Show live metrics for Instagram/Facebook/LinkedIn with charts
+              ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github') && currentMetrics ? (
+                // Show live metrics for Instagram/Facebook/LinkedIn/GitHub with charts
                 <div className="space-y-6">
                   {/* Engagement Metrics Bar Chart */}
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
@@ -2093,14 +2139,30 @@ function ContentInner() {
                       <BarChart
                         data={(() => {
                           const data = [
-                            { name: 'Likes', value: currentMetrics.likes || 0, fill: '#3b82f6' },
+                            { name: performancePlatform === 'github' ? 'Reactions' : 'Likes', value: currentMetrics.likes || 0, fill: '#3b82f6' },
                             { name: 'Comments', value: currentMetrics.comments || 0, fill: '#10b981' },
                           ];
-                          if (currentMetrics.shares !== undefined) {
-                            data.push({ name: 'Shares', value: currentMetrics.shares || 0, fill: '#8b5cf6' });
-                          }
-                          if (currentMetrics.saved !== undefined) {
-                            data.push({ name: 'Saved', value: currentMetrics.saved || 0, fill: '#f59e0b' });
+                          // For GitHub, always show Upvotes (even if 0)
+                          if (performancePlatform === 'github') {
+                            // Always include upvotes for GitHub, even if 0
+                            const upvotesValue = currentMetrics.upvotes !== undefined && currentMetrics.upvotes !== null 
+                              ? currentMetrics.upvotes 
+                              : 0;
+                            data.push({ name: 'Upvotes', value: upvotesValue, fill: '#f59e0b' });
+                            console.log('📊 GitHub metrics for chart:', {
+                              reactions: currentMetrics.likes,
+                              comments: currentMetrics.comments,
+                              upvotes: upvotesValue,
+                              upvotesRaw: currentMetrics.upvotes,
+                            });
+                          } else {
+                            // For other platforms, show Shares and Saved if available
+                            if (currentMetrics.shares !== undefined) {
+                              data.push({ name: 'Shares', value: currentMetrics.shares || 0, fill: '#8b5cf6' });
+                            }
+                            if (currentMetrics.saved !== undefined) {
+                              data.push({ name: 'Saved', value: currentMetrics.saved || 0, fill: '#f59e0b' });
+                            }
                           }
                           return data;
                         })()}
@@ -2134,11 +2196,17 @@ function ContentInner() {
                               { fill: '#3b82f6' },
                               { fill: '#10b981' },
                             ];
-                            if (currentMetrics.shares !== undefined) {
-                              data.push({ fill: '#8b5cf6' });
-                            }
-                            if (currentMetrics.saved !== undefined) {
+                            // For GitHub, add Upvotes color
+                            if (performancePlatform === 'github') {
                               data.push({ fill: '#f59e0b' });
+                            } else {
+                              // For other platforms, add Shares and Saved colors if available
+                              if (currentMetrics.shares !== undefined) {
+                                data.push({ fill: '#8b5cf6' });
+                              }
+                              if (currentMetrics.saved !== undefined) {
+                                data.push({ fill: '#f59e0b' });
+                              }
                             }
                             return data.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={entry.fill} />
@@ -2200,14 +2268,14 @@ function ContentInner() {
                   )}
                 </div>
               ) : (
-                // No metrics available or not Instagram/Facebook/LinkedIn
+                // No metrics available or not Instagram/Facebook/LinkedIn/GitHub
                 <div className="flex flex-col items-center justify-center py-12">
                   <TrendingUp className="w-16 h-16 text-gray-300 mb-4" />
                   <h4 className="text-lg font-semibold text-gray-900 mb-2">No Performance Data Available</h4>
                   <p className="text-sm text-gray-600 text-center max-w-md">
                     {performancePlatform 
-                      ? 'Performance tracking is only available for Instagram, Facebook, and LinkedIn posts. Please ensure your content is published to one of these platforms.'
-                      : 'This content is not published to Instagram, Facebook, or LinkedIn. Performance tracking is currently only available for these platforms.'}
+                      ? 'Performance tracking is only available for Instagram, Facebook, LinkedIn, and GitHub posts. Please ensure your content is published to one of these platforms.'
+                      : 'This content is not published to Instagram, Facebook, LinkedIn, or GitHub. Performance tracking is currently only available for these platforms.'}
                   </p>
                 </div>
               )}

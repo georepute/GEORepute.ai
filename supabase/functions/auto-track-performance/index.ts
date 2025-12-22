@@ -32,6 +32,126 @@ interface LinkedInMetrics {
   engagement?: number;
 }
 
+interface GitHubMetrics {
+  reactions: number;
+  comments: number;
+  upvotes: number;
+  engagement?: number;
+}
+
+/**
+ * Fetch GitHub Discussion metrics using GraphQL API
+ */
+async function fetchGitHubMetrics(
+  discussionNumber: string,
+  accessToken: string,
+  owner: string,
+  repo: string
+): Promise<GitHubMetrics> {
+  try {
+    console.log(`📊 Fetching GitHub metrics for Discussion #${discussionNumber}`);
+    console.log(`📊 Repository: ${owner}/${repo}`);
+
+    // GitHub GraphQL query to get discussion metrics
+    const query = `
+      query GetDiscussion($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          discussion(number: $number) {
+            id
+            number
+            reactions {
+              totalCount
+            }
+            comments {
+              totalCount
+            }
+            upvoteCount
+          }
+        }
+      }
+    `;
+
+    const response = await fetch("https://api.github.com/graphql", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "User-Agent": "GeoRepute.ai",
+      },
+      body: JSON.stringify({
+        query,
+        variables: {
+          owner,
+          repo,
+          number: parseInt(discussionNumber, 10),
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `GitHub API error: ${response.status}`;
+      try {
+        const errorData = JSON.parse(errorText);
+        errorMessage = errorData.message || errorMessage;
+      } catch (e) {
+        errorMessage = `${errorMessage} - ${errorText.substring(0, 200)}`;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+
+    if (result.errors) {
+      const errorMessage = result.errors[0]?.message || "GraphQL error";
+      console.error("GraphQL errors:", JSON.stringify(result.errors, null, 2));
+      throw new Error(errorMessage);
+    }
+
+    const discussion = result.data?.repository?.discussion;
+    if (!discussion) {
+      throw new Error(`Discussion #${discussionNumber} not found in repository ${owner}/${repo}`);
+    }
+
+    // Log the full discussion object for debugging
+    console.log(`📊 Full discussion object:`, JSON.stringify(discussion, null, 2));
+
+    const reactions = discussion.reactions?.totalCount || 0;
+    const comments = discussion.comments?.totalCount || 0;
+    // upvoteCount might be null or undefined, handle both cases
+    const upvotes = discussion.upvoteCount !== null && discussion.upvoteCount !== undefined 
+      ? discussion.upvoteCount 
+      : 0;
+
+    console.log(`📊 Raw values:`, {
+      reactions: discussion.reactions?.totalCount,
+      comments: discussion.comments?.totalCount,
+      upvoteCount: discussion.upvoteCount,
+      upvoteCountType: typeof discussion.upvoteCount,
+    });
+
+    console.log(`✅ GitHub metrics extracted: ${reactions} reactions, ${comments} comments, ${upvotes} upvotes`);
+
+    // Calculate engagement (reactions + comments + upvotes)
+    const totalEngagement = reactions + comments + upvotes;
+    const engagement = totalEngagement > 0 ? Number(totalEngagement.toFixed(2)) : 0;
+
+    const metrics: GitHubMetrics = {
+      reactions,
+      comments,
+      upvotes,
+      engagement,
+    };
+
+    console.log(`📊 Final GitHub metrics:`, metrics);
+
+    return metrics;
+  } catch (error: any) {
+    console.error('❌ Error fetching GitHub metrics:', error);
+    throw new Error(`Failed to fetch GitHub metrics: ${error.message}`);
+  }
+}
+
 /**
  * Fetch LinkedIn post metrics using Social Actions API
  */
@@ -868,7 +988,7 @@ serve(async (req) => {
         metadata,
         status
       `)
-      .in("platform", ["instagram", "facebook", "linkedin"]);
+      .in("platform", ["instagram", "facebook", "linkedin", "github"]);
 
     // If contentStrategyId is provided, filter to that specific content
     if (contentStrategyId) {
@@ -1332,6 +1452,99 @@ serve(async (req) => {
               postId: post.id,
               platform: post.platform,
               error: `LinkedIn metrics error: ${linkedInError.message}`,
+            });
+            
+            console.log(`⚠️ Error state marked - existing metrics will be preserved`);
+          }
+          metricsFetched = true; // Mark as fetched even if it failed (we have error state)
+        } else if (post.platform === "github") {
+          console.log(`📱 Fetching GitHub metrics for discussion #${platformPostId}`);
+          
+          // Get repository owner and name from integration metadata
+          let owner = integration.metadata?.owner || integration.metadata?.github?.owner;
+          let repo = integration.metadata?.repo || integration.metadata?.github?.repo;
+          
+          // Fallback: Try to extract from repositories list if available
+          if ((!owner || !repo) && integration.metadata?.repositories && Array.isArray(integration.metadata.repositories) && integration.metadata.repositories.length > 0) {
+            const firstRepo = integration.metadata.repositories[0];
+            if (!owner) owner = firstRepo.owner;
+            if (!repo) repo = firstRepo.name;
+            console.log(`📋 Extracted owner/repo from repositories list: ${owner}/${repo}`);
+          }
+          
+          if (!owner || !repo) {
+            console.warn(`⚠️ No repository owner or name found for GitHub integration`);
+            console.warn(`   Metadata keys: ${Object.keys(integration.metadata || {}).join(', ')}`);
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: "No repository owner or name found in integration metadata",
+            });
+            errors++;
+            continue;
+          }
+          
+          if (!platformPostId) {
+            console.warn(`⚠️ No discussion number found for GitHub discussion`);
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: "No discussion number found",
+            });
+            errors++;
+            continue;
+          }
+          
+          try {
+            const gitHubMetrics = await fetchGitHubMetrics(
+              platformPostId,
+              accessToken,
+              owner,
+              repo
+            );
+
+            console.log(`✅ GitHub metrics fetched:`, {
+              reactions: gitHubMetrics.reactions,
+              comments: gitHubMetrics.comments,
+              upvotes: gitHubMetrics.upvotes,
+              engagement: gitHubMetrics.engagement,
+            });
+
+            // Ensure upvotes is a number (handle null/undefined)
+            const upvotesValue = typeof gitHubMetrics.upvotes === 'number' ? gitHubMetrics.upvotes : 0;
+            console.log(`📊 Upvotes value after processing: ${upvotesValue} (type: ${typeof upvotesValue})`);
+
+            metrics = {
+              engagement: gitHubMetrics.engagement,
+              traffic: 0, // GitHub doesn't provide view/impression metrics
+              likes: gitHubMetrics.reactions, // Map reactions to likes for consistency
+              comments: gitHubMetrics.comments,
+              reactions: gitHubMetrics.reactions,
+              upvotes: upvotesValue, // Ensure it's always a number
+              lastUpdated: new Date().toISOString(),
+            };
+            
+            console.log(`💾 Metrics to save:`, JSON.stringify(metrics, null, 2));
+            
+            console.log(`💾 Saving GitHub metrics to database:`, metrics);
+          } catch (gitHubError: any) {
+            console.error(`❌ Error fetching GitHub metrics:`, gitHubError);
+            console.error(`   Error message: ${gitHubError.message}`);
+            console.error(`   ⚠️ Will preserve existing metrics and only update error state`);
+            
+            // Mark as error - actual metrics will be preserved from existing data
+            metrics = {
+              error: gitHubError.message || "Failed to fetch GitHub metrics",
+              lastUpdated: new Date().toISOString(),
+              // Don't set metrics to 0 here - we'll preserve existing values later
+              // This prevents overwriting good data with zeros
+            };
+            
+            // Add to error details but don't throw - we want to preserve existing data
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: `GitHub metrics error: ${gitHubError.message}`,
             });
             
             console.log(`⚠️ Error state marked - existing metrics will be preserved`);
