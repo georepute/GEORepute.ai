@@ -112,6 +112,54 @@ async function answerQuestion(
 
   await service.humanDelay(2000, 3000);
 
+  // Add image by simulating paste event (Quora auto-renders URLs when pasted)
+  if (content.metadata?.imageUrl) {
+    console.log('🖼️ Adding image to Quora by simulating paste:', content.metadata.imageUrl);
+    try {
+      // Simulate paste event to trigger Quora's URL detection and auto-rendering
+      await service.executeScript(`
+        const imageUrl = arguments[0];
+        const editor = document.querySelector('${answerBoxSelector}');
+        if (editor) {
+          editor.focus();
+          
+          // Create a paste event with the URL
+          const clipboardData = new DataTransfer();
+          clipboardData.setData('text/plain', '\\n\\n' + imageUrl);
+          
+          const pasteEvent = new ClipboardEvent('paste', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: clipboardData
+          });
+          
+          // Dispatch paste event - this triggers Quora's URL detection
+          editor.dispatchEvent(pasteEvent);
+          
+          // Also insert the text manually as fallback
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(editor);
+          range.collapse(false);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          
+          // Insert text at cursor position
+          document.execCommand('insertText', false, '\\n\\n' + imageUrl);
+          
+          // Trigger input event
+          editor.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      `, content.metadata.imageUrl);
+      
+      console.log('✅ Image URL pasted via paste event - waiting 15 seconds for Quora to auto-render');
+      // Wait 15 seconds for Quora to automatically fetch and render the image
+      await service.humanDelay(15000, 17000);
+    } catch (imgError: any) {
+      console.warn('⚠️ Image addition failed:', imgError.message);
+    }
+  }
+
   // Click submit/answer button
   const submitButtonSelector = 'button[data-testid="submit_answer"], button:contains("Answer"), button:contains("Post")';
   await service.clickElement(submitButtonSelector, { by: 'css' });
@@ -524,6 +572,58 @@ async function createQuoraPost(
     } catch (e: any) {
       console.error("❌ Failed to fill content:", e);
       throw new Error(`Failed to fill content in modal: ${e?.message || String(e)}`);
+    }
+  }
+
+  // Step 4.5: Add image by simulating paste event (Quora auto-renders URLs when pasted)
+  if (content.metadata?.imageUrl) {
+    console.log('🖼️ Adding image to Quora post by simulating paste:', content.metadata.imageUrl);
+    try {
+      // Simulate paste event to trigger Quora's URL detection and auto-rendering
+      await service.executeScript(`
+        const imageUrl = arguments[0];
+        
+        // Find editor inside the modal
+        const modal = document.querySelector('[role="dialog"]');
+        const editor = modal ? modal.querySelector('.ql-editor, [contenteditable="true"]') : document.querySelector('.ql-editor, [contenteditable="true"]');
+        
+        if (editor) {
+          editor.focus();
+          
+          // Create a paste event with the URL
+          const clipboardData = new DataTransfer();
+          clipboardData.setData('text/plain', '\\n\\n' + imageUrl);
+          
+          const pasteEvent = new ClipboardEvent('paste', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: clipboardData
+          });
+          
+          // Dispatch paste event - this triggers Quora's URL detection
+          editor.dispatchEvent(pasteEvent);
+          
+          // Also insert the text manually as fallback
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(editor);
+          range.collapse(false);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          
+          // Insert text at cursor position
+          document.execCommand('insertText', false, '\\n\\n' + imageUrl);
+          
+          // Trigger input event
+          editor.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      `, content.metadata.imageUrl);
+      
+      console.log('✅ Image URL pasted via paste event - waiting 15 seconds for Quora to auto-render');
+      // Wait 15 seconds for Quora to automatically fetch and render the image
+      await service.humanDelay(15000, 17000);
+    } catch (imgError: any) {
+      console.warn('⚠️ Image addition failed:', imgError.message);
     }
   }
 
@@ -1167,6 +1267,346 @@ export async function verifyQuoraConfig(
     };
   } finally {
     console.log("🧹 Cleaning up Selenium resources...");
+    await service.cleanup();
+  }
+}
+
+/**
+ * Quora Performance Metrics Interface
+ */
+export interface QuoraMetrics {
+  upvotes: number;
+  comments: number;
+  views?: number;
+  shares?: number;
+  engagement?: number;
+  lastUpdated: string;
+  error?: string;
+}
+
+/**
+ * Track performance metrics for a Quora post/answer
+ * Uses Selenium to crawl the post page and extract metrics
+ * 
+ * @param config - Quora configuration (email, cookies)
+ * @param postUrl - The URL of the Quora post/answer to track
+ * @returns QuoraMetrics object with upvotes, comments, views, shares
+ */
+export async function trackQuoraPerformance(
+  config: QuoraConfig,
+  postUrl: string
+): Promise<QuoraMetrics> {
+  const service = new SeleniumBaseService({
+    headless: true,
+    browser: 'chrome',
+    timeout: 60000,
+  });
+
+  try {
+    console.log('📊 Starting Quora performance tracking...');
+    console.log(`📊 Post URL: ${postUrl}`);
+    
+    await service.initialize();
+
+    const credentials: LoginCredentials = {
+      email: config.email,
+      password: config.password,
+      cookies: config.cookies,
+    };
+
+    // Login to Quora (required to see full metrics)
+    console.log('🔐 Logging in to Quora...');
+    await loginToQuora(service, credentials);
+    await service.humanDelay(2000, 3000);
+
+    // Navigate to the post URL
+    console.log(`📍 Navigating to post: ${postUrl}`);
+    await service.navigateTo(postUrl);
+    await service.humanDelay(3000, 5000);
+
+    // Wait for page to load completely (additional delay)
+    await service.humanDelay(2000, 3000);
+
+    // Extract metrics from the page
+    console.log('📊 Extracting metrics from Quora page...');
+    
+    const metrics = await service.executeScript(`
+      let upvotes = 0;
+      let comments = 0;
+      let views = 0;
+      let shares = 0;
+      
+      // Get all text content from page for debugging
+      const bodyText = document.body.innerText || '';
+      console.log('🔍 Page text (first 800 chars):', bodyText.substring(0, 800));
+      
+      // === Extract Views ===
+      // Pattern: "7 views" or "1.2K views" at top of post
+      const viewsMatch = bodyText.match(/(\\d+(?:[,.]\\d+)?)(K|M)?\\s*views?/i);
+      if (viewsMatch) {
+        let num = parseFloat(viewsMatch[1].replace(',', ''));
+        if (viewsMatch[2]) {
+          const suffix = viewsMatch[2].toUpperCase();
+          if (suffix === 'K') num *= 1000;
+          if (suffix === 'M') num *= 1000000;
+        }
+        views = Math.round(num);
+        console.log('✅ Views found:', views, '(from pattern:', viewsMatch[0] + ')');
+      } else {
+        console.log('⚠️ No views pattern found');
+      }
+      
+      // === Extract Upvotes ===
+      // Pattern 1: "View 1 upvote" or "View 1.2K upvotes"
+      const viewUpvoteMatch = bodyText.match(/View\\s+(\\d+(?:[,.]\\d+)?)(K|M)?\\s*upvotes?/i);
+      if (viewUpvoteMatch) {
+        let num = parseFloat(viewUpvoteMatch[1].replace(',', ''));
+        if (viewUpvoteMatch[2]) {
+          const suffix = viewUpvoteMatch[2].toUpperCase();
+          if (suffix === 'K') num *= 1000;
+          if (suffix === 'M') num *= 1000000;
+        }
+        upvotes = Math.round(num);
+        console.log('✅ Upvotes found (from "View X upvote"):', upvotes);
+      }
+      
+      // Pattern 2: "Upvote · 1" button (when user has upvoted)
+      if (upvotes === 0) {
+        const upvoteButtonMatch = bodyText.match(/Upvote\\s*[·•]\\s*(\\d+(?:[,.]\\d+)?)(K|M)?/i);
+        if (upvoteButtonMatch) {
+          let num = parseFloat(upvoteButtonMatch[1].replace(',', ''));
+          if (upvoteButtonMatch[2]) {
+            const suffix = upvoteButtonMatch[2].toUpperCase();
+            if (suffix === 'K') num *= 1000;
+            if (suffix === 'M') num *= 1000000;
+          }
+          upvotes = Math.round(num);
+          console.log('✅ Upvotes found (from "Upvote · X"):', upvotes);
+        }
+      }
+      
+      // Pattern 3: Just "X upvotes" text
+      if (upvotes === 0) {
+        const upvotesTextMatch = bodyText.match(/(?<!View\\s)(\\d+(?:[,.]\\d+)?)(K|M)?\\s*upvotes?/i);
+        if (upvotesTextMatch) {
+          let num = parseFloat(upvotesTextMatch[1].replace(',', ''));
+          if (upvotesTextMatch[2]) {
+            const suffix = upvotesTextMatch[2].toUpperCase();
+            if (suffix === 'K') num *= 1000;
+            if (suffix === 'M') num *= 1000000;
+          }
+          upvotes = Math.round(num);
+          console.log('✅ Upvotes found (from "X upvotes"):', upvotes);
+        }
+      }
+      
+      if (upvotes === 0) {
+        console.log('⚠️ No upvotes pattern found - defaulting to 0');
+      }
+      
+      // === Extract Comments ===
+      // Find the comment icon and look for a number directly next to it
+      console.log('🔍 Looking for comment icon and adjacent number...');
+      
+      // Find all potential comment icons/buttons (SVG icons, buttons with comment aria-label)
+      const commentElements = document.querySelectorAll(
+        'button[aria-label*="omment"], ' +
+        'a[aria-label*="omment"], ' +
+        'svg[class*="comment"], ' +
+        '[class*="CommentButton"], ' +
+        '[data-testid*="comment"]'
+      );
+      
+      console.log('Found', commentElements.length, 'potential comment elements');
+      
+      for (const commentEl of commentElements) {
+        // Get the parent container (usually the button or link wrapper)
+        let container = commentEl;
+        if (commentEl.tagName === 'svg' || commentEl.tagName === 'SVG') {
+          container = commentEl.closest('button, a, div[role="button"]') || commentEl.parentElement;
+        }
+        
+        if (!container) continue;
+        
+        console.log('Checking comment container:', container.outerHTML.substring(0, 200));
+        
+        // Method 1: Look for number in direct children
+        const children = Array.from(container.children);
+        for (const child of children) {
+          const childText = child.textContent?.trim() || '';
+          if (/^\\d+$/.test(childText)) {
+            const num = parseInt(childText, 10);
+            if (num !== views && num !== upvotes) {
+              comments = num;
+              console.log('✅ Comments found (child element):', comments, 'from:', child.outerHTML.substring(0, 100));
+              break;
+            }
+          }
+        }
+        
+        if (comments > 0) break;
+        
+        // Method 2: Look for number in next sibling
+        let nextSibling = container.nextElementSibling;
+        if (nextSibling) {
+          const sibText = nextSibling.textContent?.trim() || '';
+          if (/^\\d+$/.test(sibText)) {
+            const num = parseInt(sibText, 10);
+            if (num !== views && num !== upvotes) {
+              comments = num;
+              console.log('✅ Comments found (next sibling):', comments);
+              break;
+            }
+          }
+        }
+        
+        // Method 3: Look for number in parent's children (siblings of container)
+        if (comments === 0 && container.parentElement) {
+          const siblings = Array.from(container.parentElement.children);
+          const containerIndex = siblings.indexOf(container);
+          
+          // Check element right after the comment button
+          if (containerIndex >= 0 && containerIndex < siblings.length - 1) {
+            const nextElement = siblings[containerIndex + 1];
+            const nextText = nextElement.textContent?.trim() || '';
+            if (/^\\d+$/.test(nextText)) {
+              const num = parseInt(nextText, 10);
+              if (num !== views && num !== upvotes) {
+                comments = num;
+                console.log('✅ Comments found (parent sibling):', comments);
+                break;
+              }
+            }
+          }
+        }
+      }
+      
+      if (comments === 0) {
+        console.log('⚠️ No comment count found next to icon - defaulting to 0');
+      }
+      
+      // === Extract Shares ===
+      // Find the share icon and look for a number directly next to it
+      console.log('🔍 Looking for share icon and adjacent number...');
+      
+      // Find all potential share icons/buttons
+      const shareElements = document.querySelectorAll(
+        'button[aria-label*="hare"], ' +
+        'a[aria-label*="hare"], ' +
+        'svg[class*="share"], ' +
+        'svg[class*="Share"], ' +
+        '[class*="ShareButton"], ' +
+        '[data-testid*="share"]'
+      );
+      
+      console.log('Found', shareElements.length, 'potential share elements');
+      
+      for (const shareEl of shareElements) {
+        // Get the parent container
+        let container = shareEl;
+        if (shareEl.tagName === 'svg' || shareEl.tagName === 'SVG') {
+          container = shareEl.closest('button, a, div[role="button"]') || shareEl.parentElement;
+        }
+        
+        if (!container) continue;
+        
+        console.log('Checking share container:', container.outerHTML.substring(0, 200));
+        
+        // Method 1: Look for number in direct children
+        const children = Array.from(container.children);
+        for (const child of children) {
+          const childText = child.textContent?.trim() || '';
+          if (/^\\d+$/.test(childText)) {
+            const num = parseInt(childText, 10);
+            if (num !== views && num !== upvotes && num !== comments) {
+              shares = num;
+              console.log('✅ Shares found (child element):', shares);
+              break;
+            }
+          }
+        }
+        
+        if (shares > 0) break;
+        
+        // Method 2: Look for number in next sibling
+        let nextSibling = container.nextElementSibling;
+        if (nextSibling) {
+          const sibText = nextSibling.textContent?.trim() || '';
+          if (/^\\d+$/.test(sibText)) {
+            const num = parseInt(sibText, 10);
+            if (num !== views && num !== upvotes && num !== comments) {
+              shares = num;
+              console.log('✅ Shares found (next sibling):', shares);
+              break;
+            }
+          }
+        }
+        
+        // Method 3: Look for number in parent's children
+        if (shares === 0 && container.parentElement) {
+          const siblings = Array.from(container.parentElement.children);
+          const containerIndex = siblings.indexOf(container);
+          
+          if (containerIndex >= 0 && containerIndex < siblings.length - 1) {
+            const nextElement = siblings[containerIndex + 1];
+            const nextText = nextElement.textContent?.trim() || '';
+            if (/^\\d+$/.test(nextText)) {
+              const num = parseInt(nextText, 10);
+              if (num !== views && num !== upvotes && num !== comments) {
+                shares = num;
+                console.log('✅ Shares found (parent sibling):', shares);
+                break;
+              }
+            }
+          }
+        }
+      }
+      
+      if (shares === 0) {
+        console.log('ℹ️ No share count found next to icon - defaulting to 0');
+      }
+      
+      console.log('📊 Final metrics:', { views, upvotes, comments, shares });
+      
+      return {
+        upvotes,
+        comments,
+        views,
+        shares,
+      };
+    `);
+
+    console.log('📊 Raw metrics extracted:', metrics);
+
+    // Calculate engagement (upvotes + comments + shares)
+    const totalEngagement = (metrics.upvotes || 0) + (metrics.comments || 0) + (metrics.shares || 0);
+    const engagement = totalEngagement > 0 ? totalEngagement : 0;
+
+    const result: QuoraMetrics = {
+      upvotes: metrics.upvotes || 0,
+      comments: metrics.comments || 0,
+      views: metrics.views || undefined,
+      shares: metrics.shares || undefined,
+      engagement,
+      lastUpdated: new Date().toISOString(),
+    };
+
+    console.log('✅ Quora metrics extracted successfully:', result);
+
+    return result;
+
+  } catch (error: any) {
+    console.error('❌ Error tracking Quora performance:', error);
+    
+    return {
+      upvotes: 0,
+      comments: 0,
+      engagement: 0,
+      lastUpdated: new Date().toISOString(),
+      error: error.message || 'Failed to track Quora performance',
+    };
+  } finally {
+    console.log('🧹 Cleaning up Selenium resources...');
     await service.cleanup();
   }
 }
