@@ -514,18 +514,19 @@ function ContentInner() {
         throw new Error('Content not found');
       }
 
-      // Get published records to find Instagram/Facebook/LinkedIn/GitHub posts
+      // Get published records to find Instagram/Facebook/LinkedIn/GitHub/Quora posts
       const publishedRecords = contentItem.published_records || [];
       const instagramPost = publishedRecords.find((r: any) => r.platform === 'instagram');
       const facebookPost = publishedRecords.find((r: any) => r.platform === 'facebook');
       const linkedinPost = publishedRecords.find((r: any) => r.platform === 'linkedin');
       const githubPost = publishedRecords.find((r: any) => r.platform === 'github');
+      const quoraPost = publishedRecords.find((r: any) => r.platform === 'quora');
       
-      // Determine which platform to show metrics for
-      const platform = instagramPost ? 'instagram' : (facebookPost ? 'facebook' : (linkedinPost ? 'linkedin' : (githubPost ? 'github' : null)));
+      // Determine which platform to show metrics for (Quora added)
+      const platform = instagramPost ? 'instagram' : (facebookPost ? 'facebook' : (linkedinPost ? 'linkedin' : (githubPost ? 'github' : (quoraPost ? 'quora' : null))));
       setPerformancePlatform(platform);
 
-      // If it's Instagram, Facebook, LinkedIn, or GitHub, load existing metrics from database (if any)
+      // If it's Instagram, Facebook, LinkedIn, GitHub, or Quora, load existing metrics from database (if any)
       if (platform) {
         // Load existing metrics from database (don't auto-fetch from API)
         if (contentItem.raw?.metadata?.performance) {
@@ -544,7 +545,8 @@ function ContentInner() {
             saved: platformMetrics.saved || 0,
             reactions: platformMetrics.reactions || 0,
             clicks: platformMetrics.clicks || 0,
-            upvotes: platformMetrics.upvotes || 0, // For GitHub
+            upvotes: platformMetrics.upvotes || 0, // For GitHub and Quora
+            views: platformMetrics.views || 0, // For Quora
             lastUpdated: platformMetrics.lastUpdated || null, // Preserve timestamp from database
           });
         } else {
@@ -560,12 +562,13 @@ function ContentInner() {
             saved: 0,
             reactions: 0,
             clicks: 0,
-            upvotes: 0, // For GitHub
+            upvotes: 0, // For GitHub and Quora
+            views: 0, // For Quora
             lastUpdated: null,
           });
         }
       } else {
-        // For non-Instagram/Facebook/LinkedIn/GitHub platforms, show message
+        // For non-Instagram/Facebook/LinkedIn/GitHub/Quora platforms, show message
         setCurrentMetrics(null);
       }
     } catch (error: any) {
@@ -632,7 +635,8 @@ function ContentInner() {
               saved: platformMetrics.saved || 0,
               reactions: platformMetrics.reactions || 0,
               clicks: platformMetrics.clicks || 0,
-              upvotes: platformMetrics.upvotes || 0, // For GitHub - was missing!
+              upvotes: platformMetrics.upvotes || 0, // For GitHub and Quora
+              views: platformMetrics.views || 0, // For Quora
               lastUpdated: lastUpdated, // Always set timestamp
             });
             
@@ -656,7 +660,8 @@ function ContentInner() {
               saved: 0,
               reactions: 0,
               clicks: 0,
-              upvotes: 0, // For GitHub
+              upvotes: 0, // For GitHub and Quora
+              views: 0, // For Quora
               lastUpdated: new Date().toISOString(), // Set timestamp even if no data
             });
             toast.success('Refresh completed. No metrics available yet.', { id: 'refresh-metrics' });
@@ -2081,13 +2086,13 @@ function ContentInner() {
                   Track Content Performance
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github'
-                    ? 'Live metrics from ' + (performancePlatform === 'instagram' ? 'Instagram' : performancePlatform === 'facebook' ? 'Facebook' : performancePlatform === 'linkedin' ? 'LinkedIn' : 'GitHub')
+                  {performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora'
+                    ? 'Live metrics from ' + (performancePlatform === 'instagram' ? 'Instagram' : performancePlatform === 'facebook' ? 'Facebook' : performancePlatform === 'linkedin' ? 'LinkedIn' : performancePlatform === 'github' ? 'GitHub' : 'Quora')
                     : 'Measure your content performance to enable optimization'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {(performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github') && (
+                {(performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora') && (
                   <div className="flex flex-col items-end gap-1">
                     <button
                       onClick={handleRefreshMetrics}
@@ -2129,8 +2134,8 @@ function ContentInner() {
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                   <span className="ml-3 text-gray-600">Loading metrics...</span>
                 </div>
-              ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github') && currentMetrics ? (
-                // Show live metrics for Instagram/Facebook/LinkedIn/GitHub with charts
+              ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora') && currentMetrics ? (
+                // Show live metrics for Instagram/Facebook/LinkedIn/GitHub/Quora with charts
                 <div className="space-y-6">
                   {/* Engagement Metrics Bar Chart */}
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
@@ -2138,8 +2143,13 @@ function ContentInner() {
                     <ResponsiveContainer width="100%" height={250}>
                       <BarChart
                         data={(() => {
+                          // For Quora and GitHub, show Upvotes instead of Likes
                           const data = [
-                            { name: performancePlatform === 'github' ? 'Reactions' : 'Likes', value: currentMetrics.likes || 0, fill: '#3b82f6' },
+                            { 
+                              name: performancePlatform === 'github' ? 'Reactions' : (performancePlatform === 'quora' ? 'Upvotes' : 'Likes'), 
+                              value: performancePlatform === 'quora' ? (currentMetrics.upvotes || 0) : (currentMetrics.likes || 0), 
+                              fill: '#3b82f6' 
+                            },
                             { name: 'Comments', value: currentMetrics.comments || 0, fill: '#10b981' },
                           ];
                           // For GitHub, always show Upvotes (even if 0)
@@ -2154,6 +2164,24 @@ function ContentInner() {
                               comments: currentMetrics.comments,
                               upvotes: upvotesValue,
                               upvotesRaw: currentMetrics.upvotes,
+                            });
+                          } else if (performancePlatform === 'quora') {
+                            // For Quora, always show all 4 metrics: Views, Upvotes (already first), Comments (already second), Shares
+                            // Views
+                            const viewsValue = currentMetrics.views !== undefined && currentMetrics.views !== null 
+                              ? currentMetrics.views 
+                              : 0;
+                            data.push({ name: 'Views', value: viewsValue, fill: '#8b5cf6' });
+                            // Shares
+                            const sharesValue = currentMetrics.shares !== undefined && currentMetrics.shares !== null 
+                              ? currentMetrics.shares 
+                              : 0;
+                            data.push({ name: 'Shares', value: sharesValue, fill: '#f59e0b' });
+                            console.log('📊 Quora metrics for chart:', {
+                              upvotes: currentMetrics.upvotes,
+                              comments: currentMetrics.comments,
+                              views: viewsValue,
+                              shares: sharesValue,
                             });
                           } else {
                             // For other platforms, show Shares and Saved if available
@@ -2268,14 +2296,14 @@ function ContentInner() {
                   )}
                 </div>
               ) : (
-                // No metrics available or not Instagram/Facebook/LinkedIn/GitHub
+                // No metrics available or not Instagram/Facebook/LinkedIn/GitHub/Quora
                 <div className="flex flex-col items-center justify-center py-12">
                   <TrendingUp className="w-16 h-16 text-gray-300 mb-4" />
                   <h4 className="text-lg font-semibold text-gray-900 mb-2">No Performance Data Available</h4>
                   <p className="text-sm text-gray-600 text-center max-w-md">
                     {performancePlatform 
-                      ? 'Performance tracking is only available for Instagram, Facebook, LinkedIn, and GitHub posts. Please ensure your content is published to one of these platforms.'
-                      : 'This content is not published to Instagram, Facebook, LinkedIn, or GitHub. Performance tracking is currently only available for these platforms.'}
+                      ? 'Performance tracking is only available for Instagram, Facebook, LinkedIn, GitHub, and Quora posts. Please ensure your content is published to one of these platforms.'
+                      : 'This content is not published to Instagram, Facebook, LinkedIn, GitHub, or Quora. Performance tracking is currently only available for these platforms.'}
                   </p>
                 </div>
               )}

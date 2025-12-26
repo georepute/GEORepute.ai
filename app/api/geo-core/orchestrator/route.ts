@@ -575,11 +575,36 @@ export async function POST(request: NextRequest) {
                     console.log("✅ Schema Automation: Schema included in Medium post");
                   }
                   
-                  mediumResult = await publishToMedium(mediumConfig, {
-                    title: contentStrategy.topic || "Untitled",
-                    content: mediumContent,
-                    tags: contentStrategy.metadata?.tags || [],
-                  });
+                  // Call Render crawler service for Medium publishing
+                  if (process.env.QUORA_MEDIUM_URL) {
+                    console.log('📡 Calling Render service for Medium publishing...');
+                    const response = await fetch(`${process.env.QUORA_MEDIUM_URL}/medium/publish`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        email: mediumConfig.email,
+                        cookies: mediumConfig.cookies,
+                        content: {
+                          title: contentStrategy.topic || "Untitled",
+                          content: mediumContent,
+                          tags: contentStrategy.metadata?.tags || [],
+                          metadata: {
+                            imageUrl: contentStrategy.metadata?.imageUrl,
+                          },
+                        },
+                      }),
+                    });
+                    mediumResult = await response.json();
+                  } else {
+                    // Fallback to local Selenium (for development)
+                    mediumResult = await publishToMedium(mediumConfig, {
+                      title: contentStrategy.topic || "Untitled",
+                      content: mediumContent,
+                      tags: contentStrategy.metadata?.tags || [],
+                    });
+                  }
 
                   if (mediumResult.success && mediumResult.url) {
                     // If platform is Medium, always use Medium URL (override GitHub/Reddit)
@@ -660,11 +685,40 @@ export async function POST(request: NextRequest) {
                     console.log("💡 Schema is stored in metadata for your website use");
                   }
                   
-                  quoraResult = await publishToQuora(quoraConfig, {
-                    title: contentStrategy.topic || "Untitled",
-                    content: quoraContent,
-                    tags: contentStrategy.metadata?.tags || [],
-                  }, actionData.questionUrl);
+                  // Call Render crawler service for Quora publishing
+                  if (process.env.QUORA_MEDIUM_URL) {
+                    console.log('📡 Calling Render service for Quora publishing...');
+                    const response = await fetch(`${process.env.QUORA_MEDIUM_URL}/quora/publish`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                      },
+                      body: JSON.stringify({
+                        email: quoraConfig.email,
+                        cookies: quoraConfig.cookies,
+                        content: {
+                          title: contentStrategy.topic || "Untitled",
+                          content: quoraContent,
+                          tags: contentStrategy.metadata?.tags || [],
+                          metadata: {
+                            imageUrl: contentStrategy.metadata?.imageUrl,
+                          },
+                        },
+                        questionUrl: actionData.questionUrl,
+                      }),
+                    });
+                    quoraResult = await response.json();
+                  } else {
+                    // Fallback to local Selenium (for development)
+                    quoraResult = await publishToQuora(quoraConfig, {
+                      title: contentStrategy.topic || "Untitled",
+                      content: quoraContent,
+                      tags: contentStrategy.metadata?.tags || [],
+                      metadata: {
+                        imageUrl: contentStrategy.metadata?.imageUrl,
+                      },
+                    }, actionData.questionUrl);
+                  }
 
                   if (quoraResult.success && quoraResult.url) {
                     if (!publishUrl || platform === "quora") {

@@ -1652,11 +1652,8 @@ function MediumIntegrationSettings() {
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState({
     email: "",
-    password: "",
-    useCookies: false,
     cookies: "",
   });
-  const [showPassword, setShowPassword] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
@@ -1671,8 +1668,6 @@ function MediumIntegrationSettings() {
         if (data.success && data.config) {
           setConfig({
             email: data.config.email || "",
-            password: "",
-            useCookies: !!data.config.cookies,
             cookies: data.config.cookies ? "***" : "",
           });
           setIsConnected(data.config.verified || false);
@@ -1687,62 +1682,50 @@ function MediumIntegrationSettings() {
   };
 
   const handleSave = async () => {
-    if (config.useCookies) {
-      if (!config.cookies || config.cookies === "***") {
-        toast.error("Please enter cookies or switch to email/password");
+    // Validate inputs
+    if (!config.email) {
+      toast.error("Email is required (used for account identification)");
+      return;
+    }
+    if (!config.cookies || config.cookies === "***") {
+      toast.error("Please enter cookies JSON");
+      return;
+    }
+    
+    // Validate cookies JSON format
+    let parsedCookies;
+    try {
+      parsedCookies = JSON.parse(config.cookies);
+      if (!Array.isArray(parsedCookies)) {
+        toast.error("Cookies must be a JSON array. Example: [{\"name\": \"sid\", \"value\": \"...\", \"domain\": \".medium.com\"}]");
         return;
       }
-      
-      // Validate cookies JSON format
-      try {
-        const parsedCookies = JSON.parse(config.cookies);
-        if (!Array.isArray(parsedCookies)) {
-          toast.error("Cookies must be a JSON array. Example: [{\"name\": \"sid\", \"value\": \"...\", \"domain\": \".medium.com\"}]");
+      if (parsedCookies.length === 0) {
+        toast.error("Cookies array is empty. Please add at least one cookie.");
+        return;
+      }
+      // Validate each cookie has required fields
+      for (const cookie of parsedCookies) {
+        if (!cookie.name || !cookie.value) {
+          toast.error(`Cookie is missing required fields (name or value): ${JSON.stringify(cookie)}`);
           return;
         }
-        if (parsedCookies.length === 0) {
-          toast.error("Cookies array is empty. Please add at least one cookie.");
-          return;
-        }
-        // Validate each cookie has required fields
-        for (const cookie of parsedCookies) {
-          if (!cookie.name || !cookie.value) {
-            toast.error(`Cookie is missing required fields (name or value): ${JSON.stringify(cookie)}`);
-            return;
-          }
-        }
-      } catch (parseError: any) {
-        toast.error(`Invalid JSON format for cookies: ${parseError.message}`);
-        return;
       }
-    } else {
-      if (!config.email || !config.password) {
-        toast.error("Please enter email and password");
-        return;
-      }
+    } catch (parseError: any) {
+      toast.error(`Invalid JSON format for cookies: ${parseError.message}`);
+      return;
     }
 
     setLoading(true);
     try {
-      let cookiesToSend = undefined;
-      if (config.useCookies) {
-        try {
-          cookiesToSend = JSON.parse(config.cookies);
-          console.log("🍪 Sending cookies:", cookiesToSend.length, "cookies");
-        } catch (parseError: any) {
-          toast.error(`Failed to parse cookies JSON: ${parseError.message}`);
-          setLoading(false);
-          return;
-        }
-      }
+      console.log("🍪 Sending cookies:", parsedCookies.length, "cookies");
       
       const response = await fetch("/api/integrations/medium", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: config.email || "", // Email is still required for identification
-          password: config.useCookies ? undefined : config.password,
-          cookies: cookiesToSend,
+          email: config.email,
+          cookies: parsedCookies,
         }),
       });
 
@@ -1751,7 +1734,7 @@ function MediumIntegrationSettings() {
       if (response.ok && data.success) {
         toast.success("Medium configuration saved!");
         setIsConnected(true);
-        setConfig({ email: "", password: "", useCookies: false, cookies: "" });
+        setConfig({ email: "", cookies: "" });
         await loadMediumConfig();
       } else {
         toast.error(data.error || "Failed to save configuration");
@@ -1778,7 +1761,7 @@ function MediumIntegrationSettings() {
       if (response.ok) {
         toast.success("Medium integration disconnected");
         setIsConnected(false);
-        setConfig({ email: "", password: "", useCookies: false, cookies: "" });
+        setConfig({ email: "", cookies: "" });
       } else {
         const data = await response.json();
         toast.error(data.error || "Failed to disconnect");
@@ -1819,80 +1802,45 @@ function MediumIntegrationSettings() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 mb-4">
-            <input
-              type="checkbox"
-              id="useCookies"
-              checked={config.useCookies}
-              onChange={(e) => setConfig({ ...config, useCookies: e.target.checked })}
-              className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-            />
-            <label htmlFor="useCookies" className="text-sm text-gray-700">
-              Use session cookies instead of password (recommended)
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Email *
             </label>
+            <input
+              type="email"
+              value={config.email}
+              onChange={(e) => setConfig({ ...config, email: e.target.value })}
+              placeholder="your@email.com"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Used for account identification
+            </p>
           </div>
 
-          {config.useCookies ? (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Session Cookies (JSON) *
-              </label>
-              <textarea
-                value={config.cookies}
-                onChange={(e) => setConfig({ ...config, cookies: e.target.value })}
-                placeholder='[{"name": "session", "value": "...", "domain": ".medium.com"}]'
-                rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-xs"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Extract cookies from your browser after logging into Medium. Use browser DevTools → Application → Cookies.
-                <a href="/docs/HOW_TO_GET_SESSION_COOKIES.md" target="_blank" className="text-primary-600 hover:underline ml-1">
-                  View detailed guide →
-                </a>
-              </p>
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email *
-                </label>
-                <input
-                  type="email"
-                  value={config.email}
-                  onChange={(e) => setConfig({ ...config, email: e.target.value })}
-                  placeholder="your@email.com"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password *
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={config.password}
-                    onChange={(e) => setConfig({ ...config, password: e.target.value })}
-                    placeholder="Your Medium password"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none pr-12"
-                  />
-                  <button
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Session Cookies (JSON) *
+            </label>
+            <textarea
+              value={config.cookies}
+              onChange={(e) => setConfig({ ...config, cookies: e.target.value })}
+              placeholder='[{"name": "session", "value": "...", "domain": ".medium.com"}]'
+              rows={6}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-xs"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Extract cookies from your browser after logging into Medium. Use browser DevTools → Application → Cookies.
+              <a href="/docs/HOW_TO_GET_SESSION_COOKIES.md" target="_blank" className="text-primary-600 hover:underline ml-1">
+                View detailed guide →
+              </a>
+            </p>
+          </div>
 
           <div className="flex gap-3 pt-4">
             <button
               onClick={handleSave}
-              disabled={loading || (config.useCookies ? !config.cookies : (!config.email || !config.password))}
+              disabled={loading || !config.email || !config.cookies}
               className="px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {loading ? (
@@ -1939,11 +1887,8 @@ function QuoraIntegrationSettings() {
   const [loading, setLoading] = useState(false);
   const [config, setConfig] = useState({
     email: "",
-    password: "",
-    useCookies: false,
     cookies: "",
   });
-  const [showPassword, setShowPassword] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
@@ -1958,8 +1903,6 @@ function QuoraIntegrationSettings() {
         if (data.success && data.config) {
           setConfig({
             email: data.config.email || "",
-            password: "",
-            useCookies: !!data.config.cookies,
             cookies: data.config.cookies ? "***" : "",
           });
           setIsConnected(data.config.verified || false);
@@ -1974,27 +1917,50 @@ function QuoraIntegrationSettings() {
   };
 
   const handleSave = async () => {
-    if (config.useCookies) {
-      if (!config.cookies || config.cookies === "***") {
-        toast.error("Please enter cookies or switch to email/password");
+    // Validate inputs
+    if (!config.email) {
+      toast.error("Email is required (used for account identification)");
+      return;
+    }
+    if (!config.cookies || config.cookies === "***") {
+      toast.error("Please enter cookies JSON");
+      return;
+    }
+    
+    // Validate cookies JSON format
+    let parsedCookies;
+    try {
+      parsedCookies = JSON.parse(config.cookies);
+      if (!Array.isArray(parsedCookies)) {
+        toast.error("Cookies must be a JSON array. Example: [{\"name\": \"m-b\", \"value\": \"...\", \"domain\": \".quora.com\"}]");
         return;
       }
-    } else {
-      if (!config.email || !config.password) {
-        toast.error("Please enter email and password");
+      if (parsedCookies.length === 0) {
+        toast.error("Cookies array is empty. Please add at least one cookie.");
         return;
       }
+      // Validate each cookie has required fields
+      for (const cookie of parsedCookies) {
+        if (!cookie.name || !cookie.value) {
+          toast.error(`Cookie is missing required fields (name or value): ${JSON.stringify(cookie)}`);
+          return;
+        }
+      }
+    } catch (parseError: any) {
+      toast.error(`Invalid JSON format for cookies: ${parseError.message}`);
+      return;
     }
 
     setLoading(true);
     try {
+      console.log("🍪 Sending cookies:", parsedCookies.length, "cookies");
+      
       const response = await fetch("/api/integrations/quora", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: config.email,
-          password: config.useCookies ? undefined : config.password,
-          cookies: config.useCookies ? JSON.parse(config.cookies) : undefined,
+          cookies: parsedCookies,
         }),
       });
 
@@ -2003,7 +1969,7 @@ function QuoraIntegrationSettings() {
       if (response.ok && data.success) {
         toast.success("Quora configuration saved!");
         setIsConnected(true);
-        setConfig({ email: "", password: "", useCookies: false, cookies: "" });
+        setConfig({ email: "", cookies: "" });
         await loadQuoraConfig();
       } else {
         toast.error(data.error || "Failed to save configuration");
@@ -2030,7 +1996,7 @@ function QuoraIntegrationSettings() {
       if (response.ok) {
         toast.success("Quora integration disconnected");
         setIsConnected(false);
-        setConfig({ email: "", password: "", useCookies: false, cookies: "" });
+        setConfig({ email: "", cookies: "" });
       } else {
         const data = await response.json();
         toast.error(data.error || "Failed to disconnect");
@@ -2067,84 +2033,49 @@ function QuoraIntegrationSettings() {
           <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
             <p className="text-xs text-yellow-900">
               <strong>⚠️ Note:</strong> Quora doesn't provide an official API. We use browser automation (Selenium) to publish content. 
-              This requires your login credentials or session cookies.
+              This requires your email and session cookies.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 mb-4">
-            <input
-              type="checkbox"
-              id="useCookiesQuora"
-              checked={config.useCookies}
-              onChange={(e) => setConfig({ ...config, useCookies: e.target.checked })}
-              className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-            />
-            <label htmlFor="useCookiesQuora" className="text-sm text-gray-700">
-              Use session cookies instead of password (recommended)
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Email *
             </label>
+            <input
+              type="email"
+              value={config.email}
+              onChange={(e) => setConfig({ ...config, email: e.target.value })}
+              placeholder="your@email.com"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Used for account identification
+            </p>
           </div>
 
-          {config.useCookies ? (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Session Cookies (JSON) *
-              </label>
-              <textarea
-                value={config.cookies}
-                onChange={(e) => setConfig({ ...config, cookies: e.target.value })}
-                placeholder='[{"name": "session", "value": "...", "domain": ".quora.com"}]'
-                rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-xs"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Extract cookies from your browser after logging into Quora. Use browser DevTools → Application → Cookies.
-                <a href="/docs/HOW_TO_GET_SESSION_COOKIES.md" target="_blank" className="text-primary-600 hover:underline ml-1">
-                  View detailed guide →
-                </a>
-              </p>
-            </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email *
-                </label>
-                <input
-                  type="email"
-                  value={config.email}
-                  onChange={(e) => setConfig({ ...config, email: e.target.value })}
-                  placeholder="your@email.com"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password *
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={config.password}
-                    onChange={(e) => setConfig({ ...config, password: e.target.value })}
-                    placeholder="Your Quora password"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none pr-12"
-                  />
-                  <button
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Session Cookies (JSON) *
+            </label>
+            <textarea
+              value={config.cookies}
+              onChange={(e) => setConfig({ ...config, cookies: e.target.value })}
+              placeholder='[{"name": "m-b", "value": "...", "domain": ".quora.com"}]'
+              rows={6}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-xs"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Extract cookies from your browser after logging into Quora. Use browser DevTools → Application → Cookies.
+              <a href="/docs/HOW_TO_GET_SESSION_COOKIES.md" target="_blank" className="text-primary-600 hover:underline ml-1">
+                View detailed guide →
+              </a>
+            </p>
+          </div>
 
           <div className="flex gap-3 pt-4">
             <button
               onClick={handleSave}
-              disabled={loading || (config.useCookies ? !config.cookies : (!config.email || !config.password))}
+              disabled={loading || !config.email || !config.cookies}
               className="px-6 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {loading ? (
