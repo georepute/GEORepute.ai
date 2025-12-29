@@ -140,24 +140,54 @@ export async function POST(request: NextRequest) {
       const startTime = Date.now();
       
       try {
-        // Increase timeout to 90 seconds (Selenium can be slow, especially first time)
-        verification = await Promise.race([
-          verifyMediumConfig(mediumConfig).then((result) => {
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-            console.log(`✅ Medium verification completed in ${elapsed}s`);
-            return result;
-          }),
-          new Promise<{ success: false; error: string }>((resolve) =>
-            setTimeout(() => {
+        // Check if we should use Render service or local Selenium
+        if (process.env.QUORA_MEDIUM_URL) {
+          console.log('📡 Calling Render service for Medium verification...');
+          const response = await fetch(`${process.env.QUORA_MEDIUM_URL}/medium/verify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: email,
+              cookies: sessionCookies,
+            }),
+            signal: AbortSignal.timeout(60000), // 60 second timeout
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            verification = {
+              success: false,
+              error: errorData.error || `Render service error: ${response.status}`,
+            };
+          } else {
+            verification = await response.json();
+          }
+
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+          console.log(`${verification.success ? '✅' : '❌'} Medium verification completed in ${elapsed}s`);
+        } else {
+          console.log('🔧 Using local Selenium for Medium verification (dev mode)...');
+          // Fallback to local Selenium for development
+          verification = await Promise.race([
+            verifyMediumConfig(mediumConfig).then((result) => {
               const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-              console.error(`⏱️ Medium verification timeout after ${elapsed}s`);
-              resolve({ 
-                success: false, 
-                error: "Verification timeout after 90 seconds. Cookies were added successfully, so login should work. You can skip verification for testing." 
-              });
-            }, 90000) // Increased to 90 seconds
-          ),
-        ]);
+              console.log(`✅ Medium verification completed in ${elapsed}s`);
+              return result;
+            }),
+            new Promise<{ success: false; error: string }>((resolve) =>
+              setTimeout(() => {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                console.error(`⏱️ Medium verification timeout after ${elapsed}s`);
+                resolve({ 
+                  success: false, 
+                  error: "Verification timeout after 60 seconds. ChromeDriver initialization is slow or login is taking too long." 
+                });
+              }, 60000)
+            ),
+          ]);
+        }
       } catch (verifyError: any) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
         console.error(`❌ Medium verification error after ${elapsed}s:`, verifyError);
@@ -172,12 +202,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { 
             error: verification.error || "Failed to verify Medium access",
-            details: "This might be due to ChromeDriver initialization being slow, network issues, or login process taking too long.",
+            details: "Unable to verify Medium credentials. Please check your cookies are valid.",
             suggestions: [
-              "Try using session cookies instead of password (faster and more reliable)",
-              "Check server logs for ChromeDriver initialization messages",
-              "Ensure ChromeDriver is properly installed",
-              "You can temporarily skip verification for testing (not recommended for production)"
+              "Make sure your cookies are fresh (export them again from your browser)",
+              "Ensure you're logged into Medium in your browser",
+              "Check that all required cookies are included (especially sid)",
+              "Try logging out and back into Medium, then export cookies again"
             ]
           },
           { status: 400 }
