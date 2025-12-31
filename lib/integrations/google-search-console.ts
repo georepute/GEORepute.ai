@@ -1,412 +1,302 @@
+/**
+ * Google Search Console Integration Service
+ * Handles OAuth authentication and keyword data fetching from GSC API
+ */
+
 import { google } from 'googleapis';
 
-export interface GSCConfig {
-  clientId: string;
-  clientSecret: string;
-  redirectUri: string;
-}
-
-export interface GSCTokens {
-  access_token: string;
-  refresh_token?: string;
-  expiry_date?: number;
-  token_type?: string;
-  scope?: string;
-}
-
-export interface GSCAnalyticsQuery {
-  startDate: string;
-  endDate: string;
-  dimensions?: string[];
-  rowLimit?: number;
-  startRow?: number;
-  filters?: Array<{
-    dimension: string;
-    operator: string;
-    expression: string;
-  }>;
-}
-
-export interface GSCAnalyticsRow {
-  keys?: string[];
+export interface GSCKeyword {
+  keyword: string;
+  position: number;
   clicks: number;
   impressions: number;
   ctr: number;
-  position: number;
 }
 
-export class GoogleSearchConsoleClient {
+export interface GSCConfig {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+// Type alias for backward compatibility
+export type GSCTokens = GSCConfig;
+
+export class GoogleSearchConsoleService {
   private oauth2Client;
-  
+
   constructor(config: GSCConfig) {
     this.oauth2Client = new google.auth.OAuth2(
-      config.clientId,
-      config.clientSecret,
-      config.redirectUri
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
     );
-  }
 
-  /**
-   * Generate OAuth authorization URL
-   */
-  getAuthUrl(state?: string): string {
-    return this.oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      scope: [
-        'https://www.googleapis.com/auth/webmasters',
-        'https://www.googleapis.com/auth/webmasters.readonly',
-        'https://www.googleapis.com/auth/siteverification',
-        'https://www.googleapis.com/auth/siteverification.verify_only',
-      ],
-      prompt: 'consent', // Force consent to get refresh token
-      state: state, // For CSRF protection
-    });
-  }
-
-  /**
-   * Exchange authorization code for tokens
-   */
-  async getTokens(code: string): Promise<GSCTokens> {
-    const { tokens } = await this.oauth2Client.getToken(code);
-    return {
-      access_token: tokens.access_token!,
-      refresh_token: tokens.refresh_token || undefined,
-      expiry_date: tokens.expiry_date || undefined,
-      token_type: tokens.token_type || undefined,
-      scope: tokens.scope || undefined,
-    };
-  }
-
-  /**
-   * Set credentials for authenticated requests
-   */
-  setCredentials(tokens: GSCTokens) {
     this.oauth2Client.setCredentials({
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      expiry_date: tokens.expiry_date,
+      access_token: config.accessToken,
+      refresh_token: config.refreshToken,
+      expiry_date: config.expiresAt,
     });
   }
 
   /**
-   * Get Search Console API client
+   * Fetch keywords from Google Search Console
+   * @param siteUrl - The verified GSC property URL
+   * @param limit - Number of keywords to fetch (default 100)
+   * @returns Array of keywords with metrics
    */
-  getSearchConsoleClient() {
-    return google.webmasters({ version: 'v3', auth: this.oauth2Client });
-  }
-
-  /**
-   * Get Site Verification API client
-   */
-  getSiteVerificationClient() {
-    return google.siteVerification({ version: 'v1', auth: this.oauth2Client });
-  }
-
-  /**
-   * Refresh access token using refresh token
-   */
-  async refreshAccessToken(refreshToken: string): Promise<GSCTokens> {
-    this.oauth2Client.setCredentials({ refresh_token: refreshToken });
-    const { credentials } = await this.oauth2Client.refreshAccessToken();
-    return {
-      access_token: credentials.access_token!,
-      refresh_token: credentials.refresh_token || refreshToken,
-      expiry_date: credentials.expiry_date || undefined,
-      token_type: credentials.token_type || undefined,
-      scope: credentials.scope || undefined,
-    };
-  }
-
-  /**
-   * List all sites the user has access to
-   */
-  async listSites() {
-    const searchConsole = this.getSearchConsoleClient();
-    const response = await searchConsole.sites.list();
-    return response.data.siteEntry || [];
-  }
-
-  /**
-   * Add a site to Search Console
-   */
-  async addSite(siteUrl: string) {
-    const searchConsole = this.getSearchConsoleClient();
-    const response = await searchConsole.sites.add({ siteUrl });
-    return response.data;
-  }
-
-  /**
-   * Delete a site from Search Console
-   */
-  async deleteSite(siteUrl: string) {
-    const searchConsole = this.getSearchConsoleClient();
-    await searchConsole.sites.delete({ siteUrl });
-  }
-
-  /**
-   * Get verification token for domain verification using Site Verification API
-   * This method requests a DNS_TXT or DNS_CNAME token for domain verification
-   * @param domain - The domain to verify (e.g., "example.com")
-   * @param method - Verification method: 'DNS_TXT' or 'DNS_CNAME'
-   * @returns The verification token string to be added to DNS records
-   */
-  async getVerificationToken(domain: string, method: 'DNS_TXT' | 'DNS_CNAME' = 'DNS_TXT'): Promise<string> {
-    const siteVerification = this.getSiteVerificationClient();
-    
-    try {
-      // POST https://www.googleapis.com/siteVerification/v1/token
-      const response = await siteVerification.webResource.getToken({
-        requestBody: {
-          site: {
-            type: 'INET_DOMAIN',
-            identifier: domain,
-          },
-          verificationMethod: method,
-        },
-      });
-      return response.data.token || '';
-    } catch (error: any) {
-      console.error('Site Verification API error:', error);
-      console.error('Request details:', { domain, method });
-      console.error('Error response:', error?.response?.data);
-      throw error;
-    }
-  }
-
-  /**
-   * Verify site ownership after DNS record is in place
-   * This method instructs Google to check for the token and verify the domain
-   * @param domain - The domain to verify (e.g., "example.com")
-   * @param method - Verification method: 'DNS_TXT' or 'DNS_CNAME'
-   * @returns Verification response data
-   */
-  async verifySite(domain: string, method: 'DNS_TXT' | 'DNS_CNAME' = 'DNS_TXT') {
-    const siteVerification = this.getSiteVerificationClient();
-    
-    try {
-      // POST https://www.googleapis.com/siteVerification/v1/webResource?verificationMethod=DNS_TXT
-      const response = await siteVerification.webResource.insert({
-        verificationMethod: method,
-        requestBody: {
-          site: {
-            type: 'INET_DOMAIN',
-            identifier: domain,
-          },
-        },
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error('Site verification failed:', error);
-      console.error('Request details:', { domain, method });
-      console.error('Error response:', error?.response?.data);
-      throw error;
-    }
-  }
-
-  /**
-   * Get verification token for URL-prefix site verification
-   * This is different from domain verification and works for URL properties
-   * @param siteUrl - The full URL to verify (e.g., "https://example.com" or "https://example.com/")
-   * @param method - Verification method: 'DNS_TXT', 'META', 'FILE', 'ANALYTICS', 'TAG_MANAGER'
-   * @returns The verification token or HTML meta tag
-   */
-  async getUrlVerificationToken(siteUrl: string, method: string = 'META'): Promise<string> {
-    const siteVerification = this.getSiteVerificationClient();
-    
-    try {
-      const response = await siteVerification.webResource.getToken({
-        requestBody: {
-          site: {
-            type: 'SITE',
-            identifier: siteUrl,
-          },
-          verificationMethod: method,
-        },
-      });
-      return response.data.token || '';
-    } catch (error: any) {
-      console.error('URL Site Verification API error:', error);
-      console.error('Request details:', { siteUrl, method });
-      console.error('Error response:', error?.response?.data);
-      throw error;
-    }
-  }
-
-  /**
-   * Verify URL-prefix site ownership
-   * @param siteUrl - The full URL to verify (e.g., "https://example.com")
-   * @param method - Verification method used
-   */
-  async verifyUrlSite(siteUrl: string, method: string = 'META') {
-    const siteVerification = this.getSiteVerificationClient();
-    
-    try {
-      const response = await siteVerification.webResource.insert({
-        verificationMethod: method,
-        requestBody: {
-          site: {
-            type: 'SITE',
-            identifier: siteUrl,
-          },
-        },
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error('URL site verification failed:', error);
-      console.error('Request details:', { siteUrl, method });
-      console.error('Error response:', error?.response?.data);
-      throw error;
-    }
-  }
-
-  /**
-   * Query Search Console analytics data
-   */
-  async queryAnalytics(
+  async fetchKeywords(
     siteUrl: string,
-    query: GSCAnalyticsQuery
-  ): Promise<GSCAnalyticsRow[]> {
-    const searchConsole = this.getSearchConsoleClient();
-    const response = await searchConsole.searchanalytics.query({
-      siteUrl,
-      requestBody: {
-        startDate: query.startDate,
-        endDate: query.endDate,
-        dimensions: query.dimensions || ['date'],
-        rowLimit: query.rowLimit || 25000,
-        startRow: query.startRow || 0,
-        dimensionFilterGroups: query.filters ? [{
-          filters: query.filters,
-        }] : undefined,
-      },
-    });
-    return (response.data.rows || []) as GSCAnalyticsRow[];
+    limit: number = 100
+  ): Promise<GSCKeyword[]> {
+    try {
+      const searchconsole = google.searchconsole({
+        version: 'v1',
+        auth: this.oauth2Client,
+      });
+
+      // Get data from last 30 days
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 30);
+
+      console.log(`📊 Fetching GSC keywords for ${siteUrl}`);
+      console.log(`📅 Date range: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
+
+      const response = await searchconsole.searchanalytics.query({
+        siteUrl: siteUrl,
+        requestBody: {
+          startDate: startDate.toISOString().split('T')[0],
+          endDate: endDate.toISOString().split('T')[0],
+          dimensions: ['query'],
+          rowLimit: limit,
+        },
+      });
+
+      const rows = response.data.rows || [];
+      console.log(`✅ Fetched ${rows.length} keywords from GSC`);
+
+      return rows.map((row: any) => ({
+        keyword: row.keys[0],
+        position: Math.round(row.position * 10) / 10, // Round to 1 decimal
+        clicks: row.clicks || 0,
+        impressions: row.impressions || 0,
+        ctr: row.ctr || 0,
+      }));
+    } catch (error) {
+      console.error('❌ Error fetching GSC keywords:', error);
+      throw error;
+    }
   }
 
   /**
-   * Get sitemap data
+   * Get list of verified sites for this user
    */
-  async listSitemaps(siteUrl: string) {
-    const searchConsole = this.getSearchConsoleClient();
-    const response = await searchConsole.sitemaps.list({ siteUrl });
-    return response.data.sitemap || [];
+  async getVerifiedSites(): Promise<string[]> {
+    try {
+      const searchconsole = google.searchconsole({
+        version: 'v1',
+        auth: this.oauth2Client,
+      });
+
+      const response = await searchconsole.sites.list();
+      const sites = response.data.siteEntry || [];
+
+      // Only return verified sites where user has owner permission
+      return sites
+        .filter((site: any) => site.permissionLevel === 'siteOwner')
+        .map((site: any) => site.siteUrl);
+    } catch (error) {
+      console.error('❌ Error fetching verified sites:', error);
+      throw error;
+    }
   }
 
   /**
-   * Submit a sitemap
+   * Refresh access token if expired
    */
-  async submitSitemap(siteUrl: string, feedpath: string) {
-    const searchConsole = this.getSearchConsoleClient();
-    await searchConsole.sitemaps.submit({ siteUrl, feedpath });
+  async refreshAccessToken(): Promise<{ accessToken: string; expiresAt: number }> {
+    try {
+      const { credentials } = await this.oauth2Client.refreshAccessToken();
+      
+      return {
+        accessToken: credentials.access_token!,
+        expiresAt: credentials.expiry_date!,
+      };
+    } catch (error) {
+      console.error('❌ Error refreshing GSC token:', error);
+      throw error;
+    }
   }
 
   /**
-   * Delete a sitemap
+   * Get verification token for a site using Site Verification API
    */
-  async deleteSitemap(siteUrl: string, feedpath: string) {
-    const searchConsole = this.getSearchConsoleClient();
-    await searchConsole.sitemaps.delete({ siteUrl, feedpath });
+  async getVerificationToken(siteUrl: string, method: string): Promise<string> {
+    try {
+      const siteVerification = google.siteVerification({
+        version: 'v1',
+        auth: this.oauth2Client,
+      });
+
+      const response = await siteVerification.webResource.getToken({
+        requestBody: {
+          verificationMethod: method,
+          site: {
+            type: method === 'DNS_TXT' || method === 'DNS_CNAME' ? 'INET_DOMAIN' : 'SITE',
+            identifier: siteUrl.replace(/^sc-domain:/, ''),
+          },
+        },
+      });
+
+      return response.data.token || '';
+    } catch (error) {
+      console.error('❌ Error getting verification token:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get URL verification token (alias for getVerificationToken)
+   */
+  async getUrlVerificationToken(siteUrl: string, method: string): Promise<string> {
+    return this.getVerificationToken(siteUrl, method);
+  }
+
+  /**
+   * Verify a site with Google Site Verification API
+   */
+  async verifySite(siteUrl: string, method: string): Promise<boolean> {
+    try {
+      const siteVerification = google.siteVerification({
+        version: 'v1',
+        auth: this.oauth2Client,
+      });
+
+      await siteVerification.webResource.insert({
+        verificationMethod: method,
+        requestBody: {
+          site: {
+            type: method === 'DNS_TXT' || method === 'DNS_CNAME' ? 'INET_DOMAIN' : 'SITE',
+            identifier: siteUrl.replace(/^sc-domain:/, ''),
+          },
+        },
+      });
+
+      return true;
+    } catch (error) {
+      console.error('❌ Error verifying site:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Verify URL site (alias for verifySite)
+   */
+  async verifyUrlSite(siteUrl: string, method: string): Promise<boolean> {
+    return this.verifySite(siteUrl, method);
+  }
+
+  /**
+   * Add a site to Google Search Console
+   */
+  async addSite(siteUrl: string): Promise<void> {
+    try {
+      const searchconsole = google.searchconsole({
+        version: 'v1',
+        auth: this.oauth2Client,
+      });
+
+      await searchconsole.sites.add({
+        siteUrl,
+      });
+      
+      console.log(`✅ Site ${siteUrl} added to Search Console`);
+    } catch (error) {
+      console.error('❌ Error adding site to GSC:', error);
+      throw error;
+    }
   }
 }
 
 /**
- * Helper to create GSC client from stored tokens
+ * Normalize URL for comparison
+ * Removes protocol, www, trailing slash, and converts to lowercase
  */
-export function createGSCClientFromTokens(tokens: GSCTokens): GoogleSearchConsoleClient {
-  const config: GSCConfig = {
-    clientId: process.env.GOOGLE_CLIENT_ID!,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    redirectUri: process.env.GOOGLE_REDIRECT_URI!,
-  };
-
-  const client = new GoogleSearchConsoleClient(config);
-  client.setCredentials(tokens);
-  return client;
+export function normalizeUrl(url: string): string {
+  return url
+    .replace(/^https?:\/\//, '') // Remove protocol
+    .replace(/^www\./, '')        // Remove www
+    .replace(/\/$/, '')           // Remove trailing slash
+    .toLowerCase();               // Lowercase
 }
 
+// Alias for backwards compatibility
+export const normalizeSiteUrl = normalizeUrl;
+
 /**
- * Helper to format date for GSC API (YYYY-MM-DD)
+ * Check if two URLs match (considering different formats)
  */
-export function formatGSCDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+export function urlsMatch(url1: string, url2: string): boolean {
+  return normalizeUrl(url1) === normalizeUrl(url2);
 }
 
 /**
- * Helper to get date N days ago
+ * Helper function to create GSC client from stored tokens
+ */
+export function createGSCClientFromTokens(tokens: {
+  access_token: string;
+  refresh_token: string;
+  expires_at: string | number;
+}) {
+  const expiresAt = typeof tokens.expires_at === 'string' 
+    ? new Date(tokens.expires_at).getTime() 
+    : tokens.expires_at;
+
+  return new GoogleSearchConsoleService({
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt,
+  });
+}
+
+/**
+ * Get date N days ago in YYYY-MM-DD format
  */
 export function getDateDaysAgo(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
-  return formatGSCDate(date);
+  return date.toISOString().split('T')[0];
 }
 
 /**
- * Helper to normalize site URL for GSC
- * For now, we'll use URL-prefix properties as they're easier to verify programmatically
+ * Get the properly formatted Search Console site URL
+ * Handles both domain properties (sc-domain:) and URL-prefix properties
  */
-export function normalizeSiteUrl(domainUrl: string): string {
-  // Remove protocol and trailing slashes
-  let normalized = domainUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  
-  // Always use URL-prefix properties with https://
-  // This is easier to verify than domain properties
-  if (!normalized.startsWith('http')) {
-    normalized = `https://${normalized}`;
+export function getSearchConsoleSiteUrl(url: string, verificationMethod?: string): string {
+  // If it's already a domain property format, return as-is
+  if (url.startsWith('sc-domain:')) {
+    return url;
   }
   
-  return normalized;
-}
-
-/**
- * Helper to get the correct Search Console site URL format based on verification method
- * 
- * @param domainUrl - The domain URL (e.g., "perfection.marketing" or "https://perfection.marketing")
- * @param verificationMethod - The verification method used (DNS_TXT, DNS_CNAME, META, FILE, etc.)
- * @returns The correctly formatted site URL for Search Console API calls
- * 
- * @example
- * // For DNS verification
- * getSearchConsoleSiteUrl('perfection.marketing', 'DNS_TXT')
- * // Returns: 'sc-domain:perfection.marketing'
- * 
- * @example
- * // For META verification
- * getSearchConsoleSiteUrl('https://perfection.marketing', 'META')
- * // Returns: 'https://perfection.marketing'
- */
-export function getSearchConsoleSiteUrl(domainUrl: string, verificationMethod: string): string {
-  // Clean domain name (remove protocol and trailing slashes)
-  const cleanDomain = domainUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  
-  // DNS_TXT and DNS_CNAME use domain properties (sc-domain:)
-  // These verify the entire domain including all subdomains and protocols
+  // If verification method is DNS-based, use sc-domain: prefix
   if (verificationMethod === 'DNS_TXT' || verificationMethod === 'DNS_CNAME') {
+    // Remove protocol and www if present
+    const cleanDomain = url
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/$/, '');
     return `sc-domain:${cleanDomain}`;
   }
   
-  // META, FILE, ANALYTICS, TAG_MANAGER use URL-prefix properties
-  // These verify only the specific URL
-  return normalizeSiteUrl(domainUrl);
+  // Otherwise, ensure it has the proper URL-prefix format
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return `https://${url}`;
+  }
+  
+  return url;
 }
 
-/**
- * Check if tokens are expired or expiring soon
- */
-export function isTokenExpired(expiryDate: number | Date, bufferMinutes: number = 5): boolean {
-  const expiry = typeof expiryDate === 'number' ? expiryDate : expiryDate.getTime();
-  const now = Date.now();
-  const buffer = bufferMinutes * 60 * 1000; // Convert minutes to milliseconds
-  return expiry - buffer <= now;
-}
-
-/**
- * Verify GSC configuration exists
- */
-export function verifyGSCConfig(): boolean {
-  return !!(
-    process.env.GOOGLE_CLIENT_ID &&
-    process.env.GOOGLE_CLIENT_SECRET &&
-    process.env.GOOGLE_REDIRECT_URI
-  );
-}
-
+// Class/type alias for backward compatibility
+export { GoogleSearchConsoleService as GoogleSearchConsoleClient };
+export type { GoogleSearchConsoleService as GoogleSearchConsoleClientType };

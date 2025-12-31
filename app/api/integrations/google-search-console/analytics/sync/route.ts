@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createGSCClientFromTokens, getDateDaysAgo, getSearchConsoleSiteUrl } from '@/lib/integrations/google-search-console';
+import { getDateDaysAgo, getSearchConsoleSiteUrl } from '@/lib/integrations/google-search-console';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
+import { google } from 'googleapis';
 
 /**
  * POST /api/integrations/google-search-console/analytics/sync
@@ -68,11 +69,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create GSC client
-    const client = createGSCClientFromTokens({
+    // Create GSC client using googleapis directly
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+
+    oauth2Client.setCredentials({
       access_token: integration.access_token,
       refresh_token: integration.refresh_token,
       expiry_date: new Date(integration.expires_at).getTime(),
+    });
+
+    const searchConsole = google.searchconsole({
+      version: 'v1',
+      auth: oauth2Client,
     });
 
     // Fetch analytics data
@@ -85,12 +97,17 @@ export async function POST(request: NextRequest) {
 
     console.log(`Querying analytics for ${searchConsoleSiteUrl} (verification method: ${verificationMethod})`);
 
-    const rows = await client.queryAnalytics(searchConsoleSiteUrl, {
-      startDate: analyticsStartDate,
-      endDate: analyticsEndDate,
-      dimensions,
-      rowLimit,
+    const response = await searchConsole.searchanalytics.query({
+      siteUrl: searchConsoleSiteUrl,
+      requestBody: {
+        startDate: analyticsStartDate,
+        endDate: analyticsEndDate,
+        dimensions,
+        rowLimit,
+      },
     });
+
+    const rows = response.data.rows || [];
 
     // Process and store analytics data
     let storedCount = 0;

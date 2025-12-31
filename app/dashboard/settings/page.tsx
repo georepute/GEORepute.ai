@@ -71,11 +71,27 @@ export default function Settings() {
                         urlParams.get("github") ||
                         urlParams.get("reddit") ||
                         urlParams.get("medium") ||
-                        urlParams.get("quora");
+                        urlParams.get("quora") ||
+                        urlParams.get("success") === "gsc_connected" ||
+                        urlParams.get("error");
     
     // If any integration callback detected, switch to integrations tab
     if (hasCallback) {
       setActiveTab("integrations");
+      
+      // Show success/error toast for GSC
+      if (urlParams.get("success") === "gsc_connected") {
+        toast.success("Google Search Console connected successfully!");
+      } else if (urlParams.get("error")) {
+        const error = urlParams.get("error");
+        if (error === "no_verified_sites") {
+          toast.error("No verified sites found in Google Search Console");
+        } else if (error === "access_denied") {
+          toast.error("Access denied. Please try again.");
+        } else {
+          toast.error(`Connection failed: ${error}`);
+        }
+      }
     }
   }, []);
 
@@ -1643,6 +1659,9 @@ NEXT_PUBLIC_GITHUB_CLIENT_ID=prod_client_id`}
 
       {/* Instagram Integration */}
       <InstagramIntegrationSettings />
+
+      {/* Google Search Console Integration */}
+      <GoogleSearchConsoleSettings />
     </div>
   );
 }
@@ -2726,6 +2745,172 @@ function FacebookIntegrationSettings() {
               </>
             )}
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Google Search Console Integration Component
+function GoogleSearchConsoleSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [sites, setSites] = useState<string[]>([]);
+  const [selectedSite, setSelectedSite] = useState("");
+
+  useEffect(() => {
+    checkGSCStatus();
+  }, []);
+
+  const checkGSCStatus = async () => {
+    try {
+      const response = await fetch("/api/integrations/google-search-console");
+      if (response.ok) {
+        const data = await response.json();
+        setIsConnected(data.connected);
+        setSites(data.sites || []);
+        setSelectedSite(data.selectedSite || "");
+      }
+    } catch (error) {
+      console.error("Error checking GSC status:", error);
+    }
+  };
+
+  const handleConnect = async () => {
+    setLoading(true);
+    try {
+      // Redirect to OAuth flow
+      window.location.href = "/api/integrations/google-search-console/auth";
+    } catch (error) {
+      console.error("Error initiating GSC connection:", error);
+      toast.error("Failed to initiate connection");
+      setLoading(false);
+    }
+  };
+
+  const handleSiteChange = async (newSite: string) => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/google-search-console", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selectedSite: newSite }),
+      });
+
+      if (response.ok) {
+        setSelectedSite(newSite);
+        toast.success("Site updated successfully");
+      } else {
+        toast.error("Failed to update site");
+      }
+    } catch (error) {
+      console.error("Error updating site:", error);
+      toast.error("Failed to update site");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
+            <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+          </div>
+          <div>
+            <h3 className="font-semibold">Google Search Console</h3>
+            <p className="text-sm text-gray-600">
+              Fetch real keywords people use to find your website
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {isConnected ? (
+            <span className="flex items-center gap-1 text-green-600 text-sm">
+              <CheckCircle className="w-4 h-4" />
+              Connected
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-gray-400 text-sm">
+              <XCircle className="w-4 h-4" />
+              Not Connected
+            </span>
+          )}
+        </div>
+      </div>
+
+      {!isConnected ? (
+        <div className="pt-4">
+          <p className="text-sm text-gray-600 mb-4">
+            Connect your Google Search Console to automatically fetch real keywords
+            from your verified websites during AI Visibility analysis.
+          </p>
+          <button
+            onClick={handleConnect}
+            disabled={loading}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Connecting...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                Connect Google Search Console
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-900">
+              <strong>✅ Connected:</strong> {sites.length} verified site{sites.length !== 1 ? 's' : ''} found
+            </p>
+          </div>
+
+          {sites.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Select Website Property
+              </label>
+              <select
+                value={selectedSite}
+                onChange={(e) => handleSiteChange(e.target.value)}
+                disabled={loading}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              >
+                {sites.map((site) => (
+                  <option key={site} value={site}>
+                    {site}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-2">
+                Keywords will be fetched from this property during AI Visibility analysis
+              </p>
+            </div>
+          )}
+
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-4">
+            <h4 className="font-medium text-blue-900 mb-2 flex items-center gap-2">
+              <HelpCircle className="w-4 h-4" />
+              How It Works
+            </h4>
+            <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+              <li>When you launch AI Visibility analysis, keywords are automatically fetched from GSC</li>
+              <li>GSC keywords are merged with your manual keywords for better analysis</li>
+              <li>View all keywords in the "Keywords" tab of your analysis results</li>
+              <li>Data is refreshed with each new analysis (last 30 days)</li>
+            </ul>
+          </div>
         </div>
       )}
     </div>
