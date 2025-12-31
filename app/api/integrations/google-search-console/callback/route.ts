@@ -1,116 +1,117 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { GoogleSearchConsoleClient } from '@/lib/integrations/google-search-console';
+/**
+ * Google Search Console OAuth - Callback Handler
+ * Handles OAuth response, exchanges code for tokens, and saves to database
+ */
+
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
+import { NextRequest, NextResponse } from 'next/server';
+import { google } from 'googleapis';
+import { GoogleSearchConsoleService } from '@/lib/integrations/google-search-console';
 
 /**
- * GET /api/integrations/google-search-console/callback
- * Handles OAuth callback and stores tokens
+ * GET - OAuth callback handler
  */
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
     const error = searchParams.get('error');
-    const state = searchParams.get('state');
 
-    // Handle OAuth error
+    // Handle user denial
     if (error) {
-      console.error('OAuth error:', error);
-      const errorDescription = searchParams.get('error_description') || error;
-      
-      // Provide user-friendly error messages
-      let userMessage = error;
-      if (error === 'access_denied') {
-        userMessage = 'Access denied. If you are a developer, make sure your email is added as a Test User in Google Cloud Console OAuth consent screen.';
-      }
-      
+      console.log('User denied GSC authorization:', error);
       return NextResponse.redirect(
-        new URL(`/dashboard/google-search-console?gsc_error=${encodeURIComponent(userMessage)}`, request.url)
+        new URL('/dashboard/settings?error=access_denied', request.url)
       );
     }
 
-    // Validate authorization code
+    // Check for authorization code
     if (!code) {
       return NextResponse.redirect(
-        new URL('/dashboard/google-search-console?gsc_error=no_code', request.url)
+        new URL('/dashboard/settings?error=missing_code', request.url)
       );
     }
 
-    const supabase = createRouteHandlerClient({ cookies });
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
-      return NextResponse.redirect(
-        new URL('/login?redirect=/dashboard/google-search-console', request.url)
-      );
-    }
-
-    // Verify state parameter (CSRF protection)
-    if (state) {
-      try {
-        const stateData = JSON.parse(Buffer.from(state, 'base64').toString());
-        if (stateData.userId !== session.user.id) {
-          console.error('State user ID mismatch');
-          return NextResponse.redirect(
-            new URL('/dashboard/google-search-console?gsc_error=invalid_state', request.url)
-          );
-        }
-      } catch (e) {
-        console.error('Invalid state parameter:', e);
-      }
-    }
+    // Initialize OAuth client
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
 
     // Exchange code for tokens
-    const client = new GoogleSearchConsoleClient({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      redirectUri: process.env.GOOGLE_REDIRECT_URI!,
+    console.log('🔄 Exchanging authorization code for tokens...');
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    if (!tokens.access_token || !tokens.refresh_token) {
+      throw new Error('Failed to obtain access tokens');
+    }
+
+    console.log('✅ Tokens obtained successfully');
+
+    // Get authenticated user
+    const supabase = createRouteHandlerClient({ cookies });
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.redirect(
+        new URL('/dashboard/settings?error=unauthorized', request.url)
+      );
+    }
+
+    // Get list of verified sites
+    console.log('🔍 Fetching verified sites from GSC...');
+    const gscService = new GoogleSearchConsoleService({
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresAt: tokens.expiry_date!,
     });
 
-    const tokens = await client.getTokens(code);
+    const sites = await gscService.getVerifiedSites();
+    console.log(`✅ Found ${sites.length} verified sites`);
 
-    // Calculate expiration date
-    const expiresAt = tokens.expiry_date
-      ? new Date(tokens.expiry_date)
-      : new Date(Date.now() + 3600 * 1000); // 1 hour default
+    if (sites.length === 0) {
+      return NextResponse.redirect(
+        new URL('/dashboard/settings?error=no_verified_sites', request.url)
+      );
+    }
 
-    // Store tokens in Supabase
+    // Save integration to database
+    console.log('💾 Saving GSC integration to database...');
     const { error: dbError } = await supabase
       .from('platform_integrations')
       .upsert({
-        user_id: session.user.id,
+        user_id: user.id,
         platform: 'google_search_console',
-        platform_user_id: null,
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token || null,
-        token_type: tokens.token_type || 'Bearer',
-        expires_at: expiresAt.toISOString(),
-        scope: tokens.scope || '',
-        status: 'connected',
+        enabled: true,
         metadata: {
-          connected_at: new Date().toISOString(),
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+          expires_at: tokens.expiry_date,
+          site_urls: sites,
+          selected_site: sites[0], // Default to first site
         },
-      }, {
-        onConflict: 'user_id,platform',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
 
     if (dbError) {
       console.error('Database error:', dbError);
-      return NextResponse.redirect(
-        new URL('/dashboard/google-search-console?gsc_error=db_error', request.url)
-      );
+      throw dbError;
     }
 
-    // Redirect to google-search-console page with success message
+    console.log('✅ GSC integration saved successfully');
+
+    // Redirect back to settings with success message
     return NextResponse.redirect(
-      new URL('/dashboard/google-search-console?gsc_connected=true', request.url)
+      new URL('/dashboard/settings?success=gsc_connected', request.url)
     );
   } catch (error: any) {
-    console.error('GSC callback error:', error);
+    console.error('❌ GSC OAuth callback error:', error);
     return NextResponse.redirect(
-      new URL(`/dashboard/google-search-console?gsc_error=${encodeURIComponent('callback_failed')}`, request.url)
+      new URL(`/dashboard/settings?error=${encodeURIComponent(error.message)}`, request.url)
     );
   }
 }
-

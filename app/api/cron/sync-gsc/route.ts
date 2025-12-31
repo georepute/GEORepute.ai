@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { createGSCClientFromTokens, getDateDaysAgo } from '@/lib/integrations/google-search-console';
+import { getDateDaysAgo } from '@/lib/integrations/google-search-console';
+import { google } from 'googleapis';
 
 /**
  * GET /api/cron/sync-gsc
@@ -79,14 +80,23 @@ export async function GET(request: NextRequest) {
           continue;
         }
 
-        // Create GSC client
-        const client = createGSCClientFromTokens({
+        // Create GSC client using googleapis directly
+        const oauth2Client = new google.auth.OAuth2(
+          process.env.GOOGLE_CLIENT_ID,
+          process.env.GOOGLE_CLIENT_SECRET,
+          process.env.GOOGLE_REDIRECT_URI
+        );
+
+        oauth2Client.setCredentials({
           access_token: integration.access_token,
           refresh_token: integration.refresh_token,
           expiry_date: new Date(integration.expires_at).getTime(),
         });
 
-        const searchConsole = client.getSearchConsoleClient();
+        const searchConsole = google.searchconsole({
+          version: 'v1',
+          auth: oauth2Client,
+        });
 
         // Fetch last 7 days of summary data
         console.log(`Fetching analytics for ${domain.domain_url}...`);

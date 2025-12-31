@@ -2,6 +2,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { GoogleSearchConsoleService } from '@/lib/integrations/google-search-console'
 
 // GET all AI visibility metrics for the authenticated user
 export async function GET(request: NextRequest) {
@@ -54,7 +55,8 @@ export async function POST(request: NextRequest) {
       platforms = ['chatgpt'],
       queryLimit = 10,
       companyDescription = '',
-      companyImageUrl = ''
+      companyImageUrl = '',
+      fetchGSCKeywords = false
     } = body
 
     // Validate required fields
@@ -133,12 +135,85 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Fetch GSC keywords if requested and user is authenticated
+    let gscKeywordsFetched = 0
+    if (fetchGSCKeywords && websiteUrl) {
+      try {
+        console.log('🔍 Attempting to fetch GSC keywords...')
+        
+        // Get GSC integration for this user
+        const { data: gscIntegration } = await supabase
+          .from('google_search_console_integrations')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .single()
+
+        if (gscIntegration && gscIntegration.access_token) {
+          console.log('✅ GSC integration found, fetching keywords...')
+          
+          const gscService = new GoogleSearchConsoleService({
+            accessToken: gscIntegration.access_token,
+            refreshToken: gscIntegration.refresh_token,
+            expiresAt: new Date(gscIntegration.expires_at).getTime(),
+          })
+
+          // Use selected site property or try to match website URL
+          const siteUrl = gscIntegration.selected_site_property || websiteUrl
+
+          const gscKeywords = await gscService.fetchKeywords(siteUrl, 100)
+          console.log(`📊 Fetched ${gscKeywords.length} keywords from GSC`)
+
+          // Save keywords to database
+          if (gscKeywords.length > 0) {
+            const keywordRecords = gscKeywords.map(kw => ({
+              project_id: finalProjectId,
+              keyword: kw.keyword,
+              position: kw.position,
+              clicks: kw.clicks,
+              impressions: kw.impressions,
+              ctr: kw.ctr,
+              date: new Date().toISOString().split('T')[0]
+            }))
+
+            await supabase
+              .from('gsc_keywords')
+              .upsert(keywordRecords, {
+                onConflict: 'project_id,keyword,date',
+                ignoreDuplicates: false
+              })
+
+            gscKeywordsFetched = gscKeywords.length
+
+            // Update project with GSC status
+            await supabase
+              .from('brand_analysis_projects')
+              .update({
+                gsc_enabled: true,
+                gsc_keywords_count: gscKeywords.length,
+                last_gsc_sync: new Date().toISOString()
+              })
+              .eq('id', finalProjectId)
+
+            console.log(`✅ Saved ${gscKeywords.length} GSC keywords to database`)
+          }
+        } else {
+          console.log('⚠️ GSC not connected for this user')
+        }
+      } catch (error) {
+        console.error('❌ Error fetching GSC keywords:', error)
+        // Don't fail the entire request if GSC fetch fails
+      }
+    }
+
     // Just return the project ID - don't call the edge function here
     // The edge function will be called separately when user clicks "Run Analysis" button
     return NextResponse.json({ 
       success: true,
       projectId: finalProjectId,
-      message: 'Project created/updated successfully. Click "Run Analysis" to start the analysis.'
+      gscKeywordsFetched,
+      message: gscKeywordsFetched > 0 
+        ? `Project created with ${gscKeywordsFetched} GSC keywords. Click "Run Analysis" to start the analysis.`
+        : 'Project created/updated successfully. Click "Run Analysis" to start the analysis.'
     }, { status: 200 })
   } catch (error: any) {
     console.error('API route error:', error)

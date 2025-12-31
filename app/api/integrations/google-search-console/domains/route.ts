@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     const client = createGSCClientFromTokens({
       access_token: integration.access_token,
       refresh_token: integration.refresh_token,
-      expiry_date: new Date(integration.expires_at).getTime(),
+      expires_at: new Date(integration.expires_at).getTime(),
     });
 
     // Clean domain name (remove protocol and trailing slashes)

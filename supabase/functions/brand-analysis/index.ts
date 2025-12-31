@@ -49,6 +49,204 @@ async function fetchWithRetry(url, options, retries = 3, delay = 1000) {
   // After all retries, throw an error
   throw new Error(`Failed to fetch from ${url} after ${retries} attempts.`);
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// Google Search Console Integration
+// ════════════════════════════════════════════════════════════════════════
+
+/**
+ * Normalize URL for comparison
+ */
+function normalizeUrl(url: string): string {
+  return url
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/$/, '')
+    .toLowerCase();
+}
+
+/**
+ * Refresh GSC access token
+ */
+async function refreshGSCToken(refreshToken: string) {
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: Deno.env.get('GOOGLE_CLIENT_ID') ?? '',
+      client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+      refresh_token: refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to refresh GSC token: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  
+  return {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + (data.expires_in * 1000),
+  };
+}
+
+/**
+ * Fetch keywords from Google Search Console API
+ */
+async function fetchFromGSCAPI(accessToken: string, siteUrl: string) {
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - 30);
+
+  const response = await fetch(
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        startDate: startDate.toISOString().split('T')[0],
+        endDate: endDate.toISOString().split('T')[0],
+        dimensions: ['query'],
+        rowLimit: 100,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`GSC API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const rows = data.rows || [];
+
+  return rows.map((row: any) => ({
+    keyword: row.keys[0],
+    position: Math.round(row.position * 10) / 10,
+    clicks: row.clicks || 0,
+    impressions: row.impressions || 0,
+    ctr: row.ctr || 0,
+  }));
+}
+
+/**
+ * Fetch GSC keywords and save to database
+ * Returns array of keyword strings for use in query generation
+ */
+async function fetchGSCKeywords(project: any): Promise<string[]> {
+  try {
+    console.log('🔍 Checking GSC integration...');
+
+    // Check if user has GSC connected
+    const { data: integration } = await supabase
+      .from('platform_integrations')
+      .select('*')
+      .eq('user_id', project.user_id)
+      .eq('platform', 'google_search_console')
+      .eq('enabled', true)
+      .single();
+
+    if (!integration) {
+      console.log('ℹ️ No GSC integration found for user');
+      return [];
+    }
+
+    // Check if project website matches GSC site
+    const selectedSite = integration.metadata.selected_site;
+    const projectUrl = normalizeUrl(project.website_url);
+    const gscUrl = normalizeUrl(selectedSite);
+
+    if (projectUrl !== gscUrl) {
+      console.log(`ℹ️ Website mismatch: ${projectUrl} !== ${gscUrl}`);
+      return [];
+    }
+
+    console.log(`✅ Website matches GSC property: ${selectedSite}`);
+
+    // Check token expiry and refresh if needed
+    let accessToken = integration.metadata.access_token;
+    let refreshToken = integration.metadata.refresh_token;
+    let expiresAt = integration.metadata.expires_at;
+
+    if (Date.now() > expiresAt) {
+      console.log('🔄 Refreshing GSC access token...');
+      
+      const newTokens = await refreshGSCToken(refreshToken);
+      accessToken = newTokens.accessToken;
+      expiresAt = newTokens.expiresAt;
+
+      // Update tokens in database
+      await supabase
+        .from('platform_integrations')
+        .update({
+          metadata: {
+            ...integration.metadata,
+            access_token: accessToken,
+            expires_at: expiresAt,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', project.user_id)
+        .eq('platform', 'google_search_console');
+      
+      console.log('✅ Token refreshed successfully');
+    }
+
+    // Fetch keywords from GSC
+    console.log('📊 Fetching keywords from GSC API...');
+    const keywords = await fetchFromGSCAPI(accessToken, selectedSite);
+
+    console.log(`✅ Fetched ${keywords.length} keywords from GSC`);
+
+    // Save to database
+    const today = new Date().toISOString().split('T')[0];
+    const keywordsToInsert = keywords.map((kw: any) => ({
+      project_id: project.id,
+      keyword: kw.keyword,
+      position: kw.position,
+      clicks: kw.clicks,
+      impressions: kw.impressions,
+      ctr: kw.ctr,
+      date: today,
+    }));
+
+    if (keywordsToInsert.length > 0) {
+      const { error: insertError } = await supabase
+        .from('gsc_keywords')
+        .upsert(keywordsToInsert, {
+          onConflict: 'project_id,keyword,date',
+        });
+
+      if (insertError) {
+        console.error('❌ Error saving GSC keywords:', insertError);
+      } else {
+        console.log(`✅ Saved ${keywordsToInsert.length} keywords to database`);
+        
+        // Update project with GSC info
+        await supabase
+          .from('brand_analysis_projects')
+          .update({
+            gsc_enabled: true,
+            gsc_keywords_count: keywordsToInsert.length,
+            last_gsc_sync: new Date().toISOString(),
+          })
+          .eq('id', project.id);
+      }
+    }
+
+    // Return just keyword strings for LLM
+    return keywords.map((kw: any) => kw.keyword);
+
+  } catch (error) {
+    console.error('❌ Error in fetchGSCKeywords:', error);
+    return []; // Don't break analysis if GSC fails
+  }
+}
 async function queryAIPlatform(platform, prompt) {
   try {
     console.log(`Querying ${platform} with prompt: ${prompt.substring(0, 50)}...`);
@@ -1845,15 +2043,22 @@ Deno.serve(async (req) => {
     console.log(`Request platforms: ${platforms ? platforms.join(', ') : 'none'}`);
     console.log(`Database platforms: ${project.active_platforms ? project.active_platforms.join(', ') : 'none'}`);
     console.log(`Final platforms to analyze: ${platformsToAnalyze.join(', ')}`);
-    // If this is a direct request with a website URL, fetch the content first
+    
+    // ════════════════════════════════════════════════════════════════════════
+    // PARALLEL EXECUTION: Website Crawler + Google Search Console
+    // ════════════════════════════════════════════════════════════════════════
+    
+    console.log('⚡ Starting parallel actions: Website Crawler + GSC');
     const websiteUrl = project.website_url;
-    if (websiteUrl) {
-      try {
+    
+    const [crawlerResult, gscResult] = await Promise.allSettled([
+      // Action 1: Website Crawler (existing)
+      websiteUrl ? (async () => {
         console.log(`Fetching website content for ${websiteUrl}`);
         const websiteContent = await fetchWebsiteContent(websiteUrl);
         if (websiteContent) {
           console.log(`Successfully fetched website content (${websiteContent.length} bytes)`);
-          // Make a direct request to analyze-content with the required fields
+          // Analyze content
           try {
             const analyzeResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/analyze-content`, {
               method: 'POST',
@@ -1869,7 +2074,6 @@ Deno.serve(async (req) => {
             if (analyzeResponse.ok) {
               const analysisResult = await analyzeResponse.json();
               console.log('Website analysis completed successfully');
-              // Store the analysis result
               await supabase.from('brand_analysis_website_analysis').insert({
                 project_id: projectId,
                 url: websiteUrl,
@@ -1882,10 +2086,27 @@ Deno.serve(async (req) => {
             console.error('Error during website analysis:', analysisError);
           }
         }
-      } catch (error) {
-        console.error(`Error fetching website content: ${error.message}`);
-      // Continue with the analysis even if website content fetch fails
-      }
+        return websiteContent;
+      })() : Promise.resolve(null),
+      
+      // Action 2: Google Search Console (NEW)
+      fetchGSCKeywords(project),
+    ]);
+    
+    // Handle crawler result
+    if (crawlerResult.status === 'fulfilled') {
+      console.log('✅ Crawler completed');
+    } else {
+      console.error('❌ Crawler failed:', crawlerResult.reason);
+    }
+    
+    // Handle GSC result
+    let gscKeywords: string[] = [];
+    if (gscResult.status === 'fulfilled') {
+      gscKeywords = gscResult.value;
+      console.log(`✅ GSC completed: ${gscKeywords.length} keywords fetched`);
+    } else {
+      console.log('⚠️ GSC skipped or failed:', gscResult.reason);
     }
     // Load API keys
     const openAIApiKey = await getApiKey('openai');
@@ -1952,8 +2173,21 @@ Deno.serve(async (req) => {
         }
       });
     }
-    // Generate realistic user queries using AI
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '');
+    
+    // ════════════════════════════════════════════════════════════════════════
+    // MERGE KEYWORDS: Manual + GSC
+    // ════════════════════════════════════════════════════════════════════════
+    
+    const manualKeywords = project.target_keywords || [];
+    const allKeywords = [...new Set([...manualKeywords, ...gscKeywords])]; // Remove duplicates
+    
+    console.log(`📊 Keyword Summary:`);
+    console.log(`   Manual: ${manualKeywords.length}`);
+    console.log(`   GSC: ${gscKeywords.length}`);
+    console.log(`   Total (merged): ${allKeywords.length}`);
+    
+    // Generate realistic user queries using AI with MERGED keywords
+    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, allKeywords, project.competitors || [], project.website_url || '');
     console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
     // Start the first batch immediately (this will chain to subsequent batches)
     try {
