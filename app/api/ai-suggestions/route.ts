@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     // Call Supabase Edge Function
     const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/generate-competitive-intelligence`;
-    const edgeFunctionKey = process.env.SUPABASE_ANON_KEY;
+    const edgeFunctionKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
     if (!edgeFunctionUrl || !edgeFunctionKey) {
       console.error('Supabase configuration missing');
