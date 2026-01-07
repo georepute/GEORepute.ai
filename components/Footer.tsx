@@ -3,28 +3,31 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Twitter, Linkedin, Github, Mail } from "lucide-react";
+import { useLanguage } from "@/lib/language-context";
 
 export default function Footer() {
+  const { isRtl, t } = useLanguage();
+
   const footerLinks = {
-    Product: [
+    [t.footer.product]: [
       { label: "Features", href: "/systems" },
       { label: "Pricing", href: "/pricing" },
       { label: "Demo", href: "/demo" },
       { label: "Documentation", href: "/docs" },
     ],
-    Company: [
+    [t.footer.company]: [
       { label: "About", href: "/about" },
       { label: "Blog", href: "/blog" },
       { label: "Careers", href: "/careers" },
       { label: "Contact", href: "/contact" },
     ],
-    Resources: [
+    [t.footer.resources]: [
       { label: "Help Center", href: "/help" },
       { label: "API Reference", href: "/api" },
       { label: "Case Studies", href: "/case-studies" },
       { label: "Community", href: "/community" },
     ],
-    Legal: [
+    [t.footer.legal]: [
       { label: "Privacy Policy", href: "/privacy" },
       { label: "Terms of Service", href: "/terms" },
       { label: "Cookie Policy", href: "/cookies" },
@@ -40,28 +43,28 @@ export default function Footer() {
   ];
 
   return (
-    <footer className="bg-gray-900 text-gray-300">
+    <footer className="bg-gray-900 text-gray-300" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         {/* Main Footer Content */}
         <div className="grid grid-cols-2 md:grid-cols-6 gap-8 mb-12">
           {/* Brand Column */}
           <div className="col-span-2">
-            <Link href="/" className="flex items-center gap-3 mb-4">
+            <Link href="/" className={`flex items-center gap-3 mb-4 ${isRtl ? 'flex-row-reverse' : ''}`}>
               <div className="relative w-10 h-10">
                 <Image
                   src="/logo.png"
-                  alt="GeoRepute.ai Logo"
+                  alt={`${t.nav.brandName} Logo`}
                   fill
                   className="object-contain"
                   priority
                 />
               </div>
               <span className="text-xl font-bold text-white">
-                GeoRepute.ai
+                {t.nav.brandName}
               </span>
             </Link>
-            <p className="text-gray-400 mb-6 max-w-xs">
-              Next-generation AI-driven visibility control across SEO and AI search ecosystems.
+            <p className={`text-gray-400 mb-6 max-w-xs ${isRtl ? 'text-right' : ''}`}>
+              {t.footer.tagline}
             </p>
             <div className="flex gap-4">
               {socialLinks.map((social) => (
@@ -81,7 +84,7 @@ export default function Footer() {
 
           {/* Links Columns */}
           {Object.entries(footerLinks).map(([category, links]) => (
-            <div key={category}>
+            <div key={category} className={isRtl ? 'text-right' : ''}>
               <h3 className="text-white font-semibold mb-4">{category}</h3>
               <ul className="space-y-3">
                 {links.map((link) => (
@@ -101,13 +104,13 @@ export default function Footer() {
 
         {/* Bottom Bar */}
         <div className="pt-8 border-t border-gray-800">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className={`flex flex-col md:flex-row justify-between items-center gap-4 ${isRtl ? 'md:flex-row-reverse' : ''}`}>
             <p className="text-gray-400 text-sm">
-              © {new Date().getFullYear()} GeoRepute.ai. All rights reserved.
+              {t.footer.copyright.replace('{year}', new Date().getFullYear().toString())}
             </p>
-            <div className="flex gap-6 text-sm">
+            <div className={`flex gap-6 text-sm ${isRtl ? 'flex-row-reverse' : ''}`}>
               <Link href="/privacy" className="text-gray-400 hover:text-primary-400 transition-colors">
-                Privacy
+                {t.nav.privacy}
               </Link>
               <Link href="/terms" className="text-gray-400 hover:text-primary-400 transition-colors">
                 Terms

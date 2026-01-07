@@ -24,8 +24,10 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { useLanguage } from "@/lib/language-context";
 
 export default function AdminDashboard({ user }: { user: any }) {
+  const { isRtl, t } = useLanguage();
   // Sample data for admin view
   const platformHealth = [
     { name: "API", status: 99.9, color: "#14b8a6" },
@@ -58,33 +60,33 @@ export default function AdminDashboard({ user }: { user: any }) {
 
   const stats = [
     {
-      label: "Total Users",
+      label: t.dashboard.admin.totalUsers,
       value: "485",
-      change: "+95 this month",
+      change: "+95",
       icon: Users,
       color: "text-primary-600",
       bgColor: "bg-primary-100",
     },
     {
-      label: "Active Agencies",
+      label: t.dashboard.admin.totalAgencies,
       value: "31",
-      change: "+7 this month",
+      change: "+7",
       icon: Building2,
       color: "text-accent-600",
       bgColor: "bg-accent-100",
     },
     {
-      label: "System Uptime",
+      label: t.dashboard.admin.systemHealth,
       value: "99.9%",
-      change: "Last 30 days",
+      change: "30 days",
       icon: Activity,
       color: "text-green-600",
       bgColor: "bg-green-100",
     },
     {
-      label: "Open Issues",
-      value: "3",
-      change: "-5 resolved today",
+      label: t.dashboard.admin.apiCalls,
+      value: "24K",
+      change: "+18%",
       icon: AlertCircle,
       color: "text-orange-600",
       bgColor: "bg-orange-100",
@@ -96,9 +98,9 @@ export default function AdminDashboard({ user }: { user: any }) {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Admin Control Panel ⚡
+          {t.dashboard.admin.adminDashboard} ⚡
         </h1>
-        <p className="text-gray-600">System overview and platform management.</p>
+        <p className="text-gray-600">{t.dashboard.admin.systemOverview}</p>
       </div>
 
       {/* Stats Grid */}
@@ -127,15 +129,15 @@ export default function AdminDashboard({ user }: { user: any }) {
       <div className="grid lg:grid-cols-2 gap-6 mb-8">
         {/* User Growth */}
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
+          initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">User Growth</h2>
-              <p className="text-sm text-gray-600">Last 6 months</p>
+              <h2 className="text-xl font-bold text-gray-900">{t.dashboard.admin.userGrowth}</h2>
+              <p className="text-sm text-gray-600">{t.dashboard.client.last6Months}</p>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={300}>
@@ -162,15 +164,15 @@ export default function AdminDashboard({ user }: { user: any }) {
 
         {/* Role Distribution */}
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
+          initial={{ opacity: 0, x: isRtl ? -20 : 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Role Distribution</h2>
-              <p className="text-sm text-gray-600">User roles breakdown</p>
+              <h2 className="text-xl font-bold text-gray-900">{t.dashboard.admin.systemMetrics}</h2>
+              <p className="text-sm text-gray-600">{t.dashboard.admin.performanceOverTime}</p>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={250}>
@@ -215,14 +217,14 @@ export default function AdminDashboard({ user }: { user: any }) {
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <div className="mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Platform Health</h2>
-            <p className="text-sm text-gray-600">System uptime status</p>
+            <h2 className="text-xl font-bold text-gray-900">{t.dashboard.admin.systemHealth}</h2>
+            <p className="text-sm text-gray-600">{t.dashboard.admin.performanceOverTime}</p>
           </div>
           <div className="space-y-4">
             {platformHealth.map((service, index) => (
               <motion.div
                 key={service.name}
-                initial={{ opacity: 0, x: -20 }}
+                initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5, delay: 0.3 + index * 0.1 }}
                 className="flex items-center justify-between"
@@ -246,18 +248,18 @@ export default function AdminDashboard({ user }: { user: any }) {
         >
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Recent Activity</h2>
-              <p className="text-sm text-gray-600">System events and logs</p>
+              <h2 className="text-xl font-bold text-gray-900">{t.dashboard.admin.recentSignups}</h2>
+              <p className="text-sm text-gray-600">{t.dashboard.admin.latestRegistrations}</p>
             </div>
             <button className="text-primary-600 hover:text-primary-700 text-sm font-medium">
-              View All
+              {t.dashboard.common.view}
             </button>
           </div>
           <div className="space-y-4">
             {recentActivity.map((activity, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: 0, x: -20 }}
+                initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5, delay: 0.5 + index * 0.1 }}
                 className="flex items-start gap-3 pb-4 border-b border-gray-100 last:border-0"

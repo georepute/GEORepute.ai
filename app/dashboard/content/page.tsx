@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { useLanguage } from "@/lib/language-context";
 import { 
   FileText, 
   Search,
@@ -65,6 +66,7 @@ interface ContentItem {
 
 
 function ContentInner() {
+  const { isRtl, t } = useLanguage();
   const searchParams = useSearchParams();
   const router = useRouter();
   const supabase = createClientComponentClient();
@@ -1494,12 +1496,12 @@ function ContentInner() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Content Orchestrator</h1>
-          <p className="text-gray-600">Manage, approve, and publish content across all platforms</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">{t.dashboard.content.title}</h1>
+          <p className="text-gray-600">{t.dashboard.content.subtitle}</p>
         </div>
         <button
           onClick={handleRefresh}

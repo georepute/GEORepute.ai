@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { useLanguage } from "@/lib/language-context";
 import { 
   Target,
   ArrowRight,
@@ -78,6 +79,7 @@ interface Session {
 }
 
 export default function AIVisibility() {
+  const { isRtl, t } = useLanguage();
   const supabase = createClientComponentClient();
   const router = useRouter();
   

@@ -16,6 +16,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useLanguage } from "@/lib/language-context";
 
 interface KeywordData {
   keyword_id: string;
@@ -29,6 +30,7 @@ interface KeywordData {
 }
 
 export default function Keywords() {
+  const { isRtl, t } = useLanguage();
   const [searchTerm, setSearchTerm] = useState("");
   const [keywords, setKeywords] = useState<KeywordData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,8 +84,8 @@ export default function Keywords() {
     <div className="p-4 sm:p-6 lg:p-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Keyword Forecast & Tracking</h1>
-        <p className="text-gray-600">AI-powered predictions and real-time ranking data</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">{t.dashboard.keywords.title}</h1>
+        <p className="text-gray-600">{t.dashboard.keywords.subtitle}</p>
       </div>
 
       {/* Stats */}
@@ -97,7 +99,7 @@ export default function Keywords() {
             <Target className="w-8 h-8 text-blue-600" />
             <span className="text-2xl font-bold text-gray-900">{stats.total}</span>
           </div>
-          <p className="text-gray-600">Keywords Tracked</p>
+          <p className="text-gray-600">{t.dashboard.keywords.keywordsTracked}</p>
         </motion.div>
 
         <motion.div
@@ -110,7 +112,7 @@ export default function Keywords() {
             <TrendingUp className="w-8 h-8 text-green-600" />
             <span className="text-2xl font-bold text-gray-900">{stats.improvements}</span>
           </div>
-          <p className="text-gray-600">Top 10 Rankings</p>
+          <p className="text-gray-600">{t.dashboard.keywords.top10Rankings}</p>
         </motion.div>
 
         <motion.div
@@ -123,7 +125,7 @@ export default function Keywords() {
             <Eye className="w-8 h-8 text-purple-600" />
             <span className="text-2xl font-bold text-gray-900">{stats.avgVisibility}%</span>
           </div>
-          <p className="text-gray-600">Avg. Visibility Score</p>
+          <p className="text-gray-600">{t.dashboard.keywords.avgVisibility}</p>
         </motion.div>
 
         <motion.div
@@ -138,7 +140,7 @@ export default function Keywords() {
               {(stats.totalValue / 1000).toFixed(0)}K
             </span>
           </div>
-          <p className="text-gray-600">Total Search Volume</p>
+          <p className="text-gray-600">{t.dashboard.keywords.totalSearchVolume}</p>
         </motion.div>
       </div>
 
@@ -146,13 +148,13 @@ export default function Keywords() {
       <div className="bg-white rounded-xl p-6 border border-gray-200 mb-6">
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className={`absolute ${isRtl ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400`} />
             <input
               type="text"
-              placeholder="Search keywords..."
+              placeholder={t.dashboard.keywords.searchKeywords}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
+              className={`w-full ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all`}
             />
           </div>
           <div className="flex gap-3">
@@ -162,19 +164,19 @@ export default function Keywords() {
               className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700 disabled:opacity-50"
             >
               <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Refresh</span>
+              <span className="hidden sm:inline">{t.dashboard.common.refresh}</span>
             </button>
             <button className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700">
               <Filter className="w-5 h-5" />
-              <span className="hidden sm:inline">Filter</span>
+              <span className="hidden sm:inline">{t.dashboard.common.filter}</span>
             </button>
             <button className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700">
               <Download className="w-5 h-5" />
-              <span className="hidden sm:inline">Export</span>
+              <span className="hidden sm:inline">{t.dashboard.common.export}</span>
             </button>
             <button className="px-4 py-3 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all flex items-center gap-2">
               <Plus className="w-5 h-5" />
-              <span className="hidden sm:inline">Add Keyword</span>
+              <span className="hidden sm:inline">{t.dashboard.keywords.addKeyword}</span>
             </button>
           </div>
         </div>
@@ -190,18 +192,13 @@ export default function Keywords() {
         {loading ? (
           <div className="p-12 text-center">
             <div className="w-12 h-12 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-gray-600">Loading keywords...</p>
+            <p className="text-gray-600">{t.dashboard.common.loading}</p>
           </div>
         ) : filteredKeywords.length === 0 ? (
           <div className="p-12 text-center">
             <Search className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <p className="text-gray-600 mb-2">
-              {searchTerm ? 'No keywords match your search' : 'No keywords tracked yet'}
-            </p>
-            <p className="text-sm text-gray-500">
-              {searchTerm 
-                ? 'Try a different search term'
-                : 'Go to Keyword Forecast page to analyze and track keywords'}
+              {searchTerm ? t.dashboard.common.noData : t.dashboard.keywords.noKeywords}
             </p>
           </div>
         ) : (
@@ -209,18 +206,18 @@ export default function Keywords() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="text-left py-4 px-6 text-sm font-semibold text-gray-600">Keyword</th>
-                  <th className="text-center py-4 px-6 text-sm font-semibold text-gray-600">Ranking Score</th>
-                  <th className="text-right py-4 px-6 text-sm font-semibold text-gray-600">Volume</th>
-                  <th className="text-center py-4 px-6 text-sm font-semibold text-gray-600">Difficulty</th>
-                  <th className="text-center py-4 px-6 text-sm font-semibold text-gray-600">Actions</th>
+                  <th className={`${isRtl ? 'text-right' : 'text-left'} py-4 px-6 text-sm font-semibold text-gray-600`}>{t.dashboard.keywords.keyword}</th>
+                  <th className="text-center py-4 px-6 text-sm font-semibold text-gray-600">{t.dashboard.common.score}</th>
+                  <th className={`${isRtl ? 'text-left' : 'text-right'} py-4 px-6 text-sm font-semibold text-gray-600`}>{t.dashboard.keywords.volume}</th>
+                  <th className="text-center py-4 px-6 text-sm font-semibold text-gray-600">{t.dashboard.keywords.difficulty}</th>
+                  <th className="text-center py-4 px-6 text-sm font-semibold text-gray-600">{t.dashboard.common.actions}</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredKeywords.map((item, index) => (
                   <motion.tr
                     key={item.keyword_id}
-                    initial={{ opacity: 0, x: -20 }}
+                    initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                     className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
@@ -237,10 +234,10 @@ export default function Keywords() {
                           {item.ranking_score}
                         </span>
                       ) : (
-                        <span className="text-gray-400 text-sm">Not ranked</span>
+                        <span className="text-gray-400 text-sm">-</span>
                       )}
                     </td>
-                    <td className="py-4 px-6 text-right text-gray-900 font-medium">
+                    <td className={`py-4 px-6 ${isRtl ? 'text-left' : 'text-right'} text-gray-900 font-medium`}>
                       {item.search_volume?.toLocaleString() || 0}
                     </td>
                     <td className="py-4 px-6 text-center">
@@ -256,7 +253,7 @@ export default function Keywords() {
                     </td>
                     <td className="py-4 px-6 text-center">
                       <button className="text-primary-600 hover:text-primary-700 font-medium text-sm">
-                        Details
+                        {t.dashboard.common.details}
                       </button>
                     </td>
                   </motion.tr>

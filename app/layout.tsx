@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "react-hot-toast";
+import { LanguageProvider } from "@/lib/language-context";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -15,15 +16,34 @@ export const metadata: Metadata = {
   },
 };
 
+// Script to set language direction before React hydrates (prevents flash)
+const languageScript = `
+  (function() {
+    try {
+      var lang = localStorage.getItem('preferred-language');
+      if (lang === 'he') {
+        document.documentElement.dir = 'rtl';
+        document.documentElement.lang = 'he';
+      }
+    } catch(e) {}
+  })();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Set language direction before React hydrates to prevent flash */}
+        <script dangerouslySetInnerHTML={{ __html: languageScript }} />
+      </head>
       <body className={inter.className}>
-        {children}
+        <LanguageProvider>
+          {children}
+        </LanguageProvider>
         <Toaster
           position="top-right"
           toastOptions={{

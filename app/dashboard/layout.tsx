@@ -35,6 +35,8 @@ import {
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { filterNavigationByRole, NavigationItem } from "@/lib/permissions/permissions";
+import { useLanguage } from "@/lib/language-context";
+import LanguageToggle from "@/components/LanguageToggle";
 
 export default function DashboardLayout({
   children,
@@ -42,9 +44,10 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const { isRtl, t } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<string[]>(['Analytics']); // Track expanded parent items
+  const [expandedItems, setExpandedItems] = useState<string[]>([t.dashboard.sidebar.analytics]); // Track expanded parent items
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { role, capabilities, loading: permissionsLoading } = usePermissions();
@@ -94,38 +97,38 @@ export default function DashboardLayout({
   };
 
   const allNavigation: NavigationItem[] = [
-    { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Live View", href: "/dashboard/live-view", icon: Activity, requiredCapability: "canViewAnalytics" },
-    { name: "Content Generator", href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
-    { name: "Keyword Forecast", href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
-    { name: "Action Plans", href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
-    { name: "Keywords", href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
-    { name: "Publication", href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
-    { name: "Rankings", href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
-    { name: "AI Visibility", href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
-    // { name: "Reputation", href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
-    // { name: "Leads", href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
-    // { name: "AdSync", href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },
+    { name: t.dashboard.sidebar.overview, href: "/dashboard", icon: LayoutDashboard },
+    { name: t.dashboard.sidebar.liveView, href: "/dashboard/live-view", icon: Activity, requiredCapability: "canViewAnalytics" },
+    { name: t.dashboard.sidebar.contentGenerator, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
+    { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
+    { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
+    { name: t.dashboard.sidebar.keywords, href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
+    { name: t.dashboard.sidebar.publication, href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
+    { name: t.dashboard.sidebar.rankings, href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
+    { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
+    // { name: t.dashboard.sidebar.reputation, href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
+    // { name: t.dashboard.sidebar.leads, href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
+    // { name: t.dashboard.sidebar.adSync, href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },
     { 
-      name: "Analytics", 
+      name: t.dashboard.sidebar.analytics, 
       icon: BarChart3, 
       requiredCapability: "canViewAnalytics",
       children: [
-        { name: "GSC Analytics", href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
-        { name: "BI Reports", href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.gscAnalytics, href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.biReports, href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" },
       ]
     },
-    // { name: "Learning", href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
-    // { name: "Video Reports", href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
-    // { name: "Quote Builder", href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
-    { name: "Team", href: "/dashboard/team", icon: Users, requiredCapability: "canManageTeam" },
-    { name: "Settings", href: "/dashboard/settings", icon: Settings, requiredCapability: "canManageSettings" },
+    // { name: t.dashboard.sidebar.learning, href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
+    // { name: t.dashboard.sidebar.videoReports, href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
+    // { name: t.dashboard.sidebar.quoteBuilder, href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
+    { name: t.dashboard.sidebar.team, href: "/dashboard/team", icon: Users, requiredCapability: "canManageTeam" },
+    { name: t.dashboard.sidebar.settings, href: "/dashboard/settings", icon: Settings, requiredCapability: "canManageSettings" },
   ];
 
   const navigation = filterNavigationByRole(role, allNavigation);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Mobile Sidebar Backdrop */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -141,10 +144,12 @@ export default function DashboardLayout({
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 bg-white border-r border-gray-200 transform transition-all duration-200 ease-in-out ${
+        className={`fixed inset-y-0 ${isRtl ? 'right-0 border-l' : 'left-0 border-r'} z-50 bg-white border-gray-200 transform transition-all duration-200 ease-in-out ${
           sidebarCollapsed ? "lg:w-20" : "lg:w-64"
         } ${
-          sidebarOpen ? "translate-x-0 w-64" : "-translate-x-full lg:translate-x-0"
+          sidebarOpen 
+            ? `${isRtl ? '-translate-x-0' : 'translate-x-0'} w-64` 
+            : `${isRtl ? 'translate-x-full lg:translate-x-0' : '-translate-x-full lg:translate-x-0'}`
         }`}
       >
         <div className="h-full flex flex-col relative">
@@ -237,16 +242,16 @@ export default function DashboardLayout({
           </nav>
 
           {/* Sidebar Toggle Button - Desktop Only */}
-          <div className="hidden lg:block absolute top-1/2 -right-3 z-50">
+          <div className={`hidden lg:block absolute top-1/2 ${isRtl ? '-left-3' : '-right-3'} z-50`}>
             <button
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="flex items-center justify-center w-6 h-12 bg-white border border-gray-200 rounded-r-lg shadow-sm text-gray-500 hover:text-primary-600 hover:bg-primary-50 hover:border-primary-200 transition-all group"
-              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className={`flex items-center justify-center w-6 h-12 bg-white border border-gray-200 ${isRtl ? 'rounded-l-lg' : 'rounded-r-lg'} shadow-sm text-gray-500 hover:text-primary-600 hover:bg-primary-50 hover:border-primary-200 transition-all group`}
+              title={sidebarCollapsed ? t.dashboard.sidebar.expandSidebar : t.dashboard.sidebar.collapseSidebar}
             >
               {sidebarCollapsed ? (
-                <ChevronRight className="w-4 h-4" />
+                isRtl ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />
               ) : (
-                <ChevronLeft className="w-4 h-4" />
+                isRtl ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />
               )}
             </button>
           </div>
@@ -291,14 +296,14 @@ export default function DashboardLayout({
                     className="mt-2 w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
                   >
                     <LogOut className="w-4 h-4" />
-                    <span>Sign Out</span>
+                    <span>{t.dashboard.sidebar.signOut}</span>
                   </button>
                 )}
                 {sidebarCollapsed && (
                   <button
                     onClick={handleLogout}
                     className="mt-2 w-full flex items-center justify-center px-3 py-2 text-sm text-gray-700 rounded-lg hover:bg-red-50 hover:text-red-600 transition-colors"
-                    title="Sign Out"
+                    title={t.dashboard.sidebar.signOut}
                   >
                     <LogOut className="w-4 h-4" />
                   </button>
@@ -310,7 +315,7 @@ export default function DashboardLayout({
                 href="/login"
                 className="flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
               >
-                {!sidebarCollapsed && "Sign In"}
+                {!sidebarCollapsed && t.dashboard.sidebar.signIn}
               </Link>
             )}
           </div>
@@ -319,11 +324,15 @@ export default function DashboardLayout({
 
       {/* Main Content */}
       <div className={`transition-all duration-200 ease-in-out ${
-        sidebarCollapsed ? "lg:pl-20" : "lg:pl-64"
+        isRtl 
+          ? (sidebarCollapsed ? "lg:pr-20" : "lg:pr-64")
+          : (sidebarCollapsed ? "lg:pl-20" : "lg:pl-64")
       }`}>
         {/* Top Navigation */}
         <header className={`h-16 bg-white border-b border-gray-200 fixed top-0 right-0 left-0 z-30 transition-all duration-200 ease-in-out ${
-          sidebarCollapsed ? "lg:left-20" : "lg:left-64"
+          isRtl 
+            ? (sidebarCollapsed ? "lg:right-20" : "lg:right-64")
+            : (sidebarCollapsed ? "lg:left-20" : "lg:left-64")
         }`}>
           <div className="h-full px-4 sm:px-6 lg:px-8 flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -336,20 +345,21 @@ export default function DashboardLayout({
               
               <div className="hidden sm:block">
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <Search className={`absolute ${isRtl ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400`} />
                   <input
                     type="text"
-                    placeholder="Search..."
-                    className="pl-10 pr-4 py-2 w-64 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
+                    placeholder={t.dashboard.header.search}
+                    className={`${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-2 w-64 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all`}
                   />
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-4">
-              <button className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+              <LanguageToggle />
+              <button className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors" title={t.dashboard.header.notifications}>
                 <Bell className="w-5 h-5" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+                <span className={`absolute top-1 ${isRtl ? 'left-1' : 'right-1'} w-2 h-2 bg-red-500 rounded-full`}></span>
               </button>
             </div>
           </div>

@@ -22,8 +22,10 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useLanguage } from "@/lib/language-context";
 
 export default function Rankings() {
+  const { isRtl, t } = useLanguage();
   const rankingHistory = [
     { date: "Week 1", position: 45, competitors: 52 },
     { date: "Week 2", position: 38, competitors: 48 },
@@ -68,11 +70,11 @@ export default function Rankings() {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Search Rankings</h1>
-        <p className="text-gray-600">Track your position changes across all search engines</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">{t.dashboard.rankings.title}</h1>
+        <p className="text-gray-600">{t.dashboard.rankings.subtitle}</p>
       </div>
 
       {/* Stats */}

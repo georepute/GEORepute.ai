@@ -28,6 +28,7 @@ import {
   Sheet,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useLanguage } from "@/lib/language-context";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import {
@@ -154,6 +155,7 @@ interface ReportData {
 }
 
 export default function Reports() {
+  const { isRtl, t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [dateRange, setDateRange] = useState<"7d" | "30d" | "90d">("30d");
@@ -1048,16 +1050,16 @@ export default function Reports() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 report-container">
+    <div className="p-4 sm:p-6 lg:p-8 report-container" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="mb-8 report-section">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              BI Reports & Analytics
+              {t.dashboard.reports.title}
             </h1>
             <p className="text-gray-600">
-              Comprehensive business intelligence from real-time data
+              {t.dashboard.reports.subtitle}
             </p>
           </div>
           <div className="flex items-center gap-3">

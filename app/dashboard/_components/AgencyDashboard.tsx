@@ -21,8 +21,10 @@ import {
   LineChart,
   Line,
 } from "recharts";
+import { useLanguage } from "@/lib/language-context";
 
 export default function AgencyDashboard({ user }: { user: any }) {
+  const { isRtl, t } = useLanguage();
   // Sample data for agency view
   const clientPerformance = [
     { name: "Client A", visibility: 85, keywords: 120 },
@@ -50,33 +52,33 @@ export default function AgencyDashboard({ user }: { user: any }) {
 
   const stats = [
     {
-      label: "Total Clients",
+      label: t.dashboard.agency.totalClients,
       value: "24",
-      change: "+3 this month",
+      change: "+3",
       icon: Users,
       color: "text-primary-600",
       bgColor: "bg-primary-100",
     },
     {
-      label: "Avg. Client Visibility",
+      label: t.dashboard.agency.avgClientScore,
       value: "84%",
-      change: "+7% avg increase",
+      change: "+7%",
       icon: Eye,
       color: "text-secondary-600",
       bgColor: "bg-secondary-100",
     },
     {
-      label: "Total Keywords",
+      label: t.dashboard.sidebar.keywords,
       value: "1,847",
-      change: "+234 this month",
+      change: "+234",
       icon: Target,
       color: "text-accent-600",
       bgColor: "bg-accent-100",
     },
     {
-      label: "Monthly Revenue",
+      label: t.dashboard.agency.monthlyRevenue,
       value: "$24K",
-      change: "+18% vs last month",
+      change: "+18%",
       icon: DollarSign,
       color: "text-green-600",
       bgColor: "bg-green-100",
@@ -88,9 +90,9 @@ export default function AgencyDashboard({ user }: { user: any }) {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Agency Dashboard 🚀
+          {t.dashboard.agency.agencyOverview} 🚀
         </h1>
-        <p className="text-gray-600">Manage all your clients and track performance in one place.</p>
+        <p className="text-gray-600">{t.dashboard.agency.manageClients}</p>
       </div>
 
       {/* Stats Grid */}
@@ -119,15 +121,15 @@ export default function AgencyDashboard({ user }: { user: any }) {
       <div className="grid lg:grid-cols-2 gap-6 mb-8">
         {/* Client Performance */}
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
+          initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Client Performance</h2>
-              <p className="text-sm text-gray-600">Visibility scores by client</p>
+              <h2 className="text-xl font-bold text-gray-900">{t.dashboard.agency.clientPerformance}</h2>
+              <p className="text-sm text-gray-600">{t.dashboard.agency.overviewAllClients}</p>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={300}>
@@ -143,15 +145,15 @@ export default function AgencyDashboard({ user }: { user: any }) {
 
         {/* Revenue Trends */}
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
+          initial={{ opacity: 0, x: isRtl ? -20 : 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Revenue Trends</h2>
-              <p className="text-sm text-gray-600">Last 6 months</p>
+              <h2 className="text-xl font-bold text-gray-900">{t.dashboard.agency.monthlyRevenue}</h2>
+              <p className="text-sm text-gray-600">{t.dashboard.client.last6Months}</p>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={300}>
@@ -181,11 +183,11 @@ export default function AgencyDashboard({ user }: { user: any }) {
       >
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Top Clients</h2>
-            <p className="text-sm text-gray-600">Highest performing clients this month</p>
+            <h2 className="text-xl font-bold text-gray-900">{t.dashboard.agency.recentActivity}</h2>
+            <p className="text-sm text-gray-600">{t.dashboard.agency.latestUpdates}</p>
           </div>
           <button className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center gap-1">
-            View All Clients
+            {t.dashboard.agency.viewDetails}
             <ArrowUpRight className="w-4 h-4" />
           </button>
         </div>
@@ -193,7 +195,7 @@ export default function AgencyDashboard({ user }: { user: any }) {
           {topClients.map((client, index) => (
             <motion.div
               key={client.name}
-              initial={{ opacity: 0, x: -20 }}
+              initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.5, delay: 0.3 + index * 0.1 }}
               className="flex items-center justify-between p-4 rounded-lg border border-gray-100 hover:border-primary-200 hover:bg-primary-50/30 transition-all"
@@ -205,11 +207,11 @@ export default function AgencyDashboard({ user }: { user: any }) {
                 <div>
                   <p className="font-semibold text-gray-900">{client.name}</p>
                   <p className="text-sm text-gray-500">
-                    {client.status === "active" ? "✅ Active" : "⚠️ Needs Attention"}
+                    {client.status === "active" ? `✅ ${t.dashboard.agency.active}` : `⚠️ ${t.dashboard.agency.pending}`}
                   </p>
                 </div>
               </div>
-              <div className="text-right">
+              <div className={isRtl ? 'text-left' : 'text-right'}>
                 <p className="text-2xl font-bold text-gray-900">{client.visibility}%</p>
                 <p className={`text-sm font-semibold ${
                   client.change.startsWith("+") ? "text-green-600" : "text-red-600"
