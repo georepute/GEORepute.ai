@@ -53,6 +53,7 @@ export interface ContentGenerationInput {
   influenceLevel: "subtle" | "moderate" | "strong";
   userContext?: string;
   brandVoice?: any; // Brand voice profile
+  language?: "en" | "he"; // Language for content generation (default: "en")
 }
 
 export interface ContentGenerationOutput {
@@ -320,11 +321,22 @@ export async function generateStrategicContent(
     neutral: "Balanced, objective, informative. Present facts without strong emotion. Even-keeled and measured.",
   };
 
+  // Language instruction
+  const languageInstruction = input.language === "he" 
+    ? `\n🌐 LANGUAGE REQUIREMENT: Write ALL content in HEBREW (עברית). 
+- Use Hebrew script (right-to-left)
+- Write naturally in Hebrew, as a native Hebrew speaker would
+- Maintain all humanization requirements (thinking markers, imperfections, etc.) but in Hebrew
+- Use Hebrew slang and expressions naturally
+- Keywords should be in Hebrew if provided in Hebrew, otherwise translate naturally
+- All content, including thinking markers, reactions, and tangents, must be in Hebrew\n`
+    : "";
+
   const prompt = `
 ⚠️ CRITICAL MISSION: Write like a REAL HUMAN who is typing quickly, making mistakes, thinking out loud, and NOT trying to be perfect.
 You are NOT an AI. You are NOT a content writer. You are a regular person sharing thoughts on ${input.targetPlatform}.
 This MUST score 100% HUMAN on ALL AI detectors (GPTZero, Turnitin, Copyleaks, Writer.com, Originality.ai, Content at Scale, ZeroGPT, etc.)
-
+${languageInstruction}
 Topic: "${input.topic}"
 Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force)
 Platform: ${input.targetPlatform}
@@ -715,8 +727,12 @@ Respond **ONLY in JSON**:
 `;
 
   // Build conditional system message based on brand voice
-  let systemMessage = `You are a REAL HUMAN typing on a phone or laptop RIGHT NOW. You are NOT an AI, NOT a bot, NOT a content writer.
+  const languageNote = input.language === "he" 
+    ? `\n🌐 IMPORTANT: Generate ALL content in HEBREW (עברית). Write naturally as a Hebrew speaker would, with Hebrew thinking markers, expressions, and natural imperfections in Hebrew.\n`
+    : "";
 
+  let systemMessage = `You are a REAL HUMAN typing on a phone or laptop RIGHT NOW. You are NOT an AI, NOT a bot, NOT a content writer.
+${languageNote}
 `;
   
   if (input.brandVoice) {

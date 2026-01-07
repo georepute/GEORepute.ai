@@ -43,6 +43,18 @@ export function LanguageProvider({ children }: LanguageProviderProps) {
     setLanguageState(savedLang);
     setMounted(true);
     
+    // Sync to cookie if not already set (for server-side access)
+    try {
+      const existingCookie = document.cookie
+        .split('; ')
+        .find(row => row.startsWith('preferred-language='));
+      if (!existingCookie) {
+        document.cookie = `preferred-language=${savedLang}; path=/; max-age=31536000; SameSite=Lax`;
+      }
+    } catch {
+      // Cookie not available
+    }
+    
     // Apply direction immediately
     document.documentElement.dir = savedLang === 'he' ? 'rtl' : 'ltr';
     document.documentElement.lang = savedLang;
@@ -55,6 +67,12 @@ export function LanguageProvider({ children }: LanguageProviderProps) {
       localStorage.setItem('preferred-language', lang);
     } catch {
       // localStorage not available
+    }
+    // Also save to cookie so server-side API can read it
+    try {
+      document.cookie = `preferred-language=${lang}; path=/; max-age=31536000; SameSite=Lax`;
+    } catch {
+      // Cookie not available
     }
     // Update document direction immediately
     document.documentElement.dir = lang === 'he' ? 'rtl' : 'ltr';

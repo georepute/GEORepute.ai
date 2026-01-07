@@ -33,7 +33,26 @@ export async function POST(request: NextRequest) {
       generatedContent, // Pre-generated content to use when skipGeneration is true
       contentType, // Type of content (e.g., 'answer' for AI visibility responses)
       tone, // Tone of the content
+      language, // Language for content generation ("en" or "he")
     } = body;
+
+    // Get language preference: from request body, or from cookies as fallback
+    let preferredLanguage: "en" | "he" = language || "en";
+    if (!language) {
+      // Try to get from cookies
+      const cookieHeader = request.headers.get("cookie");
+      if (cookieHeader) {
+        const cookies = cookieHeader.split("; ").reduce((acc, cookie) => {
+          const [key, value] = cookie.split("=");
+          acc[key] = value;
+          return acc;
+        }, {} as Record<string, string>);
+        const cookieLanguage = cookies["preferred-language"];
+        if (cookieLanguage === "he" || cookieLanguage === "en") {
+          preferredLanguage = cookieLanguage;
+        }
+      }
+    }
 
     // For skipGeneration mode, we only need topic and targetPlatform
     if (skipGeneration) {
@@ -130,6 +149,7 @@ export async function POST(request: NextRequest) {
         influenceLevel: learningRules.tone || influenceLevel || "subtle",
         userContext,
         brandVoice: brandVoiceProfile, // Pass brand voice profile
+        language: preferredLanguage, // Pass language preference (from request or cookie)
       }, learningRules);
     }
 

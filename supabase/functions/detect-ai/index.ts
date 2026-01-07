@@ -14,9 +14,162 @@ const corsHeaders = {
 };
 
 // MASSIVELY EXPANDED AI DETECTION PATTERNS
-const aiPatterns = {
-  // TIER 1: DEAD GIVEAWAYS (99% confidence) - Words almost ONLY AI uses
-  deadGiveaways: [
+// Helper function to get patterns based on language
+function getAiPatterns(language: 'en' | 'he' = 'en') {
+  if (language === 'he') {
+    return {
+      // TIER 1: DEAD GIVEAWAYS (99% confidence) - Hebrew AI patterns
+      deadGiveaways: [
+        {
+          pattern: /(לסיכום|לסיכום דברים|לסיכום הנושא|לסיכום הדברים)/gi,
+          reason: "DEAD GIVEAWAY: AI conclusion phrases in Hebrew",
+          confidence: 99,
+          category: "tier1"
+        },
+        {
+          pattern: /(חשוב לציין|ראוי לציין|יש לציין|חשוב להבין|חשוב להדגיש)/gi,
+          reason: "DEAD GIVEAWAY: AI meta-commentary in Hebrew",
+          confidence: 98,
+          category: "tier1"
+        },
+        {
+          pattern: /(בנוף|בנוף של|בנוף ה|בנוף הדיגיטלי|בנוף המשתנה)/gi,
+          reason: "DEAD GIVEAWAY: AI landscape metaphors in Hebrew",
+          confidence: 97,
+          category: "tier1"
+        },
+        {
+          pattern: /(לנווט|לנווט ב|לנווט את|לנווט דרך)/gi,
+          reason: "DEAD GIVEAWAY: AI navigation phrases in Hebrew",
+          confidence: 98,
+          category: "tier1"
+        },
+        {
+          pattern: /(לצאת למסע|לצאת לדרך|להתחיל במסע)/gi,
+          reason: "DEAD GIVEAWAY: AI embark phrases in Hebrew",
+          confidence: 97,
+          category: "tier1"
+        },
+        {
+          pattern: /(מכריע|חיוני|קריטי|מרכזי|חשוב ביותר)/gi,
+          reason: "DEAD GIVEAWAY: AI importance indicators in Hebrew",
+          confidence: 96,
+          category: "tier1"
+        },
+        {
+          pattern: /(מורכב|מסובך|מפורט מאוד|מדויק מאוד)/gi,
+          reason: "DEAD GIVEAWAY: AI complexity descriptors in Hebrew",
+          confidence: 95,
+          category: "tier1"
+        }
+      ],
+      // TIER 2: EXTREMELY HIGH CONFIDENCE (95-98%)
+      extremelyHigh: [
+        {
+          pattern: /(בסיכום|לסיכום|לסיכום דברים|לסיכום הנושא)/gi,
+          reason: "Classic AI conclusion in Hebrew",
+          confidence: 97,
+          category: "conclusion"
+        },
+        {
+          pattern: /(בעולם המודרני|בעידן הדיגיטלי|בעולם המשתנה|בימינו)/gi,
+          reason: "AI temporal cliché in Hebrew",
+          confidence: 96,
+          category: "opener"
+        },
+        {
+          pattern: /(מהפכני|פורץ דרך|משנה משחק|טרנספורמטיבי)/gi,
+          reason: "AI hype words in Hebrew",
+          confidence: 95,
+          category: "hype"
+        },
+        {
+          pattern: /(לנצל|למנף|להשתמש ב|לעשות שימוש ב)/gi,
+          reason: "AI formality in Hebrew",
+          confidence: 94,
+          category: "formality"
+        },
+        {
+          pattern: /(לקדם|לטפח|לטפל|לשפר|להגדיל)/gi,
+          reason: "Corporate AI jargon in Hebrew",
+          confidence: 93,
+          category: "jargon"
+        },
+        {
+          pattern: /(מקיף|הוליסטי|רב-ממדי|מעודן)/gi,
+          reason: "AI complexity descriptors in Hebrew",
+          confidence: 92,
+          category: "descriptor"
+        }
+      ],
+      // TIER 3: VERY HIGH CONFIDENCE (90-94%)
+      veryHigh: [
+        {
+          pattern: /(יתר על כן|בנוסף|לפיכך|לכן|כך)/gi,
+          reason: "Formal AI transitions in Hebrew",
+          confidence: 91,
+          category: "transition"
+        },
+        {
+          pattern: /(למטב|למקסם|לשפר|לייעל|סינרגיה)/gi,
+          reason: "Business AI buzzwords in Hebrew",
+          confidence: 90,
+          category: "business"
+        },
+        {
+          pattern: /(חזק|דינמי|חדשני|מתקדם|מצב-האומנות)/gi,
+          reason: "AI marketing language in Hebrew",
+          confidence: 89,
+          category: "marketing"
+        }
+      ],
+      // TIER 4: HIGH CONFIDENCE (85-89%)
+      high: [
+        {
+          pattern: /(משמעותי|ניכר|רב|בולט|מדהים)/gi,
+          reason: "AI emphasis words in Hebrew",
+          confidence: 87,
+          category: "emphasis"
+        },
+        {
+          pattern: /(שונים|רבים|מגוונים|רחבים|נרחבים)/gi,
+          reason: "AI variety indicators in Hebrew",
+          confidence: 85,
+          category: "variety"
+        }
+      ],
+      highConfidence: [] as Array<{ pattern: RegExp; reason: string; confidence: number; category: string }>,
+      mediumConfidence: [] as Array<{ pattern: RegExp; reason: string; confidence: number; category: string }>,
+      lowConfidence: [] as Array<{ pattern: RegExp; reason: string; confidence: number; category: string }>,
+      structure: [] as Array<{ pattern: RegExp; reason: string; confidence: number; category: string }>,
+      // SENTENCE PATTERNS (High detection value)
+      sentencePatterns: [
+        {
+          pattern: /(מה זה אומר|למה זה חשוב|איך אפשר|מה ההשלכות)\s*\?/gi,
+          reason: "RHETORICAL QUESTION: AI engagement tactic in Hebrew",
+          confidence: 93,
+          category: "rhetorical"
+        },
+        {
+          pattern: /(מצד אחד|מצד שני|לעומת זאת|בניגוד)/gi,
+          reason: "BALANCED PERSPECTIVE: AI loves showing 'both sides' in Hebrew",
+          confidence: 88,
+          category: "balance"
+        },
+        {
+          pattern: /(חשוב (לציין|להבין|להדגיש|להכיר))/gi,
+          reason: "META-COMMENTARY: Classic AI sentence starter in Hebrew",
+          confidence: 94,
+          category: "meta"
+        }
+      ]
+    };
+  }
+  
+  // Default English patterns
+  return {
+    // TIER 1: DEAD GIVEAWAYS (99% confidence) - Words almost ONLY AI uses
+    deadGiveaways: [
     {
       pattern: /\b(delve|delving|delved)\b/gi,
       reason: "DEAD GIVEAWAY: 'delve' is used 10,000x more by AI than humans",
@@ -232,7 +385,11 @@ const aiPatterns = {
       category: "evidence"
     }
   ],
-};
+  };
+}
+
+// Keep original aiPatterns for backward compatibility (defaults to English)
+const aiPatterns = getAiPatterns('en');
 
 function extractTextFromHtml(html: string): string {
   let text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
@@ -863,7 +1020,7 @@ interface WordDetection {
   phraseEnd?: number; // End position of the phrase
 }
 
-function analyzeTextDetailed(text: string): {
+function analyzeTextDetailed(text: string, language: 'en' | 'he' = 'en'): {
   words: WordDetection[];
   aiPercentage: number;
   summary: string;
@@ -885,6 +1042,9 @@ function analyzeTextDetailed(text: string): {
     };
   };
 } {
+  // Get patterns based on language
+  const patterns = getAiPatterns(language);
+  
   const words = text.split(/(\s+|[.,!?;:])/).filter(w => w.trim().length > 0);
   const detections: WordDetection[] = [];
   // Store actual phrases (preserve original case) with their metadata
@@ -906,15 +1066,15 @@ function analyzeTextDetailed(text: string): {
   // STEP 1: Find complete phrases in the full text first
   // This ensures we capture multi-word phrases correctly
   const allPatterns = [
-    ...aiPatterns.deadGiveaways.map(p => ({ ...p, level: 'tier1' as const })),
-    ...aiPatterns.extremelyHigh.map(p => ({ ...p, level: 'tier2' as const })),
-    ...aiPatterns.veryHigh.map(p => ({ ...p, level: 'tier3' as const })),
-    ...aiPatterns.high.map(p => ({ ...p, level: 'tier4' as const })),
-    ...aiPatterns.highConfidence.map(p => ({ ...p, level: 'high' as const })),
-    ...aiPatterns.mediumConfidence.map(p => ({ ...p, level: 'medium' as const })),
-    ...aiPatterns.lowConfidence.map(p => ({ ...p, level: 'low' as const })),
-    ...aiPatterns.structure.map(p => ({ ...p, level: 'structure' as const })),
-    ...(aiPatterns.sentencePatterns || []).map(p => ({ ...p, level: 'sentence' as const }))
+    ...patterns.deadGiveaways.map(p => ({ ...p, level: 'tier1' as const })),
+    ...patterns.extremelyHigh.map(p => ({ ...p, level: 'tier2' as const })),
+    ...patterns.veryHigh.map(p => ({ ...p, level: 'tier3' as const })),
+    ...patterns.high.map(p => ({ ...p, level: 'tier4' as const })),
+    ...patterns.highConfidence.map(p => ({ ...p, level: 'high' as const })),
+    ...patterns.mediumConfidence.map(p => ({ ...p, level: 'medium' as const })),
+    ...patterns.lowConfidence.map(p => ({ ...p, level: 'low' as const })),
+    ...patterns.structure.map(p => ({ ...p, level: 'structure' as const })),
+    ...(patterns.sentencePatterns || []).map(p => ({ ...p, level: 'sentence' as const }))
   ];
   
   // Find all phrase matches in the full text
@@ -924,7 +1084,9 @@ function analyzeTextDetailed(text: string): {
     const flags = pattern.pattern.flags.includes('g') 
       ? pattern.pattern.flags 
       : pattern.pattern.flags + 'g';
-    const regex = new RegExp(pattern.pattern.source, flags);
+    // Ensure 'u' flag for Unicode support (important for Hebrew)
+    const unicodeFlags = flags.includes('u') ? flags : flags + 'u';
+    const regex = new RegExp(pattern.pattern.source, unicodeFlags);
     
     // Reset regex lastIndex to avoid issues
     regex.lastIndex = 0;
@@ -1744,11 +1906,14 @@ function generateHighlightedHtml(text: string, detections: WordDetection[]): str
   return highlighted;
 }
 
-function applyHighlightsToHtml(originalHtml: string, plainText: string, detections: WordDetection[]): string {
+function applyHighlightsToHtml(originalHtml: string, plainText: string, detections: WordDetection[], language: 'en' | 'he' = 'en'): string {
   // If original is not HTML, just use plain text highlighting
   if (!originalHtml.includes('<') || (!originalHtml.includes('<p>') && !originalHtml.includes('<h') && !originalHtml.includes('<div>'))) {
     return generateHighlightedHtml(plainText, detections);
   }
+  
+  // For Hebrew, use Unicode-aware word boundaries or direct matching
+  const isHebrew = language === 'he';
   
   // Group detections by phrase - prioritize complete phrases over individual words
   const phraseGroups = new Map<string, {
@@ -1791,8 +1956,12 @@ function applyHighlightsToHtml(originalHtml: string, plainText: string, detectio
     const detection = phraseGroup.detection;
     const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     
-    // Create regex to find the complete phrase (case-insensitive, word boundaries)
-    const phraseRegex = new RegExp(`\\b(${escapedPhrase})\\b`, 'gi');
+    // Create regex to find the complete phrase
+    // For Hebrew, don't use word boundaries (\b) as they don't work well with Hebrew text
+    // Use Unicode-aware boundaries or direct matching
+    const phraseRegex = isHebrew 
+      ? new RegExp(`(${escapedPhrase})`, 'gi')
+      : new RegExp(`\\b(${escapedPhrase})\\b`, 'gi');
     
     // Determine color class
     let colorClass = "gltr-human";
@@ -1855,7 +2024,10 @@ function applyHighlightsToHtml(originalHtml: string, plainText: string, detectio
   for (const [wordKey, detection] of sortedWords) {
     const word = detection.word;
     const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const wordRegex = new RegExp(`\\b(${escapedWord})\\b`, 'gi');
+    // For Hebrew, don't use word boundaries (\b) as they don't work well with Hebrew text
+    const wordRegex = isHebrew
+      ? new RegExp(`(${escapedWord})`, 'gi')
+      : new RegExp(`\\b(${escapedWord})\\b`, 'gi');
     
     let colorClass = "gltr-human";
     if (detection.confidence >= 90) {
@@ -1920,7 +2092,7 @@ serve(async (req) => {
   }
 
   try {
-    const { text } = await req.json();
+    const { text, language } = await req.json();
     
     if (!text || typeof text !== "string") {
       return new Response(
@@ -1928,6 +2100,10 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Determine language preference (from body or cookie)
+    const preferredLanguage = language || req.headers.get('cookie')?.split('; ').find(row => row.startsWith('preferred-language='))?.split('=')[1] || 'en';
+    const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en') ? preferredLanguage : 'en';
 
     // Store original HTML for proper highlighting
     const originalHtml = text;
@@ -1955,10 +2131,16 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Analyzing text of length: ${plainText.length}`);
+    console.log(`Analyzing text of length: ${plainText.length}, language: ${validLanguage}`);
+    console.log(`Text sample (first 100 chars): ${plainText.substring(0, 100)}`);
 
-    // Perform detailed analysis
-    const analysis = analyzeTextDetailed(plainText);
+    // Perform detailed analysis with language parameter
+    const analysis = analyzeTextDetailed(plainText, validLanguage as 'en' | 'he');
+    
+    console.log(`Detection results: ${analysis.words.length} words detected, ${analysis.topPhrases.length} phrases found`);
+    if (analysis.topPhrases.length > 0) {
+      console.log(`Top phrases: ${analysis.topPhrases.slice(0, 3).map(p => p.phrase).join(', ')}`);
+    }
     
     // Run ML-based detection (HuggingFace)
     console.log("🤖 Starting ML-based detection (HuggingFace)...");
@@ -2016,7 +2198,7 @@ serve(async (req) => {
     };
     
     // Generate highlighted HTML by mapping detections back to original HTML structure
-    const highlightedHtml = applyHighlightsToHtml(originalHtml, plainText, analysis.words);
+    const highlightedHtml = applyHighlightsToHtml(originalHtml, plainText, analysis.words, validLanguage as 'en' | 'he');
 
     return new Response(
       JSON.stringify({
