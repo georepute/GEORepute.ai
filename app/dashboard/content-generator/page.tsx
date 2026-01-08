@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import {
   Sparkles,
   FileText,
@@ -25,8 +26,10 @@ import toast from "react-hot-toast";
 import Link from "next/link";
 import { useLanguage } from "@/lib/language-context";
 
-export default function ContentGeneratorPage() {
+function ContentGeneratorPageInner() {
   const { language } = useLanguage();
+  const searchParams = useSearchParams();
+  
   // Step 1: User Input
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
@@ -34,6 +37,10 @@ export default function ContentGeneratorPage() {
   const [userBrand, setUserBrand] = useState("");
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
   const [imageUrl, setImageUrl] = useState(""); // For Instagram posts
+  
+  // Action plan context
+  const [actionPlanId, setActionPlanId] = useState<string | null>(null);
+  const [actionPlanStepId, setActionPlanStepId] = useState<string | null>(null);
   
   // Brand Voice
   const [brandVoices, setBrandVoices] = useState<any[]>([]);
@@ -85,6 +92,31 @@ export default function ContentGeneratorPage() {
 
     loadBrandVoices();
   }, []);
+
+  // Load URL params for action plan context and pre-fill form
+  useEffect(() => {
+    const urlActionPlanId = searchParams.get('actionPlanId');
+    const urlStepId = searchParams.get('stepId');
+    const urlTopic = searchParams.get('topic');
+    const urlPlatform = searchParams.get('platform');
+    const urlKeywords = searchParams.get('keywords');
+
+    if (urlActionPlanId && urlStepId) {
+      setActionPlanId(urlActionPlanId);
+      setActionPlanStepId(urlStepId);
+    }
+
+    // Pre-fill form fields from URL params
+    if (urlTopic) {
+      setTopic(urlTopic);
+    }
+    if (urlPlatform) {
+      setTargetPlatform(urlPlatform);
+    }
+    if (urlKeywords) {
+      setTargetKeywords(urlKeywords);
+    }
+  }, [searchParams]);
 
   // Step 1: Diagnostic Scan (using existing API or mock)
   const runDiagnosticScan = async () => {
@@ -164,6 +196,8 @@ export default function ContentGeneratorPage() {
           brandVoiceId: selectedVoiceId, // Include brand voice if selected
           language: language || 'en', // Pass current language preference
           ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}), // Include imageUrl if provided
+          actionPlanId: actionPlanId || undefined, // Link to action plan if present
+          actionPlanStepId: actionPlanStepId || undefined, // Link to action plan step if present
         }),
       });
 
@@ -724,6 +758,18 @@ export default function ContentGeneratorPage() {
 
       </div>
     </div>
+  );
+}
+
+export default function ContentGeneratorPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    }>
+      <ContentGeneratorPageInner />
+    </Suspense>
   );
 }
 

@@ -212,10 +212,84 @@ function ContentInner() {
     loadBrandVoices();
   }, []);
 
+  // State for action plan context
+  const [actionPlanContext, setActionPlanContext] = useState<{
+    planId: string;
+    stepId: string;
+    planTitle?: string;
+  } | null>(null);
+
+  // Load action plan context from content metadata or URL params
+  const loadActionPlanContext = async (contentId?: string, planId?: string, stepId?: string) => {
+    // If planId and stepId are provided in URL, use those
+    if (planId && stepId) {
+      try {
+        // Fetch plan title from database
+        const { data: plan } = await supabase
+          .from("action_plan")
+          .select("id, title")
+          .eq("id", planId)
+          .single();
+        
+        setActionPlanContext({
+          planId: planId,
+          stepId: stepId,
+          planTitle: plan?.title,
+        });
+      } catch (error) {
+        console.error("Error loading action plan:", error);
+        // Still set context even if title fetch fails
+        setActionPlanContext({
+          planId: planId,
+          stepId: stepId,
+        });
+      }
+      return;
+    }
+    
+    // Otherwise, if contentId is provided, check if content is linked to action plan
+    if (contentId) {
+      try {
+        const { data: content } = await supabase
+          .from("content_strategy")
+          .select("id, metadata")
+          .eq("id", contentId)
+          .single();
+        
+        if (content?.metadata?.actionPlanId && content?.metadata?.actionPlanStepId) {
+          // Fetch plan title from database
+          const { data: plan } = await supabase
+            .from("action_plan")
+            .select("id, title")
+            .eq("id", content.metadata.actionPlanId)
+            .single();
+          
+          setActionPlanContext({
+            planId: content.metadata.actionPlanId,
+            stepId: content.metadata.actionPlanStepId,
+            planTitle: plan?.title,
+          });
+        }
+      } catch (error) {
+        console.error("Error loading action plan context from content:", error);
+      }
+    }
+  };
+
   // Check for AI Visibility source and load data
   useEffect(() => {
     const source = searchParams.get('source');
     const step = searchParams.get('step');
+    const actionPlanId = searchParams.get('actionPlanId');
+    const stepId = searchParams.get('stepId');
+    const contentId = searchParams.get('contentId');
+    
+    // Load action plan context from URL params or content metadata
+    loadActionPlanContext(contentId || undefined, actionPlanId || undefined, stepId || undefined);
+    
+    
+    // Load action plan context on mount or when URL params change
+    loadActionPlanContext(contentId || undefined, actionPlanId || undefined, stepId || undefined);
     
     // Only open modals if we're coming from AI Visibility AND data exists
     // Don't reopen if content was already published (sessionStorage would be cleared)
@@ -268,7 +342,22 @@ function ContentInner() {
         }
       }
     }
-  }, [searchParams]);
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Also check for action plan context when content items change
+  useEffect(() => {
+    const contentId = searchParams.get('contentId');
+    if (contentId && contentItems.length > 0 && !actionPlanContext) {
+      const linkedContent = contentItems.find((item: any) => item.id === contentId);
+      if (linkedContent?.raw?.metadata?.actionPlanId && linkedContent?.raw?.metadata?.actionPlanStepId) {
+        loadActionPlanContext(
+          contentId,
+          linkedContent.raw.metadata.actionPlanId,
+          linkedContent.raw.metadata.actionPlanStepId
+        );
+      }
+    }
+  }, [contentItems, searchParams, actionPlanContext]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadContent = async () => {
     setLoading(true);
@@ -289,6 +378,19 @@ function ContentInner() {
         review: 0,
         draft: 0,
       });
+      
+      // Check if any content item is linked to an action plan and load context
+      const contentId = searchParams.get('contentId');
+      if (contentId) {
+        const linkedContent = data.content?.find((item: any) => item.id === contentId);
+        if (linkedContent?.raw?.metadata?.actionPlanId && linkedContent?.raw?.metadata?.actionPlanStepId) {
+          loadActionPlanContext(
+            contentId,
+            linkedContent.raw.metadata.actionPlanId,
+            linkedContent.raw.metadata.actionPlanStepId
+          );
+        }
+      }
       
       // Debug: Log published content to see what data we have
       const publishedItems = (data.content || []).filter((item: any) => 
@@ -482,6 +584,22 @@ function ContentInner() {
         // Clear URL params if present
         if (searchParams.get('source') === 'ai-visibility') {
           router.replace('/dashboard/content', { scroll: false });
+        }
+        
+        // If published from action plan, show success and link back to plan
+        if (actionPlanContext && action === "approve" && additionalData?.autoPublish) {
+          toast.success(
+            <div>
+              Content published! Step completed in action plan.
+              <button
+                onClick={() => router.push(`/dashboard/action-plans?planId=${actionPlanContext.planId}`)}
+                className="ml-2 underline font-semibold"
+              >
+                View Plan →
+              </button>
+            </div>,
+            { duration: 5000 }
+          );
         }
       }
       
@@ -1392,6 +1510,8 @@ function ContentInner() {
               photographer: selectedImage.user,
             } : null,
             language: language || 'en', // Pass current language preference
+            actionPlanId: actionPlanContext?.planId || undefined, // Link to action plan if present
+            actionPlanStepId: actionPlanContext?.stepId || undefined, // Link to action plan step if present
             }),
           });
 
@@ -1514,6 +1634,31 @@ function ContentInner() {
           <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
         </button>
       </div>
+
+      {/* Action Plan Context Banner */}
+      {actionPlanContext && (
+        <div className="mb-6 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <ArrowLeft className="w-5 h-5 text-purple-600" />
+              <div>
+                <p className="text-sm font-semibold text-purple-900">
+                  Generated from Action Plan
+                </p>
+                <p className="text-xs text-purple-700">
+                  {actionPlanContext.planTitle || 'Action Plan Step'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => router.push(`/dashboard/action-plans?planId=${actionPlanContext.planId}`)}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
+            >
+              View Action Plan →
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">

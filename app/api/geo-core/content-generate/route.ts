@@ -34,6 +34,8 @@ export async function POST(request: NextRequest) {
       contentType, // Type of content (e.g., 'answer' for AI visibility responses)
       tone, // Tone of the content
       language, // Language for content generation ("en" or "he")
+      actionPlanId, // Optional: Link content to action plan
+      actionPlanStepId, // Optional: Link content to specific step
     } = body;
 
     // Get language preference: from request body, or from cookies as fallback
@@ -283,10 +285,14 @@ export async function POST(request: NextRequest) {
     // Save to database - use normalized platform value
     console.log('💾 Saving to database with platform:', normalizedPlatform);
     
-    // Merge imageUrl, schema, and structured content into metadata
+    // Merge imageUrl, schema, structured content, and action plan link into metadata
     const contentMetadata = {
       ...result.metadata,
       ...(imageUrl ? { imageUrl } : {}), // Add imageUrl if provided
+      ...(actionPlanId && actionPlanStepId ? { 
+        actionPlanId, 
+        actionPlanStepId 
+      } : {}), // Link to action plan if provided
       schema: {
         jsonLd: schemaJson, // Store as JSON for API access
         scriptTags: schemaScriptTags, // Store as HTML script tags for embedding
@@ -425,6 +431,47 @@ export async function POST(request: NextRequest) {
         },
         { status: 200 } // Still return 200 since content was generated successfully
       );
+    }
+
+    // Update action plan step if content is linked to an action plan
+    if (actionPlanId && actionPlanStepId && data?.id) {
+      try {
+        const { data: plan } = await supabase
+          .from("action_plan")
+          .select("steps")
+          .eq("id", actionPlanId)
+          .eq("user_id", session.user.id)
+          .single();
+
+        if (plan) {
+          const steps = plan.steps || [];
+          const stepIndex = steps.findIndex(
+            (s: any) => s.id === actionPlanStepId || s.id?.toString() === actionPlanStepId
+          );
+
+          if (stepIndex !== -1) {
+            steps[stepIndex] = {
+              ...steps[stepIndex],
+              executionMetadata: {
+                ...(steps[stepIndex].executionMetadata || {}),
+                linkedContentId: data.id,
+                executionStatus: 'review', // Content generated, waiting for review
+              },
+            };
+
+            await supabase
+              .from("action_plan")
+              .update({ steps })
+              .eq("id", actionPlanId)
+              .eq("user_id", session.user.id);
+
+            console.log(`✅ Linked content ${data.id} to action plan ${actionPlanId}, step ${actionPlanStepId}`);
+          }
+        }
+      } catch (planError: any) {
+        console.error("Failed to update action plan step:", planError);
+        // Don't fail the request if action plan update fails
+      }
     }
 
     // Note: Learning will be auto-triggered when content performance data is available

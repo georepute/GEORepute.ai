@@ -1670,6 +1670,50 @@ export async function POST(request: NextRequest) {
           console.error("Error updating content_strategy:", statusError);
         }
 
+        // Update action plan step if content is linked to an action plan
+        if (contentStrategy.metadata?.actionPlanId && contentStrategy.metadata?.actionPlanStepId) {
+          try {
+            const { data: plan } = await supabase
+              .from("action_plan")
+              .select("steps")
+              .eq("id", contentStrategy.metadata.actionPlanId)
+              .eq("user_id", session.user.id)
+              .single();
+
+            if (plan) {
+              const steps = plan.steps || [];
+              const stepIndex = steps.findIndex(
+                (s: any) => s.id === contentStrategy.metadata.actionPlanStepId || 
+                           s.id?.toString() === contentStrategy.metadata.actionPlanStepId
+              );
+
+              if (stepIndex !== -1) {
+                steps[stepIndex] = {
+                  ...steps[stepIndex],
+                  completed: true,
+                  executionMetadata: {
+                    ...(steps[stepIndex].executionMetadata || {}),
+                    executionStatus: 'published',
+                    publishedAt: new Date().toISOString(),
+                    publishedUrl: publishUrl,
+                  },
+                };
+
+                await supabase
+                  .from("action_plan")
+                  .update({ steps })
+                  .eq("id", contentStrategy.metadata.actionPlanId)
+                  .eq("user_id", session.user.id);
+
+                console.log(`✅ Updated action plan ${contentStrategy.metadata.actionPlanId} step ${contentStrategy.metadata.actionPlanStepId} to published`);
+              }
+            }
+          } catch (planError: any) {
+            console.error("Failed to update action plan step:", planError);
+            // Don't fail the request if action plan update fails
+          }
+        }
+
         result = {
           success: true,
           published_record: publishedRecord,

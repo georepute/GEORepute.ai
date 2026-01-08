@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Lightbulb,
@@ -13,10 +13,20 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
+  Trash2,
+  Play,
+  ExternalLink,
+  Globe,
+  RefreshCw,
+  ArrowRight,
 } from "lucide-react";
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
 import toast from "react-hot-toast";
+import { PlanProgress } from "./_components/PlanProgress";
 
 interface ActionStep {
   step: string;
@@ -24,6 +34,21 @@ interface ActionStep {
   priority: "high" | "medium" | "low";
   estimatedImpact: string;
   completed: boolean;
+  id?: string;
+  channel?: string;
+  platform?: string;
+  executionType?: "content_generation" | "audit" | "analysis" | "manual";
+  executionMetadata?: {
+    platform?: string;
+    topic?: string;
+    keywords?: string[];
+    contentType?: string;
+    autoExecute?: boolean;
+    linkedContentId?: string;
+    executionStatus?: "pending" | "generating" | "review" | "published" | "completed";
+    publishedAt?: string;
+    publishedUrl?: string;
+  };
 }
 
 interface ActionPlan {
@@ -38,13 +63,182 @@ interface ActionPlan {
   category: string;
   createdAt: Date;
   expanded: boolean;
+  channels?: string[];
+  domain?: string;
+  region?: string;
+}
+
+interface BrandProject {
+  id: string;
+  brand_name: string;
+  industry: string;
+  website_url?: string;
+  company_description?: string;
+  company_image_url?: string;
+  keywords?: string[];
+  competitors?: string[];
 }
 
 export default function ActionPlansPage() {
+  const router = useRouter();
+  const supabase = createClientComponentClient();
   const [plans, setPlans] = useState<ActionPlan[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingPlans, setLoadingPlans] = useState(true);
   const [objective, setObjective] = useState("");
   const [keywords, setKeywords] = useState("");
+  const [domain, setDomain] = useState("");
+  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  const [executingStep, setExecutingStep] = useState<string | null>(null);
+  
+  // Brand project selection state
+  const [brandProjects, setBrandProjects] = useState<BrandProject[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<BrandProject | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [crawlingDomain, setCrawlingDomain] = useState(false);
+
+  // Load existing plans and brand projects on mount
+  useEffect(() => {
+    loadPlans();
+    loadBrandProjects();
+  }, []);
+
+  // Load brand analysis projects from database
+  const loadBrandProjects = async () => {
+    setLoadingProjects(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('brand_analysis_projects')
+        .select('id, brand_name, industry, website_url, company_description, company_image_url, keywords, competitors')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading brand projects:', error);
+        return;
+      }
+
+      setBrandProjects(data || []);
+    } catch (error: any) {
+      console.error('Error loading brand projects:', error);
+    } finally {
+      setLoadingProjects(false);
+    }
+  };
+
+  // Handle project selection
+  const handleProjectSelect = (projectId: string | null) => {
+    setSelectedProjectId(projectId);
+    if (projectId) {
+      const project = brandProjects.find(p => p.id === projectId);
+      if (project) {
+        setSelectedProject(project);
+        // Auto-fill domain from project
+        if (project.website_url) {
+          setDomain(project.website_url);
+        }
+      }
+    } else {
+      setSelectedProject(null);
+      setDomain("");
+    }
+  };
+
+  // Handle crawling a new domain
+  const handleCrawlNewDomain = async () => {
+    if (!domain.trim()) {
+      toast.error("Please enter a domain to crawl");
+      return;
+    }
+
+    setCrawlingDomain(true);
+    try {
+      const crawlResponse = await fetch("/api/crawl-website", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: domain }),
+      });
+
+      const crawlData = await crawlResponse.json();
+
+      if (crawlResponse.ok && crawlData.success) {
+        // Update selected project with crawled data (create a temporary project object)
+        const crawledProject: BrandProject = {
+          id: 'temp-' + Date.now(),
+          brand_name: crawlData.metadata?.title || domain.split('.')[0],
+          industry: 'Unknown',
+          website_url: domain,
+          company_description: crawlData.description || '',
+          company_image_url: crawlData.imageUrl || null,
+        };
+        
+        setSelectedProject(crawledProject);
+        setSelectedProjectId(null); // Clear selected project ID since this is a new crawl
+        toast.success("Website crawled successfully!");
+      } else {
+        toast.error(crawlData.error || "Failed to crawl website");
+      }
+    } catch (error: any) {
+      console.error("Error crawling domain:", error);
+      toast.error("Failed to crawl website");
+    } finally {
+      setCrawlingDomain(false);
+    }
+  };
+
+  const loadPlans = async () => {
+    setLoadingPlans(true);
+    try {
+      const response = await fetch('/api/geo-core/action-plan');
+      
+      if (!response.ok) {
+        throw new Error("Failed to load action plans");
+      }
+
+      const data = await response.json();
+      const loadedPlans: ActionPlan[] = (data.plans || []).map((plan: any) => ({
+        id: plan.id,
+        title: plan.title,
+        objective: plan.objective,
+        channels: plan.channels || [],
+        domain: plan.domain,
+        region: plan.region,
+        steps: (plan.steps || []).map((step: any) => ({
+          step: step.step || step.title || "",
+          description: step.description || "",
+          priority: step.priority || "medium",
+          estimatedImpact: step.estimatedImpact || step.estimatedTime || "Not specified",
+          completed: step.completed || false,
+          id: step.id,
+          channel: step.channel,
+          platform: step.platform,
+          executionType: step.executionType,
+          executionMetadata: step.executionMetadata || {
+            executionStatus: "pending",
+            autoExecute: false,
+          },
+        })),
+        reasoning: plan.reasoning || "",
+        expectedOutcome: plan.expectedOutcome || "",
+        timeline: plan.timeline || "",
+        priority: plan.priority || "medium",
+        category: plan.category || "General",
+        createdAt: plan.createdAt ? new Date(plan.createdAt) : new Date(),
+        expanded: false,
+      }));
+
+      setPlans(loadedPlans);
+    } catch (error: any) {
+      console.error("Error loading plans:", error);
+      toast.error("Failed to load action plans");
+    } finally {
+      setLoadingPlans(false);
+    }
+  };
 
   const generateActionPlan = async () => {
     if (!objective.trim()) {
@@ -63,6 +257,9 @@ export default function ActionPlansPage() {
         body: JSON.stringify({
           objective: objective,
           targetKeywords: keywords ? keywords.split(',').map(k => k.trim()).filter(Boolean) : [],
+          domain: domain.trim() || undefined,
+          channels: selectedChannels.length > 0 ? selectedChannels : ['all'],
+          projectId: selectedProjectId || undefined, // Pass selected project ID to use its crawler data
         }),
       });
 
@@ -77,9 +274,23 @@ export default function ActionPlansPage() {
         id: data.planId || Date.now().toString(),
         title: data.title,
         objective: data.objective,
-        steps: data.steps.map((step: any) => ({
-          ...step,
-          completed: false,
+        channels: data.channels || [],
+        domain: data.domain,
+        region: data.region,
+        steps: (data.steps || []).map((step: any) => ({
+          step: step.step || step.title || "",
+          description: step.description || "",
+          priority: step.priority || "medium",
+          estimatedImpact: step.estimatedImpact || step.estimatedTime || "Not specified",
+          completed: step.completed || false,
+          id: step.id,
+          channel: step.channel,
+          platform: step.platform,
+          executionType: step.executionType,
+          executionMetadata: step.executionMetadata || {
+            executionStatus: "pending",
+            autoExecute: false,
+          },
         })),
         reasoning: data.reasoning,
         expectedOutcome: data.expectedOutcome,
@@ -94,6 +305,10 @@ export default function ActionPlansPage() {
       toast.success("AI Action plan generated!");
       setObjective("");
       setKeywords("");
+      setDomain("");
+      setSelectedChannels([]);
+      setSelectedProjectId(null);
+      setSelectedProject(null);
     } catch (error: any) {
       console.error("Action plan error:", error);
       toast.error(error.message || "Failed to generate action plan. Check console for details.");
@@ -110,19 +325,110 @@ export default function ActionPlansPage() {
     );
   };
 
-  const toggleStep = (planId: string, stepIndex: number) => {
-    setPlans(
-      plans.map((p) =>
-        p.id === planId
-          ? {
-              ...p,
-              steps: p.steps.map((s, idx) =>
-                idx === stepIndex ? { ...s, completed: !s.completed } : s
-              ),
-            }
-          : p
-      )
+  const toggleStep = async (planId: string, stepIndex: number) => {
+    // Update local state immediately for responsive UI
+    const updatedPlans = plans.map((p) =>
+      p.id === planId
+        ? {
+            ...p,
+            steps: p.steps.map((s, idx) =>
+              idx === stepIndex ? { ...s, completed: !s.completed } : s
+            ),
+          }
+        : p
     );
+    setPlans(updatedPlans);
+
+    // Persist to database
+    const plan = updatedPlans.find((p) => p.id === planId);
+    if (plan) {
+      try {
+        const response = await fetch('/api/geo-core/action-plan', {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            planId: plan.id,
+            steps: plan.steps,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to update step');
+        }
+      } catch (error: any) {
+        console.error("Error updating step:", error);
+        toast.error("Failed to save step completion");
+        // Revert local state on error
+        setPlans(plans);
+      }
+    }
+  };
+
+  const executeStep = (planId: string, stepId: string) => {
+    if (!stepId) {
+      toast.error("Step ID is missing");
+      return;
+    }
+
+    // Find the step to get its metadata
+    const plan = plans.find(p => p.id === planId);
+    const step = plan?.steps.find((s: any) => s.id === stepId);
+    
+    if (!step) {
+      toast.error("Step not found");
+      return;
+    }
+
+    // Build URL with step metadata for pre-filling content generation form
+    const params = new URLSearchParams({
+      actionPlanId: planId,
+      stepId: stepId,
+    });
+
+    // Add step metadata if available to pre-fill the form
+    const execMetadata = step.executionMetadata || {};
+    if (execMetadata.topic) {
+      params.append('topic', execMetadata.topic);
+    }
+    if (execMetadata.platform) {
+      params.append('platform', execMetadata.platform);
+    }
+    if (execMetadata.keywords && Array.isArray(execMetadata.keywords)) {
+      params.append('keywords', execMetadata.keywords.join(','));
+    }
+    if (execMetadata.contentType) {
+      params.append('contentType', execMetadata.contentType);
+    }
+
+    // Redirect to content generator page (not content management page)
+    router.push(`/dashboard/content-generator?${params.toString()}`);
+  };
+
+  const deletePlan = async (planId: string) => {
+    if (!confirm("Are you sure you want to delete this action plan?")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/geo-core/action-plan?planId=${planId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete plan');
+      }
+
+      // Remove from local state
+      setPlans(plans.filter((p) => p.id !== planId));
+      toast.success("Action plan deleted successfully");
+    } catch (error: any) {
+      console.error("Error deleting plan:", error);
+      toast.error(error.message || "Failed to delete action plan");
+    }
   };
 
   const getPriorityColor = (priority: string) => {
@@ -178,6 +484,30 @@ export default function ActionPlansPage() {
             </h2>
 
             <div className="space-y-4">
+              {/* Brand Project Selector - First */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Brand Project (optional)
+                </label>
+                <select
+                  value={selectedProjectId || ""}
+                  onChange={(e) => handleProjectSelect(e.target.value || null)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent bg-white"
+                  disabled={loadingProjects}
+                >
+                  <option value="">-- Select a project --</option>
+                  {brandProjects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.brand_name} ({project.industry})
+                    </option>
+                  ))}
+                </select>
+                {loadingProjects && (
+                  <p className="text-xs text-gray-500 mt-1">Loading projects...</p>
+                )}
+              </div>
+
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Objective / Goal *
@@ -202,6 +532,75 @@ export default function ActionPlansPage() {
                   placeholder="e.g., local seo, google maps"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Domain (optional)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={domain}
+                    onChange={(e) => {
+                      setDomain(e.target.value);
+                      // Clear selected project if user manually changes domain
+                      if (selectedProjectId) {
+                        setSelectedProjectId(null);
+                        setSelectedProject(null);
+                      }
+                    }}
+                    placeholder="e.g., example.com"
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                  />
+                  <button
+                    onClick={handleCrawlNewDomain}
+                    disabled={crawlingDomain || !domain.trim()}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    title="Crawl this domain"
+                  >
+                    {crawlingDomain ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Globe className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Select a project above or crawl a new domain
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Marketing Channels (optional - leave empty for all channels)
+                </label>
+                <div className="space-y-2">
+                  {[
+                    { value: 'seo', label: 'SEO' },
+                    { value: 'social_media', label: 'Social Media' },
+                    { value: 'content', label: 'Content Marketing' },
+                    { value: 'email', label: 'Email Marketing' },
+                    { value: 'paid_ads', label: 'Paid Advertising' },
+                    { value: 'video', label: 'Video Marketing' },
+                  ].map((channel) => (
+                    <label key={channel.value} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedChannels.includes(channel.value)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedChannels([...selectedChannels, channel.value]);
+                          } else {
+                            setSelectedChannels(selectedChannels.filter(c => c !== channel.value));
+                          }
+                        }}
+                        className="w-4 h-4 text-accent-600 rounded focus:ring-accent-500"
+                      />
+                      <span className="text-sm text-gray-700">{channel.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <Button
@@ -264,14 +663,82 @@ export default function ActionPlansPage() {
 
         {/* RIGHT: Plans List */}
         <div className="lg:col-span-2">
-          {plans.length === 0 && !loading && (
-            <div className="bg-gray-50 rounded-lg p-12 text-center border-2 border-dashed border-gray-300">
-              <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600 mb-2">No action plans yet</p>
-              <p className="text-sm text-gray-500">
-                Enter your objective and let AI generate a strategic plan
+          {loadingPlans && (
+            <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
+              <div className="w-12 h-12 border-4 border-accent-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-gray-700 font-medium">
+                Loading your action plans...
               </p>
             </div>
+          )}
+
+          {plans.length === 0 && !loading && !loadingPlans && (
+            <>
+              {selectedProject ? (
+                // Show Crawler Info Card when project is selected
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  <div className="flex items-start gap-4 mb-4">
+                    {selectedProject.company_image_url ? (
+                      <img 
+                        src={selectedProject.company_image_url} 
+                        alt={selectedProject.brand_name}
+                        className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    ) : null}
+                    <div className={`w-16 h-16 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 ${selectedProject.company_image_url ? 'hidden' : ''}`}>
+                      <span className="text-2xl font-bold text-purple-600">
+                        {selectedProject.brand_name.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-xl font-bold text-gray-900 mb-1">{selectedProject.brand_name}</h3>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm font-medium rounded capitalize">
+                          {selectedProject.industry}
+                        </span>
+                      </div>
+                      {selectedProject.website_url && (
+                        <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
+                          <Globe className="w-4 h-4" />
+                          <a 
+                            href={selectedProject.website_url.startsWith('http') ? selectedProject.website_url : `https://${selectedProject.website_url}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:text-accent-600 hover:underline"
+                          >
+                            {selectedProject.website_url}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Company Description */}
+                  {selectedProject.company_description && (
+                    <div className="border-t border-gray-200 pt-4">
+                      <h4 className="text-sm font-semibold text-gray-900 mb-2">About {selectedProject.brand_name}</h4>
+                      <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
+                        {selectedProject.company_description}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                // Show empty state when no project is selected
+                <div className="bg-gray-50 rounded-lg p-12 text-center border-2 border-dashed border-gray-300">
+                  <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600 mb-2">No action plans yet</p>
+                  <p className="text-sm text-gray-500">
+                    Select a brand project and enter your objective to generate a strategic plan
+                  </p>
+                </div>
+              )}
+            </>
           )}
 
           {loading && (
@@ -286,7 +753,7 @@ export default function ActionPlansPage() {
             </div>
           )}
 
-          {plans.length > 0 && !loading && (
+          {plans.length > 0 && !loading && !loadingPlans && (
             <div className="space-y-4">
               {plans.map((plan, idx) => (
                 <motion.div
@@ -297,13 +764,13 @@ export default function ActionPlansPage() {
                 >
                   <Card className="overflow-hidden">
                     {/* Plan Header */}
-                    <div
-                      className="p-6 cursor-pointer hover:bg-gray-50 transition-colors"
-                      onClick={() => togglePlan(plan.id)}
-                    >
+                    <div className="p-6">
                       <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
+                        <div
+                          className="flex-1 cursor-pointer hover:bg-gray-50 transition-colors rounded-lg p-2 -m-2"
+                          onClick={() => togglePlan(plan.id)}
+                        >
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
                             <div
                               className={`px-2 py-1 rounded-full border text-xs font-semibold ${getPriorityColor(
                                 plan.priority
@@ -314,6 +781,18 @@ export default function ActionPlansPage() {
                             <div className="px-2 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-semibold">
                               {plan.category}
                             </div>
+                            {plan.channels && plan.channels.length > 0 && (
+                              <>
+                                {plan.channels.map((channel: string) => (
+                                  <div
+                                    key={channel}
+                                    className="px-2 py-1 rounded-full bg-purple-100 text-purple-800 text-xs font-semibold"
+                                  >
+                                    {channel.replace('_', ' ')}
+                                  </div>
+                                ))}
+                              </>
+                            )}
                           </div>
                           <h3 className="text-lg font-bold text-gray-900 mb-2">
                             {plan.title}
@@ -331,19 +810,39 @@ export default function ActionPlansPage() {
                             </div>
                           </div>
                         </div>
-                        <button className="text-gray-400 hover:text-gray-600">
-                          {plan.expanded ? (
-                            <ChevronUp className="w-5 h-5" />
-                          ) : (
-                            <ChevronDown className="w-5 h-5" />
-                          )}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deletePlan(plan.id);
+                            }}
+                            className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Delete plan"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => togglePlan(plan.id)}
+                            className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                          >
+                            {plan.expanded ? (
+                              <ChevronUp className="w-5 h-5" />
+                            ) : (
+                              <ChevronDown className="w-5 h-5" />
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
 
                     {/* Expanded Content */}
                     {plan.expanded && (
                       <div className="border-t border-gray-200">
+                        {/* Progress Dashboard */}
+                        <div className="p-6 border-b border-gray-200">
+                          <PlanProgress plan={plan} />
+                        </div>
+                        
                         {/* AI Reasoning */}
                         <div className="p-6 bg-gradient-to-r from-accent-50 to-primary-50 border-b border-gray-200">
                           <div className="flex items-start gap-2 mb-3">
@@ -376,62 +875,144 @@ export default function ActionPlansPage() {
                             Action Steps
                           </h4>
                           <div className="space-y-3">
-                            {plan.steps.map((step, stepIdx) => (
-                              <div
-                                key={stepIdx}
-                                className={`border rounded-lg p-4 transition-all ${
-                                  step.completed
-                                    ? "bg-green-50 border-green-200"
-                                    : "bg-white border-gray-200 hover:border-accent-300"
-                                }`}
-                              >
-                                <div className="flex items-start gap-3">
-                                  <button
-                                    onClick={() =>
-                                      toggleStep(plan.id, stepIdx)
-                                    }
-                                    className="mt-0.5 flex-shrink-0"
-                                  >
-                                    {step.completed ? (
-                                      <CheckCircle2 className="w-5 h-5 text-green-600" />
-                                    ) : (
-                                      <Circle className="w-5 h-5 text-gray-400 hover:text-accent-600 transition-colors" />
-                                    )}
-                                  </button>
-                                  <div className="flex-1">
-                                    <div className="flex items-start justify-between gap-2 mb-2">
-                                      <h5
-                                        className={`font-semibold text-sm ${
-                                          step.completed
-                                            ? "text-green-900 line-through"
-                                            : "text-gray-900"
-                                        }`}
-                                      >
-                                        {stepIdx + 1}. {step.step}
-                                      </h5>
-                                      <div
-                                        className={`px-2 py-0.5 rounded-full border text-xs font-semibold flex-shrink-0 ${getPriorityColor(
-                                          step.priority
-                                        )}`}
-                                      >
-                                        {step.priority}
+                            {plan.steps.map((step, stepIdx) => {
+                              const stepId = step.id || `step-${stepIdx}`;
+                              const executionStatus = step.executionMetadata?.executionStatus || "pending";
+                              const isExecuting = executingStep === `${plan.id}-${stepId}`;
+                              const canExecute = step.executionType === "content_generation" && step.executionMetadata?.autoExecute;
+                              
+                              return (
+                                <div
+                                  key={stepIdx}
+                                  className={`border rounded-lg p-4 transition-all ${
+                                    step.completed || executionStatus === 'published'
+                                      ? "bg-green-50 border-green-200"
+                                      : executionStatus === 'review'
+                                      ? "bg-blue-50 border-blue-200"
+                                      : "bg-white border-gray-200 hover:border-accent-300"
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <button
+                                      onClick={() =>
+                                        toggleStep(plan.id, stepIdx)
+                                      }
+                                      className="mt-0.5 flex-shrink-0"
+                                      disabled={executionStatus === 'published'}
+                                    >
+                                      {step.completed || executionStatus === 'published' ? (
+                                        <CheckCircle2 className="w-5 h-5 text-green-600" />
+                                      ) : (
+                                        <Circle className="w-5 h-5 text-gray-400 hover:text-accent-600 transition-colors" />
+                                      )}
+                                    </button>
+                                    <div className="flex-1">
+                                      <div className="flex items-start justify-between gap-2 mb-2">
+                                        <div className="flex-1">
+                                          <h5
+                                            className={`font-semibold text-sm ${
+                                              step.completed || executionStatus === 'published'
+                                                ? "text-green-900 line-through"
+                                                : "text-gray-900"
+                                            }`}
+                                          >
+                                            {stepIdx + 1}. {step.step}
+                                          </h5>
+                                          {(step.channel || step.platform) && (
+                                            <div className="flex items-center gap-2 mt-1">
+                                              {step.channel && (
+                                                <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
+                                                  {step.channel}
+                                                </span>
+                                              )}
+                                              {step.platform && (
+                                                <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">
+                                                  {step.platform}
+                                                </span>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <div
+                                            className={`px-2 py-0.5 rounded-full border text-xs font-semibold flex-shrink-0 ${getPriorityColor(
+                                              step.priority
+                                            )}`}
+                                          >
+                                            {step.priority}
+                                          </div>
+                                          {executionStatus === 'published' && (
+                                            <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-semibold rounded-full">
+                                              Published
+                                            </span>
+                                          )}
+                                          {executionStatus === 'review' && (
+                                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-semibold rounded-full">
+                                              Review
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                    <p className="text-sm text-gray-600 mb-2">
-                                      {step.description}
-                                    </p>
-                                    <div className="flex items-center gap-2 text-xs">
-                                      <span className="text-gray-500">
-                                        Impact:
-                                      </span>
-                                      <span className="font-semibold text-green-700">
-                                        {step.estimatedImpact}
-                                      </span>
+                                      <p className="text-sm text-gray-600 mb-2">
+                                        {step.description}
+                                      </p>
+                                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <span className="text-gray-500">
+                                            Impact:
+                                          </span>
+                                          <span className="font-semibold text-green-700">
+                                            {step.estimatedImpact}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          {canExecute && executionStatus === 'pending' && (
+                                            <Button
+                                              onClick={() => executeStep(plan.id, stepId)}
+                                              disabled={isExecuting}
+                                              variant="primary"
+                                              size="sm"
+                                            >
+                                              {isExecuting ? (
+                                                <>
+                                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />
+                                                  Generating...
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Play className="w-3 h-3 mr-1" />
+                                                  Generate Content
+                                                </>
+                                              )}
+                                            </Button>
+                                          )}
+                                          {executionStatus === 'review' && step.executionMetadata?.linkedContentId && (
+                                            <Button
+                                              onClick={() => router.push(`/dashboard/content?contentId=${step.executionMetadata?.linkedContentId}`)}
+                                              variant="primary"
+                                              size="sm"
+                                            >
+                                              <ExternalLink className="w-3 h-3 mr-1" />
+                                              Review Content
+                                            </Button>
+                                          )}
+                                          {executionStatus === 'published' && step.executionMetadata?.publishedUrl && (
+                                            <a
+                                              href={step.executionMetadata.publishedUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="text-xs text-accent-600 hover:text-accent-700 flex items-center gap-1"
+                                            >
+                                              View Published <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       </div>
