@@ -247,15 +247,21 @@ async function fetchGSCKeywords(project: any): Promise<string[]> {
     return []; // Don't break analysis if GSC fails
   }
 }
-async function queryAIPlatform(platform, prompt) {
+async function queryAIPlatform(platform, prompt, language = 'en') {
   try {
-    console.log(`Querying ${platform} with prompt: ${prompt.substring(0, 50)}...`);
+    console.log(`Querying ${platform} with prompt: ${prompt.substring(0, 50)}... (language: ${language})`);
     // Get API key from cache or load it
     let apiKey = apiKeyCache[platform];
     if (!apiKey) {
       apiKey = await getApiKey(platform === 'chatgpt' ? 'openai' : platform);
       apiKeyCache[platform] = apiKey;
     }
+    
+    // System message based on language
+    const systemMessage = language === 'he'
+      ? 'אתה עוזר מחקר עסקי מועיל. ספק תגובות מפורטות ועובדתיות על חברות ומותגים. תגיב בעברית אם השאילתה בעברית.'
+      : 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.';
+    
     if (platform === 'chatgpt' && apiKey) {
       try {
         const response = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
@@ -269,7 +275,7 @@ async function queryAIPlatform(platform, prompt) {
             messages: [
               {
                 role: 'system',
-                content: 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.'
+                content: systemMessage
               },
               {
                 role: 'user',
@@ -302,6 +308,7 @@ async function queryAIPlatform(platform, prompt) {
           body: JSON.stringify({
             model: 'claude-3-haiku-20240307',
             max_tokens: 4000,
+            system: systemMessage,
             messages: [
               {
                 role: 'user',
@@ -322,6 +329,11 @@ async function queryAIPlatform(platform, prompt) {
     }
     if (platform === 'gemini' && apiKey) {
       try {
+        // Add language instruction to prompt for Gemini
+        const geminiPrompt = language === 'he' 
+          ? `${systemMessage}\n\n${prompt}`
+          : prompt;
+        
         // Try gemini-2.0-flash first (v1 API, optimized for cost and latency)
         let response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
@@ -333,7 +345,7 @@ async function queryAIPlatform(platform, prompt) {
               {
                 parts: [
                   {
-                    text: prompt
+                    text: geminiPrompt
                   }
                 ]
               }
@@ -357,7 +369,7 @@ async function queryAIPlatform(platform, prompt) {
                 {
                   parts: [
                     {
-                      text: prompt
+                      text: geminiPrompt
                     }
                   ]
                 }
@@ -382,7 +394,7 @@ async function queryAIPlatform(platform, prompt) {
                 {
                   parts: [
                     {
-                      text: prompt
+                      text: geminiPrompt
                     }
                   ]
                 }
@@ -425,7 +437,7 @@ async function queryAIPlatform(platform, prompt) {
             messages: [
               {
                 role: 'system',
-                content: 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.'
+                content: systemMessage
               },
               {
                 role: 'user',
@@ -450,7 +462,7 @@ async function queryAIPlatform(platform, prompt) {
               messages: [
                 {
                   role: 'system',
-                  content: 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.'
+                  content: systemMessage
                 },
                 {
                   role: 'user',
@@ -476,7 +488,7 @@ async function queryAIPlatform(platform, prompt) {
               messages: [
                 {
                   role: 'system',
-                  content: 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.'
+                  content: systemMessage
                 },
                 {
                   role: 'user',
@@ -512,7 +524,7 @@ async function queryAIPlatform(platform, prompt) {
             messages: [
               {
                 role: 'system',
-                content: 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.'
+                content: systemMessage
               },
               {
                 role: 'user',
@@ -1001,14 +1013,14 @@ function extractTextFromHTML(html) {
     return '';
   }
 }
-async function generateRealisticUserQueries(brandName, industry, keywords = [], competitors = [], websiteUrl = '') {
+async function generateRealisticUserQueries(brandName, industry, keywords = [], competitors = [], websiteUrl = '', language = 'en') {
   const openAIApiKey = await getApiKey('openai');
   if (!openAIApiKey) {
     console.log('No OpenAI API key available for query generation, using fallback queries');
-    return generateFallbackQueries(brandName, industry, keywords, competitors);
+    return generateFallbackQueries(brandName, industry, keywords, competitors, language);
   }
   try {
-    console.log(`Generating realistic user queries for ${brandName} in ${industry}`);
+    console.log(`Generating realistic user queries for ${brandName} in ${industry} (language: ${language})`);
     // Fetch website content if URL is provided
     let websiteContent = '';
     if (websiteUrl) {
@@ -1017,7 +1029,19 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
     const keywordContext = keywords.length > 0 ? `Key features/keywords: ${keywords.join(', ')}` : '';
     const competitorContext = competitors.length > 0 ? `Main competitors: ${competitors.join(', ')}` : '';
     const websiteContext = websiteContent ? `Website content summary: ${websiteContent}` : '';
+    
+    // Language instruction
+    const languageInstruction = language === 'he' 
+      ? `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in HEBREW (עברית).
+- Write queries naturally in Hebrew, as native Hebrew speakers would search
+- Use Hebrew question words: מה, איך, למה, איפה, מתי, מי, איזה
+- Use natural Hebrew expressions and phrasing
+- Maintain conversational Hebrew style
+- All 50 queries must be in Hebrew\n`
+      : '';
+    
     const prompt = `Generate 50 realistic, conversational search queries that real users would type when looking for solutions like ${brandName} offers. These should sound like natural human messages, NOT direct brand mentions.
+${languageInstruction}
 
 Brand context: ${brandName} (${industry})
 ${keywordContext}
@@ -1060,7 +1084,9 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
         messages: [
           {
             role: 'system',
-            content: 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
+            content: language === 'he' 
+              ? 'אתה מומחה בהתנהגות חיפוש משתמשים ויצירת שאילתות. צור שאילתות חיפוש מציאותיות ושיחה שהמשתמשים האמיתיים היו מקלידים למנועי חיפוש או עוזרי AI. תמיד עטוף שאילתות כמשפטים או שאלות תקינים עם רישיות וסימני פיסוק מתאימים. תמיד החזר מערכים JSON מעוצבים כראוי ללא עיצוב markdown או הסבר. כל השאילתות חייבות להיות בעברית.'
+              : 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
           },
           {
             role: 'user',
@@ -1146,14 +1172,14 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
       }
     } catch (parseError) {
       console.error('Failed to parse generated queries:', parseError, 'Content:', generatedContent);
-      return generateFallbackQueries(brandName, industry, keywords, competitors);
+      return generateFallbackQueries(brandName, industry, keywords, competitors, language);
     }
   } catch (error) {
     console.error('Query generation failed:', error);
-    return generateFallbackQueries(brandName, industry, keywords, competitors);
+    return generateFallbackQueries(brandName, industry, keywords, competitors, language);
   }
 }
-function generateFallbackQueries(brandName, industry, keywords = [], competitors = []) {
+function generateFallbackQueries(brandName, industry, keywords = [], competitors = [], language = 'en') {
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
   // Industry-specific base queries
@@ -1470,7 +1496,7 @@ function analyzeCrossPlatformResults(platformResults, brandName, competitors) {
 }
 async function runEnhancedBrandAnalysis(projectId, platforms = [
   'chatgpt'
-], existingSessionId) {
+], existingSessionId, language = 'en') {
   console.log(`Starting enhanced brand analysis for project ${projectId} across platforms: ${platforms.join(', ')}`);
   // Load API keys
   const openAIApiKey = await getApiKey('openai');
@@ -1588,7 +1614,7 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
       }
     }
     // Generate realistic user queries using AI
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '');
+    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '', preferredLanguage);
     console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
     // Log some sample queries for debugging
     console.log("Sample queries:", realisticQueries.slice(0, 5));
@@ -1650,7 +1676,7 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
         // Process each query in the batch for this platform
         for (const query of queryBatch){
           try {
-            const response = await queryAIPlatform(platform, query);
+            const response = await queryAIPlatform(platform, query, language);
             if (response) {
               console.log(`Got response from ${platform} for query "${query.substring(0, 50)}...": ${response.substring(0, 50)}...`);
               platformSuccess = true;
@@ -1758,10 +1784,10 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
   }
 }
 // Background processing function that runs without blocking the response
-async function processAnalysisInBackground(projectId, platforms, sessionId) {
+async function processAnalysisInBackground(projectId, platforms, sessionId, language = 'en') {
   try {
     console.log(`Starting background processing for session: ${sessionId}`);
-    await runEnhancedBrandAnalysis(projectId, platforms, sessionId);
+    await runEnhancedBrandAnalysis(projectId, platforms, sessionId, language);
     console.log(`Completed background processing for session: ${sessionId}`);
   } catch (error) {
     console.error('Background analysis failed:', error);
@@ -1777,10 +1803,10 @@ async function processAnalysisInBackground(projectId, platforms, sessionId) {
   }
 }
 // Process a small batch of queries to avoid timeout
-async function processBatchOfQueries(projectId, platforms, sessionId, queries, batchStartIndex = 0, batchSize = 3 // Reduced default batch size from 5 to 3
+async function processBatchOfQueries(projectId, platforms, sessionId, queries, batchStartIndex = 0, batchSize = 3, language = 'en' // Reduced default batch size from 5 to 3
 ) {
   try {
-    console.log(`Processing batch starting at index ${batchStartIndex} for session: ${sessionId}`);
+    console.log(`Processing batch starting at index ${batchStartIndex} for session: ${sessionId} (language: ${language})`);
     // Get project details
     const { data: project, error: projectError } = await supabase.from('brand_analysis_projects').select('*').eq('id', projectId).single();
     if (projectError || !project) {
@@ -1797,7 +1823,7 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
       // Process this query across all platforms before moving to the next query
       for (const platform of platforms){
         try {
-          const response = await queryAIPlatform(platform, query);
+          const response = await queryAIPlatform(platform, query, language);
           if (response) {
             console.log(`Got response from ${platform} for query "${query.substring(0, 30)}..."`);
             // Extract sources from the response
@@ -1889,7 +1915,8 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
           batchStartIndex: nextBatchStartIndex,
           batchSize: nextBatchSize,
           continueProcessing: true,
-          platformsCount: platformsToUse.length // Add explicit count for debugging
+          platformsCount: platformsToUse.length, // Add explicit count for debugging
+          language: language // Pass language to next batch
         })
       }).catch((error)=>{
         console.error('Error scheduling next batch:', error);
@@ -1953,7 +1980,25 @@ Deno.serve(async (req) => {
       'gemini',
       'perplexity',
       'groq'
-    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false } = body;
+    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false, language } = body;
+    
+    // Get language preference: from request body, or from cookies as fallback
+    let preferredLanguage: "en" | "he" = language || "en";
+    if (!language) {
+      // Try to get from cookies
+      const cookieHeader = req.headers.get("cookie");
+      if (cookieHeader) {
+        const cookies = cookieHeader.split("; ").reduce((acc, cookie) => {
+          const [key, value] = cookie.split("=");
+          acc[key] = value;
+          return acc;
+        }, {} as Record<string, string>);
+        const cookieLanguage = cookies["preferred-language"];
+        if (cookieLanguage === "he" || cookieLanguage === "en") {
+          preferredLanguage = cookieLanguage;
+        }
+      }
+    }
     if (!projectId) {
       return new Response(JSON.stringify({
         error: 'Project ID is required'
@@ -1989,7 +2034,7 @@ Deno.serve(async (req) => {
           ...platforms
         ]; // Create a copy to ensure we don't modify the original
         console.log(`Processing batch with ${platformsToUse.length} platforms: ${platformsToUse.join(', ')}`);
-        const result = await processBatchOfQueries(projectId, platformsToUse, sessionId, queries, batchStartIndex, batchSize);
+        const result = await processBatchOfQueries(projectId, platformsToUse, sessionId, queries, batchStartIndex, batchSize, preferredLanguage);
         return new Response(JSON.stringify({
           success: true,
           message: 'Batch processed successfully',
@@ -2187,7 +2232,7 @@ Deno.serve(async (req) => {
     console.log(`   Total (merged): ${allKeywords.length}`);
     
     // Generate realistic user queries using AI with MERGED keywords
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, allKeywords, project.competitors || [], project.website_url || '');
+    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, allKeywords, project.competitors || [], project.website_url || '', preferredLanguage);
     console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
     // Start the first batch immediately (this will chain to subsequent batches)
     try {
@@ -2204,7 +2249,7 @@ Deno.serve(async (req) => {
       // Do NOT overwrite user's selected active_platforms; keep user's selection intact
       // Use a very small initial batch size (2 queries) to ensure the first batch completes quickly
       // Subsequent batches will use the default batch size defined in the function (3)
-      await processBatchOfQueries(projectId, platformsToUse, session.id, realisticQueries, 0, 2);
+      await processBatchOfQueries(projectId, platformsToUse, session.id, realisticQueries, 0, 2, preferredLanguage);
       // Return immediately with session info
       return new Response(JSON.stringify({
         success: true,

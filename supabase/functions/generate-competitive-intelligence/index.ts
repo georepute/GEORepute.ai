@@ -29,7 +29,7 @@ serve(async (req) => {
   }
 
   try {
-    const { brandName, websiteUrl, industry } = await req.json();
+    const { brandName, websiteUrl, industry, language } = await req.json();
 
     // Validate input
     if (!brandName || !websiteUrl || !industry) {
@@ -43,6 +43,9 @@ serve(async (req) => {
         }
       );
     }
+
+    // Determine language preference (from body or cookie)
+    const preferredLanguage = language || req.headers.get('cookie')?.split('; ').find(row => row.startsWith('preferred-language='))?.split('=')[1] || 'en';
 
     // Get OpenAI API key from secrets (same pattern as brand-analysis)
     const openaiApiKey = getApiKey('openai');
@@ -63,13 +66,26 @@ serve(async (req) => {
     console.log(`🤖 Generating competitive intelligence for: ${brandName}`);
     console.log(`   Industry: ${industry}`);
     console.log(`   Website: ${websiteUrl}`);
+    console.log(`   Language: ${preferredLanguage}`);
+
+    // Create language-specific instructions
+    const languageInstruction = preferredLanguage === 'he' ? `
+⚠️ CRITICAL: Generate ALL keywords in HEBREW.
+- Use Hebrew script (Right-to-Left).
+- Keywords should be natural Hebrew terms that people would search for or ask AI about.
+- Use Hebrew industry terminology and expressions.
+- Competitors can remain in their original language (brand names are typically kept as-is).
+- Keywords should be in lowercase Hebrew.
+` : '';
 
     // Create prompt for OpenAI
-    const systemPrompt = `You are a competitive intelligence analyst specialized in digital marketing and brand analysis. 
+    const systemPrompt = preferredLanguage === 'he' 
+      ? `אתה אנליסט מודיעין תחרותי המתמחה בשיווק דיגיטלי וניתוח מותגים. המשימה שלך היא לספק מתחרים ומילות מפתח מדויקות ורלוונטיות בהתבסס על מידע המותג שסופק. החזר רק JSON תקין ללא טקסט נוסף או הסבר.`
+      : `You are a competitive intelligence analyst specialized in digital marketing and brand analysis. 
 Your task is to provide accurate, relevant competitors and keywords based on the brand information provided. 
 Return only valid JSON with no additional text or explanation.`;
 
-    const userPrompt = `Based on the following brand information, generate a comprehensive competitive intelligence analysis:
+    const userPrompt = `${languageInstruction}Based on the following brand information, generate a comprehensive competitive intelligence analysis:
 
 Brand Name: ${brandName}
 Website: ${websiteUrl}
@@ -81,7 +97,7 @@ Please provide:
    - Product/service keywords
    - Industry-specific terms
    - Problem-solving keywords
-   - Comparison keywords (e.g., "best [solution] for...")
+   - Comparison keywords (e.g., "best [solution] for..." or in Hebrew: "הפתרון הטוב ביותר ל...")
 
 Format your response as JSON with this exact structure:
 {
@@ -90,8 +106,8 @@ Format your response as JSON with this exact structure:
 }
 
 Rules:
-- Competitors should be actual brand/company names
-- Keywords should be lowercase and relevant to the industry
+- Competitors should be actual brand/company names (can remain in original language)
+- Keywords should be ${preferredLanguage === 'he' ? 'in Hebrew script and lowercase' : 'lowercase and relevant to the industry'}
 - Focus on keywords that people would search for or ask AI about
 - Only return valid JSON, no additional text`;
 

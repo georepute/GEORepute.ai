@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { brandName, websiteUrl, industry } = body;
+    const { brandName, websiteUrl, industry, language } = body;
 
     // Validate input
     if (!brandName || !websiteUrl || !industry) {
@@ -18,7 +18,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Determine language preference (from body or cookie)
+    let preferredLanguage = language || 'en';
+    if (!language) {
+      // Try to get from cookies
+      const cookieHeader = request.headers.get('cookie');
+      if (cookieHeader) {
+        const cookies = cookieHeader.split('; ').reduce((acc, cookie) => {
+          const [key, value] = cookie.split('=');
+          acc[key] = value;
+          return acc;
+        }, {} as Record<string, string>);
+        const cookieLanguage = cookies['preferred-language'];
+        if (cookieLanguage === 'he' || cookieLanguage === 'en') {
+          preferredLanguage = cookieLanguage;
+        }
+      }
+    }
+
     console.log('🤖 Requesting AI suggestions for:', brandName);
+    console.log('   Language:', preferredLanguage);
 
     // Call Supabase Edge Function
     const edgeFunctionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/generate-competitive-intelligence`;
@@ -42,6 +61,7 @@ export async function POST(request: NextRequest) {
         brandName,
         websiteUrl,
         industry,
+        language: preferredLanguage,
       }),
     });
 

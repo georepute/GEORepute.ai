@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { useLanguage } from "@/lib/language-context";
 import { 
   Target,
   ArrowRight,
@@ -78,6 +79,7 @@ interface Session {
 }
 
 export default function AIVisibility() {
+  const { isRtl, t, language } = useLanguage();
   const supabase = createClientComponentClient();
   const router = useRouter();
   
@@ -475,6 +477,7 @@ export default function AIVisibility() {
         body: JSON.stringify({
           projectId: project.id,
           platforms: project.active_platforms,
+          language: language || 'en', // Pass current language preference
         }),
       });
 
@@ -630,6 +633,7 @@ export default function AIVisibility() {
           brandName,
           websiteUrl,
           industry,
+          language, // Pass the current language
         }),
       });
 
@@ -673,66 +677,66 @@ export default function AIVisibility() {
   // Render Projects List View
   if (viewMode === 'projects') {
     return (
-      <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+      <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <div className="mb-8 flex items-center justify-between">
+          <div className="mb-8 flex items-center justify-between" dir={isRtl ? 'rtl' : 'ltr'}>
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <h1 className="text-3xl font-bold text-gray-900">Brand Analysis</h1>
+                <h1 className="text-3xl font-bold text-gray-900">{t.dashboard.aiVisibility.title}</h1>
                 <TrendingUp className="w-6 h-6 text-green-500" />
               </div>
-              <p className="text-gray-600">Analyze your brand's AI visibility and competitive positioning</p>
+              <p className="text-gray-600">{t.dashboard.aiVisibility.subtitle}</p>
             </div>
             <button
               onClick={handleNewAnalysis}
               className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
             >
               <Plus className="w-5 h-5" />
-              New Analysis
+              {t.dashboard.aiVisibility.newAnalysis}
             </button>
           </div>
 
           {/* Key Metrics */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8" dir={isRtl ? 'rtl' : 'ltr'}>
             <div className="bg-white border-2 border-purple-200 rounded-lg p-6">
-              <div className="flex items-center justify-between mb-2">
+              <div className={`flex items-center justify-between mb-2 ${isRtl ? 'flex-row-reverse' : ''}`}>
                 <Search className="w-5 h-5 text-purple-600" />
                 <span className="text-2xl font-bold text-gray-900">{overallStats.totalMentions}</span>
               </div>
-              <p className="text-sm text-gray-600">Total Mentions</p>
-              <p className="text-xs text-gray-500 mt-1">across all brands</p>
+              <p className="text-sm text-gray-600">{t.dashboard.aiVisibility.totalMentions}</p>
+              <p className="text-xs text-gray-500 mt-1">{t.dashboard.aiVisibility.acrossAllBrands}</p>
             </div>
             <div className="bg-white border-2 border-purple-200 rounded-lg p-6">
-              <div className="flex items-center justify-between mb-2">
+              <div className={`flex items-center justify-between mb-2 ${isRtl ? 'flex-row-reverse' : ''}`}>
                 <Target className="w-5 h-5 text-purple-600" />
                 <span className="text-2xl font-bold text-gray-900">{overallStats.activePlatforms}</span>
               </div>
-              <p className="text-sm text-gray-600">AI Platforms</p>
-              <p className="text-xs text-gray-500 mt-1">active platforms</p>
+              <p className="text-sm text-gray-600">{t.dashboard.aiVisibility.aiPlatforms}</p>
+              <p className="text-xs text-gray-500 mt-1">{t.dashboard.aiVisibility.activePlatforms.toLowerCase()}</p>
             </div>
             <div className="bg-white rounded-lg p-6">
-              <div className="flex items-center justify-between mb-2">
+              <div className={`flex items-center justify-between mb-2 ${isRtl ? 'flex-row-reverse' : ''}`}>
                 <Eye className="w-5 h-5 text-gray-400" />
                 <span className="text-2xl font-bold text-gray-900">{overallStats.avgVisibility}%</span>
               </div>
-              <p className="text-sm text-gray-600">Avg Visibility</p>
-              <p className="text-xs text-gray-500 mt-1">mention rate</p>
+              <p className="text-sm text-gray-600">{t.dashboard.aiVisibility.avgVisibility}</p>
+              <p className="text-xs text-gray-500 mt-1">{t.dashboard.aiVisibility.mentionRate}</p>
             </div>
             <div className="bg-white border-2 border-red-200 rounded-lg p-6">
-              <div className="flex items-center justify-between mb-2">
+              <div className={`flex items-center justify-between mb-2 ${isRtl ? 'flex-row-reverse' : ''}`}>
                 <BarChart3 className="w-5 h-5 text-red-600" />
                 <span className="text-2xl font-bold text-gray-900">0%</span>
               </div>
-              <p className="text-sm text-gray-600">Avg Sentiment</p>
+              <p className="text-sm text-gray-600">{t.dashboard.aiVisibility.avgSentiment}</p>
               <p className="text-xs text-gray-500 mt-1">-100%</p>
             </div>
           </div>
 
           {/* Projects Grid */}
-          <div>
+          <div dir={isRtl ? 'rtl' : 'ltr'}>
             <h2 className="text-xl font-semibold text-gray-900 mb-4">
-              Your Brand Projects ({projects.length})
+              {t.dashboard.aiVisibility.yourBrandProjects} ({projects.length})
             </h2>
             {loading ? (
               <div className="flex items-center justify-center p-12">
@@ -741,13 +745,13 @@ export default function AIVisibility() {
             ) : projects.length === 0 ? (
               <div className="bg-white rounded-lg p-12 text-center">
                 <Target className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No projects yet</h3>
-                <p className="text-gray-600 mb-4">Start by creating your first brand analysis</p>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">{t.dashboard.common.noData}</h3>
+                <p className="text-gray-600 mb-4">{t.dashboard.aiVisibility.subtitle}</p>
                 <button
                   onClick={handleNewAnalysis}
                   className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                 >
-                  New Analysis
+                  {t.dashboard.aiVisibility.newAnalysis}
                 </button>
               </div>
             ) : (
@@ -794,15 +798,15 @@ export default function AIVisibility() {
                               {isRunning ? (
                                 <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs flex items-center gap-1">
                                   <RefreshCw className="w-3 h-3 animate-spin" />
-                                  Running
+                                  {t.dashboard.aiVisibility.analysisRunning}
                                 </span>
                               ) : isCancelled ? (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-800 rounded text-xs flex items-center gap-1">
                                   <X className="w-3 h-3" />
-                                  Cancelled
+                                  {t.dashboard.aiVisibility.analysisFailed}
                                 </span>
                               ) : (
-                                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs">Active</span>
+                                <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs">{t.dashboard.aiVisibility.active}</span>
                               )}
                               <span className="text-xs text-gray-500 capitalize">{project.industry}</span>
                             </div>
@@ -838,11 +842,11 @@ export default function AIVisibility() {
                                     e.stopPropagation();
                                     handleDeleteProject(project.id, project.brand_name);
                                   }}
-                                  className="w-full flex items-center gap-2 px-4 py-2 text-left text-red-600 hover:bg-red-50 transition-colors rounded-lg"
+                                  className={`w-full flex items-center gap-2 px-4 py-2 ${isRtl ? 'text-right' : 'text-left'} text-red-600 hover:bg-red-50 transition-colors rounded-lg`}
                                   disabled={deletingProject === project.id}
                                 >
                                   <Trash2 className="w-4 h-4" />
-                                  <span>Delete Analysis</span>
+                                  <span>{t.dashboard.aiVisibility.deleteProject}</span>
                                 </button>
                               </div>
                             </>
@@ -863,14 +867,14 @@ export default function AIVisibility() {
                           ? new Date(session.started_at).toLocaleDateString()
                           : project.last_analysis_at
                           ? new Date(project.last_analysis_at).toLocaleDateString()
-                          : 'No analysis yet'}
+                          : t.dashboard.aiVisibility.noAnalysisYet}
                       </div>
 
                       {/* Progress Bar for Running */}
                       {isRunning && (
                         <div className="mb-4">
-                          <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                            <span>Progress</span>
+                          <div className={`flex items-center justify-between text-xs text-gray-600 mb-1 ${isRtl ? 'flex-row-reverse' : ''}`}>
+                            <span>{t.dashboard.aiVisibility.progress}</span>
                             <span>{progress}%</span>
                           </div>
                           <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
@@ -885,18 +889,18 @@ export default function AIVisibility() {
                       {/* Stats */}
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
-                          <div className="text-sm text-gray-600">Mentions</div>
+                          <div className="text-sm text-gray-600">{t.dashboard.aiVisibility.mentions}</div>
                           <div className="text-2xl font-bold text-gray-900">{stats.mentions}</div>
                         </div>
                         <div>
-                          <div className="text-sm text-gray-600">Visibility</div>
+                          <div className="text-sm text-gray-600">{t.dashboard.aiVisibility.visibility}</div>
                           <div className="text-2xl font-bold text-gray-900">{stats.visibility}%</div>
                         </div>
                       </div>
 
                       {/* Platforms */}
                       <div className="mb-4">
-                        <div className="text-xs text-gray-600 mb-2">Active Platforms</div>
+                        <div className="text-xs text-gray-600 mb-2">{t.dashboard.aiVisibility.activePlatforms}</div>
                         <div className="flex flex-wrap gap-2">
                           {(project.active_platforms || []).slice(0, 5).map((platform) => {
                             const platformOption = platformOptions.find(p => p.id === platform);
@@ -939,12 +943,12 @@ export default function AIVisibility() {
                             {stoppingAnalysis === session.id ? (
                               <>
                                 <RefreshCw className="w-4 h-4 animate-spin" />
-                                Stopping...
+                                {t.dashboard.aiVisibility.stopping}
                               </>
                             ) : (
                               <>
                                 <StopCircle className="w-4 h-4" />
-                                Stop
+                                {t.dashboard.aiVisibility.stop}
                               </>
                             )}
                           </button>
@@ -957,7 +961,7 @@ export default function AIVisibility() {
                           className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
                         >
                           <TrendingUp className="w-4 h-4" />
-                          View Results
+                          {t.dashboard.aiVisibility.viewResults}
                         </button>
                       </div>
                     </div>
@@ -980,7 +984,7 @@ export default function AIVisibility() {
       : 0;
 
     return (
-      <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+      <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="max-w-7xl mx-auto">
           {/* Analysis Start Notification Banner */}
           {showAnalysisStartNotification && (
@@ -1199,21 +1203,21 @@ export default function AIVisibility() {
                       : 0}%
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Your brand appears in {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0} of {projectStats?.total_queries || projectResponses.length || 100} prompts
+                    {t.dashboard.aiVisibility.yourBrandAppears} {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0} {t.dashboard.aiVisibility.of} {projectStats?.total_queries || projectResponses.length || 100} {t.dashboard.aiVisibility.prompts}
                   </div>
                 </div>
               </div>
 
               {/* Tabs */}
-              <div className="bg-white rounded-lg border border-gray-200">
+              <div className="bg-white rounded-lg border border-gray-200" dir={isRtl ? 'rtl' : 'ltr'}>
                 <div className="border-b border-gray-200 flex overflow-x-auto">
                   {[
-                    { id: 'summary', label: 'Summary', icon: FileText },
-                    { id: 'results', label: 'Results', icon: BarChart3 },
-                    { id: 'competitors', label: 'Competitors', icon: Target },
-                    { id: 'sources', label: 'Sources', icon: Globe },
-                    { id: 'analytics', label: 'Analytics', icon: Activity },
-                    { id: 'keywords', label: 'Keywords', icon: Search },
+                    { id: 'summary', label: t.dashboard.aiVisibility.summary, icon: FileText },
+                    { id: 'results', label: t.dashboard.aiVisibility.results, icon: BarChart3 },
+                    { id: 'competitors', label: t.dashboard.aiVisibility.competitors, icon: Target },
+                    { id: 'sources', label: t.dashboard.aiVisibility.sources, icon: Globe },
+                    { id: 'analytics', label: t.dashboard.sidebar.analytics, icon: Activity },
+                    { id: 'keywords', label: t.dashboard.aiVisibility.keywords, icon: Search },
                   ].map((tab) => {
                     const Icon = tab.icon;
                     return (
@@ -1238,23 +1242,23 @@ export default function AIVisibility() {
                   {activeTab === 'summary' && (
                     <div className="space-y-6">
                       {/* Overview Stats */}
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Analysis Overview</h3>
+                      <div dir={isRtl ? 'rtl' : 'ltr'}>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">{t.dashboard.aiVisibility.analysisOverview}</h3>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                            <div className="text-sm text-gray-600 mb-1">Total Queries</div>
+                            <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.totalQueries}</div>
                             <div className="text-2xl font-bold text-purple-600">
                               {projectStats?.total_queries || projectResponses.length || 0}
                             </div>
                           </div>
                           <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <div className="text-sm text-gray-600 mb-1">Brand Mentions</div>
+                            <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.brandMentions}</div>
                             <div className="text-2xl font-bold text-green-600">
                               {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0}
                             </div>
                           </div>
                           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <div className="text-sm text-gray-600 mb-1">Mention Rate</div>
+                            <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.mentionRate}</div>
                             <div className="text-2xl font-bold text-blue-600">
                               {projectStats 
                                 ? Math.round((projectStats.mention_rate || 0) * 100) 
@@ -1264,7 +1268,7 @@ export default function AIVisibility() {
                             </div>
                           </div>
                           <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                            <div className="text-sm text-gray-600 mb-1">Platforms</div>
+                            <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.aiPlatforms}</div>
                             <div className="text-2xl font-bold text-orange-600">
                               {projectStats?.platforms_analyzed?.length || new Set(projectResponses.map(r => r.platform)).size || 0}
                             </div>
@@ -1274,8 +1278,8 @@ export default function AIVisibility() {
 
                       {/* Platform Breakdown */}
                       {projectResponses.length > 0 && (
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900 mb-4">Platform Performance</h3>
+                        <div dir={isRtl ? 'rtl' : 'ltr'}>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-4">{t.dashboard.aiVisibility.platformPerformance}</h3>
                           <div className="space-y-3">
                             {Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
                               const platformResponses = projectResponses.filter(r => r.platform === platform);
@@ -1306,20 +1310,20 @@ export default function AIVisibility() {
                                         {platform}
                                       </span>
                                       <span className="text-sm text-gray-600">
-                                        {platformResponses.length} queries
+                                        {platformResponses.length} {t.dashboard.aiVisibility.queries}
                                       </span>
                                     </div>
                                     <span className="text-sm font-semibold text-gray-900">
-                                      {Math.round(mentionRate)}% mention rate
+                                      {Math.round(mentionRate)}% {t.dashboard.aiVisibility.mentionRate.toLowerCase()}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-4 text-sm">
                                     <span className="text-gray-600">
-                                      Mentions: <span className="font-semibold text-gray-900">{mentions}</span>
+                                      {t.dashboard.aiVisibility.mentions}: <span className="font-semibold text-gray-900">{mentions}</span>
                                     </span>
                                     {!isNaN(avgSentiment) && avgSentiment !== 0 && (
                                       <span className="text-gray-600">
-                                        Avg Sentiment: <span className={`font-semibold ${
+                                        {t.dashboard.aiVisibility.avgSentiment}: <span className={`font-semibold ${
                                           avgSentiment > 0.3 ? 'text-green-600' : avgSentiment < -0.3 ? 'text-red-600' : 'text-gray-600'
                                         }`}>
                                           {avgSentiment.toFixed(2)}
@@ -1336,8 +1340,8 @@ export default function AIVisibility() {
 
                       {/* Recent Activity */}
                       {projectSessions.length > 0 && (
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900 mb-4">Analysis Sessions</h3>
+                        <div dir={isRtl ? 'rtl' : 'ltr'}>
+                          <h3 className="text-lg font-semibold text-gray-900 mb-4">{t.dashboard.aiVisibility.analysisSessions}</h3>
                           <div className="space-y-2">
                             {projectSessions.slice(0, 5).map((session) => (
                               <div key={session.id} className="border border-gray-200 rounded-lg p-3 flex items-center justify-between">
@@ -1371,10 +1375,10 @@ export default function AIVisibility() {
                       )}
 
                       {projectResponses.length === 0 && !projectSessions.find(s => s.status === 'running') && (
-                        <div className="text-center py-12 text-gray-500">
+                        <div className="text-center py-12 text-gray-500" dir={isRtl ? 'rtl' : 'ltr'}>
                           <FileText className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                          <p>No analysis data available</p>
-                          <p className="text-sm mt-2">Run an analysis to see summary data here</p>
+                          <p>{t.dashboard.aiVisibility.noAnalysisData}</p>
+                          <p className="text-sm mt-2">{t.dashboard.aiVisibility.runAnalysisToSee}</p>
                         </div>
                       )}
                     </div>
@@ -2426,15 +2430,15 @@ export default function AIVisibility() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="max-w-6xl mx-auto mb-8">
-        <div className="flex items-center justify-between mb-4">
+        <div className={`flex items-center justify-between mb-4 ${isRtl ? 'flex-row-reverse' : ''}`}>
           <button
             onClick={() => setViewMode('projects')}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+            className={`flex items-center gap-2 text-gray-600 hover:text-gray-900 ${isRtl ? 'flex-row-reverse' : ''}`}
           >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Projects
+            {isRtl ? <ArrowRight className="w-4 h-4" /> : <ArrowLeft className="w-4 h-4" />}
+            {t.dashboard.common.back}
           </button>
         </div>
         {/* Progress Indicator */}
@@ -2486,31 +2490,33 @@ export default function AIVisibility() {
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Brand Name *
+                  {t.dashboard.aiVisibility.brandName} *
                 </label>
                 <input
                   type="text"
                   value={brandName}
                   onChange={(e) => setBrandName(e.target.value)}
-                  placeholder="Enter your brand name"
-                  className="w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder={t.dashboard.aiVisibility.brandName}
+                  className={`w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${isRtl ? 'text-right' : 'text-left'}`}
+                  dir="ltr"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Website URL *
+                  {t.dashboard.aiVisibility.website} *
                 </label>
                 <input
                   type="text"
                   value={websiteUrl}
                   onChange={(e) => setWebsiteUrl(e.target.value)}
                   placeholder="example.com"
-                  className="w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className={`w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${isRtl ? 'text-right' : 'text-left'}`}
+                  dir="ltr"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Industry *
+                  {t.dashboard.aiVisibility.industry} *
                 </label>
                 <div className="relative">
                   <select
@@ -2577,22 +2583,23 @@ export default function AIVisibility() {
               {/* Competitors (Optional) */}
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Competitors
+                  {t.dashboard.aiVisibility.competitors}
                 </label>
-                <div className="flex gap-2 mb-3">
+                <div className={`flex gap-2 mb-3 ${isRtl ? 'flex-row-reverse' : ''}`}>
                   <input
                     type="text"
                     value={newCompetitor}
                     onChange={(e) => setNewCompetitor(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addCompetitor()}
-                    placeholder="Add competitor name"
-                    className="flex-1 px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder={t.dashboard.aiVisibility.addCompetitor}
+                    className={`flex-1 px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${isRtl ? 'text-right' : 'text-left'}`}
+                    dir="ltr"
                   />
                   <button
                     onClick={addCompetitor}
                     className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                   >
-                    Add
+                    {t.dashboard.common.add}
                   </button>
                 </div>
                 {competitors.length > 0 && (
@@ -2618,22 +2625,23 @@ export default function AIVisibility() {
               {/* Target Keywords */}
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
-                  Target Keywords
+                  {t.dashboard.aiVisibility.keywords}
                 </label>
-                <div className="flex gap-2 mb-3">
+                <div className={`flex gap-2 mb-3 ${isRtl ? 'flex-row-reverse' : ''}`}>
                   <input
                     type="text"
                     value={newKeyword}
                     onChange={(e) => setNewKeyword(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addKeyword()}
-                    placeholder="Add keyword"
-                    className="flex-1 px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder={t.dashboard.aiVisibility.addKeyword}
+                    className={`flex-1 px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${isRtl ? 'text-right' : 'text-left'}`}
+                    dir="ltr"
                   />
                   <button
                     onClick={addKeyword}
                     className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
                   >
-                    Add
+                    {t.dashboard.common.add}
                   </button>
                 </div>
                 {keywords.length > 0 && (

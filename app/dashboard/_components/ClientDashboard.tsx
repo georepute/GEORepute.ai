@@ -19,8 +19,10 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useLanguage } from "@/lib/language-context";
 
 export default function ClientDashboard({ user }: { user: any }) {
+  const { isRtl, t } = useLanguage();
   // Sample data for client view
   const rankingData = [
     { date: "Jan", google: 45, ai: 25 },
@@ -46,7 +48,7 @@ export default function ClientDashboard({ user }: { user: any }) {
 
   const stats = [
     {
-      label: "Total Visibility",
+      label: t.dashboard.client.totalVisibility,
       value: "91%",
       change: "+12%",
       trend: "up",
@@ -55,7 +57,7 @@ export default function ClientDashboard({ user }: { user: any }) {
       bgColor: "bg-primary-100",
     },
     {
-      label: "Keywords Tracked",
+      label: t.dashboard.client.keywordsTracked,
       value: "247",
       change: "+23",
       trend: "up",
@@ -64,7 +66,7 @@ export default function ClientDashboard({ user }: { user: any }) {
       bgColor: "bg-secondary-100",
     },
     {
-      label: "AI Platforms",
+      label: t.dashboard.client.aiPlatforms,
       value: "15",
       change: "+3",
       trend: "up",
@@ -73,7 +75,7 @@ export default function ClientDashboard({ user }: { user: any }) {
       bgColor: "bg-accent-100",
     },
     {
-      label: "Avg. Position",
+      label: t.dashboard.client.avgPosition,
       value: "3.2",
       change: "-0.8",
       trend: "up",
@@ -88,9 +90,9 @@ export default function ClientDashboard({ user }: { user: any }) {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Welcome back, {user?.user_metadata?.full_name || "there"}! 👋
+          {t.dashboard.client.welcomeBack}, {user?.user_metadata?.full_name || t.dashboard.client.welcomeDefault}! 👋
         </h1>
-        <p className="text-gray-600">Here's your visibility performance at a glance.</p>
+        <p className="text-gray-600">{t.dashboard.client.visibilityPerformance}</p>
       </div>
 
       {/* Stats Grid */}
@@ -124,15 +126,15 @@ export default function ClientDashboard({ user }: { user: any }) {
       <div className="grid lg:grid-cols-2 gap-6 mb-8">
         {/* Visibility Trends */}
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
+          initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Visibility Trends</h2>
-              <p className="text-sm text-gray-600">Last 6 months performance</p>
+              <h2 className="text-xl font-bold text-gray-900">{t.dashboard.client.visibilityTrends}</h2>
+              <p className="text-sm text-gray-600">{t.dashboard.client.last6Months}</p>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={300}>
@@ -149,15 +151,15 @@ export default function ClientDashboard({ user }: { user: any }) {
 
         {/* AI Platform Visibility */}
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
+          initial={{ opacity: 0, x: isRtl ? -20 : 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-xl font-bold text-gray-900">AI Platform Visibility</h2>
-              <p className="text-sm text-gray-600">Current visibility scores</p>
+              <h2 className="text-xl font-bold text-gray-900">{t.dashboard.client.aiPlatformVisibility}</h2>
+              <p className="text-sm text-gray-600">{t.dashboard.client.scoreAcrossPlatforms}</p>
             </div>
           </div>
           <div className="space-y-4">
@@ -199,11 +201,11 @@ export default function ClientDashboard({ user }: { user: any }) {
       >
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Top Performing Keywords</h2>
-            <p className="text-sm text-gray-600">Your best ranking keywords this month</p>
+            <h2 className="text-xl font-bold text-gray-900">{t.dashboard.client.topKeywords}</h2>
+            <p className="text-sm text-gray-600">{t.dashboard.client.bestPerforming}</p>
           </div>
           <button className="text-primary-600 hover:text-primary-700 text-sm font-medium flex items-center gap-1">
-            View All
+            {t.dashboard.client.viewAllKeywords}
             <ArrowUpRight className="w-4 h-4" />
           </button>
         </div>
@@ -211,17 +213,17 @@ export default function ClientDashboard({ user }: { user: any }) {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Keyword</th>
-                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-600">Position</th>
-                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-600">Change</th>
-                <th className="text-right py-3 px-4 text-sm font-semibold text-gray-600">Volume</th>
+                <th className={`${isRtl ? 'text-right' : 'text-left'} py-3 px-4 text-sm font-semibold text-gray-600`}>{t.dashboard.sidebar.keywords}</th>
+                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-600">{t.dashboard.client.position}</th>
+                <th className="text-center py-3 px-4 text-sm font-semibold text-gray-600">{t.dashboard.client.change}</th>
+                <th className={`${isRtl ? 'text-left' : 'text-right'} py-3 px-4 text-sm font-semibold text-gray-600`}>{t.dashboard.client.volume}</th>
               </tr>
             </thead>
             <tbody>
               {keywordData.map((item, index) => (
                 <motion.tr
                   key={item.keyword}
-                  initial={{ opacity: 0, x: -20 }}
+                  initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.5, delay: 0.3 + index * 0.1 }}
                   className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
@@ -245,7 +247,7 @@ export default function ClientDashboard({ user }: { user: any }) {
                       {item.change !== 0 && Math.abs(item.change)}
                     </span>
                   </td>
-                  <td className="py-4 px-4 text-right text-gray-900 font-medium">
+                  <td className={`py-4 px-4 ${isRtl ? 'text-left' : 'text-right'} text-gray-900 font-medium`}>
                     {item.volume.toLocaleString()}
                   </td>
                 </motion.tr>

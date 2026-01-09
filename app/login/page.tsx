@@ -5,11 +5,14 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
+import { useLanguage } from "@/lib/language-context";
+import LanguageToggle from "@/components/LanguageToggle";
 
 export default function Login() {
   const router = useRouter();
+  const { isRtl, t } = useLanguage();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -18,6 +21,8 @@ export default function Login() {
     password: "",
     remember: false,
   });
+  
+  const ArrowIcon = isRtl ? ArrowLeft : ArrowRight;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,11 +99,16 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex items-center justify-center p-4" dir={isRtl ? 'rtl' : 'ltr'}>
+      {/* Language Toggle - Fixed Position */}
+      <div className="fixed top-4 right-4 z-50">
+        <LanguageToggle />
+      </div>
+      
       <div className="w-full max-w-6xl grid lg:grid-cols-2 gap-8 items-center">
         {/* Left Side - Branding */}
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
+          initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="hidden lg:block"
@@ -107,40 +117,35 @@ export default function Login() {
             <div className="relative w-12 h-12">
               <Image
                 src="/logo.png"
-                alt="GeoRepute.ai Logo"
+                alt={`${t.nav.brandName} Logo`}
                 fill
                 className="object-contain"
                 priority
               />
             </div>
             <span className="text-3xl font-bold text-primary-600">
-              GeoRepute.ai
+              {t.nav.brandName}
             </span>
           </Link>
 
           <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            Welcome Back!
+            {t.login.welcomeBack}
           </h1>
           <p className="text-xl text-gray-600 mb-8">
-            Continue optimizing your digital visibility across AI-driven search ecosystems.
+            {t.login.welcomeSubtitle}
           </p>
 
           <div className="space-y-4">
-            {[
-              "Real-time visibility tracking",
-              "AI-powered optimization",
-              "Comprehensive analytics",
-              "50+ automated reports",
-            ].map((feature, index) => (
+            {t.login.features.map((feature, index) => (
               <motion.div
-                key={feature}
-                initial={{ opacity: 0, x: -20 }}
+                key={index}
+                initial={{ opacity: 0, x: isRtl ? 20 : -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5, delay: 0.3 + index * 0.1 }}
                 className="flex items-center gap-3"
               >
                 <div className="w-6 h-6 bg-primary-100 rounded-full flex items-center justify-center">
-                  <ArrowRight className="w-4 h-4 text-primary-600" />
+                  <ArrowIcon className="w-4 h-4 text-primary-600" />
                 </div>
                 <span className="text-gray-700">{feature}</span>
               </motion.div>
@@ -150,7 +155,7 @@ export default function Login() {
 
         {/* Right Side - Login Form */}
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
+          initial={{ opacity: 0, x: isRtl ? -20 : 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6 }}
           className="bg-white rounded-2xl p-8 md:p-10 shadow-xl"
@@ -160,21 +165,21 @@ export default function Login() {
               <div className="relative w-10 h-10">
                 <Image
                   src="/logo.png"
-                  alt="GeoRepute.ai Logo"
+                  alt={`${t.nav.brandName} Logo`}
                   fill
                   className="object-contain"
                   priority
                 />
               </div>
               <span className="text-2xl font-bold text-primary-600">
-                GeoRepute.ai
+                {t.nav.brandName}
               </span>
             </Link>
           </div>
 
-          <h2 className="text-3xl font-bold text-gray-900 mb-2">Sign In</h2>
+          <h2 className="text-3xl font-bold text-gray-900 mb-2">{t.login.signIn}</h2>
           <p className="text-gray-600 mb-8">
-            Enter your credentials to access your account
+            {t.login.enterCredentials}
           </p>
 
           {error && (
@@ -187,10 +192,10 @@ export default function Login() {
             {/* Email */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                Email Address
+                {t.login.emailAddress}
               </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <Mail className={`absolute ${isRtl ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400`} />
                 <input
                   type="email"
                   id="email"
@@ -198,8 +203,9 @@ export default function Login() {
                   required
                   value={formData.email}
                   onChange={handleChange}
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
-                  placeholder="john@company.com"
+                  className={`w-full ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all`}
+                  placeholder={t.login.emailPlaceholder}
+                  dir="ltr"
                 />
               </div>
             </div>
@@ -207,10 +213,10 @@ export default function Login() {
             {/* Password */}
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password
+                {t.login.password}
               </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <Lock className={`absolute ${isRtl ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400`} />
                 <input
                   type={showPassword ? "text" : "password"}
                   id="password"
@@ -218,13 +224,14 @@ export default function Login() {
                   required
                   value={formData.password}
                   onChange={handleChange}
-                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
-                  placeholder="••••••••"
+                  className={`w-full ${isRtl ? 'pr-10 pl-12' : 'pl-10 pr-12'} py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all`}
+                  placeholder={t.login.passwordPlaceholder}
+                  dir="ltr"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className={`absolute ${isRtl ? 'left-3' : 'right-3'} top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600`}
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
@@ -241,10 +248,10 @@ export default function Login() {
                   onChange={handleChange}
                   className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-2 focus:ring-primary-500/20"
                 />
-                <span className="text-sm text-gray-700">Remember me</span>
+                <span className="text-sm text-gray-700">{t.login.rememberMe}</span>
               </label>
               <Link href="/forgot-password" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-                Forgot password?
+                {t.login.forgotPassword}
               </Link>
             </div>
 
@@ -254,7 +261,7 @@ export default function Login() {
               disabled={loading}
               className="w-full py-3 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg font-semibold text-lg hover:shadow-xl hover:shadow-primary-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? "Signing in..." : "Sign In"}
+              {loading ? t.login.signingIn : t.login.signIn}
             </button>
 
             {/* Divider */}
@@ -263,7 +270,7 @@ export default function Login() {
                 <div className="w-full border-t border-gray-300"></div>
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Or continue with</span>
+                <span className="px-2 bg-white text-gray-500">{t.login.orContinueWith}</span>
               </div>
             </div>
 
@@ -291,15 +298,15 @@ export default function Login() {
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                 />
               </svg>
-              Sign in with Google
+              {t.login.signInWithGoogle}
             </button>
           </form>
 
           {/* Sign Up Link */}
           <p className="mt-8 text-center text-gray-600">
-            Don't have an account?{" "}
+            {t.login.noAccount}{" "}
             <Link href="/signup" className="text-primary-600 hover:text-primary-700 font-semibold">
-              Sign up for free
+              {t.login.signUpFree}
             </Link>
           </p>
         </motion.div>

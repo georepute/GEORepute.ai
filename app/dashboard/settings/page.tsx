@@ -28,8 +28,10 @@ import {
   Star
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useLanguage } from "@/lib/language-context";
 
 export default function Settings() {
+  const { isRtl, t } = useLanguage();
   const [activeTab, setActiveTab] = useState("profile");
   const [showApiKey, setShowApiKey] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -53,13 +55,13 @@ export default function Settings() {
   const [voiceIsDefault, setVoiceIsDefault] = useState(false);
 
   const tabs = [
-    { id: "profile", label: "Profile", icon: User },
-    { id: "brand-voice", label: "Brand Voice", icon: MessageSquare },
-    { id: "white-label", label: "White Label", icon: Palette },
-    { id: "notifications", label: "Notifications", icon: Bell },
-    { id: "integrations", label: "Integrations", icon: Zap },
-    { id: "security", label: "Security", icon: Lock },
-    { id: "billing", label: "Billing", icon: CreditCard },
+    { id: "profile", label: t.dashboard.settings.profile, icon: User },
+    { id: "brand-voice", label: t.dashboard.settings.brandVoice, icon: MessageSquare },
+    { id: "white-label", label: t.dashboard.settings.whiteLabel, icon: Palette },
+    { id: "notifications", label: t.dashboard.settings.notifications, icon: Bell },
+    { id: "integrations", label: t.dashboard.settings.integrations, icon: Zap },
+    { id: "security", label: t.dashboard.settings.security, icon: Lock },
+    { id: "billing", label: t.dashboard.settings.billing, icon: CreditCard },
   ];
 
   // Check for OAuth callback and auto-switch to integrations tab
@@ -236,11 +238,11 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Settings</h1>
-        <p className="text-gray-600">Manage your account and preferences</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">{t.dashboard.settings.title}</h1>
+        <p className="text-gray-600">{t.dashboard.settings.subtitle}</p>
       </div>
 
       <div className="grid lg:grid-cols-4 gap-6">

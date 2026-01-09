@@ -10,8 +10,115 @@ const corsHeaders = {
 // MULTI-PASS HUMANIZER - KEEPS HUMANIZING UNTIL TARGET IS REACHED
 // ============================================================================
 
-// TIER 1: Dead giveaway words - ALWAYS remove/replace
-const DEAD_GIVEAWAY_REPLACEMENTS: { [key: string]: string[] } = {
+// Helper function to get replacements based on language
+function getReplacements(language: 'en' | 'he' = 'en'): {
+  deadGiveaway: { [key: string]: string[] };
+  highFrequency: { [key: string]: string[] };
+  removePhrases: string[];
+  simplifyMap: { [key: string]: string };
+} {
+  if (language === 'he') {
+    return {
+      // TIER 1: Dead giveaway words in Hebrew - ALWAYS remove/replace
+      deadGiveaway: {
+        "לסיכום": ["בקיצור", "לסיכום", "בסוף"],
+        "לסיכום דברים": ["בקיצור", "לסיכום"],
+        "חשוב לציין": ["צריך לומר", "אפשר לומר"],
+        "ראוי לציין": ["צריך לומר", "אפשר לומר"],
+        "יש לציין": ["צריך לומר", "אפשר לומר"],
+        "חשוב להבין": ["צריך להבין", "חשוב לדעת"],
+        "חשוב להדגיש": ["צריך להדגיש", "חשוב לומר"],
+        "בנוף": ["בתחום", "בעולם", "בתחום של"],
+        "בנוף של": ["בתחום של", "בעולם של"],
+        "לנווט": ["לטפל", "להתמודד", "לנהל"],
+        "לנווט ב": ["לטפל ב", "להתמודד עם"],
+        "לצאת למסע": ["להתחיל", "לצאת לדרך", "להתחיל לעבוד"],
+        "מכריע": ["חשוב", "קריטי", "מרכזי"],
+        "חיוני": ["חשוב", "קריטי", "מרכזי"],
+        "קריטי": ["חשוב", "מרכזי", "משמעותי"],
+        "מרכזי": ["חשוב", "משמעותי", "עיקרי"],
+        "חשוב ביותר": ["חשוב מאוד", "מאוד חשוב", "חשוב"],
+        "מורכב": ["מסובך", "קשה", "לא פשוט"],
+        "מסובך": ["מורכב", "קשה", "לא פשוט"],
+        "מפורט מאוד": ["מפורט", "מדויק", "מקיף"],
+        "מדויק מאוד": ["מדויק", "מפורט", "מקיף"]
+      },
+      // TIER 2: High-frequency AI words in Hebrew
+      highFrequency: {
+        "לנצל": ["להשתמש", "לעשות שימוש", "להשתמש ב"],
+        "למנף": ["להשתמש", "לעשות שימוש", "לנצל"],
+        "להשתמש ב": ["להשתמש", "לעשות שימוש"],
+        "לעשות שימוש ב": ["להשתמש", "לעשות שימוש"],
+        "לקדם": ["לעזור", "לתמוך", "לעודד"],
+        "לטפח": ["לבנות", "לפתח", "ליצור"],
+        "לטפל": ["להתמודד", "לנהל", "לעסוק"],
+        "לשפר": ["להשתפר", "להגדיל", "להעלות"],
+        "להגדיל": ["להעלות", "לשפר", "להשתפר"],
+        "למטב": ["לשפר", "להשתפר", "להעלות"],
+        "למקסם": ["להגדיל", "להעלות", "לשפר"],
+        "לייעל": ["לשפר", "להשתפר", "להקל"],
+        "מקיף": ["מלא", "מפורט", "נרחב"],
+        "הוליסטי": ["מלא", "כולל", "מקיף"],
+        "רב-ממדי": ["מורכב", "מגוון", "שונה"],
+        "מעודן": ["מפורט", "מסובך", "מורכב"],
+        "חזק": ["טוב", "יציב", "אמין"],
+        "דינמי": ["פעיל", "משתנה", "גמיש"],
+        "חדשני": ["חדש", "יצירתי", "מקורי"],
+        "מהפכני": ["חדש", "פורץ דרך", "משנה"],
+        "פורץ דרך": ["חדש", "מהפכני", "משנה"],
+        "משנה משחק": ["משנה", "חשוב מאוד", "מרכזי"],
+        "טרנספורמטיבי": ["משנה", "חשוב", "מרכזי"],
+        "משמעותי": ["חשוב", "גדול", "מרכזי"],
+        "ניכר": ["גדול", "חשוב", "משמעותי"],
+        "רב": ["הרבה", "מגוון", "שונים"],
+        "בולט": ["חשוב", "משמעותי", "ניכר"],
+        "מדהים": ["מעולה", "טוב מאוד", "מצוין"]
+      },
+      // Phrases to completely remove in Hebrew
+      removePhrases: [
+        "יתר על כן", "בנוסף", "לפיכך", "לכן", "כך",
+        "חשוב לציין ש", "ראוי לציין ש", "יש לציין ש",
+        "חשוב להבין ש", "חשוב להדגיש ש",
+        "לסיכום", "לסיכום דברים", "בסיכום",
+        "בעולם המודרני", "בעידן הדיגיטלי", "בימינו",
+        "מצד אחד", "מצד שני", "לעומת זאת"
+      ],
+      // Simplification patterns in Hebrew
+      simplifyMap: {
+        "על מנת": "כדי",
+        "בגלל העובדה ש": "כי",
+        "בהקשר ל": "לגבי",
+        "ביחס ל": "לגבי",
+        "במונחים של": "ב",
+        "באמצעות": "על ידי",
+        "בזמן הנוכחי": "עכשיו",
+        "במקרה ש": "אם",
+        "בעתיד הקרוב": "בקרוב",
+        "בנקודה זו בזמן": "עכשיו",
+        "מגוון רחב של": "הרבה",
+        "מגוון נרחב של": "הרבה",
+        "מגוון גדול של": "הרבה",
+        "מגוון של": "הרבה",
+        "תפקיד מכריע ב": "חשוב ל",
+        "תפקיד חיוני ב": "חשוב ל",
+        "תפקיד מרכזי ב": "חשוב ל",
+        "תפקיד חשוב ב": "חשוב ל",
+        "משחק תפקיד חשוב ב": "חשוב ל"
+      }
+    };
+  }
+  
+  // Default English replacements
+  return {
+    deadGiveaway: DEAD_GIVEAWAY_REPLACEMENTS_EN,
+    highFrequency: HIGH_FREQUENCY_REPLACEMENTS_EN,
+    removePhrases: REMOVE_PHRASES_EN,
+    simplifyMap: SIMPLIFY_MAP_EN
+  };
+}
+
+// TIER 1: Dead giveaway words - ALWAYS remove/replace (English)
+const DEAD_GIVEAWAY_REPLACEMENTS_EN: { [key: string]: string[] } = {
   "delve": ["explore", "dive into", "examine", "look at", "study"],
   "delving": ["exploring", "diving into", "examining", "looking at"],
   "delves": ["explores", "dives into", "examines", "looks at"],
@@ -31,8 +138,8 @@ const DEAD_GIVEAWAY_REPLACEMENTS: { [key: string]: string[] } = {
   "underscoring": ["showing", "highlighting", "emphasizing"]
 };
 
-// TIER 2: High-frequency AI words - EXPANDED
-const HIGH_FREQUENCY_REPLACEMENTS: { [key: string]: string[] } = {
+// TIER 2: High-frequency AI words - EXPANDED (English)
+const HIGH_FREQUENCY_REPLACEMENTS_EN: { [key: string]: string[] } = {
   "utilize": ["use", "employ", "apply", "try"],
   "utilizes": ["uses", "employs", "applies"],
   "utilization": ["use", "usage"],
@@ -111,8 +218,8 @@ const HIGH_FREQUENCY_REPLACEMENTS: { [key: string]: string[] } = {
   "framework": ["structure", "system", "setup"]
 };
 
-// Phrases to completely remove - EXPANDED LIST
-const REMOVE_PHRASES = [
+// Phrases to completely remove - EXPANDED LIST (English)
+const REMOVE_PHRASES_EN = [
   // Transitions
   "moreover", "furthermore", "additionally", "consequently",
   "therefore", "thus", "hence", "accordingly", "ultimately",
@@ -142,8 +249,8 @@ const REMOVE_PHRASES = [
   "transform the way we", "reach out"
 ];
 
-// Simplification patterns - EXPANDED
-const SIMPLIFY_MAP: { [key: string]: string } = {
+// Simplification patterns - EXPANDED (English)
+const SIMPLIFY_MAP_EN: { [key: string]: string } = {
   "in order to": "to",
   "due to the fact that": "because",
   "with regard to": "about",
@@ -189,6 +296,13 @@ const SIMPLIFY_MAP: { [key: string]: string } = {
 
 class MultiPassHumanizer {
   private passCount: number = 0;
+  private language: 'en' | 'he' = 'en';
+  private replacements: ReturnType<typeof getReplacements>;
+  
+  constructor(language: 'en' | 'he' = 'en') {
+    this.language = language;
+    this.replacements = getReplacements(language);
+  }
   
   // Get random replacement from array
   private getRandomReplacement(options: string[]): string {
@@ -267,7 +381,7 @@ class MultiPassHumanizer {
     }
     
     // FIRST: Simplify verbose phrases (longer phrases first to avoid partial matches)
-    const sortedSimplify = Object.entries(SIMPLIFY_MAP).sort((a, b) => b[0].length - a[0].length);
+    const sortedSimplify = Object.entries(this.replacements.simplifyMap).sort((a, b) => b[0].length - a[0].length);
     for (const [verbose, simple] of sortedSimplify) {
       const escaped = verbose.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(escaped, 'gi');
@@ -275,7 +389,7 @@ class MultiPassHumanizer {
     }
     
     // SECOND: Remove phrases completely (longer phrases first)
-    const sortedRemove = [...REMOVE_PHRASES].sort((a, b) => b.length - a.length);
+    const sortedRemove = [...this.replacements.removePhrases].sort((a, b) => b.length - a.length);
     for (const phrase of sortedRemove) {
       // Try multiple patterns for better matching
       const patterns = [
@@ -291,7 +405,7 @@ class MultiPassHumanizer {
     
     // THIRD: Replace dead giveaways with variation (MULTIPLE PASSES for thoroughness)
     for (let pass = 0; pass < 2; pass++) {
-      for (const [ai, replacements] of Object.entries(DEAD_GIVEAWAY_REPLACEMENTS)) {
+      for (const [ai, replacements] of Object.entries(this.replacements.deadGiveaway)) {
         const regex = new RegExp(`\\b${ai}\\b`, 'gi');
         result = result.replace(regex, () => this.getRandomReplacement(replacements));
       }
@@ -299,7 +413,7 @@ class MultiPassHumanizer {
     
     // FOURTH: Replace high-frequency words with variation (MULTIPLE PASSES)
     for (let pass = 0; pass < 2; pass++) {
-      for (const [ai, replacements] of Object.entries(HIGH_FREQUENCY_REPLACEMENTS)) {
+      for (const [ai, replacements] of Object.entries(this.replacements.highFrequency)) {
         const regex = new RegExp(`\\b${ai}\\b`, 'gi');
         result = result.replace(regex, () => this.getRandomReplacement(replacements));
       }
@@ -880,7 +994,7 @@ serve(async (req) => {
   
   try {
     const body = await req.json();
-    const { text, passes = 5, detectedPhrases = [] } = body; // Accept passes and detectedPhrases parameters
+    const { text, passes = 5, detectedPhrases = [], language } = body; // Accept passes, detectedPhrases, and language parameters
     
     if (!text || typeof text !== "string") {
       return new Response(
@@ -888,6 +1002,10 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    
+    // Determine language preference (from body or cookie)
+    const preferredLanguage = language || req.headers.get('cookie')?.split('; ').find(row => row.startsWith('preferred-language='))?.split('=')[1] || 'en';
+    const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en') ? preferredLanguage : 'en';
     
     // Validate passes parameter
     const numPasses = Math.min(Math.max(1, parseInt(passes) || 5), 5); // 1-5 passes max, default 5
@@ -897,7 +1015,7 @@ serve(async (req) => {
       ? detectedPhrases.filter(p => typeof p === 'string' && p.trim().length > 0)
       : [];
     
-    console.log(`🔥 Processing ${text.length} characters with ${numPasses} passes...`);
+    console.log(`🔥 Processing ${text.length} characters with ${numPasses} passes, language: ${validLanguage}...`);
     if (validDetectedPhrases.length > 0) {
       console.log(`📋 Targeting ${validDetectedPhrases.length} detected AI phrases for removal`);
     }
@@ -908,7 +1026,7 @@ serve(async (req) => {
       console.log(`🧩 HTML detected in content, preserving tag structure during humanization`);
     }
     
-    const humanizer = new MultiPassHumanizer();
+    const humanizer = new MultiPassHumanizer(validLanguage as 'en' | 'he');
     const humanized = processHTML(text, humanizer, numPasses, validDetectedPhrases);
     
     const ratio = text.length > 0 ? (humanized.length / text.length) : 1;

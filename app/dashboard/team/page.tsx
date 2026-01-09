@@ -36,6 +36,7 @@ import {
 import toast from "react-hot-toast";
 import OrganizationInfo from "@/components/OrganizationInfo";
 import PurchaseSeats from "@/components/PurchaseSeats";
+import { useLanguage } from "@/lib/language-context";
 
 interface TeamMember {
   id: string;
@@ -60,6 +61,7 @@ interface UserProfile {
 }
 
 export default function Team() {
+  const { isRtl, t } = useLanguage();
   const [activeTab, setActiveTab] = useState<"organization" | "team">("organization");
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
@@ -526,10 +528,10 @@ export default function Team() {
   const hasPendingInvites = totalPendingInvitations > 0;
 
   const statsData = [
-    { label: "Team Members", value: stats.total.toString(), icon: Users, color: "text-blue-600" },
-    { label: "Admins", value: stats.admins.toString(), icon: Crown, color: "text-purple-600" },
-    { label: "Managers", value: stats.managers.toString(), icon: Briefcase, color: "text-green-600" },
-    { label: "Pending Invites", value: stats.pending.toString(), icon: Mail, color: "text-orange-600" },
+    { label: t.dashboard.team.totalMembers, value: stats.total.toString(), icon: Users, color: "text-blue-600" },
+    { label: t.dashboard.team.admin, value: stats.admins.toString(), icon: Crown, color: "text-purple-600" },
+    { label: t.dashboard.team.manager, value: stats.managers.toString(), icon: Briefcase, color: "text-green-600" },
+    { label: t.dashboard.team.pendingInvites, value: stats.pending.toString(), icon: Mail, color: "text-orange-600" },
   ];
 
   // Filter team members by search
@@ -577,7 +579,7 @@ export default function Team() {
       <div className="p-4 sm:p-6 lg:p-8 flex items-center justify-center min-h-screen">
         <div className="text-center">
           <Loader2 className="w-12 h-12 text-primary-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Loading team data...</p>
+          <p className="text-gray-600">{t.dashboard.common.loading}</p>
         </div>
       </div>
     );
@@ -600,11 +602,11 @@ export default function Team() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Team</h1>
-        <p className="text-gray-600">Manage your organization and team members</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">{t.dashboard.team.title}</h1>
+        <p className="text-gray-600">{t.dashboard.team.subtitle}</p>
       </div>
 
       {/* Tabs */}

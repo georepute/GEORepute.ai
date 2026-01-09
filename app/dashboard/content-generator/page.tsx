@@ -23,8 +23,10 @@ import Card from "@/components/Card";
 import ImageUpload from "@/components/ImageUpload";
 import toast from "react-hot-toast";
 import Link from "next/link";
+import { useLanguage } from "@/lib/language-context";
 
 export default function ContentGeneratorPage() {
+  const { language } = useLanguage();
   // Step 1: User Input
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
@@ -160,6 +162,7 @@ export default function ContentGeneratorPage() {
           brandMention: userBrand,
           influenceLevel,
           brandVoiceId: selectedVoiceId, // Include brand voice if selected
+          language: language || 'en', // Pass current language preference
           ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}), // Include imageUrl if provided
         }),
       });

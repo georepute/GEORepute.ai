@@ -7,6 +7,7 @@ import Button from "@/components/Button";
 import Image from "next/image";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
+import { useLanguage } from "@/lib/language-context";
 
 // Client Plans Data with limits
 const clientPlans = [
@@ -283,6 +284,7 @@ const addons = [
 ];
 
 export default function PricingPage() {
+  const { isRtl, t } = useLanguage();
   const [billingInterval, setBillingInterval] = useState<"monthly" | "yearly">("yearly");
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
@@ -308,7 +310,7 @@ export default function PricingPage() {
   const savingsPercentage = 20;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Navbar */}
       <Navbar />
 
@@ -316,7 +318,7 @@ export default function PricingPage() {
       <div className="bg-gradient-to-r from-primary-600 via-secondary-500 to-accent-600 text-white py-5 mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <p className="text-center text-sm sm:text-base font-semibold">
-            🎉 Get free migration and 20% discount with annual subscription plans
+            {t.pricing.banner}
           </p>
         </div>
       </div>
@@ -330,10 +332,10 @@ export default function PricingPage() {
             className="text-center"
           >
             <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-4">
-              Find your plan
+              {t.pricing.hero.title}
             </h1>
             <p className="text-lg sm:text-xl text-gray-600 max-w-3xl mx-auto mb-8">
-              Configure limits to meet your business needs. Save 20% on annual billing.
+              {t.pricing.hero.subtitle}
             </p>
 
             {/* Billing Toggle - Sticky */}
@@ -346,7 +348,7 @@ export default function PricingPage() {
                     : "text-gray-600 hover:text-gray-900"
                 }`}
               >
-                Monthly
+                {t.pricing.hero.monthly}
               </button>
               <button
                 onClick={() => setBillingInterval("yearly")}
@@ -356,9 +358,9 @@ export default function PricingPage() {
                     : "text-gray-600 hover:text-gray-900"
                 }`}
               >
-                Yearly
+                {t.pricing.hero.yearly}
                 <span className="bg-green-500 text-white text-xs px-2 py-0.5 rounded-full">
-                  Save {savingsPercentage}%
+                  {t.pricing.hero.save.replace('{percent}', '20')}
                 </span>
               </button>
             </div>
@@ -376,10 +378,10 @@ export default function PricingPage() {
         >
           <div className="text-center mb-10">
             <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
-              Client Plans
+              {t.pricing.clientPlans.title}
             </h2>
             <p className="text-lg text-gray-600">
-              Perfect for businesses managing their own reputation
+              {t.pricing.clientPlans.subtitle}
             </p>
           </div>
 
@@ -451,19 +453,19 @@ export default function PricingPage() {
                     {/* Key Limits */}
                     <div className="bg-gray-50 rounded-lg p-4 mb-6 space-y-2 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Domains</span>
+                        <span className="text-gray-600">{t.pricing.limits.domains}</span>
                         <span className="font-semibold text-gray-900">{plan.limits.domains}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Keywords</span>
+                        <span className="text-gray-600">{t.pricing.limits.keywords}</span>
                         <span className="font-semibold text-gray-900">{plan.limits.keywords}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Searches/mo</span>
+                        <span className="text-gray-600">{t.pricing.limits.searches}</span>
                         <span className="font-semibold text-gray-900">{plan.limits.monthlySearches.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Reports/mo</span>
+                        <span className="text-gray-600">{t.pricing.limits.reports}</span>
                         <span className="font-semibold text-gray-900">{plan.limits.monthlyReports}</span>
                       </div>
                     </div>
@@ -474,7 +476,7 @@ export default function PricingPage() {
                       className="w-full mb-4"
                       size="lg"
                     >
-                      Start free trial
+                      {t.pricing.buttons.startTrial}
                     </Button>
 
                     {/* Expandable Features */}
@@ -482,7 +484,7 @@ export default function PricingPage() {
                       onClick={() => setExpandedPlan(isExpanded ? null : plan.id)}
                       className="w-full flex items-center justify-center gap-2 text-sm text-primary-600 hover:text-primary-700 font-medium"
                     >
-                      {isExpanded ? "Hide details" : "View all features"}
+                      {isExpanded ? t.pricing.buttons.hideDetails : t.pricing.buttons.viewFeatures}
                       {isExpanded ? (
                         <ChevronUp className="w-4 h-4" />
                       ) : (
@@ -526,10 +528,10 @@ export default function PricingPage() {
         >
           <div className="text-center mb-10">
             <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
-              Agency Plans
+              {t.pricing.agencyPlans.title}
             </h2>
             <p className="text-lg text-gray-600">
-              Built for agencies managing multiple clients
+              {t.pricing.agencyPlans.subtitle}
             </p>
           </div>
 
@@ -596,21 +598,21 @@ export default function PricingPage() {
 
                     <div className="bg-gray-50 rounded-lg p-4 mb-6 space-y-2 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Clients</span>
+                        <span className="text-gray-600">{t.pricing.limits.clients}</span>
                         <span className="font-semibold text-gray-900">
-                          {plan.limits.clients === -1 ? "Unlimited" : plan.limits.clients}
+                          {plan.limits.clients === -1 ? t.pricing.limits.unlimited : plan.limits.clients}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Domains/client</span>
+                        <span className="text-gray-600">{t.pricing.limits.domainsPerClient}</span>
                         <span className="font-semibold text-gray-900">{plan.limits.domainsPerClient}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Keywords</span>
+                        <span className="text-gray-600">{t.pricing.limits.keywords}</span>
                         <span className="font-semibold text-gray-900">{plan.limits.keywords.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Searches/mo</span>
+                        <span className="text-gray-600">{t.pricing.limits.searches}</span>
                         <span className="font-semibold text-gray-900">{plan.limits.monthlySearches.toLocaleString()}</span>
                       </div>
                     </div>
@@ -620,14 +622,14 @@ export default function PricingPage() {
                       className="w-full mb-4"
                       size="lg"
                     >
-                      Start free trial
+                      {t.pricing.buttons.startTrial}
                     </Button>
 
                     <button
                       onClick={() => setExpandedPlan(isExpanded ? null : plan.id)}
                       className="w-full flex items-center justify-center gap-2 text-sm text-secondary-600 hover:text-secondary-700 font-medium"
                     >
-                      {isExpanded ? "Hide details" : "View all features"}
+                      {isExpanded ? t.pricing.buttons.hideDetails : t.pricing.buttons.viewFeatures}
                       {isExpanded ? (
                         <ChevronUp className="w-4 h-4" />
                       ) : (
@@ -664,11 +666,11 @@ export default function PricingPage() {
           {/* Custom Plan CTA */}
           <div className="mt-8 text-center">
             <p className="text-gray-600 mb-4">
-              Need more flexibility? We can create a custom plan for your agency.
+              {t.pricing.agencyPlans.customCta.text}
             </p>
             <Link href="/contact">
               <Button variant="outline" size="lg">
-                Get a custom plan
+                {t.pricing.agencyPlans.customCta.button}
               </Button>
             </Link>
           </div>
@@ -683,63 +685,20 @@ export default function PricingPage() {
           className="bg-white rounded-2xl p-8 md:p-12 shadow-xl border border-gray-200"
         >
           <h3 className="text-3xl font-bold text-gray-900 text-center mb-10">
-            Frequently Asked Questions
+            {t.pricing.faq.title}
           </h3>
           <div className="grid md:grid-cols-2 gap-x-12 gap-y-8">
-            <div>
-              <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-start gap-2">
-                <Info className="w-5 h-5 text-primary-500 mt-0.5 flex-shrink-0" />
-                How does the domain limit work?
-              </h4>
-              <p className="text-gray-600 leading-relaxed">
-                Each plan has a specific domain limit to prevent chaos. You can only track the number of domains specified in your plan. This ensures fair usage and keeps costs predictable.
-              </p>
-            </div>
-            <div>
-              <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-start gap-2">
-                <Info className="w-5 h-5 text-primary-500 mt-0.5 flex-shrink-0" />
-                What happens when I reach my limits?
-              </h4>
-              <p className="text-gray-600 leading-relaxed">
-                When you reach your monthly search, report, or scan limits, you'll receive a notification. You can upgrade your plan anytime to get more capacity immediately.
-              </p>
-            </div>
-            <div>
-              <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-start gap-2">
-                <Info className="w-5 h-5 text-primary-500 mt-0.5 flex-shrink-0" />
-                Can I share my account?
-              </h4>
-              <p className="text-gray-600 leading-relaxed">
-                No, each account is tied to one email address and limited to your specified seat count. This prevents abuse and ensures each user has proper access controls and security.
-              </p>
-            </div>
-            <div>
-              <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-start gap-2">
-                <Info className="w-5 h-5 text-primary-500 mt-0.5 flex-shrink-0" />
-                What's included in Operational Assistance?
-              </h4>
-              <p className="text-gray-600 leading-relaxed">
-                Our team handles all optimization work for you—from strategy to implementation. You get a dedicated specialist who performs the work while you focus on your business.
-              </p>
-            </div>
-            <div>
-              <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-start gap-2">
-                <Info className="w-5 h-5 text-primary-500 mt-0.5 flex-shrink-0" />
-                Is there a free trial?
-              </h4>
-              <p className="text-gray-600 leading-relaxed">
-                Yes! We offer a 14-day free trial for all plans. No credit card required. Experience the full power of GeoRepute.ai before committing.
-              </p>
-            </div>
-            <div>
-              <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-start gap-2">
-                <Info className="w-5 h-5 text-primary-500 mt-0.5 flex-shrink-0" />
-                Can I switch between plans?
-              </h4>
-              <p className="text-gray-600 leading-relaxed">
-                Absolutely! You can upgrade or downgrade at any time. Upgrades take effect immediately, and downgrades will apply at your next billing cycle.
-              </p>
-            </div>
+            {t.pricing.faq.items.map((faq, index) => (
+              <div key={index}>
+                <h4 className={`text-lg font-semibold text-gray-900 mb-3 flex items-start gap-2 ${isRtl ? 'flex-row-reverse' : ''}`}>
+                  <Info className={`w-5 h-5 text-primary-500 mt-0.5 flex-shrink-0 ${isRtl ? 'order-last' : ''}`} />
+                  {faq.q}
+                </h4>
+                <p className="text-gray-600 leading-relaxed">
+                  {faq.a}
+                </p>
+              </div>
+            ))}
           </div>
         </motion.div>
 
@@ -752,20 +711,20 @@ export default function PricingPage() {
         >
           <div className="bg-gradient-to-r from-primary-500 via-secondary-500 to-accent-500 rounded-2xl p-12 text-white">
             <h3 className="text-3xl sm:text-4xl font-bold mb-4">
-              Ready to boost your reputation?
+              {t.pricing.bottomCta.title}
             </h3>
             <p className="text-xl mb-8 text-white/90">
-              Join thousands of businesses already using GeoRepute.ai
+              {t.pricing.bottomCta.subtitle}
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/signup">
                 <button className="px-8 py-4 bg-white text-primary-600 rounded-lg font-semibold text-lg hover:bg-gray-100 transition-all shadow-lg">
-                  Start free trial
+                  {t.pricing.bottomCta.startTrial}
                 </button>
               </Link>
               <Link href="/contact">
                 <button className="px-8 py-4 border-2 border-white text-white rounded-lg font-semibold text-lg hover:bg-white/10 transition-all">
-                  Talk to sales
+                  {t.pricing.bottomCta.talkToSales}
                 </button>
               </Link>
             </div>

@@ -5,21 +5,24 @@ import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X } from "lucide-react";
+import { useLanguage } from "@/lib/language-context";
+import LanguageToggle from "./LanguageToggle";
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
+  const { isRtl, t } = useLanguage();
 
   const navLinks = [
-    { href: "/", label: "Home" },
-    { href: "/about", label: "About" },
-    { href: "/systems", label: "Our Systems" },
-    { href: "/pricing", label: "Pricing" },
-    { href: "/contact", label: "Contact" },
-    { href: "/privacy", label: "Privacy" },
+    { href: "/", label: t.nav.home },
+    { href: "/about", label: t.nav.about },
+    { href: "/systems", label: t.nav.systems },
+    { href: "/pricing", label: t.nav.pricing },
+    { href: "/contact", label: t.nav.contact },
+    { href: "/privacy", label: t.nav.privacy },
   ];
 
   return (
-    <nav className="fixed top-0 w-full z-50 glass-effect border-b border-white/20">
+    <nav className="fixed top-0 w-full z-50 glass-effect border-b border-white/20" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-20">
           {/* Logo */}
@@ -31,14 +34,14 @@ export default function Navbar() {
             >
               <Image
                 src="/logo.png"
-                alt="GeoRepute.ai Logo"
+                alt={`${t.nav.brandName} Logo`}
                 fill
                 className="object-contain"
                 priority
               />
             </motion.div>
             <span className="text-2xl font-bold text-primary-600">
-              GeoRepute.ai
+              {t.nav.brandName}
             </span>
           </Link>
 
@@ -55,19 +58,20 @@ export default function Navbar() {
             ))}
           </div>
 
-          {/* Desktop CTA */}
+          {/* Desktop CTA & Language Toggle */}
           <div className="hidden md:flex items-center gap-4">
+            <LanguageToggle />
             <Link
               href="/login"
               className="px-4 py-2 text-gray-700 hover:text-primary-600 font-medium transition-colors"
             >
-              Sign In
+              {t.nav.signIn}
             </Link>
             <Link
               href="/dashboard"
               className="px-6 py-2 bg-primary-500 text-white rounded-lg font-semibold hover:bg-primary-600 hover:shadow-lg hover:shadow-primary-500/50 transition-all duration-300"
             >
-              Get Started
+              {t.nav.getStarted}
             </Link>
           </div>
 
@@ -103,19 +107,22 @@ export default function Navbar() {
                 </Link>
               ))}
               <div className="pt-4 space-y-3 border-t border-gray-200">
+                <div className="flex justify-center py-2">
+                  <LanguageToggle />
+                </div>
                 <Link
                   href="/login"
                   className="block w-full px-4 py-2 text-center text-gray-700 hover:text-primary-600 font-medium transition-colors"
                   onClick={() => setIsOpen(false)}
                 >
-                  Sign In
+                  {t.nav.signIn}
                 </Link>
                 <Link
                   href="/dashboard"
                   className="block w-full px-6 py-2 bg-primary-500 text-white rounded-lg font-semibold text-center hover:bg-primary-600 hover:shadow-lg transition-all"
                   onClick={() => setIsOpen(false)}
                 >
-                  Get Started
+                  {t.nav.getStarted}
                 </Link>
               </div>
             </div>

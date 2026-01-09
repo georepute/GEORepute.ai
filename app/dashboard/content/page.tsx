@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { useLanguage } from "@/lib/language-context";
 import { 
   FileText, 
   Search,
@@ -65,6 +66,7 @@ interface ContentItem {
 
 
 function ContentInner() {
+  const { isRtl, t, language } = useLanguage();
   const searchParams = useSearchParams();
   const router = useRouter();
   const supabase = createClientComponentClient();
@@ -806,6 +808,7 @@ function ContentInner() {
           userContext: originalContent.user_context || '',
           imageUrl: originalContent.image_url || null,
           brandVoiceId: originalContent.brand_voice_id || null,
+          language: language || 'en', // Pass current language preference
           // Add optimization flag
           optimizeFromContentId: optimizeContentId,
           learningInsights: learningInsights,
@@ -1388,6 +1391,7 @@ function ContentInner() {
               alt: selectedImage.tags || responseData.prompt,
               photographer: selectedImage.user,
             } : null,
+            language: language || 'en', // Pass current language preference
             }),
           });
 
@@ -1494,12 +1498,12 @@ function ContentInner() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Header */}
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Content Orchestrator</h1>
-          <p className="text-gray-600">Manage, approve, and publish content across all platforms</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">{t.dashboard.content.title}</h1>
+          <p className="text-gray-600">{t.dashboard.content.subtitle}</p>
         </div>
         <button
           onClick={handleRefresh}
@@ -1673,16 +1677,32 @@ function ContentInner() {
                         return (
                           <div key={item.id} className="p-4 hover:bg-gray-50/50 transition-colors">
                             <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-                              {/* Platform & Keywords */}
-                              <div className="flex-1 flex items-center gap-3">
-                                <span className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-sm font-medium capitalize">
-                                  {platform}
-                                </span>
-                                {item.keywordMetrics && item.keywordMetrics.length > 0 && (
-                                  <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">
-                                    {item.keywordMetrics[0].keyword} - {item.keywordMetrics[0].percent}%
-                                  </span>
-                                )}
+                              {/* Top 3 Keywords (replacing platform) */}
+                              <div className="flex-1 flex flex-wrap items-center gap-2">
+                                {(() => {
+                                  // Get top 3 keywords sorted by percent (highest first)
+                                  let topKeywords: Array<{ keyword: string; percent: number }> = [];
+                                  
+                                  if (item.keywordMetrics && item.keywordMetrics.length > 0) {
+                                    topKeywords = item.keywordMetrics
+                                      .sort((a, b) => (b.percent || 0) - (a.percent || 0))
+                                      .slice(0, 3)
+                                      .map(metric => ({ keyword: metric.keyword, percent: metric.percent || 0 }));
+                                  } else if (item.raw?.target_keywords && item.raw.target_keywords.length > 0) {
+                                    topKeywords = item.raw.target_keywords
+                                      .slice(0, 3)
+                                      .map((keyword: string) => ({ keyword, percent: 0 }));
+                                  }
+                                  
+                                  return topKeywords.map((kw) => (
+                                    <span
+                                      key={kw.keyword}
+                                      className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium"
+                                    >
+                                      {kw.keyword} - {kw.percent}%
+                                    </span>
+                                  ));
+                                })()}
                               </div>
 
                               {/* Status & Actions */}
@@ -1839,36 +1859,32 @@ function ContentInner() {
                       </div>
                     </div>
 
-                    {/* Platforms with Keywords - Left Side */}
+                    {/* Top 3 Keywords - Left Side (replacing platforms) */}
                     <div className="flex flex-wrap gap-2 mt-3">
-                      {item.platforms.map((platform) => {
-                        // Get the first keyword for this platform
-                        // Try keywordMetrics first, then fall back to raw target_keywords
-                        const firstKeyword = item.keywordMetrics && item.keywordMetrics.length > 0
-                          ? item.keywordMetrics[0].keyword
-                          : (item.raw?.target_keywords && item.raw.target_keywords.length > 0
-                            ? item.raw.target_keywords[0]
-                            : null);
+                      {(() => {
+                        // Get top 3 keywords sorted by percent (highest first)
+                        let topKeywords: Array<{ keyword: string; percent: number }> = [];
                         
-                        // Get keyword percentage if available
-                        const keywordPercent = item.keywordMetrics && item.keywordMetrics.length > 0
-                          ? item.keywordMetrics[0].percent
-                          : null;
-
-                        return (
-                          <div key={platform} className="flex items-center gap-2">
-                            <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium capitalize">
-                              {platform}
-                            </span>
-                            {firstKeyword && (
-                              <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">
-                                {firstKeyword}
-                                {keywordPercent !== null && ` - ${keywordPercent}%`}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
+                        if (item.keywordMetrics && item.keywordMetrics.length > 0) {
+                          topKeywords = item.keywordMetrics
+                            .sort((a, b) => (b.percent || 0) - (a.percent || 0))
+                            .slice(0, 3)
+                            .map(metric => ({ keyword: metric.keyword, percent: metric.percent || 0 }));
+                        } else if (item.raw?.target_keywords && item.raw.target_keywords.length > 0) {
+                          topKeywords = item.raw.target_keywords
+                            .slice(0, 3)
+                            .map((keyword: string) => ({ keyword, percent: 0 }));
+                        }
+                        
+                        return topKeywords.map((kw) => (
+                          <span
+                            key={kw.keyword}
+                            className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium"
+                          >
+                            {kw.keyword} - {kw.percent}%
+                          </span>
+                        ));
+                      })()}
                     </div>
 
                     {/* Performance (if published) */}
@@ -1921,38 +1937,6 @@ function ContentInner() {
                       <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${statusConfig.bg} ${statusConfig.text}`}>
                         <StatusIcon className="w-4 h-4" />
                         <span className="font-semibold capitalize">{item.status}</span>
-                      </div>
-                    )}
-
-                    {/* Keywords with Metrics - Right Side */}
-                    {item.keywordMetrics && item.keywordMetrics.length > 0 && (
-                      <div className="flex flex-wrap gap-2 justify-end">
-                        {item.keywordMetrics.map((metric) => {
-                          const getRiseIcon = () => {
-                            if (metric.rise === "up") return <TrendingUp className="w-3 h-3" />;
-                            if (metric.rise === "down") return <TrendingDown className="w-3 h-3" />;
-                            return <Minus className="w-3 h-3" />;
-                          };
-                          
-                          const getRiseColor = () => {
-                            if (metric.rise === "up") return "text-green-600";
-                            if (metric.rise === "down") return "text-red-600";
-                            return "text-gray-600";
-                          };
-
-                          return (
-                            <span
-                              key={metric.keyword}
-                              className="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-xs font-medium flex items-center gap-2"
-                            >
-                              <span className="text-blue-700">{metric.keyword}</span>
-                              <span className={`flex items-center gap-1 ${getRiseColor()}`}>
-                                {getRiseIcon()}
-                                <span>{metric.percent}%</span>
-                              </span>
-                            </span>
-                          );
-                        })}
                       </div>
                     )}
 
