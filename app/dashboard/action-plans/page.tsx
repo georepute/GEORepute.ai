@@ -88,7 +88,6 @@ export default function ActionPlansPage() {
   const [objective, setObjective] = useState("");
   const [keywords, setKeywords] = useState("");
   const [domain, setDomain] = useState("");
-  const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [executingStep, setExecutingStep] = useState<string | null>(null);
   
   // Brand project selection state
@@ -258,7 +257,7 @@ export default function ActionPlansPage() {
           objective: objective,
           targetKeywords: keywords ? keywords.split(',').map(k => k.trim()).filter(Boolean) : [],
           domain: domain.trim() || undefined,
-          channels: selectedChannels.length > 0 ? selectedChannels : ['all'],
+          channels: ['all'], // Always use all channels
           projectId: selectedProjectId || undefined, // Pass selected project ID to use its crawler data
         }),
       });
@@ -306,7 +305,6 @@ export default function ActionPlansPage() {
       setObjective("");
       setKeywords("");
       setDomain("");
-      setSelectedChannels([]);
       setSelectedProjectId(null);
       setSelectedProject(null);
     } catch (error: any) {
@@ -487,7 +485,7 @@ export default function ActionPlansPage() {
               {/* Brand Project Selector - First */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Brand Project (optional)
+                  Select Brand Project
                 </label>
                 <select
                   value={selectedProjectId || ""}
@@ -523,7 +521,7 @@ export default function ActionPlansPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Target Keywords (optional)
+                  Target Keywords
                 </label>
                 <input
                   type="text"
@@ -536,7 +534,7 @@ export default function ActionPlansPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Domain (optional)
+                  Domain
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -569,38 +567,6 @@ export default function ActionPlansPage() {
                 <p className="text-xs text-gray-500 mt-1">
                   Select a project above or crawl a new domain
                 </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Marketing Channels (optional - leave empty for all channels)
-                </label>
-                <div className="space-y-2">
-                  {[
-                    { value: 'seo', label: 'SEO' },
-                    { value: 'social_media', label: 'Social Media' },
-                    { value: 'content', label: 'Content Marketing' },
-                    { value: 'email', label: 'Email Marketing' },
-                    { value: 'paid_ads', label: 'Paid Advertising' },
-                    { value: 'video', label: 'Video Marketing' },
-                  ].map((channel) => (
-                    <label key={channel.value} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedChannels.includes(channel.value)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedChannels([...selectedChannels, channel.value]);
-                          } else {
-                            setSelectedChannels(selectedChannels.filter(c => c !== channel.value));
-                          }
-                        }}
-                        className="w-4 h-4 text-accent-600 rounded focus:ring-accent-500"
-                      />
-                      <span className="text-sm text-gray-700">{channel.label}</span>
-                    </label>
-                  ))}
-                </div>
               </div>
 
               <Button
