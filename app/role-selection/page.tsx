@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Building2, User, ArrowRight, ArrowLeft, Globe, FileText, Upload } from "lucide-react";
+import { Building2, User, ArrowRight, ArrowLeft, FileText } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 
 export default function RoleSelection() {
@@ -99,8 +99,6 @@ export default function RoleSelection() {
           body: JSON.stringify({
             name: orgData.name.trim(),
             description: orgData.description.trim() || undefined,
-            website: orgData.website.trim() || undefined,
-            logo_url: orgData.logo_url.trim() || undefined,
           }),
         });
 
@@ -235,46 +233,6 @@ export default function RoleSelection() {
                   <p className="mt-1 text-sm text-gray-500">Optional: Brief description of your agency</p>
                 </div>
 
-                {/* Website URL */}
-                <div>
-                  <label htmlFor="website" className="block text-sm font-medium text-gray-700 mb-2">
-                    Website URL
-                  </label>
-                  <div className="relative">
-                    <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type="url"
-                      id="website"
-                      name="website"
-                      value={agencyData.website}
-                      onChange={handleInputChange}
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 outline-none transition-all"
-                      placeholder="https://www.yourwebsite.com"
-                    />
-                  </div>
-                  <p className="mt-1 text-sm text-gray-500">Optional: Your agency's website</p>
-                </div>
-
-                {/* Logo URL */}
-                <div>
-                  <label htmlFor="logo_url" className="block text-sm font-medium text-gray-700 mb-2">
-                    Logo URL
-                  </label>
-                  <div className="relative">
-                    <Upload className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type="url"
-                      id="logo_url"
-                      name="logo_url"
-                      value={agencyData.logo_url}
-                      onChange={handleInputChange}
-                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 outline-none transition-all"
-                      placeholder="https://example.com/logo.png"
-                    />
-                  </div>
-                  <p className="mt-1 text-sm text-gray-500">Optional: Direct URL to your logo image</p>
-                </div>
-
                 {/* Buttons */}
                 <div className="flex gap-4 pt-4">
                   <button
@@ -317,8 +275,6 @@ export default function RoleSelection() {
                   <div className="space-y-1 text-sm text-accent-800">
                     <p><strong>Name:</strong> {agencyData.name}</p>
                     {agencyData.description && <p><strong>Description:</strong> {agencyData.description}</p>}
-                    {agencyData.website && <p><strong>Website:</strong> {agencyData.website}</p>}
-                    {agencyData.logo_url && <p><strong>Logo:</strong> {agencyData.logo_url}</p>}
                   </div>
                 </motion.div>
               )}

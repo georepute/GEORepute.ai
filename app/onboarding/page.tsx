@@ -3,21 +3,17 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { useOnboarding } from "@/hooks/useOnboarding";
-import Welcome from "./steps/Welcome";
-import SetupProfile from "./steps/SetupProfile";
-import ConnectPlatforms from "./steps/ConnectPlatforms";
-import FirstKeyword from "./steps/FirstKeyword";
-import Complete from "./steps/Complete";
+import EnterDomain from "./steps/EnterDomain";
+import ConnectDataSources from "./steps/ConnectDataSources";
+import StartScan from "./steps/StartScan";
 import { CheckCircle2, Circle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 const steps = [
-  { id: 0, name: "Welcome", component: Welcome },
-  { id: 1, name: "Setup Profile", component: SetupProfile },
-  { id: 2, name: "Connect Platforms", component: ConnectPlatforms },
-  { id: 3, name: "First Keyword", component: FirstKeyword },
-  { id: 4, name: "Complete", component: Complete },
+  { id: 0, name: "Enter Domain", component: EnterDomain },
+  { id: 1, name: "Connect Sources", component: ConnectDataSources },
+  { id: 2, name: "Start Scan", component: StartScan },
 ];
 
 export default function OnboardingPage() {
@@ -27,8 +23,8 @@ export default function OnboardingPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    // Reset onboarding state for new users
-    resetOnboarding();
+    // Don't reset onboarding state automatically - allow users to resume
+    // resetOnboarding();
     
     // Check authentication status
     async function checkAuth() {
@@ -72,7 +68,7 @@ export default function OnboardingPage() {
     return () => subscription.unsubscribe();
   }, [router, resetOnboarding]);
 
-  const CurrentStepComponent = steps[currentStep]?.component || Welcome;
+  const CurrentStepComponent = steps[currentStep]?.component || EnterDomain;
 
   const handleSkip = () => {
     skipOnboarding();

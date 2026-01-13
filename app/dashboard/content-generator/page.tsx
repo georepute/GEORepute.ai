@@ -16,22 +16,32 @@ import {
   BarChart3,
   ChevronRight,
   ArrowRight,
-  Send
+  Send,
+  Shield,
+  RefreshCw,
+  Loader2,
+  MessageSquare,
+  CheckCircle,
+  X
 } from "lucide-react";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
 import ImageUpload from "@/components/ImageUpload";
 import toast from "react-hot-toast";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useLanguage } from "@/lib/language-context";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 export default function ContentGeneratorPage() {
   const { language } = useLanguage();
+  const supabase = createClientComponentClient();
+  const router = useRouter();
+  
   // Step 1: User Input
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
   const [targetPlatform, setTargetPlatform] = useState("reddit");
-  const [userBrand, setUserBrand] = useState("");
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
   const [imageUrl, setImageUrl] = useState(""); // For Instagram posts
   
@@ -49,6 +59,17 @@ export default function ContentGeneratorPage() {
   const [generatingContent, setGeneratingContent] = useState(false);
   const [contentMetadata, setContentMetadata] = useState<any>(null);
   const [copied, setCopied] = useState(false);
+  const [contentId, setContentId] = useState<string | null>(null); // Store content ID from generation
+  const [isCreatingSchema, setIsCreatingSchema] = useState(false);
+
+  // AI Detection & Humanization State
+  const [isDetectingAI, setIsDetectingAI] = useState(false);
+  const [aiDetectionResults, setAiDetectionResults] = useState<any>(null);
+  const [originalAiPercentage, setOriginalAiPercentage] = useState<number | null>(null); // Store original AI % for comparison
+  const [isHumanizing, setIsHumanizing] = useState(false);
+  const [humanizedContent, setHumanizedContent] = useState<string | null>(null);
+  const [originalContent, setOriginalContent] = useState<string | null>(null);
+  const [showComparisonModal, setShowComparisonModal] = useState(false);
 
   // Platforms
   const platforms = [
@@ -159,7 +180,6 @@ export default function ContentGeneratorPage() {
           topic,
           targetKeywords: keywords,
           targetPlatform,
-          brandMention: userBrand,
           influenceLevel,
           brandVoiceId: selectedVoiceId, // Include brand voice if selected
           language: language || 'en', // Pass current language preference
@@ -174,6 +194,8 @@ export default function ContentGeneratorPage() {
       const data = await response.json();
 
       setGeneratedContent(data.content);
+      setOriginalContent(data.content); // Store original for comparison
+      setContentId(data.contentId || null); // Store content ID if available
       setContentMetadata({
         neutralityScore: data.metadata.neutralityScore,
         tone: data.metadata.tone,
@@ -197,6 +219,17 @@ export default function ContentGeneratorPage() {
       }
       
       toast.success("Content generated successfully!");
+
+      // Automatically run AI detection after content is generated
+      if (data.content) {
+        console.log('🔍 Starting AI detection for generated content...');
+        console.log('📝 Content preview (first 200 chars):', data.content.substring(0, 200));
+        console.log('📏 Content length:', data.content.length);
+        await detectAIInContent(data.content);
+        
+        // After detection completes, automatically run humanization (only once)
+        // We'll do this inside detectAIInContent after results are set
+      }
     } catch (error) {
       console.error('Generation error:', error);
       toast.error("Content generation failed");
@@ -207,10 +240,471 @@ export default function ContentGeneratorPage() {
 
   // Copy to clipboard
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(generatedContent);
+    const contentToCopy = humanizedContent || generatedContent;
+    navigator.clipboard.writeText(contentToCopy);
     setCopied(true);
     toast.success("Content copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Handle using humanized version
+  const handleUseHumanized = () => {
+    if (humanizedContent) {
+      setGeneratedContent(humanizedContent);
+      setShowComparisonModal(false);
+      setOriginalContent(null); // Clear original since we're using humanized
+      setHumanizedContent(null); // Clear humanized since we've applied it
+      setAiDetectionResults(null); // Clear AI detection results since we're using humanized
+      setOriginalAiPercentage(null); // Reset original AI percentage
+      toast.success('Using generated version');
+      // Don't re-run detection - humanized content is already processed
+    }
+  };
+
+  // Handle reverting to original
+  const handleRevertToOriginal = () => {
+    if (originalContent) {
+      setGeneratedContent(originalContent);
+      setHumanizedContent(null);
+      setShowComparisonModal(false);
+      setOriginalContent(null); // Clear since we're reverting
+      toast.success('Reverted to original version');
+      // Keep AI detection results as they are for the original content
+    }
+  };
+
+  // AI Detection Function
+  const detectAIInContent = async (content: string) => {
+    if (!content || !content.trim()) {
+      console.warn('⚠️ No content to analyze');
+      return;
+    }
+
+    setIsDetectingAI(true);
+    try {
+      console.log('📤 Calling detect-ai Edge Function with text length:', content.length);
+      
+      let detectionData: any = null;
+      let detectionError: any = null;
+      
+      // Try using supabase.functions.invoke first
+      try {
+        console.log('🔄 Attempting to call via supabase.functions.invoke...');
+        const invokeResult = await supabase.functions.invoke('detect-ai', {
+          body: { text: content, language: language || 'en' }
+        });
+        detectionData = invokeResult.data;
+        detectionError = invokeResult.error;
+        console.log('📥 Invoke result:', { hasData: !!detectionData, hasError: !!detectionError });
+      } catch (invokeErr: any) {
+        console.warn('⚠️ supabase.functions.invoke failed, trying direct fetch:', invokeErr);
+        
+        // Fallback: Use direct fetch to Edge Function
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+        
+        if (!supabaseUrl || !supabaseAnonKey) {
+          throw new Error('Supabase configuration missing. Check environment variables.');
+        }
+        
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/detect-ai`;
+        console.log('🔄 Attempting direct fetch to Edge Function:', edgeFunctionUrl.replace(supabaseAnonKey, 'KEY_HIDDEN'));
+        
+        const fetchResponse = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({ text: content, language: language || 'en' })
+        });
+        
+        console.log('📥 Fetch response status:', fetchResponse.status, fetchResponse.statusText);
+        
+        if (!fetchResponse.ok) {
+          const errorText = await fetchResponse.text();
+          console.error('❌ Fetch error response:', errorText);
+          throw new Error(`Edge Function returned ${fetchResponse.status}: ${errorText.substring(0, 200)}`);
+        }
+        
+        detectionData = await fetchResponse.json();
+        console.log('✅ Fetch successful, got data:', { 
+          hasAiPercentage: !!detectionData?.aiPercentage,
+          aiPercentage: detectionData?.aiPercentage,
+          fullResponse: detectionData
+        });
+      }
+      
+      if (detectionError) {
+        console.error('❌ AI detection error:', detectionError);
+        toast.error(`AI detection failed: ${detectionError.message || JSON.stringify(detectionError)}`);
+      } else if (detectionData) {
+        console.log('✅ AI detection successful:', {
+          aiPercentage: detectionData.aiPercentage,
+          topPhrasesCount: detectionData.topPhrases?.length || 0,
+          rawData: detectionData
+        });
+        
+        // Ensure we're getting the actual AI percentage - check multiple possible response formats
+        let aiPercentage = 0;
+        if (typeof detectionData.aiPercentage === 'number') {
+          aiPercentage = detectionData.aiPercentage;
+        } else if (detectionData.data && typeof detectionData.data.aiPercentage === 'number') {
+          aiPercentage = detectionData.data.aiPercentage;
+        } else if (detectionData.result && typeof detectionData.result.aiPercentage === 'number') {
+          aiPercentage = detectionData.result.aiPercentage;
+        } else {
+          console.warn('⚠️ Could not find aiPercentage in response:', detectionData);
+          aiPercentage = 0;
+        }
+        
+        console.log('🔍 Final AI Percentage extracted:', aiPercentage);
+        // Extract all data with fallbacks for different response formats
+        const data = detectionData.data || detectionData.result || detectionData;
+        // Get highlighted HTML - check multiple possible locations, fallback to content if not found
+        const highlightedHtml = data.highlightedHtml || detectionData.highlightedHtml || detectionData.highlighted || content;
+        console.log('🎨 Highlighted HTML check:', {
+          hasDataHighlightedHtml: !!data.highlightedHtml,
+          hasDetectionDataHighlightedHtml: !!detectionData.highlightedHtml,
+          hasDetectionDataHighlighted: !!detectionData.highlighted,
+          willUse: highlightedHtml === content ? 'content (no highlighting)' : 'highlighted HTML found',
+          highlightedHtmlLength: highlightedHtml?.length
+        });
+        const detectionResults = {
+          aiPercentage: aiPercentage,
+          highlightedHtml: highlightedHtml,
+          topPhrases: data.topPhrases || detectionData.topPhrases || [],
+          summary: data.summary || detectionData.summary || '',
+          metrics: data.metrics || detectionData.metrics || {}
+        };
+        
+        console.log('📊 Detection results processed:', {
+          aiPercentage: detectionResults.aiPercentage,
+          topPhrasesCount: detectionResults.topPhrases.length,
+          hasMetrics: !!detectionResults.metrics
+        });
+        setAiDetectionResults(detectionResults);
+        
+        // Store original AI percentage if this is the first detection
+        if (originalAiPercentage === null && !humanizedContent) {
+          setOriginalAiPercentage(aiPercentage);
+        }
+        
+        // Automatically run humanization if AI is detected above threshold (only once on generation)
+        if (aiPercentage > 20 && !humanizedContent && !isHumanizing) {
+          toast.success(`AI detection complete: ${aiPercentage}% AI detected. Humanizing automatically...`);
+          // Automatically humanize (runs only once on generation) - pass detection results
+          setTimeout(() => {
+            handleMakeItHumanAuto(content, detectionResults);
+          }, 1000);
+        } else {
+          if (aiPercentage <= 20) {
+            toast.success(`AI detection complete: ${aiPercentage}% AI detected - Content looks human!`);
+          }
+        }
+      } else {
+        console.warn('⚠️ AI detection returned no data and no error');
+        toast.error('AI detection returned no data');
+      }
+    } catch (detectionErr: any) {
+      console.error('❌ Error calling AI detection:', detectionErr);
+      toast.error(`AI detection error: ${detectionErr?.message || 'Unknown error'}. Check console for details.`);
+    } finally {
+      setIsDetectingAI(false);
+    }
+  };
+
+  // Handle "Ready to Publish?" button click - Generate schema and navigate
+  const handleReadyToPublish = async () => {
+    if (!generatedContent || !topic || !targetKeywords) {
+      toast.error("Please generate content first");
+      return;
+    }
+
+    setIsCreatingSchema(true);
+    try {
+      const keywords = targetKeywords.split(",").map(k => k.trim()).filter(Boolean);
+      
+      toast.loading("Generating schema for publication...", { id: "schema-generation" });
+
+      // Generate schema for the current content (without creating duplicate DB entry)
+      const response = await fetch('/api/geo-core/content-generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          topic,
+          targetKeywords: keywords,
+          targetPlatform,
+          influenceLevel,
+          brandVoiceId: selectedVoiceId,
+          language: language || 'en',
+          generatedContent: humanizedContent || generatedContent, // Use humanized content if available
+          skipGeneration: true, // Skip AI generation AND database insertion, just create schema
+          contentType: targetPlatform === "github" ? "documentation" : "article",
+          tone: contentMetadata?.tone || "informative",
+          ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to generate schema');
+      }
+
+      const data = await response.json();
+
+      // Store schema data and content info in sessionStorage for the content page
+      // Use existing contentId from initial generation (not from schema generation, which won't create a new entry)
+      const publishData = {
+        contentId: contentId, // Use the original contentId from when content was first generated
+        content: humanizedContent || generatedContent,
+        topic,
+        targetPlatform,
+        targetKeywords: keywords,
+        schema: data.schema,
+        structuredSEO: data.structuredSEO,
+        metadata: {
+          ...contentMetadata,
+          ...data.metadata,
+        },
+        generatedAt: new Date().toISOString(),
+      };
+
+      sessionStorage.setItem('contentToPublish', JSON.stringify(publishData));
+
+      toast.success("Schema generated! Redirecting to publication page...", { id: "schema-generation" });
+      
+      // Navigate to publication page
+      router.push('/dashboard/content');
+    } catch (error: any) {
+      console.error('Schema generation error:', error);
+      toast.error(`Failed to generate schema: ${error.message || 'Unknown error'}`, { id: "schema-generation" });
+    } finally {
+      setIsCreatingSchema(false);
+    }
+  };
+
+  // Auto-humanize function (runs once after generation)
+  const handleMakeItHumanAuto = async (contentToHumanize: string, detectionResults?: any) => {
+    if (!contentToHumanize || isHumanizing || humanizedContent) {
+      return; // Already humanizing/humanized or no content
+    }
+
+    setIsHumanizing(true);
+    try {
+      // Use passed detection results or current state
+      const resultsToUse = detectionResults || aiDetectionResults;
+      const detectedPhrases = resultsToUse?.topPhrases?.map((p: any) => p.phrase) || [];
+      
+      console.log('🤖 Auto-humanizing content...', {
+        textLength: contentToHumanize.length,
+        detectedPhrasesCount: detectedPhrases.length
+      });
+
+      // Store original content for comparison
+      if (!originalContent) {
+        setOriginalContent(contentToHumanize);
+      }
+
+      // Try using supabase.functions.invoke first
+      let humanizedData: any = null;
+      let humanizeError: any = null;
+
+      try {
+        console.log('🔄 Attempting to call make-it-human via supabase.functions.invoke...');
+        const invokeResult = await supabase.functions.invoke('make-it-human', {
+          body: {
+            text: contentToHumanize,
+            detectedPhrases: detectedPhrases,
+            passes: 5,
+            language: language || 'en'
+          }
+        });
+        humanizedData = invokeResult.data;
+        humanizeError = invokeResult.error;
+        console.log('📥 Invoke result:', { hasData: !!humanizedData, hasError: !!humanizeError });
+      } catch (invokeErr: any) {
+        console.warn('⚠️ supabase.functions.invoke failed, trying direct fetch:', invokeErr);
+        
+        // Fallback: Use direct fetch to Edge Function
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+        
+        if (!supabaseUrl || !supabaseAnonKey) {
+          throw new Error('Supabase configuration missing. Check environment variables.');
+        }
+        
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/make-it-human`;
+        console.log('🔄 Attempting direct fetch to Edge Function:', edgeFunctionUrl.replace(supabaseAnonKey, 'KEY_HIDDEN'));
+        
+        const fetchResponse = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            text: contentToHumanize,
+            detectedPhrases: detectedPhrases,
+            passes: 5,
+            language: language || 'en'
+          })
+        });
+        
+        console.log('📥 Fetch response status:', fetchResponse.status, fetchResponse.statusText);
+        
+        if (!fetchResponse.ok) {
+          const errorText = await fetchResponse.text();
+          console.error('❌ Fetch error response:', errorText);
+          throw new Error(`Edge Function returned ${fetchResponse.status}: ${errorText.substring(0, 200)}`);
+        }
+        
+        humanizedData = await fetchResponse.json();
+        console.log('✅ Fetch successful, got humanized data');
+      }
+
+      if (humanizeError) {
+        console.error('❌ Humanization error:', humanizeError);
+        toast.error(`Humanization failed: ${humanizeError.message || JSON.stringify(humanizeError)}`);
+      } else if (humanizedData && humanizedData.humanVersion) {
+        console.log('✅ Auto-humanization successful:', {
+          originalLength: humanizedData.length?.original,
+          humanizedLength: humanizedData.length?.humanized,
+          phrasesRemoved: humanizedData.detectedPhrasesRemoved
+        });
+        
+        setHumanizedContent(humanizedData.humanVersion);
+        toast.success(`Content auto-generated! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
+        
+        // Automatically show comparison modal
+        setShowComparisonModal(true);
+      } else {
+        console.warn('⚠️ Humanization returned no data');
+        toast.error('Humanization returned no data');
+      }
+    } catch (err: any) {
+      console.error('❌ Error calling humanization:', err);
+      toast.error(`Humanization error: ${err?.message || 'Unknown error'}. Check console for details.`);
+    } finally {
+      setIsHumanizing(false);
+    }
+  };
+
+  // Make It Human Function (manual trigger - should not run if already auto-humanized)
+  const handleMakeItHuman = async () => {
+    if (!generatedContent) {
+      toast.error('No content to humanize');
+      return;
+    }
+
+    // Don't run again if already humanized
+    if (humanizedContent || isHumanizing) {
+      toast('Content is already being processed or has been generated');
+      if (humanizedContent && !showComparisonModal) {
+        setShowComparisonModal(true);
+      }
+      return;
+    }
+
+    setIsHumanizing(true);
+    try {
+      // Extract detected phrases for the Edge Function
+      const detectedPhrases = aiDetectionResults?.topPhrases?.map((p: any) => p.phrase) || [];
+      
+      console.log('🤖 Starting humanization...', {
+        textLength: generatedContent.length,
+        detectedPhrasesCount: detectedPhrases.length
+      });
+
+      // Store original content for comparison if not already stored
+      if (!originalContent) {
+        setOriginalContent(generatedContent);
+      }
+
+      // Try using supabase.functions.invoke first
+      let humanizedData: any = null;
+      let humanizeError: any = null;
+
+      try {
+        console.log('🔄 Attempting to call make-it-human via supabase.functions.invoke...');
+        const invokeResult = await supabase.functions.invoke('make-it-human', {
+          body: {
+            text: generatedContent,
+            detectedPhrases: detectedPhrases,
+            passes: 5,
+            language: language || 'en'
+          }
+        });
+        humanizedData = invokeResult.data;
+        humanizeError = invokeResult.error;
+        console.log('📥 Invoke result:', { hasData: !!humanizedData, hasError: !!humanizeError });
+      } catch (invokeErr: any) {
+        console.warn('⚠️ supabase.functions.invoke failed, trying direct fetch:', invokeErr);
+        
+        // Fallback: Use direct fetch to Edge Function
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+        
+        if (!supabaseUrl || !supabaseAnonKey) {
+          throw new Error('Supabase configuration missing. Check environment variables.');
+        }
+        
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/make-it-human`;
+        console.log('🔄 Attempting direct fetch to Edge Function:', edgeFunctionUrl.replace(supabaseAnonKey, 'KEY_HIDDEN'));
+        
+        const fetchResponse = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            text: generatedContent,
+            detectedPhrases: detectedPhrases,
+            passes: 5,
+            language: language || 'en'
+          })
+        });
+        
+        console.log('📥 Fetch response status:', fetchResponse.status, fetchResponse.statusText);
+        
+        if (!fetchResponse.ok) {
+          const errorText = await fetchResponse.text();
+          console.error('❌ Fetch error response:', errorText);
+          throw new Error(`Edge Function returned ${fetchResponse.status}: ${errorText.substring(0, 200)}`);
+        }
+        
+        humanizedData = await fetchResponse.json();
+        console.log('✅ Fetch successful, got humanized data');
+      }
+
+      if (humanizeError) {
+        console.error('❌ Humanization error:', humanizeError);
+        toast.error(`Humanization failed: ${humanizeError.message || JSON.stringify(humanizeError)}`);
+      } else if (humanizedData && humanizedData.humanVersion) {
+        console.log('✅ Humanization successful:', {
+          originalLength: humanizedData.length?.original,
+          humanizedLength: humanizedData.length?.humanized,
+          phrasesRemoved: humanizedData.detectedPhrasesRemoved
+        });
+        
+        setHumanizedContent(humanizedData.humanVersion);
+        toast.success(`Content generated! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
+        
+        // Show comparison modal instead of directly updating
+        setShowComparisonModal(true);
+      } else {
+        console.warn('⚠️ Humanization returned no data');
+        toast.error('Humanization returned no data');
+      }
+    } catch (err: any) {
+      console.error('❌ Error calling humanization:', err);
+      toast.error(`Humanization error: ${err?.message || 'Unknown error'}. Check console for details.`);
+    } finally {
+      setIsHumanizing(false);
+    }
   };
 
 
@@ -230,7 +724,7 @@ export default function ContentGeneratorPage() {
             <div>
               <h1 className="text-3xl font-bold text-gray-900">AI Content Generator</h1>
               <p className="text-gray-600">
-                Create humanized content that bypasses AI detectors
+                Create generated content that bypasses AI detectors
               </p>
             </div>
           </div>
@@ -273,7 +767,7 @@ export default function ContentGeneratorPage() {
               <h3 className="text-lg font-semibold text-gray-900">3. Content Generation</h3>
             </div>
             <p className="text-sm text-gray-600">
-              Generate humanized, AI-detector-proof content
+              Generate AI-detector-proof content
             </p>
           </Card>
         </div>
@@ -349,20 +843,6 @@ export default function ContentGeneratorPage() {
                       </button>
                     ))}
                   </div>
-                </div>
-
-                {/* Brand Mention (Optional) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Brand/Product to Mention (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={userBrand}
-                    onChange={(e) => setUserBrand(e.target.value)}
-                    placeholder="e.g., TubeBuddy, VidIQ"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
                 </div>
 
                 {/* Brand Voice Profile Selection */}
@@ -517,7 +997,7 @@ export default function ContentGeneratorPage() {
                   ) : (
                     <>
                       <Sparkles className="w-5 h-5 mr-2" />
-                      Generate Humanized Content
+                      Generate Content
                     </>
                   )}
                 </Button>
@@ -585,10 +1065,24 @@ export default function ContentGeneratorPage() {
                   <h2 className="text-xl font-bold text-gray-900">Generated Content</h2>
                 </div>
                 {generatedContent && (
-                  <div className="flex items-center gap-2 text-xs text-gray-600">
-                    <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full font-medium">
-                      AI Detector-Proof
-                    </span>
+                  <div className="flex items-center gap-2">
+                    {isDetectingAI && (
+                      <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-medium text-xs flex items-center gap-1">
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        Detecting AI...
+                      </span>
+                    )}
+                    {aiDetectionResults && !isDetectingAI && (
+                      <span className={`px-2 py-1 rounded-full font-medium text-xs ${
+                        aiDetectionResults.aiPercentage > 50 
+                          ? 'bg-red-100 text-red-700'
+                          : aiDetectionResults.aiPercentage > 20
+                          ? 'bg-yellow-100 text-yellow-700'
+                          : 'bg-green-100 text-green-700'
+                      }`}>
+                        {aiDetectionResults.aiPercentage}% AI Detected
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -611,7 +1105,7 @@ export default function ContentGeneratorPage() {
                     <Sparkles className="w-8 h-8 text-primary-600 animate-spin" />
                   </div>
                   <p className="text-gray-900 font-semibold mb-2">
-                    Generating humanized content...
+                    Generating content...
                   </p>
                   <p className="text-sm text-gray-600">
                     Using GPT-4 Turbo with advanced humanization
@@ -627,13 +1121,7 @@ export default function ContentGeneratorPage() {
                 >
                   {/* Metadata */}
                   {contentMetadata && (
-                    <div className="grid grid-cols-3 gap-2 text-xs mb-4">
-                      <div className="bg-green-50 rounded-lg p-3 text-center">
-                        <div className="font-semibold text-green-900">
-                          {contentMetadata.neutralityScore}%
-                        </div>
-                        <div className="text-green-700">Neutrality</div>
-                      </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs mb-4">
                       <div className="bg-blue-50 rounded-lg p-3 text-center">
                         <div className="font-semibold text-blue-900 capitalize">
                           {contentMetadata.tone}
@@ -665,7 +1153,40 @@ export default function ContentGeneratorPage() {
                       </button>
                     </div>
                     <div className="bg-gray-50 rounded-lg p-6 border border-gray-200 whitespace-pre-wrap text-gray-800 leading-relaxed">
-                      {generatedContent}
+                      {/* Show highlighted HTML if available (same as missed prompts page), otherwise plain text */}
+                      {aiDetectionResults?.highlightedHtml ? (
+                        <div 
+                          className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap"
+                          dangerouslySetInnerHTML={{ __html: aiDetectionResults.highlightedHtml }} 
+                        />
+                      ) : (
+                        <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
+                          {generatedContent}
+                        </div>
+                      )}
+                      {/* CSS for AI detection highlights - always included when AI detection section is visible */}
+                      {(isDetectingAI || aiDetectionResults) && (
+                        <style jsx>{`
+                          :global(.gltr-red) {
+                            background-color: #fee2e2;
+                            padding: 2px 4px;
+                            border-radius: 3px;
+                            cursor: help;
+                          }
+                          :global(.gltr-yellow) {
+                            background-color: #fef3c7;
+                            padding: 2px 4px;
+                            border-radius: 3px;
+                            cursor: help;
+                          }
+                          :global(.gltr-green) {
+                            background-color: #d1fae5;
+                            padding: 2px 4px;
+                            border-radius: 3px;
+                            cursor: help;
+                          }
+                        `}</style>
+                      )}
                     </div>
                   </div>
 
@@ -688,6 +1209,142 @@ export default function ContentGeneratorPage() {
                     </div>
                   </div>
 
+                  {/* AI Detection Results - Displayed below the content */}
+                  {(isDetectingAI || aiDetectionResults) && generatedContent && (
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-6">
+                      <div className="px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                              {isDetectingAI ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                  Analyzing AI Content...
+                                </>
+                              ) : aiDetectionResults ? (
+                                <>
+                                  <MessageSquare className="w-4 h-4 text-blue-600" />
+                                  AI Content Analysis
+                                </>
+                              ) : (
+                                <>
+                                  <MessageSquare className="w-4 h-4 text-gray-400" />
+                                  AI Detection
+                                </>
+                              )}
+                            </h3>
+                            {aiDetectionResults && (
+                              <p className="text-xs text-gray-600 mt-0.5">{aiDetectionResults.summary}</p>
+                            )}
+                          </div>
+                          {aiDetectionResults && (
+                            <div className="flex items-center gap-2">
+                              <div className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                                aiDetectionResults.aiPercentage >= 70 
+                                  ? 'bg-red-100 text-red-700' 
+                                  : aiDetectionResults.aiPercentage >= 40
+                                  ? 'bg-yellow-100 text-yellow-700'
+                                  : 'bg-green-100 text-green-700'
+                              }`}>
+                                {aiDetectionResults.aiPercentage}% AI
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {aiDetectionResults && (
+                        <div className="p-4 space-y-4">
+                          {/* Metrics Summary */}
+                          {aiDetectionResults.metrics && (
+                            <div className="grid grid-cols-3 gap-4 text-sm">
+                              <div className="text-center p-2 bg-gray-50 rounded-lg">
+                                <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.burstiness?.toFixed(1) || 'N/A'}</div>
+                                <div className="text-xs text-gray-600">Burstiness</div>
+                              </div>
+                              <div className="text-center p-2 bg-gray-50 rounded-lg">
+                                <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.clichés || 0}</div>
+                                <div className="text-xs text-gray-600">Clichés</div>
+                              </div>
+                              <div className="text-center p-2 bg-gray-50 rounded-lg">
+                                <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.avgSentenceLength || 0}</div>
+                                <div className="text-xs text-gray-600">Avg Sentence</div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Top Detected Phrases */}
+                          {aiDetectionResults.topPhrases && aiDetectionResults.topPhrases.length > 0 && (
+                            <div>
+                              <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                                Detected AI Phrases ({aiDetectionResults.topPhrases.length})
+                              </h4>
+                              <div className="space-y-2 max-h-48 overflow-y-auto">
+                                {aiDetectionResults.topPhrases.slice(0, 10).map((phrase: any, idx: number) => (
+                                  <div 
+                                    key={idx} 
+                                    className="p-2 bg-gray-50 rounded border border-gray-200 text-sm"
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <span className="text-gray-700 flex-1">"{phrase.phrase}"</span>
+                                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                        phrase.confidence >= 90 
+                                          ? 'bg-red-100 text-red-700' 
+                                          : phrase.confidence >= 75
+                                          ? 'bg-yellow-100 text-yellow-700'
+                                          : 'bg-green-100 text-green-700'
+                                      }`}>
+                                        {phrase.confidence}%
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 mt-1">{phrase.reason}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Legend for Highlighted Text */}
+                          <div className="flex items-center gap-4 text-xs text-gray-600 pt-2 border-t border-gray-200">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 bg-red-200 rounded"></span>
+                              <span>High AI (90%+)</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 bg-yellow-200 rounded"></span>
+                              <span>Medium AI (75-89%)</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 bg-green-200 rounded"></span>
+                              <span>Low AI (60-74%)</span>
+                            </div>
+                          </div>
+
+                          {/* Make it Human Button */}
+                          <div className="pt-4 border-t border-gray-200 mt-4">
+                            <button
+                              onClick={handleMakeItHuman}
+                              disabled={isHumanizing}
+                              className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {isHumanizing ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  Humanizing Content...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-4 h-4" />
+                                  Make it Human
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Arrow to Publication Page */}
                   <motion.div
                     initial={{ opacity: 0, x: -20 }}
@@ -695,26 +1352,36 @@ export default function ContentGeneratorPage() {
                     transition={{ delay: 0.3 }}
                     className="mt-6"
                   >
-                    <Link href="/dashboard/content">
-                      <div className="bg-gradient-to-r from-primary-500 to-accent-500 rounded-lg p-4 border border-primary-300 hover:shadow-lg transition-all cursor-pointer group">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                    <button
+                      onClick={handleReadyToPublish}
+                      disabled={!generatedContent || isCreatingSchema}
+                      className="w-full bg-gradient-to-r from-primary-500 to-accent-500 rounded-lg p-4 border border-primary-300 hover:shadow-lg transition-all cursor-pointer group disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                            {isCreatingSchema ? (
+                              <Loader2 className="w-5 h-5 text-white animate-spin" />
+                            ) : (
                               <Send className="w-5 h-5 text-white" />
-                            </div>
-                            <div>
-                              <h4 className="font-semibold text-white text-sm mb-0.5">
-                                Ready to Publish?
-                              </h4>
-                              <p className="text-xs text-white/90">
-                                Go to Publication page to review and publish your content
-                              </p>
-                            </div>
+                            )}
                           </div>
-                          <ArrowRight className="w-6 h-6 text-white group-hover:translate-x-1 transition-transform" />
+                          <div>
+                            <h4 className="font-semibold text-white text-sm mb-0.5">
+                              {isCreatingSchema ? "Generating Schema..." : "Ready to Publish?"}
+                            </h4>
+                            <p className="text-xs text-white/90">
+                              {isCreatingSchema 
+                                ? "Creating schema for publication..." 
+                                : "Go to Publication page to review and publish your content"}
+                            </p>
+                          </div>
                         </div>
+                        {!isCreatingSchema && (
+                          <ArrowRight className="w-6 h-6 text-white group-hover:translate-x-1 transition-transform" />
+                        )}
                       </div>
-                    </Link>
+                    </button>
                   </motion.div>
                 </motion.div>
               )}
@@ -723,6 +1390,90 @@ export default function ContentGeneratorPage() {
         </div>
 
       </div>
+
+      {/* Comparison Modal: Original vs Humanized */}
+      {showComparisonModal && originalContent && humanizedContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
+                  <Sparkles className="w-5 h-5 text-purple-600" />
+                  Comparison: Original vs Generated
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Review both versions side-by-side and choose which one to use
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowComparisonModal(false);
+                }}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <div className="grid grid-cols-2 gap-0 border-t border-gray-200 flex-1 overflow-hidden">
+                {/* Original Version */}
+                <div className="border-r border-gray-200 flex flex-col overflow-hidden">
+                  <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-gray-900">Original Version</h4>
+                      <span className="text-xs text-gray-500 px-2 py-1 bg-gray-200 rounded">
+                        {originalAiPercentage !== null ? originalAiPercentage : (aiDetectionResults?.aiPercentage || 0)}% AI
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-4 overflow-y-auto flex-1">
+                    <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
+                      {originalContent}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Humanized Version */}
+                <div className="flex flex-col overflow-hidden">
+                  <div className="px-4 py-3 bg-green-50 border-b border-gray-200 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                        Generated Version
+                        <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-medium">
+                          New
+                        </span>
+                      </h4>
+                    </div>
+                  </div>
+                  <div className="p-4 overflow-y-auto flex-1">
+                    <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap">
+                      {humanizedContent}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-end gap-3 flex-shrink-0">
+                <button
+                  onClick={handleRevertToOriginal}
+                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                >
+                  Use Original
+                </button>
+                <button
+                  onClick={handleUseHumanized}
+                  className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center gap-2 text-sm font-medium"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Use Humanized
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

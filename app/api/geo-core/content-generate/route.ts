@@ -242,7 +242,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Generate SEO schema (JSON-LD structured data) for the content - AUTOMATIC
+    // ========================================
+    // SEO SCHEMA GENERATION - ENABLED
+    // ========================================
     let schemaJson: any[] = [];
     let schemaScriptTags = "";
     
@@ -306,25 +308,39 @@ export async function POST(request: NextRequest) {
       },
     };
     
-    const { data, error } = await supabase
-      .from("content_strategy")
-      .insert({
-        user_id: session.user.id,
-        topic,
-        target_keywords: targetKeywords,
-        target_platform: normalizedPlatform, // Use normalized value
-        brand_mention: brandMention,
-        influence_level: influenceLevel || "subtle",
-        generated_content: result.content, // Keep original content natural (structured elements in schema only)
-        neutrality_score: result.neutralityScore,
-        tone: result.tone,
-        word_count: result.wordCount, // Use original content word count
-        ai_model: "gpt-4-turbo",
-        metadata: contentMetadata, // Include imageUrl, schema (with structured elements), and structured SEO in metadata
-        status: "draft",
-      })
-      .select()
-      .single();
+    // Skip database insertion if skipGeneration is true (schema-only generation)
+    // This prevents duplicate entries when generating schema for already-created content
+    let data: any = null;
+    let error: any = null;
+    
+    if (!skipGeneration) {
+      // Only insert into database if this is a new content generation
+      const insertResult = await supabase
+        .from("content_strategy")
+        .insert({
+          user_id: session.user.id,
+          topic,
+          target_keywords: targetKeywords,
+          target_platform: normalizedPlatform, // Use normalized value
+          brand_mention: brandMention,
+          influence_level: influenceLevel || "subtle",
+          generated_content: result.content, // Keep original content natural (structured elements in schema only)
+          neutrality_score: result.neutralityScore,
+          tone: result.tone,
+          word_count: result.wordCount, // Use original content word count
+          ai_model: "gpt-4-turbo",
+          metadata: contentMetadata, // Include imageUrl, schema (with structured elements), and structured SEO in metadata
+          status: "draft",
+        })
+        .select()
+        .single();
+      
+      data = insertResult.data;
+      error = insertResult.error;
+    } else {
+      // For skipGeneration mode, we're just generating schema, so don't create a new DB entry
+      console.log("⏭️ Skip generation mode: Returning schema without creating database entry");
+    }
 
     // Handle database errors - but don't fail the entire request if content was generated
     if (error) {
@@ -337,27 +353,31 @@ export async function POST(request: NextRequest) {
         originalPlatform: targetPlatform
       });
       
-      // Generate schema even if database save fails - AUTOMATIC
-      let schemaJson: any[] = [];
-      let schemaScriptTags = "";
-      
-      try {
-        const keywordsArray = Array.isArray(targetKeywords) ? targetKeywords : targetKeywords.split(",").map((k: string) => k.trim()).filter(Boolean);
-        const generatedSchemas = generatePlatformSchema({
-          content: result.content,
-          title: topic,
-          topic,
-          keywords: keywordsArray,
-          platform: normalizedPlatform,
-          imageUrl: imageUrl || undefined,
-          brandName: brandMention || brandVoiceProfile?.brand_name || undefined,
-          publishedDate: new Date().toISOString(),
-          description: result.content.substring(0, 160),
-        }, normalizedPlatform);
-        schemaScriptTags = schemaToScriptTag(generatedSchemas);
-        schemaJson = Array.isArray(generatedSchemas) ? generatedSchemas : [generatedSchemas];
-      } catch (schemaError: any) {
-        console.error("❌ Schema generation error (non-fatal):", schemaError);
+      // ========================================
+      // SEO SCHEMA GENERATION - ENABLED (fallback for DB error case)
+      // ========================================
+      // Re-generate schema in case it wasn't generated earlier (shouldn't happen, but safe fallback)
+      if (schemaJson.length === 0) {
+        try {
+          const keywordsArray = Array.isArray(targetKeywords) ? targetKeywords : targetKeywords.split(",").map((k: string) => k.trim()).filter(Boolean);
+          const generatedSchemas = generatePlatformSchema({
+            content: result.content,
+            title: topic,
+            topic,
+            keywords: keywordsArray,
+            platform: normalizedPlatform,
+            imageUrl: imageUrl || undefined,
+            brandName: brandMention || brandVoiceProfile?.brand_name || undefined,
+            publishedDate: new Date().toISOString(),
+            description: metaDescription || result.content.substring(0, 160),
+            faqPairs: faqs.length > 0 ? faqs : undefined,
+            headings: headings.length > 0 ? headings : undefined,
+          }, normalizedPlatform);
+          schemaScriptTags = schemaToScriptTag(generatedSchemas);
+          schemaJson = Array.isArray(generatedSchemas) ? generatedSchemas : [generatedSchemas];
+        } catch (schemaError: any) {
+          console.error("❌ Schema generation error (non-fatal):", schemaError);
+        }
       }
 
       // If it's a constraint violation, return the content but warn about the database save
@@ -452,7 +472,8 @@ export async function POST(request: NextRequest) {
           jsonLd: schemaJson, // Schema includes headings and FAQs
           scriptTags: schemaScriptTags,
         },
-        contentId: data?.id,
+        contentId: data?.id || null, // Return contentId only if a new entry was created
+        skipGeneration: skipGeneration || false, // Indicate if this was schema-only generation
       },
       { status: 200 }
     );

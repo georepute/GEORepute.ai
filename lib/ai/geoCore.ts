@@ -299,7 +299,7 @@ export async function generateStrategicContent(
     medium: "reflective, narrative-driven, insightful, well-paced",
     github: "technical, plain-spoken, documentation-style but personal",
     linkedin: "professional yet human, conversational, thoughtful",
-    twitter: "short, witty, spontaneous, a bit emotional, emoji-friendly",
+    twitter: "short, witty, spontaneous, a bit emotional",
     facebook: "casual, personal, community-focused, friendly",
     instagram: "visual storytelling, authentic, trendy, personal",
   };
@@ -448,7 +448,7 @@ ${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authori
 - NO "lol", "lmao", "bruh", "omg", "wtf", "smh" - too casual for your brand
 - Personal experience: "In my experience", "I've observed", "What I've found"
 - Measured language, avoid excessive exclamation marks
-- Emojis: ${input.brandVoice.emoji_style} style only
+- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
 ` : input.brandVoice.tone === 'formal' ? `
 - Sophisticated expressions: "Remarkable", "Noteworthy", "Compelling"
 - NO casual slang whatsoever ("lol", "bruh", etc.)
@@ -459,7 +459,7 @@ ${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authori
 - Witty reactions: Clever observations, playful language
 - Can use "lol" IF it enhances the humor
 - Fun exclamations appropriate for comedy
-- Emojis: ${input.brandVoice.emoji_style} - can be playful
+- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
 - Keep it funny but authentic to your brand
 ` : input.brandVoice.tone === 'casual' || input.brandVoice.tone === 'friendly' ? `
 - Natural reactions: "honestly", "I mean", "you know"
@@ -503,40 +503,43 @@ ${input.targetPlatform === 'reddit' ? `- Reddit style: ${input.brandVoice ? "For
 - Include Reddit-isms: "this", "that", "honestly", "I mean", lots of "lol" and "haha"
 - Paragraph breaks are common, sometimes one-liners
 - Use markdown sparingly (bold for emphasis, not structure)
+- Casual, conversational, story-like, community-focused, first-person, real-talk
 ${input.brandVoice ? `- IGNORE "casual" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
-${input.targetPlatform === 'quora' ? `- Quora style: ${input.brandVoice ? "Format only - " : ""}Thoughtful but conversational, personal experience heavy
+${input.targetPlatform === 'quora' ? `- Quora style: ${input.brandVoice ? "Format only - " : ""}Authentic, experience-based, helpful, calm and articulate
 - Use "I've found that...", "In my experience...", "What I noticed is..."
-- Longer paragraphs, but still casual
+- Longer paragraphs, but still conversational
 - Ask rhetorical questions: "Right?", "You know?", "Makes sense?"
+- Thoughtful but authentic, personal experience heavy
 ${input.brandVoice ? `- IGNORE "thoughtful conversational" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
-${input.targetPlatform === 'medium' ? `- Medium style: ${input.brandVoice ? "Format only - " : ""}Reflective, narrative-driven, but still human
+${input.targetPlatform === 'medium' ? `- Medium style: ${input.brandVoice ? "Format only - " : ""}Reflective, narrative-driven, insightful, well-paced
 - Personal voice: "I've been thinking about...", "It struck me that..."
 - Mix of short and long paragraphs
 - Use dashes and ellipses for pauses
+- Thoughtful and well-structured but still human
 ${input.brandVoice ? `- IGNORE "reflective" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
-${input.targetPlatform === 'github' ? `- GitHub style: ${input.brandVoice ? "Format only - " : ""}Technical but personal, documentation-like
+${input.targetPlatform === 'github' ? `- GitHub style: ${input.brandVoice ? "Format only - " : ""}Technical, plain-spoken, documentation-style but personal
 - Use "I've been working with...", "In my setup...", "YMMV"
 - Code references feel natural, not forced
-- Casual technical talk
+- Casual technical talk, straightforward and clear
 ${input.brandVoice ? `- IGNORE "technical personal" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
-${input.targetPlatform === 'linkedin' ? `- LinkedIn style: ${input.brandVoice ? "Format only - " : ""}Professional but human, conversational
+${input.targetPlatform === 'linkedin' ? `- LinkedIn style: ${input.brandVoice ? "Format only - " : ""}Professional yet human, conversational, thoughtful
 - Use "I've noticed...", "In my experience...", "Something I learned..."
-- Still casual, but slightly more polished
+- Professional but approachable, slightly more polished
 - Personal insights, not corporate speak
-${input.brandVoice ? `- IGNORE "professional" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
-${input.targetPlatform === 'facebook' ? `- Facebook style: ${input.brandVoice ? "Format only - " : ""}Casual, personal, community-focused
+- ⚠️ CRITICAL: NO EMOJIS ALLOWED - Content should be emoji-free (only applies when no brand voice is selected)
+- Focus on value-driven content with professional tone
+${input.brandVoice ? `- IGNORE "professional" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone, but still NO EMOJIS even if brand voice allows emojis` : ""}` : ''}
+${input.targetPlatform === 'facebook' ? `- Facebook style: ${input.brandVoice ? "Format only - " : ""}Casual, personal, community-focused, friendly
 - Use "I've been thinking...", "Just wanted to share...", "Has anyone else noticed..."
 - Mix of personal stories and observations
-- Emojis are common: 😊 👍 💬
-- Conversational and engaging
+- Conversational and engaging, community-driven
 ${input.brandVoice ? `- IGNORE "casual" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
-${input.targetPlatform === 'instagram' ? `- Instagram style: ${input.brandVoice ? "Format only - " : ""}Visual storytelling, authentic and personal
+${input.targetPlatform === 'instagram' ? `- Instagram style: ${input.brandVoice ? "Format only - " : ""}Visual storytelling, authentic, trendy, personal
 - Use "So I've been...", "Okay but...", "Can we talk about..."
 - Short paragraphs, lots of line breaks
-- Emojis everywhere: 📸 ✨ 💕 🔥 👀
 - Very casual, trendy language, hashtags feel natural
 - Personal stories and behind-the-scenes content
-${input.brandVoice ? `- IGNORE "casual trendy" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone and ${input.brandVoice.emoji_style} emoji style` : ""}` : ''}
+${input.brandVoice ? `- IGNORE "casual trendy" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
 ${input.targetPlatform === 'twitter' ? `- Twitter style: ${input.brandVoice ? "Format only - " : ""}Short, punchy, emotional, emoji-friendly
 - Very casual, lots of abbreviations
 - Emojis feel natural: 😅 🤷 💭 🔥 📈
@@ -646,11 +649,31 @@ ${input.brandVoice ? `
 ✅ Personality traits (${input.brandVoice.personality_traits?.join(", ") || "authentic"}) are evident
 ✅ Preferred words used naturally: ${input.brandVoice.preferred_words?.join(", ") || "none specified"}
 ✅ Avoided words NOT present: ${input.brandVoice.avoid_words?.join(", ") || "none specified"}
-✅ Emoji style is ${input.brandVoice.emoji_style}
+${input.brandVoice ? `✅ Emoji style is ${input.brandVoice.emoji_style}` : `✅ NO EMOJIS - Generic content should be emoji-free`}
 ${input.brandVoice.signature_phrases && input.brandVoice.signature_phrases.length > 0 ? `✅ Signature phrase used naturally (if relevant): "${input.brandVoice.signature_phrases[0]}"` : ""}
 
+PLATFORM-SPECIFIC REQUIREMENTS:
+${input.brandVoice ? '' : `🚨 CRITICAL: NO brand voice selected - Remove ALL emojis from the final content`}
+${input.brandVoice && !input.brandVoice.use_emojis ? `🚨 CRITICAL: Brand voice disallows emojis - Remove ALL emojis from the final content` : ''}
+${input.targetPlatform === 'facebook' ? `✅ Facebook style: Casual, personal, community-focused` : ''}
+${input.targetPlatform === 'instagram' ? `✅ Instagram style: Visual storytelling, trendy, personal` : ''}
+${input.targetPlatform === 'reddit' ? `✅ Reddit style: Casual, conversational, story-like, community-focused` : ''}
+${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate` : ''}
+${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced` : ''}
+${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal` : ''}
+
 HUMANIZATION REQUIREMENTS:
-` : ""}✅ At least 8-12 thinking markers ("like", "I mean", "you know", "wait", "actually")
+` : `
+PLATFORM-SPECIFIC REQUIREMENTS:
+${input.brandVoice ? '' : `🚨 CRITICAL: NO brand voice selected - Remove ALL emojis from the final content`}
+${input.brandVoice && !input.brandVoice.use_emojis ? `🚨 CRITICAL: Brand voice disallows emojis - Remove ALL emojis from the final content` : ''}
+${input.targetPlatform === 'facebook' ? `✅ Facebook style: Casual, personal, community-focused` : ''}
+${input.targetPlatform === 'instagram' ? `✅ Instagram style: Visual storytelling, trendy, personal` : ''}
+${input.targetPlatform === 'reddit' ? `✅ Reddit style: Casual, conversational, story-like, community-focused` : ''}
+${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate` : ''}
+${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced` : ''}
+${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal` : ''}
+`}✅ At least 8-12 thinking markers ("like", "I mean", "you know", "wait", "actually")
 ✅ Sentence lengths vary: 1-2 word fragments AND 35-45 word run-ons
 ✅ At least 3-5 natural typos or grammar mistakes
 ✅ At least 2-3 tangents or random associations
@@ -683,12 +706,14 @@ WHO YOU ARE (YOUR IDENTITY - NEVER CHANGES):
 WHERE YOU'RE POSTING (FORMAT ONLY):
 ═══════════════════════════════════════════════════════════════════
 📍 Platform: ${input.targetPlatform} (this ONLY affects length/structure, NOT your personality)
+${input.brandVoice.use_emojis ? `✅ Emoji style: ${input.brandVoice.emoji_style} - Use emojis naturally according to your brand voice` : `⚠️ PLATFORM RULE: NO EMOJIS. Brand voice disallows emojis - Remove ALL emojis from content.`}
 
 🚨 CRITICAL: Write as ${input.brandVoice.brand_name} posting on ${input.targetPlatform}.
 NOT as a generic ${input.targetPlatform} user!
 
-Your ${input.brandVoice.tone} tone and ${input.brandVoice.personality_traits?.join("/") || "authentic"} personality 
+Your ${input.brandVoice.tone} tone and ${input.brandVoice.personality_traits?.join("/") || "authentic"} personality
 must be present in EVERY sentence, regardless of platform.
+${input.brandVoice.use_emojis ? `✅ Use emojis in ${input.brandVoice.emoji_style} style as specified by your brand voice` : `⚠️ REMEMBER: Brand voice disallows emojis - content must be completely emoji-free.`}
 
 ${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authoritative' || input.brandVoice.tone === 'formal' ? `
 ⚠️ PROFESSIONAL BRAND VOICE RULES:
@@ -754,7 +779,7 @@ MANDATORY WRITING STYLE (TONE-APPROPRIATE):
 - Consistent capitalization (proper "I", not "i")
 - NO casual slang: NO "gonna", "wanna", "imma", "tryna", "ain't", "me and him"
 - Maintain ${tone} tone throughout - this is your brand identity
-- Emoji style: ${input.brandVoice.emoji_style || 'minimal'}
+- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
 - Preferred words: ${input.brandVoice.preferred_words?.join(", ") || "none"}
 - NEVER use: ${input.brandVoice.avoid_words?.join(", ") || "none"}
 
@@ -851,11 +876,27 @@ Respond ONLY in JSON with "content" field containing the messy, human-written te
       result = { content: raw };
     }
 
+    // Remove emojis from all platforms ONLY when no brand voice is selected
+    // If brand voice is selected, respect its emoji settings
+    let finalContent = result.content || "";
+    if (!input.brandVoice) {
+      // Remove all emojis using regex pattern (only for generic content without brand voice)
+      finalContent = finalContent.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{24C2}-\u{1F251}]|[\u{1F004}-\u{1F0CF}]|[\u{1F170}-\u{1F251}]/gu, '');
+      // Also remove common emoji patterns
+      finalContent = finalContent.replace(/<[^>]*>/g, ''); // Remove HTML-like emoji codes
+      console.log(`🔧 Removed emojis from ${input.targetPlatform} content (no brand voice)`);
+    } else if (!input.brandVoice.use_emojis) {
+      // Brand voice explicitly disallows emojis
+      finalContent = finalContent.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{1F900}-\u{1F9FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]|[\u{24C2}-\u{1F251}]|[\u{1F004}-\u{1F0CF}]|[\u{1F170}-\u{1F251}]/gu, '');
+      finalContent = finalContent.replace(/<[^>]*>/g, '');
+      console.log(`🔧 Removed emojis from ${input.targetPlatform} content (brand voice: ${input.brandVoice.brand_name} disallows emojis)`);
+    }
+
     return {
-      content: result.content || "",
+      content: finalContent,
       neutralityScore: result.neutralityScore || 90,
       tone: result.tone || "casual",
-      wordCount: (result.content || "").split(/\s+/).length,
+      wordCount: finalContent.split(/\s+/).length,
       platform: input.targetPlatform,
       metadata: {
         keywordsUsed: result.keywordsUsed || input.targetKeywords,

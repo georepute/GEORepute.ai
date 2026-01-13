@@ -97,15 +97,13 @@ export default function DashboardLayout({
   };
 
   const allNavigation: NavigationItem[] = [
-    { name: t.dashboard.sidebar.overview, href: "/dashboard", icon: LayoutDashboard },
-    { name: t.dashboard.sidebar.liveView, href: "/dashboard/live-view", icon: Activity, requiredCapability: "canViewAnalytics" },
+    { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
+    { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
     { name: t.dashboard.sidebar.contentGenerator, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
     { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
-    { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
     { name: t.dashboard.sidebar.keywords, href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
     { name: t.dashboard.sidebar.publication, href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
     { name: t.dashboard.sidebar.rankings, href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
-    { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
     // { name: t.dashboard.sidebar.reputation, href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
     // { name: t.dashboard.sidebar.leads, href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
     // { name: t.dashboard.sidebar.adSync, href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },

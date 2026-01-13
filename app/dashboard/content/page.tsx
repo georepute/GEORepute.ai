@@ -84,6 +84,8 @@ function ContentInner() {
   const [viewMode, setViewMode] = useState<'content' | 'schema' | 'image'>('content');
   const [refreshing, setRefreshing] = useState(false);
   const [publishingContentId, setPublishingContentId] = useState<string | null>(null);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [isDeletingMultiple, setIsDeletingMultiple] = useState(false);
   const [stats, setStats] = useState({
     total: 0,
     published: 0,
@@ -851,7 +853,18 @@ function ContentInner() {
       return;
     }
 
+    // Optimistically remove from UI immediately
+    const previousItems = contentItems;
+    setContentItems(prevItems => prevItems.filter(item => item.id !== contentId));
+    setSelectedItems(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(contentId);
+      return newSet;
+    });
+
     try {
+      console.log("🗑️ Deleting content:", contentId);
+
       const response = await fetch("/api/geo-core/orchestrator", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -861,16 +874,122 @@ function ContentInner() {
         }),
       });
 
+      const data = await response.json();
+      console.log("🗑️ Delete response:", { status: response.status, ok: response.ok, data });
+
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Delete failed");
+        // Restore the item if deletion failed
+        console.error("❌ Delete API error:", data);
+        setContentItems(previousItems);
+        throw new Error(data.error || "Delete failed");
       }
 
-      toast.success("Content deleted successfully");
-      loadContent();
+      if (data.success) {
+        console.log("✅ Delete successful, refreshing content list...");
+        toast.success("Content deleted successfully");
+        // Wait a moment for database to update, then refresh
+        await new Promise(resolve => setTimeout(resolve, 500));
+        // Refresh content list to ensure it's removed from server
+        await loadContent();
+      } else {
+        // Restore the item if deletion didn't succeed
+        console.error("❌ Delete did not succeed:", data);
+        setContentItems(previousItems);
+        throw new Error(data.message || data.error || "Delete failed");
+      }
     } catch (error: any) {
-      console.error("Delete error:", error);
+      console.error("❌ Delete error:", error);
+      // Restore the item on error
+      setContentItems(previousItems);
       toast.error(error.message || "Failed to delete content");
+    }
+  };
+
+  const handleSelectItem = (contentId: string) => {
+    setSelectedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(contentId)) {
+        newSet.delete(contentId);
+      } else {
+        newSet.add(contentId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedItems.size === contentItems.length) {
+      setSelectedItems(new Set());
+    } else {
+      setSelectedItems(new Set(contentItems.map(item => item.id)));
+    }
+  };
+
+  const handleDeleteMultiple = async () => {
+    if (selectedItems.size === 0) {
+      toast.error("Please select at least one content item to delete");
+      return;
+    }
+
+    const count = selectedItems.size;
+    if (!confirm(`Are you sure you want to delete ${count} content item(s)? This action cannot be undone.`)) {
+      return;
+    }
+
+    setIsDeletingMultiple(true);
+    const previousItems = contentItems;
+    const itemsToDelete = Array.from(selectedItems);
+
+    // Optimistically remove from UI immediately
+    setContentItems(prevItems => prevItems.filter(item => !selectedItems.has(item.id)));
+    setSelectedItems(new Set());
+
+    try {
+      console.log("🗑️ Deleting multiple content items:", itemsToDelete);
+
+      const response = await fetch("/api/geo-core/orchestrator", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "deleteMultiple",
+          contentIds: itemsToDelete,
+        }),
+      });
+
+      const data = await response.json();
+      console.log("🗑️ Batch delete response:", { status: response.status, ok: response.ok, data });
+
+      if (!response.ok) {
+        // Restore items if deletion failed
+        console.error("❌ Batch delete API error:", data);
+        setContentItems(previousItems);
+        setSelectedItems(new Set(itemsToDelete));
+        throw new Error(data.error || "Batch delete failed");
+      }
+
+      if (data.success) {
+        const deletedCount = data.deletedCount || 0;
+        console.log(`✅ Batch delete successful: ${deletedCount} items deleted`);
+        toast.success(`Successfully deleted ${deletedCount} content item(s)`);
+        // Wait a moment for database to update, then refresh
+        await new Promise(resolve => setTimeout(resolve, 500));
+        // Refresh content list to ensure items are removed from server
+        await loadContent();
+      } else {
+        // Restore items if deletion didn't succeed
+        console.error("❌ Batch delete did not succeed:", data);
+        setContentItems(previousItems);
+        setSelectedItems(new Set(itemsToDelete));
+        throw new Error(data.message || data.error || "Batch delete failed");
+      }
+    } catch (error: any) {
+      console.error("❌ Batch delete error:", error);
+      // Restore items on error
+      setContentItems(previousItems);
+      setSelectedItems(new Set(itemsToDelete));
+      toast.error(error.message || "Failed to delete content items");
+    } finally {
+      setIsDeletingMultiple(false);
     }
   };
 
@@ -1591,7 +1710,39 @@ function ContentInner() {
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
             />
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-center">
+            {contentItems.length > 0 && (
+              <>
+                <label className="flex items-center gap-2 cursor-pointer px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={selectedItems.size === contentItems.length && contentItems.length > 0}
+                    onChange={handleSelectAll}
+                    className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                  />
+                  <span className="text-sm font-medium">Select All ({selectedItems.size})</span>
+                </label>
+                {selectedItems.size > 0 && (
+                  <button
+                    onClick={handleDeleteMultiple}
+                    disabled={isDeletingMultiple}
+                    className="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isDeletingMultiple ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span className="hidden sm:inline">Deleting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-5 h-5" />
+                        <span className="hidden sm:inline">Delete Selected ({selectedItems.size})</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </>
+            )}
             <button className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700">
               <Filter className="w-5 h-5" />
               <span className="hidden sm:inline">Filter</span>
@@ -1649,6 +1800,22 @@ function ContentInner() {
                     {/* Prompt Header */}
                     <div className="bg-gradient-to-r from-gray-50 to-gray-100/50 p-4 border-b border-gray-200">
                       <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={items.every(item => selectedItems.has(item.id))}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              items.forEach(item => setSelectedItems(prev => new Set([...prev, item.id])));
+                            } else {
+                              items.forEach(item => setSelectedItems(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(item.id);
+                                return newSet;
+                              }));
+                            }
+                          }}
+                          className="mt-1 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                        />
                         <FileText className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
                         <div className="flex-1">
                           <h3 className="text-lg font-semibold text-gray-900">{firstItem.title}</h3>
@@ -1677,6 +1844,13 @@ function ContentInner() {
                         return (
                           <div key={item.id} className="p-4 hover:bg-gray-50/50 transition-colors">
                             <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+                              {/* Checkbox */}
+                              <input
+                                type="checkbox"
+                                checked={selectedItems.has(item.id)}
+                                onChange={() => handleSelectItem(item.id)}
+                                className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                              />
                               {/* Top 3 Keywords (replacing platform) */}
                               <div className="flex-1 flex flex-wrap items-center gap-2">
                                 {(() => {
@@ -1841,6 +2015,13 @@ function ContentInner() {
                 className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-all"
               >
                 <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+                  {/* Checkbox */}
+                  <input
+                    type="checkbox"
+                    checked={selectedItems.has(item.id)}
+                    onChange={() => handleSelectItem(item.id)}
+                    className="mt-1 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                  />
                   {/* Content Info - Left Side */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start gap-3 mb-2">
