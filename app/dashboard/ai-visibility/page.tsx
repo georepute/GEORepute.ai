@@ -202,22 +202,117 @@ export default function AIVisibility() {
       if (error) throw error;
       setProjects(data || []);
 
-      // Fetch latest session for each project
+      // Fetch latest session for each project (prefer completed sessions for stats)
       if (data && data.length > 0) {
         const projectIds = data.map(p => p.id);
-        const { data: sessions } = await supabase
+        const { data: sessions, error: sessionsError } = await supabase
           .from('brand_analysis_sessions')
           .select('*')
           .in('project_id', projectIds)
           .order('started_at', { ascending: false });
 
-        // Group sessions by project and get latest
+        if (sessionsError) {
+          console.error('Error fetching sessions:', sessionsError);
+        }
+
+        // Group sessions by project and get latest (prefer completed)
         const latestSessions = projectIds.map(projectId => {
           const projectSessions = (sessions || []).filter(s => s.project_id === projectId);
-          return projectSessions[0] || null;
+          
+          if (projectSessions.length === 0) {
+            console.log(`⚠️ No sessions found for project ${projectId}`);
+            return null;
+          }
+          
+          // First try to find a completed session (for accurate stats)
+          const completedSessions = projectSessions.filter(s => s.status === 'completed');
+          if (completedSessions.length > 0) {
+            // Sort by started_at desc to get the most recent completed session
+            const latestCompleted = completedSessions.sort((a, b) => 
+              new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+            )[0];
+            
+            console.log(`✅ Found completed session for project ${projectId} (${projectId.slice(0, 8)}...):`, {
+              sessionId: latestCompleted.id,
+              status: latestCompleted.status,
+              mentions: latestCompleted.results_summary?.total_mentions || 0,
+              totalQueries: latestCompleted.results_summary?.total_queries || 0,
+              visibility: latestCompleted.results_summary ? 
+                Math.round((latestCompleted.results_summary.total_mentions || 0) / (latestCompleted.results_summary.total_queries || 1) * 100) : 0,
+              hasSummary: !!latestCompleted.results_summary
+            });
+            return latestCompleted;
+          }
+          
+          // Fallback to latest session if no completed session
+          console.log(`⚠️ No completed session for project ${projectId}, using latest session:`, {
+            sessionId: projectSessions[0].id,
+            status: projectSessions[0].status,
+            hasSummary: !!projectSessions[0].results_summary,
+            mentions: projectSessions[0].results_summary?.total_mentions || 'N/A'
+          });
+          return projectSessions[0];
         }).filter(Boolean);
 
-        setProjectSessions(latestSessions as Session[]);
+        // Fetch all responses for all sessions at once to calculate accurate stats
+        let finalSessions = latestSessions as Session[];
+        const sessionIds = finalSessions.map(s => s.id);
+        if (sessionIds.length > 0) {
+          try {
+            const { data: allResponses, error: responsesError } = await supabase
+              .from('ai_platform_responses')
+              .select('session_id, response_metadata')
+              .in('session_id', sessionIds);
+
+            if (responsesError) {
+              console.error('Error fetching responses for stats calculation:', responsesError);
+            } else if (allResponses && allResponses.length > 0) {
+              // Calculate stats per session
+              finalSessions = finalSessions.map((session) => {
+                const sessionResponses = allResponses.filter(r => r.session_id === session.id);
+                const totalResponses = sessionResponses.length;
+                const mentionsCount = sessionResponses.filter(r => 
+                  r.response_metadata && r.response_metadata.brand_mentioned === true
+                ).length;
+
+                // Update session with calculated stats if results_summary is missing or has zeros
+                if (!session.results_summary || 
+                    !session.results_summary.total_mentions || 
+                    session.results_summary.total_mentions === 0) {
+                  
+                  const calculatedTotal = totalResponses > 0 ? totalResponses : (session.results_summary?.total_queries || session.total_queries || 0);
+                  
+                  session.results_summary = {
+                    ...(session.results_summary || {}),
+                    total_mentions: mentionsCount,
+                    total_queries: calculatedTotal
+                  };
+                  
+                  console.log(`📊 Calculated stats for session ${session.id}:`, {
+                    mentions: mentionsCount,
+                    totalQueries: calculatedTotal,
+                    visibility: calculatedTotal > 0 
+                      ? Math.round((mentionsCount / calculatedTotal) * 100) 
+                      : 0,
+                    responsesFound: totalResponses
+                  });
+                } else {
+                  console.log(`✅ Using existing summary for session ${session.id}:`, {
+                    mentions: session.results_summary.total_mentions,
+                    totalQueries: session.results_summary.total_queries
+                  });
+                }
+                
+                return session;
+              });
+            }
+          } catch (error) {
+            console.error('Error calculating stats from responses:', error);
+          }
+        }
+
+        console.log(`📊 Setting ${finalSessions.length} sessions for ${projectIds.length} projects`);
+        setProjectSessions(finalSessions);
       }
     } catch (error) {
       console.error('Error fetching projects:', error);
@@ -324,18 +419,42 @@ export default function AIVisibility() {
 
   const getProjectStats = (projectId: string) => {
     const session = getProjectSession(projectId);
-    if (!session || session.status !== 'completed') {
+    
+    // Log for debugging
+    if (!session) {
+      console.log(`No session found for project ${projectId}`);
       return { mentions: 0, visibility: 0, sentiment: 0 };
     }
+    
+    // Allow stats from completed sessions, or from latest session if it has summary data
+    if (session.status === 'completed' || (session.results_summary && session.results_summary.total_mentions !== undefined)) {
     const summary = session.results_summary || {};
     const totalQueries = summary.total_queries || 0;
     const mentions = summary.total_mentions || 0;
     const visibility = totalQueries > 0 ? (mentions / totalQueries) * 100 : 0;
-    return {
+      
+      const stats = {
       mentions,
       visibility: Math.round(visibility),
       sentiment: summary.avg_sentiment || 0
     };
+      
+      console.log(`Stats for project ${projectId}:`, {
+        status: session.status,
+        mentions: stats.mentions,
+        visibility: stats.visibility,
+        hasSummary: !!session.results_summary
+      });
+      
+      return stats;
+    }
+    
+    console.log(`Session for project ${projectId} not ready:`, {
+      status: session.status,
+      hasSummary: !!session.results_summary
+    });
+    
+    return { mentions: 0, visibility: 0, sentiment: 0 };
   };
 
   const handleDeleteProject = async (projectId: string, projectName: string) => {
@@ -759,6 +878,22 @@ export default function AIVisibility() {
                 {projects.map((project) => {
                   const session = getProjectSession(project.id);
                   const stats = getProjectStats(project.id);
+                  
+                  // Debug logging for each project card
+                  if (session) {
+                    console.log(`🎴 Rendering card for project ${project.brand_name} (${project.id.slice(0, 8)}...):`, {
+                      sessionId: session.id,
+                      status: session.status,
+                      hasSummary: !!session.results_summary,
+                      mentions: session.results_summary?.total_mentions || 0,
+                      visibility: session.results_summary ? 
+                        Math.round((session.results_summary.total_mentions || 0) / (session.results_summary.total_queries || 1) * 100) : 0,
+                      statsFromFunction: stats
+                    });
+                  } else {
+                    console.log(`⚠️ No session found for project ${project.brand_name} (${project.id.slice(0, 8)}...)`);
+                  }
+                  
                   const isRunning = session?.status === 'running';
                   const isCancelled = session?.status === 'cancelled';
                   const progress = session && session.total_queries 
@@ -890,11 +1025,33 @@ export default function AIVisibility() {
                       <div className="grid grid-cols-2 gap-4 mb-4">
                         <div>
                           <div className="text-sm text-gray-600">{t.dashboard.aiVisibility.mentions}</div>
-                          <div className="text-2xl font-bold text-gray-900">{stats.mentions}</div>
+                          <div className="text-2xl font-bold text-gray-900">
+                            {(() => {
+                              // Use session data directly if available, fallback to stats
+                              if (session?.results_summary?.total_mentions !== undefined) {
+                                return session.results_summary.total_mentions || 0;
+                              }
+                              return stats.mentions || 0;
+                            })()}
+                          </div>
                         </div>
                         <div>
                           <div className="text-sm text-gray-600">{t.dashboard.aiVisibility.visibility}</div>
-                          <div className="text-2xl font-bold text-gray-900">{stats.visibility}%</div>
+                          <div className="text-2xl font-bold text-gray-900">
+                            {(() => {
+                              // Calculate visibility directly from session data if available
+                              if (session?.results_summary) {
+                                const summary = session.results_summary;
+                                const totalQueries = summary.total_queries || 0;
+                                const mentions = summary.total_mentions || 0;
+                                if (totalQueries > 0) {
+                                  return `${Math.round((mentions / totalQueries) * 100)}%`;
+                                }
+                              }
+                              // Fallback to stats
+                              return stats.visibility > 0 ? `${stats.visibility}%` : '0%';
+                            })()}
+                          </div>
                         </div>
                       </div>
 
@@ -1111,19 +1268,19 @@ export default function AIVisibility() {
             {/* Main Content */}
             <div className="lg:col-span-3 space-y-6">
               {/* Metrics Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-sm text-gray-600 mb-1">AI Platforms</div>
-                  <div className="text-2xl font-bold text-gray-900">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  <div className="text-sm text-gray-600 mb-2">AI Platforms</div>
+                  <div className="text-3xl font-bold text-gray-900 mb-3">
                     {projectStats?.platforms_analyzed?.length || new Set(projectResponses.map(r => r.platform)).size || selectedProject.active_platforms?.length || 0}
                   </div>
-                  <div className="flex flex-wrap gap-1 mt-2">
+                  <div className="flex flex-wrap gap-2 mt-2">
                     {(() => {
                       const platforms = projectStats?.platforms_analyzed || Array.from(new Set(projectResponses.map(r => r.platform))) || selectedProject.active_platforms || [];
                       return platforms.slice(0, 4).map((platform: string) => {
                         const platformOption = platformOptions.find(p => p.id === platform);
                         return (
-                          <span key={platform} className="text-xs flex items-center" title={platformOption?.name || platform}>
+                          <span key={platform} className="text-sm flex items-center" title={platformOption?.name || platform}>
                             {platformOption?.icon ? (
                               <Image 
                                 src={platformOption.icon} 
@@ -1143,18 +1300,18 @@ export default function AIVisibility() {
                     })()}
                   </div>
                 </div>
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-sm text-gray-600 mb-1">Total Mentions</div>
-                  <div className="text-2xl font-bold text-gray-900">
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  <div className="text-sm text-gray-600 mb-2">Total Mentions</div>
+                  <div className="text-3xl font-bold text-gray-900 mb-2">
                     {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0}
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-sm text-gray-500 mt-1">
                     Across {projectStats?.platforms_analyzed?.length || new Set(projectResponses.map(r => r.platform)).size || 0} platforms
                   </div>
                 </div>
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-sm text-gray-600 mb-1">Avg Sentiment</div>
-                  <div className="text-2xl font-bold text-gray-900">
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  <div className="text-sm text-gray-600 mb-2">Avg Sentiment</div>
+                  <div className="text-3xl font-bold text-gray-900 mb-2">
                     {(() => {
                       const sentiments = projectResponses
                         .filter(r => r.response_metadata?.brand_mentioned && r.response_metadata?.sentiment_score !== null)
@@ -1164,13 +1321,13 @@ export default function AIVisibility() {
                       return `${Math.round(avgSentiment * 100)}%`;
                     })()}
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-sm text-gray-500 mt-1">
                     Based on {projectResponses.filter(r => r.response_metadata?.brand_mentioned && r.response_metadata?.sentiment_score !== null).length || 0} mentions
                   </div>
                 </div>
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-sm text-gray-600 mb-1">Competitor Mentions</div>
-                  <div className="text-2xl font-bold text-gray-900">
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  <div className="text-sm text-gray-600 mb-2">Competitor Mentions</div>
+                  <div className="text-3xl font-bold text-gray-900 mb-2">
                     {(() => {
                       const competitorMentions = projectResponses.reduce((total, response) => {
                         const competitors = response.response_metadata?.competitors_found || [];
@@ -1179,7 +1336,7 @@ export default function AIVisibility() {
                       return competitorMentions;
                     })()}
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-sm text-gray-500 mt-1">
                     {(() => {
                       const competitorMap: Record<string, number> = {};
                       projectResponses.forEach((response) => {
@@ -1191,19 +1348,6 @@ export default function AIVisibility() {
                       const topCompetitor = Object.entries(competitorMap).sort((a, b) => b[1] - a[1])[0];
                       return topCompetitor ? `Top: ${topCompetitor[0]}` : 'Top: -';
                     })()}
-                  </div>
-                </div>
-                <div className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-sm text-gray-600 mb-1">Visibility Score</div>
-                  <div className="text-2xl font-bold text-gray-900">
-                    {projectStats 
-                      ? Math.round((projectStats.mention_rate || 0) * 100) 
-                      : projectResponses.length > 0
-                      ? Math.round((projectResponses.filter(r => r.response_metadata?.brand_mentioned).length / projectResponses.length) * 100)
-                      : 0}%
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {t.dashboard.aiVisibility.yourBrandAppears} {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0} {t.dashboard.aiVisibility.of} {projectStats?.total_queries || projectResponses.length || 100} {t.dashboard.aiVisibility.prompts}
                   </div>
                 </div>
               </div>
@@ -1260,11 +1404,14 @@ export default function AIVisibility() {
                           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                             <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.mentionRate}</div>
                             <div className="text-2xl font-bold text-blue-600">
-                              {projectStats 
-                                ? Math.round((projectStats.mention_rate || 0) * 100) 
-                                : projectResponses.length > 0
-                                ? Math.round((projectResponses.filter(r => r.response_metadata?.brand_mentioned).length / projectResponses.length) * 100)
-                                : 0}%
+                              {(() => {
+                                const totalMentions = projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0;
+                                const totalQueries = projectStats?.total_queries || projectResponses.length || 0;
+                                if (totalQueries > 0) {
+                                  return Math.round((totalMentions / totalQueries) * 100);
+                                }
+                                return 0;
+                              })()}%
                             </div>
                           </div>
                           <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
@@ -2130,10 +2277,17 @@ export default function AIVisibility() {
               <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <h3 className="font-semibold text-gray-900 mb-4">Visibility Score</h3>
                 <div className="text-4xl font-bold text-gray-900 mb-2">
-                  {projectStats ? Math.round((projectStats.mention_rate || 0) * 100) : 0}%
+                  {(() => {
+                    const totalMentions = projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0;
+                    const totalQueries = projectStats?.total_queries || projectResponses.length || 0;
+                    if (totalQueries > 0) {
+                      return Math.round((totalMentions / totalQueries) * 100);
+                    }
+                    return 0;
+                  })()}%
                 </div>
                 <p className="text-sm text-gray-600">
-                  Your brand appears in {projectStats?.total_mentions || 0} of {projectStats?.total_queries || 0} prompts
+                  Your brand appears in {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0} of {projectStats?.total_queries || projectResponses.length || 0} prompts
                 </p>
               </div>
 

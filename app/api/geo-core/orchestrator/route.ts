@@ -173,28 +173,43 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { action, contentId, ...actionData } = body;
+    const { action, contentId, contentIds, ...actionData } = body;
 
-    if (!action || !contentId) {
-      return NextResponse.json(
-        { error: "action and contentId are required" },
-        { status: 400 }
-      );
+    // For batch delete, contentIds is required instead of contentId
+    if (action === "deleteMultiple") {
+      if (!contentIds || !Array.isArray(contentIds) || contentIds.length === 0) {
+        return NextResponse.json(
+          { error: "contentIds array is required for batch delete" },
+          { status: 400 }
+        );
+      }
+    } else {
+      if (!action || !contentId) {
+        return NextResponse.json(
+          { error: "action and contentId are required" },
+          { status: 400 }
+        );
+      }
     }
 
-    // Get content strategy
-    const { data: contentStrategy, error: fetchError } = await supabase
-      .from("content_strategy")
-      .select("*")
-      .eq("id", contentId)
-      .eq("user_id", session.user.id)
-      .single();
+    // For batch operations, skip single content fetch
+    let contentStrategy: any = null;
+    if (action !== "deleteMultiple") {
+      // Get content strategy for single operations
+      const { data: fetchedContentStrategy, error: fetchError } = await supabase
+        .from("content_strategy")
+        .select("*")
+        .eq("id", contentId)
+        .eq("user_id", session.user.id)
+        .single();
 
-    if (fetchError || !contentStrategy) {
-      return NextResponse.json(
-        { error: "Content not found" },
-        { status: 404 }
-      );
+      if (fetchError || !fetchedContentStrategy) {
+        return NextResponse.json(
+          { error: "Content not found" },
+          { status: 404 }
+        );
+      }
+      contentStrategy = fetchedContentStrategy;
     }
 
     let result: any = {};
@@ -1370,25 +1385,231 @@ export async function POST(request: NextRequest) {
         break;
 
       case "delete":
+        console.log(`🗑️ Attempting to delete content: ${contentId} for user: ${session.user.id}`);
+        console.log(`✅ Content already verified: ${contentStrategy.topic} (${contentId}), user_id: ${contentStrategy.user_id}`);
+        
+        // Verify user_id matches (contentStrategy is already fetched at the top)
+        if (contentStrategy.user_id !== session.user.id) {
+          console.error(`❌ User ID mismatch:`, {
+            contentUserId: contentStrategy.user_id,
+            sessionUserId: session.user.id,
+            contentId
+          });
+          return NextResponse.json(
+            { error: "Access denied - content belongs to different user", success: false },
+            { status: 403 }
+          );
+        }
+
         // Delete published_content records first
-        await supabase
+        const { error: publishedDeleteError, data: publishedDeleteData } = await supabase
           .from("published_content")
           .delete()
           .eq("content_strategy_id", contentId)
-          .eq("user_id", session.user.id);
+          .select();
+
+        if (publishedDeleteError) {
+          console.error("❌ Error deleting published_content:", publishedDeleteError);
+          // Log but continue - try to delete content_strategy anyway
+        } else {
+          console.log(`✅ Deleted ${publishedDeleteData?.length || 0} published_content record(s)`);
+        }
 
         // Delete content_strategy record
-        const { error: deleteError } = await supabase
+        // Note: We've already verified ownership above, so RLS should allow this
+        // Try with just ID first (RLS should handle user check)
+        let deleteResult = await supabase
           .from("content_strategy")
           .delete()
           .eq("id", contentId)
-          .eq("user_id", session.user.id);
+          .select();
 
-        if (deleteError) throw deleteError;
+        // If no rows deleted, try with explicit user_id
+        if (!deleteResult.data || deleteResult.data.length === 0) {
+          console.log(`⚠️ Delete without user_id returned 0 rows, trying with user_id...`);
+          deleteResult = await supabase
+            .from("content_strategy")
+            .delete()
+            .eq("id", contentId)
+            .eq("user_id", contentStrategy.user_id)
+            .select();
+        }
+
+        const { error: deleteError, data: deleteData } = deleteResult;
+
+        console.log(`🗑️ Delete result:`, {
+          error: deleteError,
+          dataLength: deleteData?.length || 0,
+          data: deleteData,
+          contentId,
+          userId: contentStrategy.user_id
+        });
+
+        if (deleteError) {
+          console.error("❌ Error deleting content_strategy:", {
+            error: deleteError,
+            errorCode: (deleteError as any).code,
+            errorMessage: deleteError.message,
+            errorDetails: (deleteError as any).details,
+            errorHint: (deleteError as any).hint,
+            contentId,
+            userId: session.user.id
+          });
+          throw deleteError;
+        }
+
+        // Verify deletion actually happened (check if data was deleted)
+
+        if (!deleteData || deleteData.length === 0) {
+          console.error(`❌ Delete query returned 0 rows for contentId: ${contentId}`, {
+            contentId,
+            verifiedUserId: contentStrategy.user_id,
+            sessionUserId: session.user.id,
+            verifiedContent: contentStrategy
+          });
+          
+          // Try to check if content still exists (with same user check)
+          const { data: stillExists } = await supabase
+            .from("content_strategy")
+            .select("id, user_id, topic")
+            .eq("id", contentId)
+            .eq("user_id", session.user.id)
+            .maybeSingle();
+          
+          if (stillExists) {
+            console.error(`❌ Content still exists after delete attempt!`, {
+              contentId,
+              foundUserId: stillExists.user_id,
+              requestUserId: session.user.id,
+              topic: stillExists.topic
+            });
+            return NextResponse.json(
+              { 
+                error: "Failed to delete content - content still exists. This may be due to missing RLS DELETE policy on content_strategy table. Please run the database migration: database/012_add_content_strategy_delete_policy.sql",
+                success: false,
+                details: "Content verification passed but deletion returned 0 rows. Check if RLS DELETE policy exists for content_strategy table."
+              },
+              { status: 500 }
+            );
+          } else {
+            // Content doesn't exist anymore - deletion might have worked but query returned 0
+            console.log(`✅ Content not found after delete attempt - deletion succeeded`);
+            // Treat as success since content is gone
+            result = {
+              success: true,
+              message: "Content deleted successfully",
+              deletedId: contentId,
+            };
+            break;
+          }
+          
+          // Return error since we can't verify deletion
+          return NextResponse.json(
+            { error: "Failed to delete content - no rows affected. This may be due to missing RLS DELETE policy on content_strategy table.", success: false },
+            { status: 500 }
+          );
+        }
+
+        console.log(`✅ Successfully deleted content_strategy: ${contentId}`);
 
         result = {
           success: true,
           message: "Content deleted successfully",
+          deletedId: contentId,
+        };
+        break;
+
+      case "deleteMultiple":
+        console.log(`🗑️ Attempting to delete multiple content items: ${contentIds.length} items for user: ${session.user.id}`);
+        
+        // Verify all content items exist and belong to the user
+        const { data: verifyContents, error: verifyError } = await supabase
+          .from("content_strategy")
+          .select("id, topic, user_id")
+          .in("id", contentIds)
+          .eq("user_id", session.user.id);
+
+        if (verifyError) {
+          console.error(`❌ Error verifying contents:`, verifyError);
+          return NextResponse.json(
+            { error: `Error verifying contents: ${verifyError.message}`, success: false },
+            { status: 500 }
+          );
+        }
+
+        if (!verifyContents || verifyContents.length === 0) {
+          console.error(`❌ No valid contents found for deletion`);
+          return NextResponse.json(
+            { error: "No valid content found for deletion", success: false },
+            { status: 404 }
+          );
+        }
+
+        const verifiedIds = verifyContents.map(c => c.id);
+        const invalidIds = contentIds.filter((id: string) => !verifiedIds.includes(id));
+        
+        if (invalidIds.length > 0) {
+          console.warn(`⚠️ Some content IDs were not found or don't belong to user:`, invalidIds);
+        }
+
+        console.log(`✅ Verified ${verifiedIds.length} content items for deletion`);
+
+        // Delete published_content records first
+        const { error: publishedDeleteErrorBatch, data: publishedDeleteDataBatch } = await supabase
+          .from("published_content")
+          .delete()
+          .in("content_strategy_id", verifiedIds)
+          .select();
+
+        if (publishedDeleteErrorBatch) {
+          console.error("❌ Error deleting published_content:", publishedDeleteErrorBatch);
+          // Continue with content_strategy deletion
+        } else {
+          console.log(`✅ Deleted ${publishedDeleteDataBatch?.length || 0} published_content record(s)`);
+        }
+
+        // Delete content_strategy records
+        const { error: batchDeleteError, data: batchDeleteData } = await supabase
+          .from("content_strategy")
+          .delete()
+          .in("id", verifiedIds)
+          .eq("user_id", session.user.id)
+          .select();
+
+        if (batchDeleteError) {
+          console.error("❌ Error deleting content_strategy records:", batchDeleteError);
+          throw batchDeleteError;
+        }
+
+        const deletedCount = batchDeleteData?.length || 0;
+        console.log(`✅ Successfully deleted ${deletedCount} content_strategy record(s)`);
+
+        // Verify deletions
+        if (deletedCount === 0) {
+          console.error(`❌ No rows were deleted`);
+          return NextResponse.json(
+            { error: "Failed to delete contents - no rows affected. This may be due to missing RLS DELETE policy.", success: false },
+            { status: 500 }
+          );
+        }
+
+        // Check if any records still exist
+        const { data: stillExists } = await supabase
+          .from("content_strategy")
+          .select("id")
+          .in("id", verifiedIds)
+          .eq("user_id", session.user.id);
+
+        if (stillExists && stillExists.length > 0) {
+          console.warn(`⚠️ ${stillExists.length} content item(s) still exist after deletion attempt`);
+        }
+
+        result = {
+          success: true,
+          message: `Successfully deleted ${deletedCount} content item(s)`,
+          deletedIds: batchDeleteData?.map(d => d.id) || [],
+          deletedCount,
+          failedCount: contentIds.length - deletedCount,
         };
         break;
 
