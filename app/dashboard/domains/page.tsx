@@ -6,19 +6,15 @@ import {
   Server,
   Plus,
   Trash2,
-  Check,
   X,
   AlertCircle,
   ExternalLink,
-  Copy,
   RefreshCw,
   Globe,
   CheckCircle,
   Clock,
   XCircle,
-  Shield,
   Link as LinkIcon,
-  Info,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { useLanguage } from "@/lib/language-context";
@@ -189,75 +185,6 @@ export default function DomainsPage() {
     }
   };
 
-  const getStatusBadge = (domain: Domain) => {
-    // Show GSC verification status if GSC integration exists
-    if (domain.gsc_integration) {
-      const gscStatus = domain.gsc_integration.verification_status;
-      switch (gscStatus) {
-        case "verified":
-          return (
-            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">
-              <Shield className="w-3 h-3" />
-              GSC Verified
-            </span>
-          );
-        case "pending":
-          return (
-            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-700">
-              <Clock className="w-3 h-3" />
-              GSC Pending
-            </span>
-          );
-        case "failed":
-          return (
-            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700">
-              <XCircle className="w-3 h-3" />
-              GSC Failed
-            </span>
-          );
-      }
-    }
-
-    // Fall back to domain status
-    switch (domain.status) {
-      case "active":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">
-            <CheckCircle className="w-3 h-3" />
-            Active
-          </span>
-        );
-      case "pending_verification":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-700">
-            <Clock className="w-3 h-3" />
-            Pending
-          </span>
-        );
-      case "verification_failed":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700">
-            <XCircle className="w-3 h-3" />
-            Failed
-          </span>
-        );
-      case "inactive":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700">
-            <X className="w-3 h-3" />
-            Inactive
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-700">
-            <Globe className="w-3 h-3" />
-            Active
-          </span>
-        );
-    }
-  };
-
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
       year: "numeric",
@@ -276,6 +203,36 @@ export default function DomainsPage() {
       );
     }
 
+    const verificationStatus = domain.gsc_integration.verification_status;
+
+    if (verificationStatus === 'verified') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-700">
+          <CheckCircle className="w-3 h-3" />
+          GSC Verified
+        </span>
+      );
+    }
+    
+    if (verificationStatus === 'pending') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">
+          <Clock className="w-3 h-3" />
+          GSC Pending
+        </span>
+      );
+    }
+    
+    if (verificationStatus === 'failed') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">
+          <XCircle className="w-3 h-3" />
+          GSC Failed
+        </span>
+      );
+    }
+
+    // Default - GSC integration exists but no valid status
     return (
       <span className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">
         <LinkIcon className="w-3 h-3" />
@@ -402,9 +359,6 @@ export default function DomainsPage() {
                     Domain
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     GSC Integration
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -431,9 +385,6 @@ export default function DomainsPage() {
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {getStatusBadge(domain)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex flex-col gap-1">
