@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      connected: integration.enabled,
+      connected: integration.status === 'connected',
       sites: integration.metadata?.site_urls || [],
       selectedSite: integration.metadata?.selected_site || null,
     });

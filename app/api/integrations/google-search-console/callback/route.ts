@@ -17,7 +17,18 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
     const error = searchParams.get('error');
-    const returnTo = searchParams.get('return_to') || '/dashboard/settings';
+    const stateParam = searchParams.get('state');
+    
+    // Parse state to get return_to
+    let returnTo = '/dashboard/google-search-console';
+    if (stateParam) {
+      try {
+        const state = JSON.parse(decodeURIComponent(stateParam));
+        returnTo = state.return_to || returnTo;
+      } catch (e) {
+        console.error('Failed to parse state parameter:', e);
+      }
+    }
 
     // Handle user denial
     if (error) {
@@ -83,20 +94,26 @@ export async function GET(request: NextRequest) {
     console.log('💾 Saving GSC integration to database...');
     const { error: dbError } = await supabase
       .from('platform_integrations')
-      .upsert({
-        user_id: user.id,
-        platform: 'google_search_console',
-        enabled: true,
-        metadata: {
+      .upsert(
+        {
+          user_id: user.id,
+          platform: 'google_search_console',
           access_token: tokens.access_token,
           refresh_token: tokens.refresh_token,
-          expires_at: tokens.expiry_date,
-          site_urls: sites,
-          selected_site: sites[0], // Default to first site
+          token_type: 'Bearer',
+          expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+          status: 'connected',
+          metadata: {
+            site_urls: sites,
+            selected_site: sites[0], // Default to first site
+          },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+        {
+          onConflict: 'user_id,platform',
+        }
+      );
 
     if (dbError) {
       console.error('Database error:', dbError);
@@ -107,13 +124,25 @@ export async function GET(request: NextRequest) {
 
     // Redirect back to original page with success message
     const returnUrl = new URL(returnTo, request.url);
-    returnUrl.searchParams.set('success', 'gsc_connected');
+    returnUrl.searchParams.set('gsc_connected', 'true');
     return NextResponse.redirect(returnUrl);
   } catch (error: any) {
     console.error('❌ GSC OAuth callback error:', error);
-    const returnTo = request.nextUrl.searchParams.get('return_to') || '/dashboard/settings';
+    
+    // Try to parse state for return_to
+    let returnTo = '/dashboard/google-search-console';
+    const stateParam = request.nextUrl.searchParams.get('state');
+    if (stateParam) {
+      try {
+        const state = JSON.parse(decodeURIComponent(stateParam));
+        returnTo = state.return_to || returnTo;
+      } catch (e) {
+        console.error('Failed to parse state parameter in error handler:', e);
+      }
+    }
+    
     return NextResponse.redirect(
-      new URL(`${returnTo}?error=${encodeURIComponent(error.message)}`, request.url)
+      new URL(`${returnTo}?gsc_error=${encodeURIComponent(error.message)}`, request.url)
     );
   }
 }

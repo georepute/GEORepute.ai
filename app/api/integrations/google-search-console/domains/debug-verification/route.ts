@@ -26,12 +26,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get domain
+    // Get domain from domains table
     const { data: domain, error: domainError } = await supabase
-      .from('gsc_domains')
+      .from('domains')
       .select('*')
       .eq('id', domainId)
-      .eq('user_id', session.user.id)
       .single();
 
     if (domainError || !domain) {
@@ -41,11 +40,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check if domain has GSC integration
+    if (!domain.gsc_integration) {
+      return NextResponse.json(
+        { error: 'Domain does not have GSC integration' },
+        { status: 400 }
+      );
+    }
+
     // Get integration
     const { data: integration, error: integrationError } = await supabase
       .from('platform_integrations')
       .select('*')
-      .eq('id', domain.integration_id)
+      .eq('id', domain.gsc_integration.integration_id)
       .single();
 
     if (integrationError || !integration) {
@@ -63,19 +70,19 @@ export async function POST(request: NextRequest) {
     });
 
     const debug: any = {
-      domain_url: domain.domain_url,
-      site_url: domain.site_url,
-      verification_method: domain.verification_method,
-      verification_token: domain.verification_token,
+      domain_url: domain.gsc_integration.domain_url || domain.domain,
+      site_url: domain.gsc_integration.site_url,
+      verification_method: domain.gsc_integration.verification_method,
+      verification_token: domain.gsc_integration.verification_token,
       steps: [],
     };
 
     // Step 1: Try to get a fresh token to see what format Google expects
     try {
       debug.steps.push('Step 1: Requesting fresh token from Google...');
-      const freshToken = await client.getVerificationToken(domain.site_url, domain.verification_method || 'DNS_TXT');
+      const freshToken = await client.getVerificationToken(domain.gsc_integration.site_url, domain.gsc_integration.verification_method || 'DNS_TXT');
       debug.fresh_token = freshToken;
-      debug.token_matches = freshToken === domain.verification_token;
+      debug.token_matches = freshToken === domain.gsc_integration.verification_token;
       debug.steps.push(`✅ Fresh token received: ${freshToken.substring(0, 50)}...`);
     } catch (error: any) {
       debug.steps.push(`❌ Failed to get fresh token: ${error.message}`);
@@ -84,7 +91,7 @@ export async function POST(request: NextRequest) {
 
     // Step 2: Analyze token format
     debug.steps.push('Step 2: Analyzing token format...');
-    const token = domain.verification_token || '';
+    const token = domain.gsc_integration.verification_token || '';
     debug.token_analysis = {
       length: token.length,
       has_prefix: token.startsWith('google-site-verification='),
@@ -97,18 +104,18 @@ export async function POST(request: NextRequest) {
     // Step 3: Check what Google is expecting
     debug.steps.push('Step 3: Checking verification requirements...');
     debug.requirements = {
-      site_url_format: domain.site_url,
-      is_url_prefix: domain.site_url.startsWith('http'),
-      is_domain_property: domain.site_url.startsWith('sc-domain:'),
-      dns_record_location: domain.site_url.startsWith('http')
-        ? domain.site_url.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
-        : domain.domain_url,
+      site_url_format: domain.gsc_integration.site_url,
+      is_url_prefix: domain.gsc_integration.site_url.startsWith('http'),
+      is_domain_property: domain.gsc_integration.site_url.startsWith('sc-domain:'),
+      dns_record_location: domain.gsc_integration.site_url.startsWith('http')
+        ? domain.gsc_integration.site_url.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
+        : domain.domain,
     };
 
     // Step 4: Try verification with detailed error
     debug.steps.push('Step 4: Attempting verification...');
     try {
-      const verifyResult = await client.verifySite(domain.site_url, domain.verification_method || 'DNS_TXT');
+      const verifyResult = await client.verifySite(domain.gsc_integration.site_url, domain.gsc_integration.verification_method || 'DNS_TXT');
       debug.verification_result = verifyResult;
       debug.steps.push('✅ Verification successful!');
     } catch (error: any) {
@@ -176,4 +183,3 @@ function generateRecommendations(debug: any): string[] {
 
   return recommendations;
 }
-

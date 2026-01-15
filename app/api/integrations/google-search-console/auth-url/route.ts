@@ -6,9 +6,9 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const returnTo = searchParams.get("return_to") || "/dashboard/settings";
+    const returnTo = searchParams.get("return_to") || "/dashboard/google-search-console";
 
-    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const googleClientId = process.env.GOOGLE_CLIENT_ID;
     if (!googleClientId) {
       return NextResponse.json(
         { error: "Google OAuth not configured" },
@@ -16,10 +16,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const redirectUri = `${process.env.NEXT_PUBLIC_SITE_URL || request.nextUrl.origin}/api/integrations/google-search-console/callback?return_to=${encodeURIComponent(returnTo)}`;
-    const scope = "https://www.googleapis.com/auth/webmasters.readonly";
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${request.nextUrl.origin}/api/integrations/google-search-console/callback`;
     
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
+    const scopes = [
+      'https://www.googleapis.com/auth/webmasters.readonly',
+      'https://www.googleapis.com/auth/siteverification', // Required for domain verification
+      'https://www.googleapis.com/auth/webmasters', // Required for adding sites to GSC
+    ];
+    const scope = scopes.join(' ');
+    
+    // Use state parameter to pass return_to
+    const state = encodeURIComponent(JSON.stringify({ return_to: returnTo }));
+    
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${state}`;
 
     return NextResponse.json({ authUrl });
   } catch (error: any) {

@@ -26,12 +26,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get domain
+    // Get domain from domains table
     const { data: domain, error: domainError } = await supabase
-      .from('gsc_domains')
+      .from('domains')
       .select('*')
       .eq('id', domainId)
-      .eq('user_id', session.user.id)
       .single();
 
     if (domainError || !domain) {
@@ -41,8 +40,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Extract domain name from domain_url
-    let domainName = domain.domain_url
+    // Check if domain has GSC integration
+    if (!domain.gsc_integration) {
+      return NextResponse.json(
+        { error: 'Domain does not have GSC integration' },
+        { status: 400 }
+      );
+    }
+
+    // Extract domain name
+    let domainName = domain.domain
       .replace(/^https?:\/\//, '')
       .replace(/^www\./, '')
       .replace(/\/.*$/, '');
@@ -62,7 +69,7 @@ export async function POST(request: NextRequest) {
     // Flatten TXT records and look for the verification token
     const allRecords = txtRecords.map(record => record.join('')).flat();
     const tokenFound = allRecords.some(record => 
-      record.includes(domain.verification_token || '')
+      record.includes(domain.gsc_integration.verification_token || '')
     );
 
     // Also check with 'www' prefix if not found
@@ -73,7 +80,7 @@ export async function POST(request: NextRequest) {
         wwwRecords = await resolver.resolveTxt(`www.${domainName}`);
         const allWwwRecords = wwwRecords.map(record => record.join('')).flat();
         wwwTokenFound = allWwwRecords.some(record => 
-          record.includes(domain.verification_token || '')
+          record.includes(domain.gsc_integration.verification_token || '')
         );
       } catch (error) {
         // www subdomain doesn't exist, that's ok
@@ -83,14 +90,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       domain: domainName,
-      verificationToken: domain.verification_token,
+      verificationToken: domain.gsc_integration.verification_token,
       tokenFound: tokenFound || wwwTokenFound,
       foundIn: tokenFound ? 'root' : wwwTokenFound ? 'www' : null,
       allTxtRecords: allRecords,
       wwwTxtRecords: wwwRecords.length > 0 ? wwwRecords.map(r => r.join('')).flat() : [],
       dnsError,
-      siteUrl: domain.site_url,
-      verificationMethod: domain.verification_method,
+      siteUrl: domain.gsc_integration.site_url,
+      verificationMethod: domain.gsc_integration.verification_method,
       advice: getAdvice(tokenFound || wwwTokenFound, dnsError, domain),
     });
   } catch (error: any) {
@@ -112,20 +119,19 @@ function getAdvice(tokenFound: boolean, dnsError: string | null, domain: any): s
   if (!tokenFound) {
     advice.push('❌ Verification token NOT FOUND in DNS records.');
     advice.push('📝 Make sure you added a TXT record with the exact token value.');
-    advice.push(`🎯 Record Name: Use "@" or leave empty (or try "${domain.domain_url}")`);
+    advice.push(`🎯 Record Name: Use "@" or leave empty (or try "${domain.domain}")`);
     advice.push('⏱️ DNS propagation can take 5 minutes to 48 hours. Current wait time may not be enough.');
     advice.push('🔄 Try using a DNS propagation checker: https://dnschecker.org');
     
-    if (domain.verification_method === 'DNS_TXT') {
+    if (domain.gsc_integration.verification_method === 'DNS_TXT') {
       advice.push(`💡 Alternative: Try using META tag verification instead by re-adding the domain.`);
     }
   } else {
     advice.push('✅ Verification token FOUND in your DNS records!');
     advice.push('🎉 Google should be able to verify your domain now.');
     advice.push('⚠️ If verification still fails, wait a few more minutes and try again.');
-    advice.push(`📍 Site URL format being verified: ${domain.site_url}`);
+    advice.push(`📍 Site URL format being verified: ${domain.gsc_integration.site_url}`);
   }
 
   return advice;
 }
-

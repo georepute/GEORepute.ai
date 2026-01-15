@@ -242,6 +242,37 @@ export interface GSCIntegration {
   updated_at: string;
 }
 
+// GSC Integration Data stored in domains.gsc_integration JSONB field
+export interface GSCIntegrationData {
+  integration_id?: string;
+  domain_url?: string;
+  site_url?: string;
+  verification_method?: 'DNS_TXT' | 'DNS_CNAME' | 'FILE' | 'META' | 'ANALYTICS' | 'TAG_MANAGER';
+  verification_token?: string;
+  verification_status?: 'pending' | 'verified' | 'failed';
+  permission_level?: 'siteOwner' | 'siteFullUser' | 'siteRestrictedUser';
+  last_synced_at?: string;
+  verified_at?: string;
+  error?: string;
+  failed_at?: string;
+  [key: string]: any;
+}
+
+// Domain with integrated GSC support
+export interface Domain {
+  id: string;
+  organization_id: string;
+  domain: string;
+  status: 'active' | 'inactive' | 'pending_verification' | 'verification_failed';
+  metadata?: any;
+  created_by?: string;
+  user_id?: string;
+  gsc_integration?: GSCIntegrationData | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Legacy GSC Domain type (deprecated - use Domain instead)
 export interface GSCDomain {
   id: string;
   user_id: string;

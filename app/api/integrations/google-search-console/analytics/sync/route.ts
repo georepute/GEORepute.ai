@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     // Get domain
     const { data: domain, error: domainError } = await supabase
-      .from('gsc_domains')
+      .from('domains')
       .select('*')
       .eq('id', domainId)
       .eq('user_id', session.user.id)
@@ -48,7 +48,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (domain.verification_status !== 'verified') {
+    if (!domain.gsc_integration) {
+      return NextResponse.json(
+        { error: 'Domain does not have GSC integration enabled' },
+        { status: 400 }
+      );
+    }
+
+    const gscData = domain.gsc_integration;
+
+    if (gscData.verification_status !== 'verified') {
       return NextResponse.json(
         { error: 'Domain is not verified. Please verify the domain first.' },
         { status: 400 }
@@ -59,7 +68,7 @@ export async function POST(request: NextRequest) {
     const { data: integration, error: integrationError } = await supabase
       .from('platform_integrations')
       .select('*')
-      .eq('id', domain.integration_id)
+      .eq('id', gscData.integration_id)
       .single();
 
     if (integrationError || !integration) {
@@ -92,10 +101,18 @@ export async function POST(request: NextRequest) {
     const analyticsEndDate = endDate || getDateDaysAgo(0);
 
     // Get the correct Search Console site URL format based on verification method
-    const verificationMethod = domain.verification_method || 'DNS_TXT';
-    const searchConsoleSiteUrl = getSearchConsoleSiteUrl(domain.domain_url, verificationMethod);
+    const verificationMethod = gscData.verification_method || 'DNS_TXT';
+    const searchConsoleSiteUrl = getSearchConsoleSiteUrl(gscData.domain_url, verificationMethod);
 
     console.log(`Querying analytics for ${searchConsoleSiteUrl} (verification method: ${verificationMethod})`);
+
+    // Validate dimensions - searchAppearance cannot be combined with other dimensions
+    if (dimensions.includes('searchAppearance') && dimensions.length > 1) {
+      return NextResponse.json(
+        { error: 'searchAppearance dimension cannot be combined with other dimensions. Query it separately.' },
+        { status: 400 }
+      );
+    }
 
     const response = await searchConsole.searchanalytics.query({
       siteUrl: searchConsoleSiteUrl,
@@ -281,11 +298,12 @@ export async function POST(request: NextRequest) {
       }
     } else if (dimensions.includes('searchAppearance')) {
       // Store search appearance data in gsc_analytics table
+      // Note: searchAppearance must be queried alone (not combined with other dimensions)
       const searchAppearanceData = rows.map((row) => ({
         domain_id: domainId,
         user_id: session.user.id,
-        date: row.keys?.[0] || analyticsEndDate,
-        search_appearance: row.keys?.[dimensions.indexOf('searchAppearance')] || '',
+        date: analyticsEndDate, // Use endDate since we can't group by date with searchAppearance
+        search_appearance: row.keys?.[0] || '', // First key is searchAppearance when queried alone
         clicks: row.clicks || 0,
         impressions: row.impressions || 0,
         ctr: row.ctr || 0,
@@ -317,11 +335,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Update last synced time
+    // Update last synced time in GSC integration data
+    const updatedGscData = {
+      ...gscData,
+      last_synced_at: new Date().toISOString(),
+    };
+
     await supabase
-      .from('gsc_domains')
+      .from('domains')
       .update({ 
-        last_synced_at: new Date().toISOString(),
+        gsc_integration: updatedGscData,
         updated_at: new Date().toISOString(),
       })
       .eq('id', domainId);
