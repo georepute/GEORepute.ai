@@ -1333,6 +1333,96 @@ export async function POST(request: NextRequest) {
             }
           }
 
+          // Update action plan step if content is linked to an action plan (for approve case)
+          if (contentStrategy.metadata?.actionPlanId && contentStrategy.metadata?.actionPlanStepId) {
+            try {
+              console.log(`🔄 Attempting to update action plan step (approve case):`, {
+                planId: contentStrategy.metadata.actionPlanId,
+                stepId: contentStrategy.metadata.actionPlanStepId,
+                publishUrl,
+              });
+
+              const { data: plan, error: fetchError } = await supabase
+                .from("action_plan")
+                .select("steps")
+                .eq("id", contentStrategy.metadata.actionPlanId)
+                .eq("user_id", session.user.id)
+                .single();
+
+              if (fetchError) {
+                console.error("❌ Error fetching action plan:", fetchError);
+                throw fetchError;
+              }
+
+              if (!plan) {
+                console.error("❌ Action plan not found:", contentStrategy.metadata.actionPlanId);
+                throw new Error("Action plan not found");
+              }
+
+              const steps = plan.steps || [];
+              const stepIndex = steps.findIndex(
+                (s: any) => s.id === contentStrategy.metadata.actionPlanStepId || 
+                           s.id?.toString() === contentStrategy.metadata.actionPlanStepId
+              );
+
+              if (stepIndex === -1) {
+                console.error("❌ Step not found in action plan:", {
+                  stepId: contentStrategy.metadata.actionPlanStepId,
+                  availableStepIds: steps.map((s: any) => s.id),
+                });
+                throw new Error("Step not found in action plan");
+              }
+
+              console.log(`📝 Updating step at index ${stepIndex} (approve case):`, {
+                before: steps[stepIndex],
+              });
+
+              // Use publishedRecord.published_url as the final source of truth
+              const finalPublishedUrl = publishedRecord?.published_url || publishUrl || null;
+
+              steps[stepIndex] = {
+                ...steps[stepIndex],
+                completed: true,
+                executionMetadata: {
+                  ...(steps[stepIndex].executionMetadata || {}),
+                  executionStatus: 'published',
+                  publishedAt: new Date().toISOString(),
+                  publishedUrl: finalPublishedUrl,
+                },
+              };
+
+              console.log(`📝 Updated step (approve case):`, {
+                after: steps[stepIndex],
+              });
+
+              const { data: updatedPlan, error: updateError } = await supabase
+                .from("action_plan")
+                .update({ steps })
+                .eq("id", contentStrategy.metadata.actionPlanId)
+                .eq("user_id", session.user.id)
+                .select()
+                .single();
+
+              if (updateError) {
+                console.error("❌ Error updating action plan:", updateError);
+                throw updateError;
+              }
+
+              console.log(`✅ Successfully updated action plan ${contentStrategy.metadata.actionPlanId} step ${contentStrategy.metadata.actionPlanStepId} to published (approve case)`);
+            } catch (planError: any) {
+              console.error("❌ Failed to update action plan step (approve case):", {
+                error: planError,
+                message: planError.message,
+                code: planError.code,
+                planId: contentStrategy.metadata?.actionPlanId,
+                stepId: contentStrategy.metadata?.actionPlanStepId,
+              });
+              // Don't fail the request if action plan update fails
+            }
+          } else {
+            console.log("ℹ️ Content not linked to action plan (no actionPlanId or actionPlanStepId in metadata) - approve case");
+          }
+
           result = {
             success: true,
             content: updatedContent,
@@ -1889,6 +1979,96 @@ export async function POST(request: NextRequest) {
 
         if (statusError) {
           console.error("Error updating content_strategy:", statusError);
+        }
+
+        // Update action plan step if content is linked to an action plan
+        if (contentStrategy.metadata?.actionPlanId && contentStrategy.metadata?.actionPlanStepId) {
+          try {
+            console.log(`🔄 Attempting to update action plan step:`, {
+              planId: contentStrategy.metadata.actionPlanId,
+              stepId: contentStrategy.metadata.actionPlanStepId,
+              publishUrl,
+            });
+
+            const { data: plan, error: fetchError } = await supabase
+              .from("action_plan")
+              .select("steps")
+              .eq("id", contentStrategy.metadata.actionPlanId)
+              .eq("user_id", session.user.id)
+              .single();
+
+            if (fetchError) {
+              console.error("❌ Error fetching action plan:", fetchError);
+              throw fetchError;
+            }
+
+            if (!plan) {
+              console.error("❌ Action plan not found:", contentStrategy.metadata.actionPlanId);
+              throw new Error("Action plan not found");
+            }
+
+            const steps = plan.steps || [];
+            const stepIndex = steps.findIndex(
+              (s: any) => s.id === contentStrategy.metadata.actionPlanStepId || 
+                         s.id?.toString() === contentStrategy.metadata.actionPlanStepId
+            );
+
+            if (stepIndex === -1) {
+              console.error("❌ Step not found in action plan:", {
+                stepId: contentStrategy.metadata.actionPlanStepId,
+                availableStepIds: steps.map((s: any) => s.id),
+              });
+              throw new Error("Step not found in action plan");
+            }
+
+            console.log(`📝 Updating step at index ${stepIndex}:`, {
+              before: steps[stepIndex],
+            });
+
+            // Use publishedRecord.published_url as the final source of truth
+            const finalPublishedUrl = publishedRecord?.published_url || publishUrl || null;
+
+            steps[stepIndex] = {
+              ...steps[stepIndex],
+              completed: true,
+              executionMetadata: {
+                ...(steps[stepIndex].executionMetadata || {}),
+                executionStatus: 'published',
+                publishedAt: new Date().toISOString(),
+                publishedUrl: finalPublishedUrl,
+              },
+            };
+
+            console.log(`📝 Updated step:`, {
+              after: steps[stepIndex],
+            });
+
+            const { data: updatedPlan, error: updateError } = await supabase
+              .from("action_plan")
+              .update({ steps })
+              .eq("id", contentStrategy.metadata.actionPlanId)
+              .eq("user_id", session.user.id)
+              .select()
+              .single();
+
+            if (updateError) {
+              console.error("❌ Error updating action plan:", updateError);
+              throw updateError;
+            }
+
+            console.log(`✅ Successfully updated action plan ${contentStrategy.metadata.actionPlanId} step ${contentStrategy.metadata.actionPlanStepId} to published`);
+          } catch (planError: any) {
+            console.error("❌ Failed to update action plan step:", {
+              error: planError,
+              message: planError.message,
+              code: planError.code,
+              planId: contentStrategy.metadata?.actionPlanId,
+              stepId: contentStrategy.metadata?.actionPlanStepId,
+            });
+            // Don't fail the request if action plan update fails
+          }
+        } else {
+          console.log("ℹ️ Content not linked to action plan (no actionPlanId or actionPlanStepId in metadata)");
         }
 
         result = {
