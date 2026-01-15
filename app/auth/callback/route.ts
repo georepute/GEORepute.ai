@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Redirect based on whether user needs to select a role
-    const redirectUrl = isNewUser ? '/role-selection' : '/dashboard';
+    const redirectUrl = isNewUser ? '/role-selection' : '/dashboard/ai-visibility';
     
     // Get the base URL from environment variable or request
     // This ensures we use the correct URL on Vercel, not localhost
@@ -76,5 +76,5 @@ export async function GET(request: NextRequest) {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
                  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ||
                  request.nextUrl.origin;
-  return NextResponse.redirect(new URL('/dashboard', baseUrl))
+  return NextResponse.redirect(new URL('/dashboard/ai-visibility', baseUrl))
 }

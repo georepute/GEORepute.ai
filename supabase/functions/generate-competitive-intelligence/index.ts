@@ -29,7 +29,7 @@ serve(async (req) => {
   }
 
   try {
-    const { brandName, websiteUrl, industry, language } = await req.json();
+    const { brandName, websiteUrl, industry, language, companyContext } = await req.json();
 
     // Validate input
     if (!brandName || !websiteUrl || !industry) {
@@ -85,14 +85,88 @@ serve(async (req) => {
 Your task is to provide accurate, relevant competitors and keywords based on the brand information provided. 
 Return only valid JSON with no additional text or explanation.`;
 
+    // Build context-aware prompt for fair competitor identification
+    let contextInstructions = "";
+    let competitorRules = "";
+    
+    if (companyContext) {
+      const { trafficLevel, companyStage, marketPosition, estimatedTraffic } = companyContext;
+      
+      contextInstructions = `\n\nIMPORTANT CONTEXT FOR FAIR COMPETITOR IDENTIFICATION:
+- Company Stage: ${companyStage.charAt(0).toUpperCase() + companyStage.slice(1)}
+- Traffic Level: ${trafficLevel.charAt(0).toUpperCase() + trafficLevel.slice(1)} (estimated: ${estimatedTraffic})
+- Market Position: ${marketPosition.charAt(0).toUpperCase() + marketPosition.slice(1)}
+
+CRITICAL: You MUST identify competitors that are at a SIMILAR level to ensure fair comparison.`;
+
+      // Stage-specific rules
+      if (companyStage === "startup") {
+        competitorRules = `
+COMPETITOR SELECTION RULES FOR STARTUP:
+- ONLY include other startups, early-stage companies, or small businesses
+- DO NOT include large enterprises, Fortune 500 companies, or market leaders
+- Examples of what NOT to include: Apple, Google, Microsoft, Amazon, Samsung, IBM, Oracle, Salesforce, Adobe, etc.
+- Focus on companies that are also in early stages (founded within last 5-7 years)
+- Include companies with similar team sizes and funding stages
+- Prioritize companies that are direct competitors at the same growth stage`;
+      } else if (companyStage === "smb") {
+        competitorRules = `
+COMPETITOR SELECTION RULES FOR SMB (Small-Medium Business):
+- Include other small to medium-sized businesses
+- May include some mid-market companies but NOT large enterprises
+- DO NOT include Fortune 500 or global market leaders
+- Focus on companies with similar scale (20-200 employees typically)
+- Include regional or local competitors if market position is regional`;
+      } else if (companyStage === "mid-market") {
+        competitorRules = `
+COMPETITOR SELECTION RULES FOR MID-MARKET:
+- Include other mid-market companies and established SMBs
+- May include some smaller enterprise companies
+- DO NOT include only the largest global enterprises unless they're direct competitors
+- Focus on companies with similar market share and scale`;
+      } else {
+        competitorRules = `
+COMPETITOR SELECTION RULES FOR ENTERPRISE:
+- Include other enterprise-level companies
+- May include market leaders and established players
+- Focus on companies with similar scale and market position`;
+      }
+
+      // Traffic-level rules
+      if (trafficLevel === "low") {
+        competitorRules += `
+- Traffic Level Consideration: This company has LOW traffic (<10K/month)
+- ONLY compare with competitors that also have low to medium traffic
+- DO NOT include high-traffic market leaders as direct competitors`;
+      } else if (trafficLevel === "medium") {
+        competitorRules += `
+- Traffic Level Consideration: This company has MEDIUM traffic (10K-100K/month)
+- Compare with competitors that have similar traffic levels
+- Avoid comparing with very high-traffic market leaders unless they're direct competitors`;
+      }
+
+      // Market position rules
+      if (marketPosition === "niche") {
+        competitorRules += `
+- Market Position: This is a NICHE player
+- Focus on other niche players in the same specialized area
+- DO NOT include broad-market generalists as direct competitors`;
+      } else if (marketPosition === "regional") {
+        competitorRules += `
+- Market Position: This is a REGIONAL player
+- Prioritize other regional competitors in the same geographic area
+- Include some national players only if they compete directly in this region`;
+      }
+    }
+
     const userPrompt = `${languageInstruction}Based on the following brand information, generate a comprehensive competitive intelligence analysis:
 
 Brand Name: ${brandName}
 Website: ${websiteUrl}
-Industry: ${industry}
+Industry: ${industry}${contextInstructions}${competitorRules}
 
 Please provide:
-1. A list of 8-12 main competitors (company/brand names) that operate in the same industry and market space. Include both direct competitors and notable alternative solutions.
+1. A list of 8-12 main competitors (company/brand names) that operate in the same industry and market space. ${companyContext ? 'CRITICAL: These competitors MUST be at a similar company stage, traffic level, and market position as described above. This ensures fair comparison.' : 'Include both direct competitors and notable alternative solutions.'}
 2. A list of 15-20 relevant target keywords that would be important for brand monitoring, SEO, and AI visibility in this industry. Include:
    - Product/service keywords
    - Industry-specific terms
@@ -107,6 +181,7 @@ Format your response as JSON with this exact structure:
 
 Rules:
 - Competitors should be actual brand/company names (can remain in original language)
+- ${companyContext ? 'MOST IMPORTANT: Only suggest competitors that are at a SIMILAR level (same stage, similar traffic, similar market position). This is critical for fair analysis.' : ''}
 - Keywords should be ${preferredLanguage === 'he' ? 'in Hebrew script and lowercase' : 'lowercase and relevant to the industry'}
 - Focus on keywords that people would search for or ask AI about
 - Only return valid JSON, no additional text`;

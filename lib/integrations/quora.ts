@@ -633,6 +633,9 @@ async function createQuoraPost(
   // Store the initial tab handle BEFORE clicking Post
   // This is the tab we're currently on - we'll ignore its URL later
   const driver = service.getDriver();
+  if (!driver) {
+    throw new Error('WebDriver not initialized. Cannot proceed with publishing.');
+  }
   const initialHandles = await driver.getAllWindowHandles();
   const initialTabHandle = initialHandles[initialHandles.length - 1]; // Get the current active tab
   const initialTabUrl = await driver.getCurrentUrl();
@@ -1000,6 +1003,9 @@ async function loginToQuora(
     await service.humanDelay(2000, 3000);
     
     const driver = service.getDriver();
+    if (!driver) {
+      throw new Error('WebDriver not initialized. Cannot add cookies.');
+    }
     let cookiesAdded = 0;
     let cookiesFailed = 0;
     

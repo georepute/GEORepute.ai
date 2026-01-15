@@ -1818,7 +1818,7 @@ function MediumIntegrationSettings() {
         <div className="space-y-4">
           <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
             <p className="text-xs text-yellow-900">
-              <strong>⚠️ Note:</strong> Medium doesn't provide an official API. We use browser automation (Selenium) to publish content. 
+              <strong>⚠️ Note:</strong> Medium doesn't provide an official API. We use browser automation (Playwright) to publish content. 
               This requires your login credentials or session cookies.
             </p>
           </div>
@@ -2762,6 +2762,17 @@ function GoogleSearchConsoleSettings() {
 
   useEffect(() => {
     checkGSCStatus();
+    
+    // Check for success param in URL (from OAuth callback)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("success") === "gsc_connected") {
+      // Refresh status after successful connection
+      setTimeout(() => {
+        checkGSCStatus();
+        // Clean URL
+        window.history.replaceState({}, '', window.location.pathname);
+      }, 500);
+    }
   }, []);
 
   const checkGSCStatus = async () => {
@@ -2813,14 +2824,46 @@ function GoogleSearchConsoleSettings() {
     }
   };
 
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect Google Search Console? Your domains and analytics data will be preserved.")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/google-search-console/status", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Google Search Console disconnected successfully");
+        setIsConnected(false);
+        setSites([]);
+        setSelectedSite("");
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="border border-gray-200 rounded-lg p-6 mb-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
-            <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-            </svg>
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden">
+            <Image 
+              src="/google.svg" 
+              alt="Google Search Console" 
+              width={40} 
+              height={40}
+              className="w-full h-full object-contain"
+            />
           </div>
           <div>
             <h3 className="font-semibold">Google Search Console</h3>
@@ -2829,19 +2872,13 @@ function GoogleSearchConsoleSettings() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {isConnected ? (
-            <span className="flex items-center gap-1 text-green-600 text-sm">
-              <CheckCircle className="w-4 h-4" />
-              Connected
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 text-gray-400 text-sm">
-              <XCircle className="w-4 h-4" />
-              Not Connected
-            </span>
-          )}
-        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
       </div>
 
       {!isConnected ? (
@@ -2862,9 +2899,13 @@ function GoogleSearchConsoleSettings() {
               </>
             ) : (
               <>
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                </svg>
+                <Image 
+                  src="/google.svg" 
+                  alt="Google" 
+                  width={16} 
+                  height={16}
+                  className="w-4 h-4"
+                />
                 Connect Google Search Console
               </>
             )}
@@ -2912,6 +2953,27 @@ function GoogleSearchConsoleSettings() {
               <li>View all keywords in the "Keywords" tab of your analysis results</li>
               <li>Data is refreshed with each new analysis (last 30 days)</li>
             </ul>
+          </div>
+
+          {/* Disconnect Button */}
+          <div className="pt-4 border-t border-gray-200">
+            <button
+              onClick={handleDisconnect}
+              disabled={loading}
+              className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Disconnecting...
+                </>
+              ) : (
+                <>
+                  <XCircle className="w-4 h-4" />
+                  Disconnect
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}

@@ -38,14 +38,14 @@ export default function Login() {
 
       if (signInError) throw signInError;
 
-      // Redirect to dashboard on success
+      // Redirect to AI Visibility page on success
       if (data.session) {
         // Auth-helpers automatically handle cookies, but we need to refresh the router
         router.refresh();
         // Small delay to ensure router is refreshed
         await new Promise(resolve => setTimeout(resolve, 100));
         // Use router.push for proper Next.js navigation
-        router.push("/dashboard");
+        router.push("/dashboard/ai-visibility");
         return; // Don't set loading to false, we're redirecting
       }
     } catch (err: any) {
