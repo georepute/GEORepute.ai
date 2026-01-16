@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
     
     // If projectId is provided, fetch crawler data from brand_analysis_projects
     let projectCrawlerData = null;
+    let projectName = null;
     if (projectId) {
       try {
         const { data: project, error: projectError } = await supabase
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest) {
           .single();
         
         if (!projectError && project) {
+          projectName = project.brand_name;
           projectCrawlerData = {
             domain: project.website_url || domain,
             description: project.company_description,
@@ -138,9 +140,10 @@ export async function POST(request: NextRequest) {
     const manualSteps = mappedSteps.filter((s: any) => !s.executionMetadata?.autoExecute);
 
     // Save to database with execution metadata
-    const { data, error } = await supabase
-      .from("action_plan")
-      .insert({
+    let savedPlanId = null;
+    try {
+      // Build insert object - store project info in execution_metadata since columns don't exist
+      const insertData: any = {
         user_id: session.user.id,
         title: result.title,
         objective: result.objective,
@@ -159,19 +162,37 @@ export async function POST(request: NextRequest) {
           total_executable_steps: executableSteps.length,
           automated_steps_count: automatedSteps.length,
           manual_steps_count: manualSteps.length,
+          // Store project info in execution_metadata since project_id/project_name columns don't exist
+          project_id: projectId || null,
+          project_name: projectName || null,
         },
-      })
-      .select()
-      .single();
+      };
 
-    if (error) {
-      console.error("Database insert error:", error);
-      // Continue anyway, return result even if DB save fails
+      const { data, error } = await supabase
+        .from("action_plan")
+        .insert(insertData)
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Database insert error:", error);
+        console.error("Error details:", JSON.stringify(error, null, 2));
+        savedPlanId = null;
+      } else {
+        savedPlanId = data?.id;
+        console.log("✅ Action plan saved successfully with ID:", savedPlanId);
+        console.log("📝 Saved project info in execution_metadata - project_id:", projectId, "project_name:", projectName);
+      }
+    } catch (dbError: any) {
+      console.error("Database save failed:", dbError);
+      // Still return the plan to frontend, but log the error
+      // Frontend can still use it temporarily, but it won't persist
+      savedPlanId = null;
     }
 
     return NextResponse.json(
       {
-        planId: data?.id || Date.now().toString(),
+        planId: savedPlanId || Date.now().toString(),
         title: result.title,
         objective: result.objective,
         channels: result.channels || [],
@@ -183,6 +204,9 @@ export async function POST(request: NextRequest) {
         category: result.category,
         domain: domain,
         region: region,
+        projectId: projectId || undefined,
+        projectName: projectName || undefined,
+        saved: !!savedPlanId, // Indicate if plan was successfully saved
       },
       { status: 200 }
     );
@@ -236,6 +260,8 @@ export async function GET(request: NextRequest) {
       status: plan.status || "active",
       domain: plan.domain_url,
       region: plan.region,
+      projectId: plan.project_id || undefined,
+      projectName: plan.project_name || undefined,
       executionMetadata: plan.execution_metadata || {},
     }));
 

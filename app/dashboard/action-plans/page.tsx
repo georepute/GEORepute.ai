@@ -19,6 +19,7 @@ import {
   Globe,
   RefreshCw,
   ArrowRight,
+  X,
 } from "lucide-react";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import Image from "next/image";
@@ -66,6 +67,8 @@ interface ActionPlan {
   channels?: string[];
   domain?: string;
   region?: string;
+  projectId?: string;
+  projectName?: string;
 }
 
 interface BrandProject {
@@ -86,7 +89,6 @@ export default function ActionPlansPage() {
   const [loading, setLoading] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [objective, setObjective] = useState("");
-  const [keywords, setKeywords] = useState("");
   const [domain, setDomain] = useState("");
   const [executingStep, setExecutingStep] = useState<string | null>(null);
   
@@ -96,6 +98,11 @@ export default function ActionPlansPage() {
   const [selectedProject, setSelectedProject] = useState<BrandProject | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [crawlingDomain, setCrawlingDomain] = useState(false);
+  
+  // Keywords state
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [newKeyword, setNewKeyword] = useState("");
+  const [loadingGSCKeywords, setLoadingGSCKeywords] = useState(false);
 
   // Load existing plans and brand projects on mount
   useEffect(() => {
@@ -129,8 +136,47 @@ export default function ActionPlansPage() {
     }
   };
 
+  // Load keywords from project (manual + GSC)
+  const loadProjectKeywords = async (projectId: string) => {
+    setLoadingGSCKeywords(true);
+    try {
+      const project = brandProjects.find(p => p.id === projectId);
+      if (!project) return;
+
+      // Start with manual keywords from project
+      const manualKeywords = project.keywords || [];
+      let allKeywords = [...manualKeywords];
+
+      // Fetch GSC keywords if available
+      try {
+        const gscResponse = await fetch(`/api/brand-analysis/${projectId}/gsc-keywords`);
+        const gscData = await gscResponse.json();
+        
+        if (gscData.success && gscData.keywords && gscData.keywords.length > 0) {
+          // Extract keyword strings from GSC data (they have keyword, clicks, impressions, etc.)
+          const gscKeywordStrings = gscData.keywords.map((kw: any) => kw.keyword);
+          // Merge with manual keywords, avoiding duplicates
+          const uniqueKeywords = new Set([...allKeywords, ...gscKeywordStrings]);
+          allKeywords = Array.from(uniqueKeywords);
+        }
+      } catch (error) {
+        console.log('GSC keywords not available or error fetching:', error);
+        // Continue with just manual keywords if GSC fails
+      }
+
+      setKeywords(allKeywords);
+    } catch (error) {
+      console.error('Error loading project keywords:', error);
+      // Fallback to just manual keywords
+      const project = brandProjects.find(p => p.id === projectId);
+      setKeywords(project?.keywords || []);
+    } finally {
+      setLoadingGSCKeywords(false);
+    }
+  };
+
   // Handle project selection
-  const handleProjectSelect = (projectId: string | null) => {
+  const handleProjectSelect = async (projectId: string | null) => {
     setSelectedProjectId(projectId);
     if (projectId) {
       const project = brandProjects.find(p => p.id === projectId);
@@ -140,10 +186,13 @@ export default function ActionPlansPage() {
         if (project.website_url) {
           setDomain(project.website_url);
         }
+        // Load keywords from project
+        await loadProjectKeywords(projectId);
       }
     } else {
       setSelectedProject(null);
       setDomain("");
+      setKeywords([]); // Clear keywords when no project selected
     }
   };
 
@@ -199,36 +248,48 @@ export default function ActionPlansPage() {
       }
 
       const data = await response.json();
-      const loadedPlans: ActionPlan[] = (data.plans || []).map((plan: any) => ({
-        id: plan.id,
-        title: plan.title,
-        objective: plan.objective,
-        channels: plan.channels || [],
-        domain: plan.domain,
-        region: plan.region,
-        steps: (plan.steps || []).map((step: any) => ({
-          step: step.step || step.title || "",
-          description: step.description || "",
-          priority: step.priority || "medium",
-          estimatedImpact: step.estimatedImpact || step.estimatedTime || "Not specified",
-          completed: step.completed || false,
-          id: step.id,
-          channel: step.channel,
-          platform: step.platform,
-          executionType: step.executionType,
-          executionMetadata: step.executionMetadata || {
-            executionStatus: "pending",
-            autoExecute: false,
-          },
-        })),
-        reasoning: plan.reasoning || "",
-        expectedOutcome: plan.expectedOutcome || "",
-        timeline: plan.timeline || "",
-        priority: plan.priority || "medium",
-        category: plan.category || "General",
-        createdAt: plan.createdAt ? new Date(plan.createdAt) : new Date(),
-        expanded: false,
-      }));
+      console.log("📋 Loaded plans data:", data.plans?.map((p: any) => ({ id: p.id, title: p.title, projectName: p.projectName, projectId: p.projectId })));
+      
+      const loadedPlans: ActionPlan[] = (data.plans || []).map((plan: any) => {
+        console.log("🔍 Processing plan:", plan.id, "projectName:", plan.projectName, "projectId:", plan.projectId);
+        // Extract project info from execution_metadata if not in main fields
+        const execMetadata = plan.executionMetadata || {};
+        const projectId = plan.projectId || execMetadata.project_id || undefined;
+        const projectName = plan.projectName || execMetadata.project_name || undefined;
+        
+        return {
+          id: plan.id,
+          title: plan.title,
+          objective: plan.objective,
+          channels: plan.channels || [],
+          domain: plan.domain,
+          region: plan.region,
+          projectId: projectId,
+          projectName: projectName,
+          steps: (plan.steps || []).map((step: any) => ({
+            step: step.step || step.title || "",
+            description: step.description || "",
+            priority: step.priority || "medium",
+            estimatedImpact: step.estimatedImpact || step.estimatedTime || "Not specified",
+            completed: step.completed || false,
+            id: step.id,
+            channel: step.channel,
+            platform: step.platform,
+            executionType: step.executionType,
+            executionMetadata: step.executionMetadata || {
+              executionStatus: "pending",
+              autoExecute: false,
+            },
+          })),
+          reasoning: plan.reasoning || "",
+          expectedOutcome: plan.expectedOutcome || "",
+          timeline: plan.timeline || "",
+          priority: plan.priority || "medium",
+          category: plan.category || "General",
+          createdAt: plan.createdAt ? new Date(plan.createdAt) : new Date(),
+          expanded: false,
+        };
+      });
 
       setPlans(loadedPlans);
     } catch (error: any) {
@@ -255,7 +316,7 @@ export default function ActionPlansPage() {
         },
         body: JSON.stringify({
           objective: objective,
-          targetKeywords: keywords ? keywords.split(',').map(k => k.trim()).filter(Boolean) : [],
+          targetKeywords: keywords.length > 0 ? keywords : undefined,
           domain: domain.trim() || undefined,
           channels: ['all'], // Always use all channels
           projectId: selectedProjectId || undefined, // Pass selected project ID to use its crawler data
@@ -269,6 +330,18 @@ export default function ActionPlansPage() {
         throw new Error(data.error || 'Failed to generate action plan');
       }
 
+      // Check if plan was saved successfully
+      if (!data.saved) {
+        toast.error("Plan generated but failed to save. It may not persist after refresh.");
+        console.warn("Action plan was not saved to database");
+      }
+
+      console.log("📝 Creating new plan with project info:", {
+        projectId: data.projectId || selectedProjectId,
+        projectName: data.projectName || selectedProject?.brand_name,
+        selectedProject: selectedProject?.brand_name
+      });
+
       const newPlan: ActionPlan = {
         id: data.planId || Date.now().toString(),
         title: data.title,
@@ -276,6 +349,8 @@ export default function ActionPlansPage() {
         channels: data.channels || [],
         domain: data.domain,
         region: data.region,
+        projectId: data.projectId || selectedProjectId || undefined,
+        projectName: data.projectName || selectedProject?.brand_name || undefined,
         steps: (data.steps || []).map((step: any) => ({
           step: step.step || step.title || "",
           description: step.description || "",
@@ -300,11 +375,20 @@ export default function ActionPlansPage() {
         expanded: true,
       };
 
-      setPlans([newPlan, ...plans]);
-      toast.success("AI Action plan generated!");
+      // Reload plans from database to ensure we have the saved version
+      await loadPlans();
+      
+      // If plan was saved, show success. Otherwise show warning.
+      if (data.saved) {
+        toast.success("AI Action plan generated and saved!");
+      } else {
+        toast.success("AI Action plan generated!");
+        toast.error("Warning: Plan may not persist after refresh. Check console for details.");
+      }
+      
       setObjective("");
-      setKeywords("");
       setDomain("");
+      setKeywords([]);
       setSelectedProjectId(null);
       setSelectedProject(null);
     } catch (error: any) {
@@ -521,19 +605,6 @@ export default function ActionPlansPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Target Keywords
-                </label>
-                <input
-                  type="text"
-                  value={keywords}
-                  onChange={(e) => setKeywords(e.target.value)}
-                  placeholder="e.g., local seo, google maps"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Domain
                 </label>
                 <div className="flex gap-2">
@@ -546,6 +617,7 @@ export default function ActionPlansPage() {
                       if (selectedProjectId) {
                         setSelectedProjectId(null);
                         setSelectedProject(null);
+                        setKeywords([]);
                       }
                     }}
                     placeholder="e.g., example.com"
@@ -568,6 +640,80 @@ export default function ActionPlansPage() {
                   Select a project above or crawl a new domain
                 </p>
               </div>
+
+              {/* Keywords Section - Only show when project is selected */}
+              {selectedProjectId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Target Keywords
+                    {loadingGSCKeywords && (
+                      <span className="ml-2 text-xs text-gray-500">(Loading GSC keywords...)</span>
+                    )}
+                  </label>
+                  
+                  {/* Display keywords as tags */}
+                  {keywords.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      {keywords.map((keyword, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center gap-1 px-3 py-1 bg-white border border-gray-300 rounded-full text-sm"
+                        >
+                          <span className="text-gray-700">{keyword}</span>
+                          <button
+                            onClick={() => {
+                              setKeywords(keywords.filter((_, i) => i !== index));
+                            }}
+                            className="ml-1 text-gray-400 hover:text-red-500 transition-colors"
+                            title="Remove keyword"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add new keyword input */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newKeyword}
+                      onChange={(e) => setNewKeyword(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && newKeyword.trim()) {
+                          if (!keywords.includes(newKeyword.trim())) {
+                            setKeywords([...keywords, newKeyword.trim()]);
+                            setNewKeyword("");
+                          } else {
+                            toast.error("Keyword already exists");
+                          }
+                        }
+                      }}
+                      placeholder="Add keyword and press Enter"
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                    />
+                    <button
+                      onClick={() => {
+                        if (newKeyword.trim() && !keywords.includes(newKeyword.trim())) {
+                          setKeywords([...keywords, newKeyword.trim()]);
+                          setNewKeyword("");
+                        } else if (keywords.includes(newKeyword.trim())) {
+                          toast.error("Keyword already exists");
+                        }
+                      }}
+                      className="px-4 py-2 bg-accent-600 text-white rounded-lg hover:bg-accent-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={!newKeyword.trim()}
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Keywords from project: {selectedProject?.keywords?.length || 0} manual
+                    {loadingGSCKeywords ? " (loading GSC...)" : ""}
+                  </p>
+                </div>
+              )}
 
               <Button
                 onClick={generateActionPlan}
@@ -744,6 +890,17 @@ export default function ActionPlansPage() {
                             >
                               {plan.priority.toUpperCase()}
                             </div>
+                            {plan.projectName ? (
+                              <div className="px-2 py-1 rounded-full bg-green-100 text-green-800 text-xs font-semibold flex items-center gap-1">
+                                <Target className="w-3 h-3" />
+                                {plan.projectName}
+                              </div>
+                            ) : plan.projectId ? (
+                              <div className="px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-xs font-semibold flex items-center gap-1">
+                                <Target className="w-3 h-3" />
+                                Project #{plan.projectId.substring(0, 8)}
+                              </div>
+                            ) : null}
                             <div className="px-2 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-semibold">
                               {plan.category}
                             </div>

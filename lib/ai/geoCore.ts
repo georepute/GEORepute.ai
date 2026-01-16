@@ -1137,11 +1137,22 @@ export async function generateActionPlan(
   const prompt = `You are a comprehensive marketing strategist creating multi-channel marketing action plans.
 
 Objective: "${input.objective}"
-${input.targetKeywords ? `Target Keywords: ${input.targetKeywords.join(", ")}` : ""}
+${input.targetKeywords && input.targetKeywords.length > 0 ? `Target Keywords: ${input.targetKeywords.join(", ")}` : ""}
 ${domainContext ? `${domainContext}` : ""}
 ${input.region ? `Region: ${input.region}` : ""}
 ${channels ? `Focus Channels: ${channels}` : "All available channels"}
 ${input.currentSituation ? `Current Situation: ${input.currentSituation}` : ""}
+
+${input.targetKeywords && input.targetKeywords.length > 0 ? `
+🎯 KEYWORD STRATEGY (CRITICAL):
+The target keywords above are the PRIMARY focus of this action plan. You MUST:
+- Create steps that directly target these keywords for SEO and content optimization
+- Include these keywords naturally in content generation steps (use them in the "keywords" field of executionMetadata)
+- Prioritize SEO steps that optimize for these specific keywords
+- Create content topics that incorporate these keywords
+- Use keyword variations and related terms when appropriate
+- Ensure at least 60% of content_generation steps include these target keywords
+` : ""}
 
 ${input.domainEnrichment?.hasContent ? `
 DOMAIN-SPECIFIC GUIDANCE:
@@ -1166,10 +1177,11 @@ Create a comprehensive, multi-channel action plan with:
    - Execution type: "content_generation" (can auto-generate content), "audit" (requires manual tools), "analysis" (data review), or "manual" (requires manual work)
    - For content_generation steps, include:
      * platform (specific platform like "reddit", "linkedin", "medium", "email")
-     * topic (specific topic for content)
-     * keywords (relevant keywords to include)
+     * topic (specific topic for content - MUST incorporate target keywords if provided)
+     * keywords (MUST include relevant target keywords from the list above - use at least 2-3 target keywords per content step)
      * contentType ("article", "post", "answer", or "newsletter")
      * autoExecute: true (if system can auto-generate) or false
+   - For SEO steps, focus on optimizing for the target keywords provided
 3. Dependencies between steps
 4. Priority levels based on ROI potential and urgency
 5. Expected outcomes per channel
