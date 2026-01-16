@@ -3,17 +3,39 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import toast from 'react-hot-toast';
-import { Copy, Check, AlertCircle, Trash2, RefreshCw, ExternalLink, X } from 'lucide-react';
+import { Copy, Check, AlertCircle, Trash2, RefreshCw, ExternalLink, X, Plus } from 'lucide-react';
+
+interface GSCIntegrationData {
+  integration_id?: string;
+  domain_url?: string;
+  site_url?: string;
+  verification_method?: 'DNS_TXT' | 'DNS_CNAME' | 'FILE' | 'META' | 'ANALYTICS' | 'TAG_MANAGER';
+  verification_token?: string;
+  verification_status?: 'pending' | 'verified' | 'failed';
+  permission_level?: 'siteOwner' | 'siteFullUser' | 'siteRestrictedUser';
+  last_synced_at?: string;
+  verified_at?: string;
+  error?: string;
+  failed_at?: string;
+  [key: string]: any;
+}
 
 interface Domain {
   id: string;
-  domain_url: string;
-  site_url: string;
-  verification_status: 'pending' | 'verified' | 'failed';
+  domain: string;
+  status: string;
+  user_id?: string;
+  organization_id?: string;
+  gsc_integration?: GSCIntegrationData | null;
+  created_at: string;
+  updated_at: string;
+  // Computed properties for backward compatibility
+  domain_url?: string;
+  site_url?: string;
+  verification_status?: 'pending' | 'verified' | 'failed';
   verification_token?: string;
   verification_method?: string;
   last_synced_at?: string;
-  created_at: string;
   metadata?: any;
 }
 
@@ -29,7 +51,6 @@ export default function GoogleSearchConsolePage() {
   const [isConnected, setIsConnected] = useState(false);
   const [integration, setIntegration] = useState<Integration | null>(null);
   const [domains, setDomains] = useState<Domain[]>([]);
-  const [newDomain, setNewDomain] = useState('');
   const [loading, setLoading] = useState(false);
   const [checkingConnection, setCheckingConnection] = useState(true);
   const [showTokenModal, setShowTokenModal] = useState(false);
@@ -79,7 +100,18 @@ export default function GoogleSearchConsolePage() {
       const response = await fetch('/api/integrations/google-search-console/domains');
       const data = await response.json();
       if (data.success) {
-        setDomains(data.domains || []);
+        // Map domains to include backward compatibility fields
+        const mappedDomains = (data.domains || []).map((domain: any) => ({
+          ...domain,
+          // Extract GSC data for easier access
+          domain_url: domain.gsc_integration?.domain_url || domain.domain,
+          site_url: domain.gsc_integration?.site_url || `https://${domain.domain}`,
+          verification_status: domain.gsc_integration?.verification_status || 'pending',
+          verification_token: domain.gsc_integration?.verification_token,
+          verification_method: domain.gsc_integration?.verification_method || 'DNS_TXT',
+          last_synced_at: domain.gsc_integration?.last_synced_at,
+        }));
+        setDomains(mappedDomains);
       }
     } catch (error) {
       console.error('Load domains error:', error);
@@ -89,7 +121,7 @@ export default function GoogleSearchConsolePage() {
   const connectGSC = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/integrations/google-search-console/auth');
+      const response = await fetch('/api/integrations/google-search-console/auth-url');
       const data = await response.json();
       
       if (data.authUrl) {
@@ -131,37 +163,31 @@ export default function GoogleSearchConsolePage() {
     }
   };
 
-  const addDomain = async () => {
-    if (!newDomain.trim()) {
-      toast.error('Please enter a domain');
-      return;
-    }
-
+  const addDomainToGSC = async (domainId: string) => {
     setLoading(true);
     
     try {
       const response = await fetch('/api/integrations/google-search-console/domains', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domainUrl: newDomain.trim() }),
+        body: JSON.stringify({ domainId }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        toast.success('Domain added! Please add the TXT record to verify.');
+        toast.success('Domain added to GSC! Please add the TXT record to verify.');
         await loadDomains();
-        setNewDomain('');
         
         // Open modal with the newly added domain
         setModalDomain(data.domain);
         setShowTokenModal(true);
       } else {
-        toast.error(data.error || 'Failed to add domain');
+        toast.error(data.error || 'Failed to add domain to GSC');
       }
     } catch (error) {
-      console.error('Add domain error:', error);
-      toast.error('Failed to add domain');
+      console.error('Add domain to GSC error:', error);
+      toast.error('Failed to add domain to GSC');
     } finally {
       setLoading(false);
     }
@@ -195,7 +221,7 @@ export default function GoogleSearchConsolePage() {
   };
 
   const deleteDomain = async (domainId: string) => {
-    if (!confirm('Are you sure you want to remove this domain? All analytics data will be deleted.')) {
+    if (!confirm('Are you sure you want to remove GSC integration from this domain? The domain will remain in your domains list.')) {
       return;
     }
 
@@ -206,14 +232,14 @@ export default function GoogleSearchConsolePage() {
       });
 
       if (response.ok) {
-        toast.success('Domain removed successfully');
+        toast.success('GSC integration removed successfully');
         loadDomains();
       } else {
-        toast.error('Failed to remove domain');
+        toast.error('Failed to remove GSC integration');
       }
     } catch (error) {
-      console.error('Delete domain error:', error);
-      toast.error('Failed to remove domain');
+      console.error('Delete GSC integration error:', error);
+      toast.error('Failed to remove GSC integration');
     } finally {
       setLoading(false);
     }
@@ -338,11 +364,20 @@ export default function GoogleSearchConsolePage() {
       <div className="min-h-screen bg-gray-50 p-6">
         <div className="max-w-6xl mx-auto">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Google Search Console</h1>
-            <p className="text-gray-600">
-              Connect your Google Search Console account to track your website's search performance.
-            </p>
+          <div className="mb-8 flex items-start justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">Google Search Console</h1>
+              <p className="text-gray-600">
+                Connect your Google Search Console account to track your website's search performance.
+              </p>
+            </div>
+            <a
+              href="/dashboard/domains"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 whitespace-nowrap"
+            >
+              <Plus className="w-5 h-5" />
+              Add Domain
+            </a>
           </div>
 
           <div className="flex items-center justify-center py-12">
@@ -360,11 +395,20 @@ export default function GoogleSearchConsolePage() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Google Search Console</h1>
-          <p className="text-gray-600">
-            Connect your Google Search Console account to track your website's search performance.
-          </p>
+        <div className="mb-8 flex items-start justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Google Search Console</h1>
+            <p className="text-gray-600">
+              Connect your Google Search Console account to track your website's search performance.
+            </p>
+          </div>
+          <a
+            href="/dashboard/domains"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2 whitespace-nowrap"
+          >
+            <Plus className="w-5 h-5" />
+            Add Domain
+          </a>
         </div>
 
         {/* Connection Status */}
@@ -441,39 +485,20 @@ export default function GoogleSearchConsolePage() {
               </button>
             </div>
 
-            {/* Add Domain Section */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Add Domain</h2>
-              <div className="flex gap-4">
-                <input
-                  type="text"
-                  value={newDomain}
-                  onChange={(e) => setNewDomain(e.target.value)}
-                  placeholder="example.com"
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  onKeyDown={(e) => e.key === 'Enter' && addDomain()}
-                />
-                <button
-                  onClick={addDomain}
-                  disabled={loading || !newDomain.trim()}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                >
-                  {loading ? 'Adding...' : 'Add Domain'}
-                </button>
-              </div>
-            </div>
-
             {/* Domains List */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Domains</h2>
+              <p className="text-sm text-gray-600 mb-4">
+                Manage your domains and add them to Google Search Console for tracking.
+              </p>
               
               {domains.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <ExternalLink className="w-8 h-8 text-gray-400" />
                   </div>
-                  <p className="text-gray-500 mb-2">No domains added yet</p>
-                  <p className="text-sm text-gray-400">Add your first domain above to get started</p>
+                  <p className="text-gray-500 mb-2">No domains found</p>
+                  <p className="text-sm text-gray-400">Add domains from the Domains page first, then connect them to GSC here</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -485,11 +510,13 @@ export default function GoogleSearchConsolePage() {
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-gray-900 text-lg">{domain.domain_url}</h3>
-                            <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(domain.verification_status)}`}>
-                              {getStatusIcon(domain.verification_status)}
-                              {domain.verification_status}
-                            </span>
+                            <h3 className="font-semibold text-gray-900 text-lg">{domain.domain_url || domain.domain}</h3>
+                            {domain.verification_status && (
+                              <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(domain.verification_status)}`}>
+                                {getStatusIcon(domain.verification_status)}
+                                {domain.verification_status}
+                              </span>
+                            )}
                           </div>
                           
                           {domain.last_synced_at && (
@@ -506,50 +533,65 @@ export default function GoogleSearchConsolePage() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {(domain.verification_status === 'pending' || domain.verification_status === 'failed') && (
+                          {!domain.gsc_integration ? (
+                            // Show "Add to GSC" button for domains without GSC integration
+                            <button
+                              onClick={() => addDomainToGSC(domain.id)}
+                              disabled={loading}
+                              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                            >
+                              Add to GSC
+                            </button>
+                          ) : (
                             <>
-                              <button
-                                onClick={() => {
-                                  setModalDomain(domain);
-                                  setShowTokenModal(true);
-                                }}
-                                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                                  domain.verification_status === 'failed'
-                                    ? 'text-red-700 bg-red-50 border border-red-200 hover:bg-red-100'
-                                    : 'text-yellow-700 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100'
-                                }`}
-                              >
-                                Show Token
-                              </button>
-                              <button
-                                onClick={() => verifyDomain(domain.id)}
-                                disabled={loading}
-                                className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                              >
-                                {domain.verification_status === 'failed' ? 'Retry Verification' : 'Verify'}
-                              </button>
+                              {(domain.verification_status === 'pending' || domain.verification_status === 'failed') && (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setModalDomain(domain);
+                                      setShowTokenModal(true);
+                                    }}
+                                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                      domain.verification_status === 'failed'
+                                        ? 'text-red-700 bg-red-50 border border-red-200 hover:bg-red-100'
+                                        : 'text-yellow-700 bg-yellow-50 border border-yellow-200 hover:bg-yellow-100'
+                                    }`}
+                                  >
+                                    Show Token
+                                  </button>
+                                  <button
+                                    onClick={() => verifyDomain(domain.id)}
+                                    disabled={loading}
+                                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                                  >
+                                    {domain.verification_status === 'failed' ? 'Retry Verification' : 'Verify'}
+                                  </button>
+                                </>
+                              )}
+                              
+                              {domain.verification_status === 'verified' && (
+                                <button
+                                  onClick={() => syncAnalytics(domain.id)}
+                                  disabled={loading}
+                                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                                >
+                                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                                  Sync Data
+                                </button>
+                              )}
                             </>
                           )}
                           
-                          {domain.verification_status === 'verified' && (
+                          {domain.gsc_integration && (
                             <button
-                              onClick={() => syncAnalytics(domain.id)}
+                              onClick={() => deleteDomain(domain.id)}
                               disabled={loading}
-                              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                              title="Remove GSC integration"
                             >
-                              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                              Sync Data
+                              <Trash2 className="w-5 h-5" />
                             </button>
                           )}
-                          
-                          <button
-                            onClick={() => deleteDomain(domain.id)}
-                            disabled={loading}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                            title="Remove domain"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
                         </div>
                       </div>
                     </div>

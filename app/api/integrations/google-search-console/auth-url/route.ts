@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const returnTo = searchParams.get("return_to") || "/dashboard/settings";
+    const returnTo = searchParams.get("return_to") || "/dashboard/google-search-console";
 
     // Check for required environment variables
     // Use NEXT_PUBLIC_GOOGLE_CLIENT_ID for client-side access, but also check server-side vars
@@ -46,7 +46,13 @@ export async function GET(request: NextRequest) {
     // Remove any trailing slashes or query parameters from redirect URI
     const cleanRedirectUri = baseRedirectUri.split('?')[0].replace(/\/$/, '');
     
-    const scope = "https://www.googleapis.com/auth/webmasters.readonly https://www.googleapis.com/auth/webmasters";
+    // Include all required scopes for GSC integration
+    const scopes = [
+      'https://www.googleapis.com/auth/webmasters.readonly',
+      'https://www.googleapis.com/auth/siteverification', // Required for domain verification
+      'https://www.googleapis.com/auth/webmasters', // Required for adding sites to GSC
+    ];
+    const scope = scopes.join(' ');
     
     // Pass return_to as state parameter (Google will return it in the callback)
     const state = encodeURIComponent(JSON.stringify({ return_to: returnTo }));
