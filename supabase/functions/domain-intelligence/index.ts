@@ -3,6 +3,9 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import * as cheerio from "https://deno.land/x/cheerio@1.0.0-rc.12/mod.ts";
+// Playwright for Deno - for JavaScript-rendered sites
+import { chromium } from "https://esm.sh/playwright@1.40.0?target=deno";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -130,39 +133,74 @@ async function fetchWebsiteContent(url: string, timeout = 10000): Promise<{ html
   }
 }
 
-// Extract text from HTML
+// Extract text from HTML using Cheerio for better parsing
 function extractTextFromHTML(html: string): string {
   try {
-    let text = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ");
-    text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ");
-    text = text.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, " ");
-    text = text.replace(/<[^>]*>/g, " ");
-    text = text.replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&apos;/g, "'");
-    text = text.replace(/\s+/g, " ").trim();
-    return text;
-  } catch {
-    return "";
+    // Use Cheerio for better HTML parsing and text extraction
+    const $ = cheerio.load(html);
+    
+    // Remove script, style, and other non-content elements
+    $("script, style, noscript, iframe, embed, object").remove();
+    
+    // Get text content from body (or html if no body)
+    const bodyText = $("body").length > 0 ? $("body").text() : $.text();
+    
+    // Clean up whitespace
+    return bodyText.replace(/\s+/g, " ").trim();
+  } catch (error) {
+    // Fallback to regex-based extraction if Cheerio fails
+    console.warn("Cheerio text extraction failed, using regex fallback:", error);
+    try {
+      let text = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ");
+      text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ");
+      text = text.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, " ");
+      text = text.replace(/<[^>]*>/g, " ");
+      text = text.replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'");
+      text = text.replace(/\s+/g, " ").trim();
+      return text;
+    } catch {
+      return "";
+    }
   }
 }
 
-// Extract links from HTML
+// Extract links from HTML using Cheerio for better parsing
 function extractLinks(html: string, baseUrl: string, baseDomain: string): string[] {
   const links: string[] = [];
-  const linkRegex = /<a[^>]*href=["']([^"']+)["'][^>]*>/gi;
-  let match;
   
-  while ((match = linkRegex.exec(html)) !== null) {
-    const href = match[1];
-    if (href && !href.startsWith("#") && !href.startsWith("javascript:") && !href.startsWith("mailto:")) {
-      const normalized = normalizeUrl(href, baseUrl);
-      if (normalized && isSameDomain(normalized, baseDomain)) {
-        links.push(normalized);
+  try {
+    // Use Cheerio for better HTML parsing
+    const $ = cheerio.load(html);
+    
+    // Extract all anchor tags
+    $("a[href]").each((_, element) => {
+      const href = $(element).attr("href");
+      if (href && !href.startsWith("#") && !href.startsWith("javascript:") && !href.startsWith("mailto:")) {
+        const normalized = normalizeUrl(href, baseUrl);
+        if (normalized && isSameDomain(normalized, baseDomain)) {
+          links.push(normalized);
+        }
+      }
+    });
+  } catch (error) {
+    // Fallback to regex if Cheerio fails
+    console.warn("Cheerio parsing failed, using regex fallback:", error);
+    const linkRegex = /<a[^>]*href=["']([^"']+)["'][^>]*>/gi;
+    let match;
+    
+    while ((match = linkRegex.exec(html)) !== null) {
+      const href = match[1];
+      if (href && !href.startsWith("#") && !href.startsWith("javascript:") && !href.startsWith("mailto:")) {
+        const normalized = normalizeUrl(href, baseUrl);
+        if (normalized && isSameDomain(normalized, baseDomain)) {
+          links.push(normalized);
+        }
       }
     }
   }
@@ -170,43 +208,193 @@ function extractLinks(html: string, baseUrl: string, baseDomain: string): string
   return [...new Set(links)]; // Remove duplicates
 }
 
-// Multi-page crawler
+// Fetch website content with JavaScript rendering support using Playwright
+// Note: Playwright requires browser binaries. For Supabase Edge Functions,
+// you may need to use a headless browser service API instead (Browserless.io, ScrapingBee)
+// or deploy Playwright in a separate service. Set USE_PLAYWRIGHT=false to disable.
+async function fetchWebsiteContentWithJS(
+  url: string,
+  usePlaywright: boolean = true,
+  waitForSelector?: string,
+  waitTime: number = 2000
+): Promise<{ html: string; statusCode: number }> {
+  // Check if Playwright is enabled via environment variable
+  const playwrightEnabled = Deno.env.get("USE_PLAYWRIGHT") !== "false" && usePlaywright;
+  
+  // If Playwright is disabled or not available, use basic fetch
+  if (!playwrightEnabled) {
+    return fetchWebsiteContent(url);
+  }
+
+  try {
+    console.log(`🎭 Using Playwright to render JavaScript for: ${url}`);
+    
+    // Launch Playwright browser
+    const browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-client-side-phishing-detection',
+        '--disable-component-update',
+        '--disable-default-apps',
+        '--disable-features=TranslateUI',
+        '--disable-hang-monitor',
+        '--disable-ipc-flooding-protection',
+        '--disable-popup-blocking',
+        '--disable-prompt-on-repost',
+        '--disable-renderer-backgrounding',
+        '--disable-sync',
+        '--metrics-recording-only',
+        '--mute-audio',
+        '--no-default-browser-check',
+        '--no-pings',
+        '--use-mock-keychain',
+      ]
+    });
+
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (compatible; DomainIntelligenceBot/1.0; +https://georepute.ai)",
+      viewport: { width: 1920, height: 1080 },
+      ignoreHTTPSErrors: true,
+    });
+
+    const page = await context.newPage();
+    
+    // Navigate to URL with timeout
+    const response = await page.goto(url, {
+      waitUntil: 'networkidle',
+      timeout: 30000,
+    });
+
+    // Wait for specific selector if provided, otherwise wait for content
+    if (waitForSelector) {
+      try {
+        await page.waitForSelector(waitForSelector, { timeout: 10000 });
+      } catch {
+        // Selector not found, continue anyway
+      }
+    } else {
+      // Wait a bit for JavaScript to render
+      await page.waitForTimeout(waitTime);
+    }
+
+    // Get fully rendered HTML
+    const html = await page.content();
+    const statusCode = response?.status() || 200;
+
+    await browser.close();
+
+    console.log(`✅ Playwright successfully rendered: ${url}`);
+    return { html, statusCode };
+  } catch (error) {
+    console.warn(`⚠️ Playwright failed for ${url}, falling back to fetch:`, error);
+    // Fallback to regular fetch if Playwright fails
+    return fetchWebsiteContent(url);
+  }
+}
+
+// Multi-page crawler with parallel crawling and robots.txt support
 async function crawlDomain(
   startUrl: string,
-  maxPages: number = 20,
-  maxDepth: number = 3
+  maxPages: number = 75, // Increased from 20 to 75
+  maxDepth: number = 4, // Increased from 3 to 4
+  parallelRequests: number = 5 // Number of parallel requests
 ): Promise<Array<{ url: string; html: string; statusCode: number; depth: number }>> {
   const visited = new Set<string>();
   const toVisit: Array<{ url: string; depth: number }> = [{ url: startUrl, depth: 0 }];
   const results: Array<{ url: string; html: string; statusCode: number; depth: number }> = [];
   const baseDomain = extractDomainName(startUrl);
+  const baseUrl = new URL(startUrl).origin;
   
-  while (toVisit.length > 0 && results.length < maxPages) {
-    const { url, depth } = toVisit.shift()!;
-    
-    if (visited.has(url) || depth > maxDepth) continue;
-    visited.add(url);
-    
-    const { html, statusCode } = await fetchWebsiteContent(url);
-    
-    if (statusCode === 200 && html) {
-      results.push({ url, html, statusCode, depth });
-      
-      // Extract links for next depth level
-      if (depth < maxDepth) {
-        const links = extractLinks(html, url, baseDomain);
-        for (const link of links) {
-          if (!visited.has(link) && results.length < maxPages) {
-            toVisit.push({ url: link, depth: depth + 1 });
-          }
-        }
-      }
-    }
-    
-    // Small delay to avoid rate limiting
-    await new Promise(resolve => setTimeout(resolve, 500));
+  // Check robots.txt once at the start
+  const robotsAllowed = await checkRobotsTxt(baseUrl, "/");
+  if (!robotsAllowed) {
+    console.warn("⚠️ robots.txt disallows crawling root path");
+    // Still try to crawl, but respect individual path rules
   }
   
+  // Parallel crawling queue
+  const crawlingQueue: Array<Promise<void>> = [];
+  
+  while (toVisit.length > 0 || crawlingQueue.length > 0) {
+    // Start parallel requests up to the limit
+    while (crawlingQueue.length < parallelRequests && toVisit.length > 0 && results.length < maxPages) {
+      const { url, depth } = toVisit.shift()!;
+      
+      if (visited.has(url) || depth > maxDepth) continue;
+      visited.add(url);
+      
+      // Check robots.txt for this specific path
+      const urlPath = new URL(url).pathname;
+      const isAllowed = await checkRobotsTxt(baseUrl, urlPath);
+      
+      if (!isAllowed) {
+        console.log(`🚫 robots.txt disallows: ${urlPath}`);
+        continue;
+      }
+      
+      // Add to parallel crawling queue
+      const crawlPromise = (async () => {
+        try {
+          // Use Playwright for JavaScript-rendered sites (depth 0 and 1 for main pages)
+          // Use regular fetch for deeper pages to save resources
+          const usePlaywright = depth <= 1 && Deno.env.get("USE_PLAYWRIGHT") !== "false";
+          const { html, statusCode } = usePlaywright 
+            ? await fetchWebsiteContentWithJS(url, true, undefined, 2000)
+            : await fetchWebsiteContent(url);
+          
+          if (statusCode === 200 && html) {
+            results.push({ url, html, statusCode, depth });
+            
+            // Extract links for next depth level
+            if (depth < maxDepth && results.length < maxPages) {
+              const links = extractLinks(html, url, baseDomain);
+              for (const link of links) {
+                if (!visited.has(link) && results.length < maxPages) {
+                  toVisit.push({ url: link, depth: depth + 1 });
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error(`Error crawling ${url}:`, error);
+        }
+      })();
+      
+      crawlingQueue.push(crawlPromise);
+      
+      // Remove completed promises
+      crawlPromise.finally(() => {
+        const index = crawlingQueue.indexOf(crawlPromise);
+        if (index > -1) {
+          crawlingQueue.splice(index, 1);
+        }
+      });
+    }
+    
+    // Wait for at least one request to complete before continuing
+    if (crawlingQueue.length >= parallelRequests) {
+      await Promise.race(crawlingQueue);
+    }
+    
+    // Small delay to avoid overwhelming the server
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  
+  // Wait for all remaining requests to complete
+  await Promise.all(crawlingQueue);
+  
+  console.log(`✅ Crawled ${results.length} pages (max: ${maxPages}, depth: ${maxDepth})`);
   return results;
 }
 
@@ -307,6 +495,84 @@ function detectGeography(text: string, html: string, domain: string): { primary:
   }
   
   return geography;
+}
+
+// Check robots.txt and determine if URL is allowed to crawl
+async function checkRobotsTxt(baseUrl: string, path: string): Promise<boolean> {
+  try {
+    const robotsUrl = new URL("/robots.txt", baseUrl).href;
+    const { html, statusCode } = await fetchWebsiteContent(robotsUrl);
+    
+    if (statusCode !== 200 || !html) {
+      // If robots.txt doesn't exist, allow crawling
+      return true;
+    }
+    
+    // Parse robots.txt
+    const lines = html.split("\n");
+    let inUserAgent = false;
+    let userAgentMatches = false;
+    const disallowedPaths: string[] = [];
+    const allowedPaths: string[] = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      
+      const lowerLine = trimmed.toLowerCase();
+      
+      if (lowerLine.startsWith("user-agent:")) {
+        const userAgent = trimmed.substring(11).trim();
+        // Check if it's for all agents (*) or our bot
+        inUserAgent = userAgent === "*" || userAgent.includes("DomainIntelligenceBot");
+        userAgentMatches = inUserAgent;
+      } else if (inUserAgent) {
+        if (lowerLine.startsWith("disallow:")) {
+          const disallowPath = trimmed.substring(9).trim();
+          if (disallowPath) {
+            disallowedPaths.push(disallowPath);
+          }
+        } else if (lowerLine.startsWith("allow:")) {
+          const allowPath = trimmed.substring(6).trim();
+          if (allowPath) {
+            allowedPaths.push(allowPath);
+          }
+        } else if (lowerLine.startsWith("user-agent:")) {
+          // New user-agent block, reset
+          inUserAgent = false;
+          disallowedPaths.length = 0;
+          allowedPaths.length = 0;
+        }
+      }
+    }
+    
+    // If no specific rules for our user-agent, allow
+    if (!userAgentMatches) {
+      return true;
+    }
+    
+    // Check if path is explicitly allowed
+    for (const allowed of allowedPaths) {
+      if (path.startsWith(allowed.replace(/\*/g, ""))) {
+        return true;
+      }
+    }
+    
+    // Check if path is disallowed
+    for (const disallowed of disallowedPaths) {
+      const pattern = disallowed.replace(/\*/g, ".*");
+      if (new RegExp(`^${pattern}`).test(path)) {
+        return false;
+      }
+    }
+    
+    // Default: allow if no disallow rules, or if there are allow rules
+    return disallowedPaths.length === 0 || allowedPaths.length > 0;
+  } catch (error) {
+    console.warn("Error checking robots.txt:", error);
+    // On error, allow crawling (fail open)
+    return true;
+  }
 }
 
 // Detect toxic patterns
@@ -412,77 +678,175 @@ function analyzeSEOBaseline(html: string, url: string) {
     recommendations: [] as string[],
   };
 
-  // Extract title
-  const titleMatch = html.match(/<title>(.*?)<\/title>/i);
-  if (titleMatch) {
-    seoAnalysis.metaTags.hasTitle = true;
-    seoAnalysis.metaTags.title = titleMatch[1].trim();
-    seoAnalysis.metaTags.titleLength = seoAnalysis.metaTags.title.length;
+  try {
+    // Use Cheerio for better HTML parsing
+    const $ = cheerio.load(html);
+
+    // Extract title
+    const title = $("title").text().trim();
+    if (title) {
+      seoAnalysis.metaTags.hasTitle = true;
+      seoAnalysis.metaTags.title = title;
+      seoAnalysis.metaTags.titleLength = title.length;
+    }
+
+    // Extract meta description
+    const description = $('meta[name="description"]').attr("content") || "";
+    if (description) {
+      seoAnalysis.metaTags.hasDescription = true;
+      seoAnalysis.metaTags.description = description.trim();
+      seoAnalysis.metaTags.descriptionLength = seoAnalysis.metaTags.description.length;
+    }
+
+    // Check meta keywords
+    seoAnalysis.metaTags.hasKeywords = $('meta[name="keywords"]').length > 0;
+
+    // Check Open Graph tags
+    seoAnalysis.metaTags.ogTags = $('meta[property^="og:"]').length > 0;
+
+    // Check Twitter tags
+    seoAnalysis.metaTags.twitterTags = $('meta[name^="twitter:"]').length > 0;
+
+    // Extract canonical URL
+    const canonical = $('link[rel="canonical"]').attr("href") || "";
+    if (canonical) {
+      seoAnalysis.metaTags.canonicalUrl = canonical;
+    }
+
+    // Extract headings using Cheerio
+    seoAnalysis.headings.h1Count = $("h1").length;
+    seoAnalysis.headings.h2Count = $("h2").length;
+    seoAnalysis.headings.h3Count = $("h3").length;
+    seoAnalysis.headings.h4Count = $("h4").length;
+
+    // Heading issues
+    if (seoAnalysis.headings.h1Count === 0) {
+      seoAnalysis.headings.issues.push("Missing H1 tag");
+    } else if (seoAnalysis.headings.h1Count > 1) {
+      seoAnalysis.headings.issues.push(`Multiple H1 tags (${seoAnalysis.headings.h1Count})`);
+    }
+
+    // Extract links using Cheerio
+    $("a[href]").each((_, element) => {
+      const href = $(element).attr("href") || "";
+      const rel = $(element).attr("rel") || "";
+      
+      if (href.startsWith("/") || href.startsWith("./") || (href.startsWith("http") && new URL(href).hostname === new URL(url).hostname)) {
+        seoAnalysis.links.internal++;
+      } else if (href.startsWith("http")) {
+        seoAnalysis.links.external++;
+      }
+      
+      if (rel.toLowerCase().includes("nofollow")) {
+        seoAnalysis.links.nofollow++;
+      }
+    });
+
+    // Extract images using Cheerio
+    $("img").each((_, element) => {
+      seoAnalysis.images.total++;
+      const alt = $(element).attr("alt");
+      if (alt && alt.trim()) {
+        seoAnalysis.images.withAlt++;
+      } else {
+        seoAnalysis.images.missingAlt++;
+      }
+    });
+
+    // Check schema markup
+    $('script[type="application/ld+json"]').each((_, element) => {
+      seoAnalysis.schema.present = true;
+      try {
+        const schemaText = $(element).html() || "";
+        const schemaMatch = schemaText.match(/"@type"\s*:\s*"([^"]+)"/);
+        if (schemaMatch && schemaMatch[1]) {
+          seoAnalysis.schema.types.push(schemaMatch[1]);
+        }
+      } catch {
+        // Skip invalid JSON
+      }
+    });
+    seoAnalysis.schema.types = [...new Set(seoAnalysis.schema.types)];
+
+    // Check mobile viewport
+    seoAnalysis.mobile.hasViewport = $('meta[name="viewport"]').length > 0;
+    seoAnalysis.mobile.isResponsive = html.includes('max-width') || html.includes('responsive') || $('meta[name="viewport"]').attr("content")?.includes("width=device-width") || false;
+  } catch (error) {
+    // Fallback to regex-based parsing if Cheerio fails
+    console.warn("Cheerio SEO analysis failed, using regex fallback:", error);
+    
+    // Extract title (fallback)
+    const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+    if (titleMatch) {
+      seoAnalysis.metaTags.hasTitle = true;
+      seoAnalysis.metaTags.title = titleMatch[1].trim();
+      seoAnalysis.metaTags.titleLength = seoAnalysis.metaTags.title.length;
+    }
+
+    // Extract meta description (fallback)
+    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+    if (descMatch) {
+      seoAnalysis.metaTags.hasDescription = true;
+      seoAnalysis.metaTags.description = descMatch[1].trim();
+      seoAnalysis.metaTags.descriptionLength = seoAnalysis.metaTags.description.length;
+    }
+
+    // Check meta keywords (fallback)
+    seoAnalysis.metaTags.hasKeywords = html.includes('name="keywords"');
+
+    // Check Open Graph tags (fallback)
+    seoAnalysis.metaTags.ogTags = html.includes('property="og:');
+
+    // Check Twitter tags (fallback)
+    seoAnalysis.metaTags.twitterTags = html.includes('name="twitter:');
+
+    // Extract canonical URL (fallback)
+    const canonicalMatch = html.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+    if (canonicalMatch) {
+      seoAnalysis.metaTags.canonicalUrl = canonicalMatch[1];
+    }
+
+    // Extract headings (fallback)
+    seoAnalysis.headings.h1Count = (html.match(/<h1[^>]*>/gi) || []).length;
+    seoAnalysis.headings.h2Count = (html.match(/<h2[^>]*>/gi) || []).length;
+    seoAnalysis.headings.h3Count = (html.match(/<h3[^>]*>/gi) || []).length;
+    seoAnalysis.headings.h4Count = (html.match(/<h4[^>]*>/gi) || []).length;
+
+    // Heading issues (fallback)
+    if (seoAnalysis.headings.h1Count === 0) {
+      seoAnalysis.headings.issues.push("Missing H1 tag");
+    } else if (seoAnalysis.headings.h1Count > 1) {
+      seoAnalysis.headings.issues.push(`Multiple H1 tags (${seoAnalysis.headings.h1Count})`);
+    }
+
+    // Extract links (fallback)
+    const internalLinks = html.match(/href=["'](\/[^"']*|.*?\/[^"']*)/gi) || [];
+    const externalLinks = html.match(/href=["']https?:\/\/(?!.*?\/\/)/gi) || [];
+    const nofollowLinks = html.match(/rel=["'][^"']*nofollow/gi) || [];
+    
+    seoAnalysis.links.internal = internalLinks.length;
+    seoAnalysis.links.external = externalLinks.length;
+    seoAnalysis.links.nofollow = nofollowLinks.length;
+
+    // Extract images (fallback)
+    const allImages = html.match(/<img[^>]*>/gi) || [];
+    const imagesWithAlt = html.match(/<img[^>]*alt=["'][^"']+["']/gi) || [];
+    
+    seoAnalysis.images.total = allImages.length;
+    seoAnalysis.images.withAlt = imagesWithAlt.length;
+    seoAnalysis.images.missingAlt = seoAnalysis.images.total - seoAnalysis.images.withAlt;
+
+    // Check schema markup (fallback)
+    if (html.includes('application/ld+json')) {
+      seoAnalysis.schema.present = true;
+      const schemaMatches = html.match(/"@type"\s*:\s*"([^"]+)"/gi) || [];
+      seoAnalysis.schema.types = [...new Set(schemaMatches.map(m => m.match(/"([^"]+)"/)?.[1] || "").filter(Boolean))];
+    }
+
+    // Check mobile viewport (fallback)
+    seoAnalysis.mobile.hasViewport = html.includes('name="viewport"');
+    seoAnalysis.mobile.isResponsive = html.includes('max-width') || html.includes('responsive');
   }
-
-  // Extract meta description
-  const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
-  if (descMatch) {
-    seoAnalysis.metaTags.hasDescription = true;
-    seoAnalysis.metaTags.description = descMatch[1].trim();
-    seoAnalysis.metaTags.descriptionLength = seoAnalysis.metaTags.description.length;
-  }
-
-  // Check meta keywords
-  seoAnalysis.metaTags.hasKeywords = html.includes('name="keywords"');
-
-  // Check Open Graph tags
-  seoAnalysis.metaTags.ogTags = html.includes('property="og:');
-
-  // Check Twitter tags
-  seoAnalysis.metaTags.twitterTags = html.includes('name="twitter:');
-
-  // Extract canonical URL
-  const canonicalMatch = html.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
-  if (canonicalMatch) {
-    seoAnalysis.metaTags.canonicalUrl = canonicalMatch[1];
-  }
-
-  // Extract headings
-  seoAnalysis.headings.h1Count = (html.match(/<h1[^>]*>/gi) || []).length;
-  seoAnalysis.headings.h2Count = (html.match(/<h2[^>]*>/gi) || []).length;
-  seoAnalysis.headings.h3Count = (html.match(/<h3[^>]*>/gi) || []).length;
-  seoAnalysis.headings.h4Count = (html.match(/<h4[^>]*>/gi) || []).length;
-
-  // Heading issues
-  if (seoAnalysis.headings.h1Count === 0) {
-    seoAnalysis.headings.issues.push("Missing H1 tag");
-  } else if (seoAnalysis.headings.h1Count > 1) {
-    seoAnalysis.headings.issues.push(`Multiple H1 tags (${seoAnalysis.headings.h1Count})`);
-  }
-
-  // Extract links
-  const internalLinks = html.match(/href=["'](\/[^"']*|.*?\/[^"']*)/gi) || [];
-  const externalLinks = html.match(/href=["']https?:\/\/(?!.*?\/\/)/gi) || [];
-  const nofollowLinks = html.match(/rel=["'][^"']*nofollow/gi) || [];
-  
-  seoAnalysis.links.internal = internalLinks.length;
-  seoAnalysis.links.external = externalLinks.length;
-  seoAnalysis.links.nofollow = nofollowLinks.length;
-
-  // Extract images
-  const allImages = html.match(/<img[^>]*>/gi) || [];
-  const imagesWithAlt = html.match(/<img[^>]*alt=["'][^"']+["']/gi) || [];
-  
-  seoAnalysis.images.total = allImages.length;
-  seoAnalysis.images.withAlt = imagesWithAlt.length;
-  seoAnalysis.images.missingAlt = seoAnalysis.images.total - seoAnalysis.images.withAlt;
-
-  // Check schema markup
-  if (html.includes('application/ld+json')) {
-    seoAnalysis.schema.present = true;
-    const schemaMatches = html.match(/"@type"\s*:\s*"([^"]+)"/gi) || [];
-    seoAnalysis.schema.types = [...new Set(schemaMatches.map(m => m.match(/"([^"]+)"/)?.[1] || "").filter(Boolean))];
-  }
-
-  // Check mobile viewport
-  seoAnalysis.mobile.hasViewport = html.includes('name="viewport"');
-  seoAnalysis.mobile.isResponsive = html.includes('max-width') || html.includes('responsive');
 
   // Calculate SEO score
   let score = 0;
@@ -613,6 +977,179 @@ function analyzeSiteStructure(
   return structure;
 }
 
+// Estimate traffic level based on SEO metrics and site structure
+function estimateTrafficLevel(
+  seoAnalysis: any,
+  siteStructure: any,
+  crawledPages: any[],
+  domainAge?: number
+): "low" | "medium" | "high" {
+  let score = 0;
+  
+  // SEO score contributes (0-40 points)
+  score += Math.floor(seoAnalysis.seoScore / 2.5);
+  
+  // Page count contributes (0-20 points)
+  const pageCount = siteStructure.totalPages || crawledPages.length;
+  if (pageCount > 50) score += 20;
+  else if (pageCount > 20) score += 15;
+  else if (pageCount > 10) score += 10;
+  else if (pageCount > 5) score += 5;
+  
+  // Internal links contribute (0-15 points)
+  if (seoAnalysis.links.internal > 100) score += 15;
+  else if (seoAnalysis.links.internal > 50) score += 10;
+  else if (seoAnalysis.links.internal > 20) score += 5;
+  
+  // External links contribute (0-10 points)
+  if (seoAnalysis.links.external > 20) score += 10;
+  else if (seoAnalysis.links.external > 10) score += 5;
+  
+  // Schema markup contributes (0-10 points)
+  if (seoAnalysis.schema.present) score += 10;
+  
+  // Domain age contributes (0-5 points) - older domains tend to have more traffic
+  if (domainAge && domainAge > 5) score += 5;
+  else if (domainAge && domainAge > 2) score += 3;
+  
+  // Categorize based on total score
+  if (score >= 60) return "high";
+  if (score >= 30) return "medium";
+  return "low";
+}
+
+// Detect company stage from website content
+function detectCompanyStage(
+  html: string,
+  text: string,
+  siteStructure: any
+): "startup" | "smb" | "mid-market" | "enterprise" {
+  const lowerText = text.toLowerCase();
+  const lowerHtml = html.toLowerCase();
+  
+  // Indicators for startup
+  const startupIndicators = [
+    /founded in (20\d{2})/i,
+    /established in (20\d{2})/i,
+    /started in (20\d{2})/i,
+    /\b(startup|start-up|early stage|seed|pre-seed|angel|bootstrapped)\b/i,
+    /\b(founded|launched|established) (in |)(20\d{2})/i,
+    /team of \d{1,2}/i,
+    /\b(we are|we're) a (small|new|young|emerging) (company|team|startup)/i,
+  ];
+  
+  // Indicators for SMB
+  const smbIndicators = [
+    /\b(small business|local business|family-owned|independent)\b/i,
+    /\b(serving|serves) (the|our) (local|community|area|region)/i,
+    /\b(established|operating) (since|for) (over |more than |)\d{1,2} (years|year)/i,
+  ];
+  
+  // Indicators for enterprise
+  const enterpriseIndicators = [
+    /\b(enterprise|corporation|corp|inc\.|llc|global|worldwide|international)\b/i,
+    /\b(established|founded) (in |)(19\d{2}|20[0-1]\d)/i,
+    /\b(thousands|hundreds) of (employees|staff|team members)/i,
+    /\b(multi-?national|fortune|publicly traded|listed on)/i,
+    /(revenue|annual revenue|turnover) (of |exceeding |over )(\$|€|£)?[\d,]+ (million|billion)/i,
+  ];
+  
+  // Check for enterprise indicators first (most specific)
+  for (const indicator of enterpriseIndicators) {
+    if (indicator.test(lowerText) || indicator.test(lowerHtml)) {
+      return "enterprise";
+    }
+  }
+  
+  // Check for startup indicators
+  let startupScore = 0;
+  for (const indicator of startupIndicators) {
+    if (indicator.test(lowerText) || indicator.test(lowerHtml)) {
+      startupScore++;
+      // Check if founded recently (within last 3 years)
+      const yearMatch = lowerText.match(/(founded|established|started|launched) (in |)(20\d{2})/);
+      if (yearMatch) {
+        const year = parseInt(yearMatch[3]);
+        const currentYear = new Date().getFullYear();
+        if (currentYear - year <= 3) {
+          startupScore += 2; // Strong startup indicator
+        }
+      }
+    }
+  }
+  
+  // Check for SMB indicators
+  let smbScore = 0;
+  for (const indicator of smbIndicators) {
+    if (indicator.test(lowerText) || indicator.test(lowerHtml)) {
+      smbScore++;
+    }
+  }
+  
+  // Small site structure suggests startup
+  if (siteStructure.totalPages < 10) {
+    startupScore += 1;
+  }
+  
+  // Determine stage based on scores
+  if (startupScore >= 2) return "startup";
+  if (smbScore >= 1 || (startupScore === 0 && smbScore === 0 && siteStructure.totalPages < 30)) {
+    return "smb";
+  }
+  if (siteStructure.totalPages > 100) {
+    return "enterprise";
+  }
+  
+  return "mid-market";
+}
+
+// Detect market position/scope
+function detectMarketPosition(
+  text: string,
+  html: string,
+  geography: any
+): "niche" | "regional" | "national" | "global" {
+  const lowerText = text.toLowerCase();
+  const lowerHtml = html.toLowerCase();
+  
+  // Global indicators
+  if (
+    /\b(global|worldwide|international|world-class|serving (the )?world|across (the )?globe)\b/i.test(lowerText) ||
+    /\b(multiple countries|worldwide|international presence)\b/i.test(lowerText)
+  ) {
+    return "global";
+  }
+  
+  // National indicators
+  if (
+    /\b(nationwide|national|across (the )?(country|usa|uk|canada|australia))\b/i.test(lowerText) ||
+    /\b(serving (the )?(entire )?(country|nation))\b/i.test(lowerText)
+  ) {
+    return "national";
+  }
+  
+  // Regional indicators
+  if (
+    geography.primary ||
+    /\b(regional|local|area|region|serving (the )?(local|regional))\b/i.test(lowerText) ||
+    /\b(near me|in your area|local business)\b/i.test(lowerText)
+  ) {
+    return "regional";
+  }
+  
+  // Niche indicators (specific industry focus, specialized)
+  if (
+    /\b(specialized|specialist|niche|focused on|expert in|dedicated to)\b/i.test(lowerText) ||
+    /\b(leading (provider|solution|company) (for|in))\b/i.test(lowerText)
+  ) {
+    return "niche";
+  }
+  
+  // Default based on geography
+  if (geography.primary) return "regional";
+  return "niche";
+}
+
 // Analyze strengths and weaknesses
 function analyzeStrengthsWeaknesses(
   seoAnalysis: any,
@@ -736,6 +1273,8 @@ serve(async (req) => {
       userId,
       language = "en",
       integrations = {},
+      crawlData, // Crawled data from separate crawler service
+      keywords, // Extracted keywords from crawler
     } = await req.json();
 
     if (!jobId || !domainUrl) {
@@ -773,30 +1312,53 @@ serve(async (req) => {
     };
 
     try {
-      // Step 1: Multi-page Crawl
-      await updateJobProgress(supabase, jobId, "crawl", 10);
-      console.log("Step 1: Crawling domain (multi-page)...");
+      // Step 1: Use crawled data from separate crawler service
+      let crawledPages: Array<{ url: string; html: string; statusCode: number; depth: number }> = [];
       
-      const crawledPages = await crawlDomain(domainUrl, 20, 3);
-      console.log(`Crawled ${crawledPages.length} pages`);
+      if (crawlData && crawlData.htmlContent) {
+        // Use provided crawl data
+        console.log("📥 Using crawled data from crawler service");
+        crawledPages = crawlData.htmlContent.map((page: any) => ({
+          url: page.url,
+          html: page.html,
+          statusCode: 200, // Assume success if provided
+          depth: crawlData.pages.find((p: any) => p.url === page.url)?.depth || 0,
+        }));
+        
+        results.crawl = {
+          pages: crawlData.pages,
+          totalPages: crawlData.totalPages,
+        };
+        
+        // Use provided keywords
+        if (keywords && keywords.all) {
+          results.keywords.all = keywords.all;
+          console.log(`✅ Using ${keywords.all.length} keywords from crawler`);
+        }
+      } else {
+        // Fallback: crawl if no data provided (for backward compatibility)
+        console.log("⚠️ No crawl data provided, falling back to edge function crawling");
+        await updateJobProgress(supabase, jobId, "crawl", 10);
+        crawledPages = await crawlDomain(domainUrl, 20, 3, 3); // Reduced limits for edge function
+        
+        results.crawl = {
+          pages: crawledPages.map(p => ({
+            url: p.url,
+            statusCode: p.statusCode,
+            depth: p.depth,
+            contentLength: p.html.length,
+          })),
+          totalPages: crawledPages.length,
+        };
+      }
       
-      // Build link graph
+      // Build link graph from crawled pages
       const linkGraph: Record<string, string[]> = {};
       for (const page of crawledPages) {
-        if (page.statusCode === 200) {
+        if (page.statusCode === 200 && page.html) {
           linkGraph[page.url] = extractLinks(page.html, page.url, domainName);
         }
       }
-      
-      results.crawl = {
-        pages: crawledPages.map(p => ({
-          url: p.url,
-          statusCode: p.statusCode,
-          depth: p.depth,
-          contentLength: p.html.length,
-        })),
-        totalPages: crawledPages.length,
-      };
 
       await updateJobProgress(supabase, jobId, "crawl", 100, "completed");
 
@@ -852,10 +1414,10 @@ serve(async (req) => {
 
       await updateJobProgress(supabase, jobId, "seo", 100, "completed");
 
-      // Step 4: Geography Detection
-      await updateJobProgress(supabase, jobId, "geography", 40);
-      console.log("Step 4: Detecting geography...");
+      // Step 3.5: Analyze Company Context (for fair competitor matching)
+      console.log("Step 3.5: Analyzing company context for fair competitor matching...");
       
+      // Prepare combined text for analysis (will reuse for geography)
       const combinedText = crawledPages
         .filter(p => p.statusCode === 200)
         .map(p => extractTextFromHTML(p.html))
@@ -865,7 +1427,45 @@ serve(async (req) => {
         .map(p => p.html)
         .join(" ");
       
+      // Estimate traffic level
+      const trafficLevel = estimateTrafficLevel(
+        aggregateSEO,
+        siteStructure,
+        crawledPages
+      );
+      
+      // Detect company stage
+      const companyStage = detectCompanyStage(
+        combinedHTML,
+        combinedText,
+        siteStructure
+      );
+      
+      console.log(`📊 Company Context: ${companyStage} stage, ${trafficLevel} traffic`);
+      
+      // Store context for later use (will update market position after geography)
+      results.companyContext = {
+        trafficLevel,
+        companyStage,
+        marketPosition: "niche", // Will be updated after geography detection
+        estimatedTraffic: trafficLevel === "high" ? ">100K/month" : trafficLevel === "medium" ? "10K-100K/month" : "<10K/month",
+      };
+
+      // Step 4: Geography Detection
+      await updateJobProgress(supabase, jobId, "geography", 40);
+      console.log("Step 4: Detecting geography...");
+      
       results.geography = detectGeography(combinedText, combinedHTML, domainName);
+      
+      // Update market position based on geography
+      if (results.companyContext) {
+        results.companyContext.marketPosition = detectMarketPosition(
+          combinedText,
+          combinedHTML,
+          results.geography
+        );
+        console.log(`🌍 Market Position: ${results.companyContext.marketPosition}`);
+      }
 
       await updateJobProgress(supabase, jobId, "geography", 100, "completed");
 
@@ -900,63 +1500,128 @@ serve(async (req) => {
 
       await updateJobProgress(supabase, jobId, "analysis", 100, "completed");
 
-      // Step 7: Keyword Extraction
-      await updateJobProgress(supabase, jobId, "keywords", 70);
-      console.log("Step 7: Extracting keywords...");
+      // Step 7: Keyword Extraction & Fair Competitor Identification
+      // Check if keywords were already provided from crawler
+      if (keywords && keywords.all && keywords.all.length > 0) {
+        console.log(`✅ Using ${keywords.all.length} keywords from crawler`);
+        results.keywords.all = keywords.all;
+        await updateJobProgress(supabase, jobId, "keywords", 80);
+      } else {
+        await updateJobProgress(supabase, jobId, "keywords", 70);
+        console.log("Step 7: Extracting keywords and identifying fair competitors...");
 
-      try {
-        const keywordResponse = await fetch(
-          `${supabaseUrl}/functions/v1/generate-competitive-intelligence`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${supabaseKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              brandName: domainName.split(".")[0],
-              websiteUrl: domainUrl,
-              industry: "Technology",
-              language,
-            }),
-          }
-        );
+        // Prepare context for fair competitor identification
+        const companyContext = results.companyContext || {
+          trafficLevel: "low",
+          companyStage: "startup",
+          marketPosition: "niche",
+          estimatedTraffic: "<10K/month",
+        };
 
-        if (keywordResponse.ok) {
-          const keywordData = await keywordResponse.json();
-          if (keywordData.success && keywordData.data) {
-            results.keywords.all = keywordData.data.keywords || [];
-            results.competitors.all = keywordData.data.competitors || [];
+        try {
+          const keywordResponse = await fetch(
+            `${supabaseUrl}/functions/v1/generate-competitive-intelligence`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${supabaseKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                brandName: domainName.split(".")[0],
+                websiteUrl: domainUrl,
+                industry: "Technology", // Could be enhanced to detect industry
+                language,
+                // Add context for fair competitor matching
+                companyContext: {
+                  trafficLevel: companyContext.trafficLevel,
+                  companyStage: companyContext.companyStage,
+                  marketPosition: companyContext.marketPosition,
+                  estimatedTraffic: companyContext.estimatedTraffic,
+                },
+              }),
+            }
+          );
+
+          if (keywordResponse.ok) {
+            const keywordData = await keywordResponse.json();
+            console.log("Keyword extraction response:", JSON.stringify(keywordData).substring(0, 500));
             
-            // Classify keywords
-            const brandName = domainName.split(".")[0].toLowerCase();
-            results.keywords.branded = results.keywords.all.filter((k: string) =>
-              k.toLowerCase().includes(brandName)
-            );
-            results.keywords.nonBranded = results.keywords.all.filter(
-              (k: string) => !k.toLowerCase().includes(brandName)
-            );
-            
-            // Extract geo keywords
-            const geoKeywords = results.keywords.all.filter((k: string) => {
-              const lower = k.toLowerCase();
-              return /^(in|at|near|around|local|city|area|region|location)/i.test(k) ||
-                /(near me|local|city|area|region)/i.test(lower);
-            });
-            results.keywords.geo = geoKeywords;
+            if (keywordData.success && keywordData.data) {
+              results.keywords.all = keywordData.data.keywords || [];
+              results.competitors.all = keywordData.data.competitors || [];
+              
+              console.log(`✅ Extracted ${results.keywords.all.length} keywords and ${results.competitors.all.length} competitors`);
+            } else {
+              console.warn("⚠️ Keyword extraction returned no data:", keywordData);
+            }
+          } else {
+            const errorText = await keywordResponse.text();
+            console.error("❌ Keyword extraction failed:", keywordResponse.status, errorText);
           }
+        } catch (error) {
+          console.error("❌ Keyword extraction error:", error);
         }
-      } catch (error) {
-        console.error("Keyword extraction error:", error);
+
+        await updateJobProgress(supabase, jobId, "keywords", 90);
+      }
+      
+      // Classify keywords (whether from crawler or LLM extraction)
+      if (results.keywords.all && results.keywords.all.length > 0) {
+        const brandName = domainName.split(".")[0].toLowerCase();
+        results.keywords.branded = results.keywords.all.filter((k: string) =>
+          k.toLowerCase().includes(brandName)
+        );
+        results.keywords.nonBranded = results.keywords.all.filter(
+          (k: string) => !k.toLowerCase().includes(brandName)
+        );
+        
+        const geoKeywords = results.keywords.all.filter((k: string) => {
+          const lower = k.toLowerCase();
+          return /^(in|at|near|around|local|city|area|region|location)/i.test(k) ||
+            /(near me|local|city|area|region)/i.test(lower);
+        });
+        results.keywords.geo = geoKeywords;
       }
 
       await updateJobProgress(supabase, jobId, "keywords", 100, "completed");
 
-      // Step 8: Enhanced Competitor Mapping
+      // Step 8: Enhanced Competitor Mapping & Validation
       await updateJobProgress(supabase, jobId, "competitors", 80);
-      console.log("Step 8: Mapping competitors...");
+      console.log("Step 8: Mapping and validating competitors for fairness...");
 
       if (results.competitors.all.length > 0) {
+        // Filter out obviously unfair competitors (large enterprises for startups/SMBs)
+        const companyContext = results.companyContext || { companyStage: "startup", trafficLevel: "low" };
+        const unfairCompetitors = [
+          "apple", "google", "microsoft", "amazon", "meta", "facebook", "samsung", 
+          "ibm", "oracle", "salesforce", "adobe", "intel", "nvidia", "cisco",
+          "hp", "dell", "lenovo", "sony", "panasonic", "lg", "huawei", "xiaomi",
+          "netflix", "uber", "airbnb", "tesla", "spacex", "twitter", "linkedin"
+        ];
+        
+        let filteredCompetitors = results.competitors.all;
+        
+        // If company is startup or SMB, filter out large enterprises
+        if (companyContext.companyStage === "startup" || companyContext.companyStage === "smb") {
+          filteredCompetitors = results.competitors.all.filter((competitor: string) => {
+            const lowerCompetitor = competitor.toLowerCase();
+            // Check if competitor name contains any unfair competitor keywords
+            const isUnfair = unfairCompetitors.some(unfair => 
+              lowerCompetitor.includes(unfair) || 
+              lowerCompetitor === unfair ||
+              lowerCompetitor.startsWith(unfair + " ") ||
+              lowerCompetitor.endsWith(" " + unfair)
+            );
+            return !isUnfair;
+          });
+          
+          if (filteredCompetitors.length < results.competitors.all.length) {
+            console.log(`✅ Filtered out ${results.competitors.all.length - filteredCompetitors.length} unfair competitors (large enterprises)`);
+            results.competitors.all = filteredCompetitors;
+          }
+        }
+        
         results.competitors.organic = results.competitors.all.slice(0, 10);
         
         // Classify competitors by type
@@ -969,6 +1634,8 @@ serve(async (req) => {
         results.competitors.local = results.competitors.all.filter((c: string) =>
           /local|near me|area|region/i.test(c)
         ).slice(0, 5);
+        
+        console.log(`✅ Final competitor list: ${results.competitors.all.length} fair competitors identified`);
       }
 
       await updateJobProgress(supabase, jobId, "competitors", 100, "completed");
@@ -1005,7 +1672,7 @@ serve(async (req) => {
             },
             body: JSON.stringify({
               domainUrl,
-              platforms: ["chatgpt", "gemini", "claude", "perplexity", "groq"],
+              platforms: ["claude", "gemini", "perplexity"], // Only 3 platforms for faster scanning
               language,
               userId,
             }),
@@ -1015,10 +1682,34 @@ serve(async (req) => {
         if (visibilityResponse.ok) {
           const visibilityData = await visibilityResponse.json();
           if (visibilityData.success) {
+            // Calculate totals from platform results
+            const platformResults = visibilityData.results || {};
+            let totalQueries = 0;
+            let totalMentions = 0;
+            const platformResultsFormatted: Record<string, any> = {};
+
+            Object.entries(platformResults).forEach(([platform, data]: [string, any]) => {
+              const platformData = data as any;
+              totalQueries += platformData.totalQueries || 0;
+              totalMentions += platformData.mentions || 0;
+              platformResultsFormatted[platform] = {
+                mentions: platformData.mentions || 0,
+                totalQueries: platformData.totalQueries || 0,
+                visibilityScore: platformData.visibilityScore || 0,
+                queries: platformData.queries || [],
+              };
+            });
+
             results.aiVisibility = {
-              platforms: visibilityData.results,
-              overallScore: visibilityData.overallScore,
+              platforms: platformResultsFormatted,
+              platform_results: platformResultsFormatted, // Alias for compatibility
+              overallScore: visibilityData.overallScore || 0,
+              total_queries: totalQueries,
+              total_mentions: totalMentions,
+              avg_sentiment: 0, // Not calculated yet
             };
+
+            console.log(`✅ AI Visibility results: ${totalMentions} mentions out of ${totalQueries} queries`);
           }
         }
       } catch (error) {

@@ -4,78 +4,166 @@ import { motion } from "framer-motion";
 import { useOnboarding } from "@/hooks/useOnboarding";
 import { Globe, ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import Button from "@/components/Button";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export default function EnterDomain() {
   const { nextStep } = useOnboarding();
   const [domain, setDomain] = useState("");
   const [error, setError] = useState("");
-  const [isValidating, setIsValidating] = useState(false);
   const [isValid, setIsValid] = useState(false);
+  const [normalizedDomain, setNormalizedDomain] = useState("");
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
-  const validateDomain = async (url: string) => {
-    if (!url.trim()) {
-      setError("");
+  // Clear any stale domain from localStorage when component mounts
+  // This ensures a clean start for each onboarding session
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const staleDomain = localStorage.getItem("onboarding-domain");
+      if (staleDomain) {
+        console.log('Clearing stale domain from localStorage:', staleDomain);
+        localStorage.removeItem("onboarding-domain");
+      }
+      // Reset domain state to empty
+      setDomain("");
       setIsValid(false);
-      return;
+      setError("");
+      setNormalizedDomain("");
+    }
+  }, []);
+
+  // Instant validation function (synchronous)
+  const validateDomain = (url: string): { valid: boolean; normalized: string; error: string } => {
+    if (!url.trim()) {
+      return { valid: false, normalized: "", error: "" };
     }
 
-    setIsValidating(true);
-    setError("");
+    const trimmedUrl = url.trim();
+    
+    // Reject common invalid inputs (like agency names, company names without domain)
+    if (!trimmedUrl.includes(".") && !trimmedUrl.startsWith("http")) {
+      return { 
+        valid: false, 
+        normalized: "", 
+        error: "Please enter a valid domain URL with a dot (e.g., example.com)" 
+      };
+    }
+
+    // Reject inputs that look like plain text (no TLD)
+    const hasTLD = /\.(com|org|net|io|co|ai|dev|app|tech|online|site|website|xyz|info|biz|us|uk|ca|au|de|fr|it|es|nl|se|no|dk|fi|pl|cz|at|ch|be|ie|nz|jp|cn|in|br|mx|ar|cl|co|pe|za|ae|sa|il|tr|ru|gov|edu|mil)$/i.test(trimmedUrl);
+    if (!hasTLD && !trimmedUrl.startsWith("http")) {
+      return { 
+        valid: false, 
+        normalized: "", 
+        error: "Please enter a valid domain URL with a top-level domain (e.g., .com, .org)" 
+      };
+    }
 
     try {
       // Normalize URL
-      let normalizedUrl = url.trim();
+      let normalizedUrl = trimmedUrl;
       if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://")) {
         normalizedUrl = "https://" + normalizedUrl;
       }
 
       // Validate URL format
-      try {
-        const urlObj = new URL(normalizedUrl);
-        const hostname = urlObj.hostname.replace("www.", "");
+      const urlObj = new URL(normalizedUrl);
+      const hostname = urlObj.hostname.replace("www.", "");
 
-        // Basic validation
-        if (hostname.length < 3) {
-          throw new Error("Domain name too short");
-        }
-
-        if (hostname.includes("localhost") || hostname.includes("127.0.0.1")) {
-          throw new Error("Local domains are not supported");
-        }
-
-        // Update with normalized domain
-        setDomain(normalizedUrl);
-        setIsValid(true);
-        setError("");
-      } catch (urlError: any) {
-        if (urlError.code === "ERR_INVALID_URL") {
-          setError("Please enter a valid domain URL (e.g., example.com or https://example.com)");
-        } else {
-          setError(urlError.message || "Invalid domain format");
-        }
-        setIsValid(false);
+      // Basic validation
+      if (hostname.length < 3) {
+        return { valid: false, normalized: normalizedUrl, error: "Domain name too short" };
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to validate domain");
-      setIsValid(false);
-    } finally {
-      setIsValidating(false);
+
+      // Check for valid domain pattern (must have at least one dot)
+      if (!hostname.includes(".")) {
+        return { 
+          valid: false, 
+          normalized: normalizedUrl, 
+          error: "Please enter a valid domain URL (e.g., example.com)" 
+        };
+      }
+
+      // Check for valid TLD (at least 2 characters after last dot)
+      const parts = hostname.split(".");
+      const tld = parts[parts.length - 1];
+      if (tld.length < 2) {
+        return { 
+          valid: false, 
+          normalized: normalizedUrl, 
+          error: "Please enter a valid domain URL with a proper top-level domain" 
+        };
+      }
+
+      if (hostname.includes("localhost") || hostname.includes("127.0.0.1")) {
+        return { valid: false, normalized: normalizedUrl, error: "Local domains are not supported" };
+      }
+
+      // Valid domain
+      return { valid: true, normalized: normalizedUrl, error: "" };
+    } catch (urlError: any) {
+      return { 
+        valid: false, 
+        normalized: "", 
+        error: "Please enter a valid domain URL (e.g., example.com or https://example.com)" 
+      };
     }
   };
 
-  const handleContinue = () => {
-    if (!isValid || !domain) {
-      setError("Please enter a valid domain URL");
+  // Real-time validation with debouncing
+  useEffect(() => {
+    // Clear previous timer
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+
+    // If domain is empty, reset state
+    if (!domain.trim()) {
+      setIsValid(false);
+      setError("");
+      setNormalizedDomain("");
       return;
     }
 
-    // Store domain in onboarding state (if available in the hook)
-    // For now, we'll pass it via localStorage or state management
-    if (typeof window !== "undefined") {
-      localStorage.setItem("onboarding-domain", domain);
+    // Debounce validation by 300ms for better UX
+    debounceTimer.current = setTimeout(() => {
+      const validation = validateDomain(domain);
+      setIsValid(validation.valid);
+      setError(validation.error);
+      setNormalizedDomain(validation.normalized);
+    }, 300);
+
+    // Cleanup
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, [domain]);
+
+  const handleContinue = () => {
+    // Use normalized domain if available, otherwise validate current input
+    const finalDomain = normalizedDomain || domain;
+    const validation = validateDomain(finalDomain);
+
+    if (!validation.valid || !finalDomain || !validation.normalized) {
+      setError(validation.error || "Please enter a valid domain URL");
+      setIsValid(false);
+      return;
     }
 
+    // Double-check validation before proceeding
+    if (!isValid) {
+      setError("Please wait for domain validation to complete");
+      return;
+    }
+
+    // Store domain in localStorage for next steps
+    if (typeof window !== "undefined") {
+      localStorage.setItem("onboarding-domain", validation.normalized);
+      console.log("✅ Domain stored:", validation.normalized);
+    }
+
+    // Only proceed if domain is valid
     nextStep();
   };
 
@@ -108,10 +196,7 @@ export default function EnterDomain() {
               value={domain}
               onChange={(e) => {
                 setDomain(e.target.value);
-                setIsValid(false);
-                setError("");
               }}
-              onBlur={(e) => validateDomain(e.target.value)}
               placeholder="example.com or https://example.com"
               className={`w-full px-4 py-3 pr-12 border rounded-lg focus:ring-2 focus:ring-primary-500/20 outline-none transition-all ${
                 error
@@ -122,11 +207,9 @@ export default function EnterDomain() {
               }`}
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2">
-              {isValidating ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600"></div>
-              ) : isValid ? (
+              {isValid ? (
                 <CheckCircle2 className="w-5 h-5 text-green-500" />
-              ) : error ? (
+              ) : error && domain.trim() ? (
                 <XCircle className="w-5 h-5 text-red-500" />
               ) : null}
             </div>
@@ -159,7 +242,7 @@ export default function EnterDomain() {
           variant="primary"
           size="lg"
           className="w-full"
-          disabled={!isValid || isValidating}
+          disabled={!isValid}
         >
           Continue <ArrowRight className="w-5 h-5 ml-2" />
         </Button>

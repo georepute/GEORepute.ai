@@ -47,8 +47,8 @@ export default function RoleSelection() {
         .single();
 
       if (profile?.role) {
-        // User already has a role, redirect to dashboard
-        router.push("/dashboard");
+        // User already has a role, redirect to AI Visibility page
+        router.push("/dashboard/ai-visibility");
       } else {
         // Automatically show agency form for new users
         setShowAgencyForm(true);
@@ -120,6 +120,13 @@ export default function RoleSelection() {
       if (updateError) throw updateError;
 
       console.log(`✅ Role set to: ${role}`);
+
+      // Clear any stale onboarding data before redirecting
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("onboarding-integrations");
+        localStorage.removeItem("onboarding-domain");
+        console.log('✅ Cleared onboarding localStorage before redirect');
+      }
 
       // Redirect to onboarding for new users
       setTimeout(() => {

@@ -14,6 +14,8 @@
  */
 
 import OpenAI from "openai";
+import type { DomainEnrichmentData } from "@/lib/utils/domainEnrichment";
+import { formatDomainDataForPrompt } from "@/lib/utils/domainEnrichment";
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -112,12 +114,17 @@ export interface ActionPlanInput {
   objective: string;
   targetKeywords?: string[];
   currentSituation?: string;
+  domain?: string;
+  domainEnrichment?: DomainEnrichmentData | null; // Enriched domain data from crawler
+  region?: string;
+  channels?: string[]; // ['all'] or specific channels like ['seo', 'social_media', 'content']
 }
 
 export interface ActionPlanOutput {
   planId: string;
   title: string;
   objective: string;
+  channels?: string[]; // ['seo', 'social_media', 'content', etc.]
   steps: Array<{
     id: string;
     title: string;
@@ -125,6 +132,17 @@ export interface ActionPlanOutput {
     estimatedTime: string;
     priority: "high" | "medium" | "low";
     dependencies?: string[];
+    channel?: string; // 'seo', 'social_media', 'content', 'email', etc.
+    platform?: string; // 'reddit', 'linkedin', 'email', etc.
+    executionType?: "content_generation" | "audit" | "analysis" | "manual";
+    executionMetadata?: {
+      platform?: string;
+      topic?: string;
+      keywords?: string[];
+      contentType?: "article" | "post" | "answer" | "newsletter";
+      autoExecute?: boolean;
+      requiresTools?: string[];
+    };
   }>;
   reasoning: string;
   expectedOutcome: string;
@@ -1099,39 +1117,138 @@ Respond in JSON format:
 export async function generateActionPlan(
   input: ActionPlanInput
 ): Promise<ActionPlanOutput> {
-  const prompt = `You are a strategic planner creating actionable SEO/GEO optimization plans.
+  const channels = input.channels && input.channels.length > 0 && input.channels[0] !== 'all' 
+    ? input.channels.join(", ")
+    : "All available channels";
+
+  // Format domain context for prompt
+  let domainContext = "";
+  if (input.domain) {
+    if (input.domainEnrichment?.hasContent) {
+      // Use enriched domain data if available
+      const formattedDomain = formatDomainDataForPrompt(input.domainEnrichment);
+      domainContext = `Domain: ${input.domain}\n${formattedDomain ? `Domain Information:\n${formattedDomain}` : ""}`;
+    } else {
+      // Fallback to basic domain string
+      domainContext = `Domain: ${input.domain}`;
+    }
+  }
+
+  const prompt = `You are a comprehensive marketing strategist creating multi-channel marketing action plans.
 
 Objective: "${input.objective}"
-${input.targetKeywords ? `Target Keywords: ${input.targetKeywords.join(", ")}` : ""}
+${input.targetKeywords && input.targetKeywords.length > 0 ? `Target Keywords: ${input.targetKeywords.join(", ")}` : ""}
+${domainContext ? `${domainContext}` : ""}
+${input.region ? `Region: ${input.region}` : ""}
+${channels ? `Focus Channels: ${channels}` : "All available channels"}
 ${input.currentSituation ? `Current Situation: ${input.currentSituation}` : ""}
 
-Create a detailed action plan with:
-1. Clear, actionable steps
-2. Time estimates for each step
-3. Priority levels
-4. Dependencies between steps
-5. Expected outcomes
-6. Timeline
+${input.targetKeywords && input.targetKeywords.length > 0 ? `
+🎯 KEYWORD STRATEGY (CRITICAL):
+The target keywords above are the PRIMARY focus of this action plan. You MUST:
+- Create steps that directly target these keywords for SEO and content optimization
+- Include these keywords naturally in content generation steps (use them in the "keywords" field of executionMetadata)
+- Prioritize SEO steps that optimize for these specific keywords
+- Create content topics that incorporate these keywords
+- Use keyword variations and related terms when appropriate
+- Ensure at least 60% of content_generation steps include these target keywords
+` : ""}
+
+${input.domainEnrichment?.hasContent ? `
+DOMAIN-SPECIFIC GUIDANCE:
+Use the website information above to create action plans that are tailored to what this domain actually offers.
+Consider the website's content, purpose, and value proposition when generating marketing steps.
+` : ""}
+
+Available Channels:
+- SEO (Search Engine Optimization) - website optimization, keyword targeting, on-page SEO
+- Social Media (LinkedIn, Facebook, Twitter/X, Instagram, Reddit) - social posts, engagement, community building
+- Content Marketing (Medium, Quora, GitHub, Blog posts) - articles, answers, documentation
+- Email Marketing - newsletters, campaigns, drip sequences
+- Paid Advertising (Google Ads, Facebook Ads, LinkedIn Ads) - PPC campaigns, sponsored content
+- Video Marketing (YouTube, TikTok) - video content, tutorials, vlogs
+- PR & Outreach - press releases, influencer outreach, partnerships
+
+Create a comprehensive, multi-channel action plan with:
+1. Steps across multiple marketing channels (include at least 3 different channels)
+2. Each step must specify:
+   - Channel (e.g., "seo", "social_media", "content", "email")
+   - Platform if applicable (e.g., "reddit", "linkedin", "email")
+   - Execution type: "content_generation" (can auto-generate content), "audit" (requires manual tools), "analysis" (data review), or "manual" (requires manual work)
+   - For content_generation steps, include:
+     * platform (specific platform like "reddit", "linkedin", "medium", "email")
+     * topic (specific topic for content - MUST incorporate target keywords if provided)
+     * keywords (MUST include relevant target keywords from the list above - use at least 2-3 target keywords per content step)
+     * contentType ("article", "post", "answer", or "newsletter")
+     * autoExecute: true (if system can auto-generate) or false
+   - For SEO steps, focus on optimizing for the target keywords provided
+3. Dependencies between steps
+4. Priority levels based on ROI potential and urgency
+5. Expected outcomes per channel
+6. Timeline with channel coordination
 
 Respond in JSON format:
 {
-  "title": "Plan title",
+  "title": "Multi-Channel Marketing Plan for [Objective]",
   "objective": "Objective",
+  "channels": ["seo", "social_media", "content"],
   "steps": [
     {
       "id": "step-1",
-      "title": "Step title",
-      "description": "Detailed description",
+      "title": "Create Reddit post about [specific topic]",
+      "description": "Detailed description of what to post and why",
       "estimatedTime": "2-3 hours",
       "priority": "high",
-      "dependencies": []
+      "dependencies": [],
+      "channel": "content",
+      "platform": "reddit",
+      "executionType": "content_generation",
+      "executionMetadata": {
+        "platform": "reddit",
+        "topic": "Local SEO tips for restaurants",
+        "keywords": ["local seo", "restaurant marketing"],
+        "contentType": "post",
+        "autoExecute": true
+      }
+    },
+    {
+      "id": "step-2",
+      "title": "Perform SEO audit of website",
+      "description": "Analyze website structure, content quality, link profile, and rankings",
+      "estimatedTime": "4-6 hours",
+      "priority": "high",
+      "dependencies": [],
+      "channel": "seo",
+      "executionType": "audit",
+      "executionMetadata": {
+        "autoExecute": false,
+        "requiresTools": ["screaming_frog", "google_search_console"]
+      }
+    },
+    {
+      "id": "step-3",
+      "title": "Send email newsletter to subscribers",
+      "description": "Monthly newsletter with SEO updates and tips",
+      "estimatedTime": "3-4 hours",
+      "priority": "medium",
+      "dependencies": ["step-1"],
+      "channel": "email",
+      "platform": "email",
+      "executionType": "content_generation",
+      "executionMetadata": {
+        "platform": "email",
+        "topic": "Monthly SEO updates and insights",
+        "keywords": [],
+        "contentType": "newsletter",
+        "autoExecute": true
+      }
     }
   ],
-  "reasoning": "Why this plan will work",
-  "expectedOutcome": "What to expect",
+  "reasoning": "Why this multi-channel approach will work",
+  "expectedOutcome": "Expected results across all channels",
   "timeline": "2-4 weeks",
   "priority": "high",
-  "category": "Content Strategy"
+  "category": "Multi-Channel Marketing"
 }`;
 
   try {
@@ -1159,12 +1276,13 @@ Respond in JSON format:
       planId: `plan-${Date.now()}`,
       title: result.title || "Action Plan",
       objective: result.objective || input.objective,
+      channels: result.channels || [],
       steps: result.steps || [],
       reasoning: result.reasoning || "",
       expectedOutcome: result.expectedOutcome || "",
       timeline: result.timeline || "Not specified",
       priority: result.priority || "medium",
-      category: result.category || "General",
+      category: result.category || "Multi-Channel Marketing",
     };
   } catch (error) {
     console.error("Action plan generation error:", error);

@@ -105,7 +105,57 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get Supabase URL and service role key for edge function
+    // Step 1: Call crawler API first to crawl domain and extract keywords
+    const baseUrl = new URL(request.url).origin;
+    const crawlerResponse = await fetch(`${baseUrl}/api/geo-core/domain-crawler`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: request.headers.get("cookie") || "",
+      },
+      body: JSON.stringify({
+        domainUrl,
+        jobId: job.id,
+      }),
+    });
+
+    if (!crawlerResponse.ok) {
+      const errorData = await crawlerResponse.json();
+      console.error("Crawler error:", errorData);
+      
+      // Update job status to failed
+      await supabase
+        .from("domain_intelligence_jobs")
+        .update({
+          status: "failed",
+          error_message: `Crawler failed: ${errorData.error || "Unknown error"}`,
+        })
+        .eq("id", job.id);
+
+      return NextResponse.json(
+        { error: "Crawler failed", details: errorData.error },
+        { status: 500 }
+      );
+    }
+
+    const crawlerData = await crawlerResponse.json();
+    console.log(`✅ Crawler completed: ${crawlerData.crawlData?.totalPages || 0} pages, ${crawlerData.keywords?.count || 0} keywords`);
+
+    // Step 2: Get crawled data from database (it was stored by crawler)
+    const { data: jobWithCrawlData } = await supabase
+      .from("domain_intelligence_jobs")
+      .select("results")
+      .eq("id", job.id)
+      .single();
+
+    if (!jobWithCrawlData?.results?.crawl) {
+      return NextResponse.json(
+        { error: "Crawled data not found" },
+        { status: 500 }
+      );
+    }
+
+    // Step 3: Call domain-intelligence edge function with crawled data (async, don't wait)
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -116,7 +166,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Call domain-intelligence edge function (async, don't wait)
+    // Send crawled data to edge function for analysis
     fetch(`${supabaseUrl}/functions/v1/domain-intelligence`, {
       method: "POST",
       headers: {
@@ -130,6 +180,8 @@ export async function POST(request: NextRequest) {
         userId: session.user.id,
         language,
         integrations: job.integrations,
+        crawlData: jobWithCrawlData.results.crawl, // Send crawled data
+        keywords: jobWithCrawlData.results.keywords, // Send extracted keywords
       }),
     }).catch((error) => {
       console.error("Error triggering edge function:", error);

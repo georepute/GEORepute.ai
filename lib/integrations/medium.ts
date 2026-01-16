@@ -943,6 +943,10 @@ async function loginToMedium(
     await service.humanDelay(2000, 3000);
     
     const driver = service.getDriver();
+    if (!driver) {
+      throw new Error('WebDriver not initialized. Cannot add cookies.');
+    }
+    
     let cookiesAdded = 0;
     let cookiesFailed = 0;
     

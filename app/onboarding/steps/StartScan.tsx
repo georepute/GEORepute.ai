@@ -68,8 +68,31 @@ export default function StartScan() {
   const [isRetrying, setIsRetrying] = useState(false);
 
   useEffect(() => {
-    // Start scan automatically when component mounts
-    startScan();
+    // Don't auto-start - wait for user to explicitly start the scan
+    // This prevents skipping steps when user lands on this page
+    const domain = localStorage.getItem("onboarding-domain");
+    if (!domain) {
+      setError("Domain not found");
+      setErrorDetails("Please go back to the previous step and enter your domain URL.");
+      return;
+    }
+    
+    // Validate domain format
+    try {
+      const urlObj = new URL(domain.startsWith("http") ? domain : `https://${domain}`);
+      if (!urlObj.hostname || urlObj.hostname.length < 3 || !urlObj.hostname.includes(".")) {
+        setError("Invalid domain");
+        setErrorDetails("Please go back and enter a valid domain URL.");
+        return;
+      }
+    } catch (e) {
+      setError("Invalid domain format");
+      setErrorDetails("Please go back and enter a valid domain URL (e.g., example.com or https://example.com).");
+      return;
+    }
+    
+    // Domain is valid, but don't auto-start - user must click "Start Scan" button
+    // Remove auto-start to prevent skipping steps
   }, []);
 
   useEffect(() => {
@@ -210,7 +233,7 @@ export default function StartScan() {
 
   const handleFinish = () => {
     skipOnboarding();
-    router.push("/dashboard");
+    router.push("/dashboard/ai-visibility");
   };
 
   const steps = [
@@ -439,6 +462,51 @@ export default function StartScan() {
           >
             <Sparkles className="w-5 h-5 mr-2" />
             View Full Results in Dashboard
+          </Button>
+        </div>
+      ) : !isScanning && !isComplete && !error ? (
+        // Initial state - show Start Scan button
+        <div className="mb-8">
+          <div className="p-6 bg-blue-50 border-2 border-blue-200 rounded-lg mb-6">
+            <div className="flex items-start gap-3">
+              <Sparkles className="w-6 h-6 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-blue-900 mb-2">Ready to Start</h3>
+                <p className="text-sm text-blue-700 mb-4">
+                  Your domain has been validated and integrations are ready. Click the button below to start the comprehensive intelligence scan.
+                </p>
+                <div className="text-xs text-blue-600 space-y-1">
+                  <p>• Domain: {(() => {
+                    if (typeof window !== "undefined") {
+                      const domain = localStorage.getItem("onboarding-domain");
+                      return domain || "Not set";
+                    }
+                    return "Not set";
+                  })()}</p>
+                  <p>• This scan will analyze your domain across multiple platforms</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <Button
+            onClick={startScan}
+            variant="primary"
+            size="lg"
+            className="w-full"
+            disabled={isScanning}
+          >
+            <Sparkles className="w-5 h-5 mr-2" />
+            {isScanning ? "Starting Scan..." : "Start Intelligence Scan"}
+          </Button>
+
+          <Button
+            onClick={() => router.push("/onboarding?step=1")}
+            variant="outline"
+            size="lg"
+            className="w-full mt-3"
+          >
+            Go Back to Integrations
           </Button>
         </div>
       ) : (
