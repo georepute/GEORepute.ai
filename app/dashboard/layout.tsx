@@ -37,6 +37,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { filterNavigationByRole, NavigationItem } from "@/lib/permissions/permissions";
 import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/LanguageToggle";
+import { Providers } from "@/lib/providers";
 
 export default function DashboardLayout({
   children,
@@ -126,7 +127,8 @@ export default function DashboardLayout({
   const navigation = filterNavigationByRole(role, allNavigation);
 
   return (
-    <div className="min-h-screen bg-gray-50" dir={isRtl ? 'rtl' : 'ltr'}>
+    <Providers>
+      <div className="min-h-screen bg-gray-50" dir={isRtl ? 'rtl' : 'ltr'}>
       {/* Mobile Sidebar Backdrop */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -369,6 +371,7 @@ export default function DashboardLayout({
         </main>
       </div>
     </div>
+    </Providers>
   );
 }
 
