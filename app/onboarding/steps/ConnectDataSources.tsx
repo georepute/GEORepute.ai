@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import Image from "next/image";
 
 interface IntegrationStatus {
   gsc: boolean;
@@ -99,8 +100,17 @@ export default function ConnectDataSources() {
       if (platform === "gsc") {
         // Get GSC OAuth URL from API
         try {
-          const response = await fetch("/api/integrations/google-search-console/auth-url?return_to=/onboarding");
+          const response = await fetch("/api/integrations/google-search-console/auth-url?return_to=/onboarding?step=1&success=gsc_connected");
           const data = await response.json();
+          
+          if (!response.ok) {
+            // Show detailed error message
+            const errorMsg = data.details || data.error || "Failed to get OAuth URL";
+            console.error("GSC OAuth error:", errorMsg);
+            toast.error(errorMsg);
+            setConnecting(null);
+            return;
+          }
           
           if (data.authUrl) {
             window.location.href = data.authUrl;
@@ -108,7 +118,8 @@ export default function ConnectDataSources() {
             throw new Error(data.error || "Failed to get OAuth URL");
           }
         } catch (err: any) {
-          toast.error(err.message || "Failed to connect Google Search Console");
+          console.error("GSC connection error:", err);
+          toast.error(err.message || "Failed to connect Google Search Console. Please check your environment variables.");
           setConnecting(null);
         }
       } else if (platform === "ga4") {
@@ -150,6 +161,25 @@ export default function ConnectDataSources() {
   };
 
   const handleContinue = () => {
+    // Verify domain exists before allowing to proceed
+    const domain = localStorage.getItem("onboarding-domain");
+    if (!domain) {
+      toast.error("Domain not found. Please go back and enter your domain.");
+      return;
+    }
+
+    // Validate domain format
+    try {
+      const urlObj = new URL(domain.startsWith("http") ? domain : `https://${domain}`);
+      if (!urlObj.hostname || urlObj.hostname.length < 3 || !urlObj.hostname.includes(".")) {
+        toast.error("Invalid domain. Please go back and enter a valid domain URL.");
+        return;
+      }
+    } catch (e) {
+      toast.error("Invalid domain format. Please go back and enter a valid domain URL.");
+      return;
+    }
+
     // GSC is mandatory
     if (!integrations.gsc) {
       toast.error("Google Search Console connection is required to continue");
@@ -200,8 +230,14 @@ export default function ConnectDataSources() {
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center">
-                  <span className="text-2xl">🔍</span>
+                <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center overflow-hidden">
+                  <Image 
+                    src="/google.svg" 
+                    alt="Google Search Console" 
+                    width={40} 
+                    height={40}
+                    className="w-full h-full object-contain p-1"
+                  />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">

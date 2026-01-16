@@ -17,17 +17,22 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
     const error = searchParams.get('error');
-    const stateParam = searchParams.get('state');
+    const state = searchParams.get('state');
     
-    // Parse state to get return_to
+    // Parse return_to from state parameter (passed during OAuth initiation)
     let returnTo = '/dashboard/google-search-console';
-    if (stateParam) {
+    if (state) {
       try {
-        const state = JSON.parse(decodeURIComponent(stateParam));
-        returnTo = state.return_to || returnTo;
+        const stateData = JSON.parse(decodeURIComponent(state));
+        returnTo = stateData.return_to || returnTo;
       } catch (e) {
-        console.error('Failed to parse state parameter:', e);
+        console.log('Could not parse state, using default returnTo');
       }
+    }
+    
+    // Fallback to query parameter if state is not available (for backward compatibility)
+    if (!state) {
+      returnTo = searchParams.get('return_to') || returnTo;
     }
 
     // Handle user denial
@@ -46,10 +51,22 @@ export async function GET(request: NextRequest) {
     }
 
     // Initialize OAuth client
+    // Use NEXT_PUBLIC_GOOGLE_CLIENT_ID for client-side access, but also check server-side vars
+    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+    const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const googleRedirectUri = process.env.GOOGLE_REDIRECT_URI;
+
+    if (!googleClientId || !googleClientSecret || !googleRedirectUri) {
+      console.error('❌ Missing required Google OAuth environment variables');
+      return NextResponse.redirect(
+        new URL(`${returnTo}?error=oauth_not_configured`, request.url)
+      );
+    }
+
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
+      googleClientId,
+      googleClientSecret,
+      googleRedirectUri
     );
 
     // Exchange code for tokens
@@ -92,32 +109,64 @@ export async function GET(request: NextRequest) {
 
     // Save integration to database
     console.log('💾 Saving GSC integration to database...');
-    const { error: dbError } = await supabase
+    
+    // Calculate expiration time
+    const expiresAt = tokens.expiry_date 
+      ? new Date(tokens.expiry_date).toISOString()
+      : new Date(Date.now() + 3600 * 1000).toISOString(); // Default to 1 hour if not provided
+    
+    // Check if integration already exists
+    const { data: existingIntegration } = await supabase
       .from('platform_integrations')
-      .upsert(
-        {
-          user_id: user.id,
-          platform: 'google_search_console',
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
-          token_type: 'Bearer',
-          expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
-          status: 'connected',
-          metadata: {
-            site_urls: sites,
-            selected_site: sites[0], // Default to first site
-          },
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        {
-          onConflict: 'user_id,platform',
-        }
-      );
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('platform', 'google_search_console')
+      .maybeSingle();
 
-    if (dbError) {
-      console.error('Database error:', dbError);
-      throw dbError;
+    // Prepare integration data
+    const integrationData = {
+      user_id: user.id,
+      platform: 'google_search_console',
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token || null,
+      expires_at: expiresAt,
+      token_type: 'Bearer',
+      status: 'connected',
+      metadata: {
+        site_urls: sites,
+        selected_site: sites[0], // Default to first site
+      },
+      updated_at: new Date().toISOString(),
+    };
+
+    let result;
+    if (existingIntegration) {
+      // Update existing integration
+      const { data, error: updateError } = await supabase
+        .from('platform_integrations')
+        .update(integrationData)
+        .eq('id', existingIntegration.id)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error('Database error:', updateError);
+        throw updateError;
+      }
+      result = data;
+    } else {
+      // Create new integration
+      const { data, error: insertError } = await supabase
+        .from('platform_integrations')
+        .insert(integrationData)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('Database error:', insertError);
+        throw insertError;
+      }
+      result = data;
     }
 
     console.log('✅ GSC integration saved successfully');

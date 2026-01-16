@@ -141,26 +141,35 @@ export async function POST(request: NextRequest) {
       try {
         console.log('🔍 Attempting to fetch GSC keywords...')
         
-        // Get GSC integration for this user
+        // Get GSC integration from platform_integrations table
         const { data: gscIntegration } = await supabase
-          .from('google_search_console_integrations')
+          .from('platform_integrations')
           .select('*')
           .eq('user_id', session.user.id)
-          .single()
+          .eq('platform', 'google_search_console')
+          .eq('status', 'connected')
+          .maybeSingle()
 
         if (gscIntegration && gscIntegration.access_token) {
           console.log('✅ GSC integration found, fetching keywords...')
           
+          // Calculate expiresAt timestamp
+          const expiresAt = gscIntegration.expires_at 
+            ? new Date(gscIntegration.expires_at).getTime()
+            : Date.now() + 3600 * 1000; // Default to 1 hour if not set
+          
           const gscService = new GoogleSearchConsoleService({
             accessToken: gscIntegration.access_token,
-            refreshToken: gscIntegration.refresh_token,
-            expiresAt: new Date(gscIntegration.expires_at).getTime(),
+            refreshToken: gscIntegration.refresh_token || '',
+            expiresAt: expiresAt,
           })
 
-          // Use selected site property or try to match website URL
-          const siteUrl = gscIntegration.selected_site_property || websiteUrl
+          // Use selected site from metadata or try to match website URL
+          const selectedSite = gscIntegration.metadata?.selected_site || 
+                              gscIntegration.metadata?.site_urls?.[0] || 
+                              websiteUrl
 
-          const gscKeywords = await gscService.fetchKeywords(siteUrl, 100)
+          const gscKeywords = await gscService.fetchKeywords(selectedSite, 100)
           console.log(`📊 Fetched ${gscKeywords.length} keywords from GSC`)
 
           // Save keywords to database

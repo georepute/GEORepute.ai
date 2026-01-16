@@ -58,6 +58,13 @@ export interface PublishResult {
 export class SeleniumBaseService {
   protected driver: WebDriver | null = null;
   protected config: SeleniumConfig;
+  
+  /**
+   * Get the WebDriver instance
+   */
+  getDriver(): WebDriver | null {
+    return this.driver;
+  }
 
   constructor(config: SeleniumConfig = {}) {
     this.config = {
@@ -176,22 +183,64 @@ export class SeleniumBaseService {
       if (this.config.browser === 'chrome') {
         const options = new chrome.Options();
         
+        // Cloudflare bypass: Use non-headless mode if possible (better stealth)
+        // Headless mode is easier to detect
         if (this.config.headless) {
-          options.addArguments('--headless=new'); // New headless mode
+          // Use new headless mode which is harder to detect
+          options.addArguments('--headless=new');
+          // Additional stealth for headless
+          options.addArguments('--disable-blink-features=AutomationControlled');
+        } else {
+          // Non-headless is better for Cloudflare bypass
+          options.addArguments('--disable-blink-features=AutomationControlled');
         }
         
+        // Basic Chrome options
         options.addArguments('--no-sandbox');
         options.addArguments('--disable-dev-shm-usage');
         options.addArguments('--disable-gpu');
-        options.addArguments('--disable-blink-features=AutomationControlled');
         options.addArguments('--disable-features=IsolateOrigins,site-per-process');
         options.addArguments(`--window-size=${this.config.windowSize?.width},${this.config.windowSize?.height}`);
         
-        // User agent to avoid detection
-        options.addArguments('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        // Cloudflare bypass: Realistic user agent (updated to latest Chrome)
+        options.addArguments('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
         
-        // Exclude automation flags (using addArguments instead of setExcludeSwitches)
+        // Cloudflare bypass: Remove automation indicators
         options.addArguments('--exclude-switches=enable-automation');
+        options.addArguments('--disable-blink-features=AutomationControlled');
+        
+        // Cloudflare bypass: Additional stealth flags
+        options.addArguments('--disable-web-security');
+        options.addArguments('--disable-features=VizDisplayCompositor');
+        options.addArguments('--disable-extensions');
+        options.addArguments('--no-first-run');
+        options.addArguments('--no-default-browser-check');
+        options.addArguments('--disable-default-apps');
+        options.addArguments('--disable-popup-blocking');
+        options.addArguments('--disable-translate');
+        options.addArguments('--disable-background-timer-throttling');
+        options.addArguments('--disable-renderer-backgrounding');
+        options.addArguments('--disable-backgrounding-occluded-windows');
+        options.addArguments('--disable-component-update');
+        options.addArguments('--disable-sync');
+        options.addArguments('--disable-infobars');
+        options.addArguments('--disable-notifications');
+        options.addArguments('--lang=en-US,en');
+        
+        // Cloudflare bypass: Critical flags to avoid detection
+        options.addArguments('--disable-blink-features=AutomationControlled');
+        options.addArguments('--disable-features=IsolateOrigins,site-per-process');
+        options.addArguments('--disable-site-isolation-trials');
+        
+        // Cloudflare bypass: Set preferences to hide automation
+        options.setUserPreferences({
+          'credentials_enable_service': false,
+          'profile.password_manager_enabled': false,
+          'profile.default_content_setting_values.notifications': 2,
+          'webrtc.ip_handling_policy': 'disable_non_proxied_udp',
+          'webrtc.multiple_routes_enabled': false,
+          'webrtc.nonproxied_udp_enabled': false,
+        });
         
         const builder = new Builder()
           .forBrowser('chrome')
@@ -271,7 +320,11 @@ export class SeleniumBaseService {
         
         try {
           this.driver = await builder.build();
-            console.log('✅ WebDriver initialized successfully (local)');
+          
+          // Apply Cloudflare bypass after driver is initialized
+          await this.applyCloudflareBypass();
+          
+          console.log('✅ WebDriver initialized successfully (local)');
         } catch (buildError: any) {
           const errorMessage = buildError.message || 'Unknown error';
           console.error('❌ Failed to build WebDriver:', errorMessage);
@@ -346,15 +399,6 @@ export class SeleniumBaseService {
     }
   }
 
-  /**
-   * Get WebDriver instance (public for integrations)
-   */
-  getDriver(): WebDriver {
-    if (!this.driver) {
-      throw new Error('WebDriver not initialized');
-    }
-    return this.driver;
-  }
 
   /**
    * Login using credentials or cookies
@@ -551,6 +595,79 @@ export class SeleniumBaseService {
       const currentUrl = await this.driver!.getCurrentUrl();
       return pattern.test(currentUrl);
     }, timeout || this.config.timeout);
+  }
+
+  /**
+   * Apply Cloudflare bypass techniques
+   * Uses Chrome DevTools Protocol (CDP) and JavaScript injection
+   */
+  private async applyCloudflareBypass(): Promise<void> {
+    if (!this.driver) {
+      return;
+    }
+
+    try {
+      // Try to use CDP (Chrome DevTools Protocol) for better stealth
+      const cdp = await (this.driver as any).getDevTools();
+      const session = await cdp.createSession();
+      
+      // Hide webdriver property (Cloudflare checks for this)
+      await session.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: `
+          Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+          });
+          
+          // Override plugins
+          Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5]
+          });
+          
+          // Override languages
+          Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en']
+          });
+          
+          // Mock chrome runtime
+          window.chrome = {
+            runtime: {}
+          };
+        `
+      });
+      
+      console.log('✅ Cloudflare bypass scripts injected via CDP');
+    } catch (error: any) {
+      // CDP might not be available, fallback to JavaScript injection
+      console.log('ℹ️ CDP not available, using JavaScript injection fallback');
+      
+      // Fallback: Inject via executeScript
+      try {
+        await this.driver.executeScript(`
+          // Remove webdriver property
+          Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+          });
+          
+          // Override plugins
+          Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5]
+          });
+          
+          // Override languages
+          Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en']
+          });
+          
+          // Mock chrome runtime
+          window.chrome = {
+            runtime: {}
+          };
+        `);
+        console.log('✅ Cloudflare bypass scripts injected (fallback)');
+      } catch (e: any) {
+        console.warn('⚠️ Could not inject Cloudflare bypass scripts:', e.message);
+      }
+    }
   }
 
   /**

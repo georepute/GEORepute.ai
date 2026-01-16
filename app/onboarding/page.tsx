@@ -23,9 +23,6 @@ export default function OnboardingPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    // Don't reset onboarding state automatically - allow users to resume
-    // resetOnboarding();
-    
     // Check authentication status
     async function checkAuth() {
       try {
@@ -44,6 +41,32 @@ export default function OnboardingPage() {
           console.log('No session found, redirecting to login');
           router.push("/login");
           return;
+        }
+        
+        // Check if user has completed onboarding by checking for completed domain intelligence jobs
+        // Having a role doesn't mean onboarding is complete - role is set BEFORE onboarding starts
+        const { data: completedJobs } = await supabase
+          .from("domain_intelligence_jobs")
+          .select("id")
+          .eq("user_id", session.user.id)
+          .eq("status", "completed")
+          .limit(1);
+
+        // Only redirect if user has actually completed a domain intelligence scan
+        if (completedJobs && completedJobs.length > 0) {
+          console.log('User has completed onboarding (has completed domain scan), redirecting to dashboard');
+          router.push("/dashboard/ai-visibility");
+          return;
+        }
+
+        // ALWAYS reset onboarding state and clear localStorage for new users
+        // This ensures a clean start even if there's stale data from previous sessions
+        console.log('Resetting onboarding state and clearing localStorage for fresh start');
+        resetOnboarding();
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("onboarding-integrations");
+          localStorage.removeItem("onboarding-domain");
+          console.log('✅ Cleared onboarding localStorage data');
         }
         
         setIsAuthenticated(true);
@@ -72,7 +95,7 @@ export default function OnboardingPage() {
 
   const handleSkip = () => {
     skipOnboarding();
-    router.push("/dashboard");
+    router.push("/dashboard/ai-visibility");
   };
 
   // Show loading state while checking authentication

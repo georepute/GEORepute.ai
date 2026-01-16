@@ -36,8 +36,11 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Check if integration is actually connected (status should be 'connected')
+    const isConnected = integration.status === 'connected' || integration.status === 'active';
+
     return NextResponse.json({
-      connected: integration.status === 'connected',
+      connected: isConnected,
       sites: integration.metadata?.site_urls || [],
       selectedSite: integration.metadata?.selected_site || null,
     });
