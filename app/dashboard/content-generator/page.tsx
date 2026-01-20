@@ -23,11 +23,12 @@ import {
   Loader2,
   MessageSquare,
   CheckCircle,
-  X
+  X,
+  Search,
+  ImageIcon
 } from "lucide-react";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
-import ImageUpload from "@/components/ImageUpload";
 import toast from "react-hot-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -45,7 +46,8 @@ function ContentGeneratorPageInner() {
   const [targetKeywords, setTargetKeywords] = useState("");
   const [targetPlatform, setTargetPlatform] = useState("reddit");
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
-  const [imageUrl, setImageUrl] = useState(""); // For Instagram posts
+  const [imageUrl, setImageUrl] = useState(""); // For platforms that support image upload (not Facebook, Instagram, LinkedIn, Medium)
+  const [linkedinContentType, setLinkedinContentType] = useState<"linkedin_article" | "linkedin_post">("linkedin_post"); // LinkedIn content type
   
   // Action plan context
   const [actionPlanId, setActionPlanId] = useState<string | null>(null);
@@ -67,6 +69,16 @@ function ContentGeneratorPageInner() {
   const [copied, setCopied] = useState(false);
   const [contentId, setContentId] = useState<string | null>(null); // Store content ID from generation
   const [isCreatingSchema, setIsCreatingSchema] = useState(false);
+
+  // Image Selection State
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [imageSearchQuery, setImageSearchQuery] = useState<string>('');
+  const [fetchingImages, setFetchingImages] = useState(false);
+  const [pixabayImages, setPixabayImages] = useState<any[]>([]);
+  const [selectedImage, setSelectedImage] = useState<any | null>(null);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageModalShown, setImageModalShown] = useState(false); // Track if image modal has been shown
 
   // AI Detection & Humanization State
   const [isDetectingAI, setIsDetectingAI] = useState(false);
@@ -119,6 +131,7 @@ function ContentGeneratorPageInner() {
     const urlStepId = searchParams.get('stepId');
     const urlTopic = searchParams.get('topic');
     const urlPlatform = searchParams.get('platform');
+    const urlContentType = searchParams.get('contentType');
     const urlKeywords = searchParams.get('keywords');
 
     if (urlActionPlanId && urlStepId) {
@@ -135,6 +148,9 @@ function ContentGeneratorPageInner() {
     }
     if (urlKeywords) {
       setTargetKeywords(urlKeywords);
+    }
+    if (urlContentType && (urlContentType === 'linkedin_article' || urlContentType === 'linkedin_post')) {
+      setLinkedinContentType(urlContentType as "linkedin_article" | "linkedin_post");
     }
   }, [searchParams]);
 
@@ -194,12 +210,6 @@ function ContentGeneratorPageInner() {
 
     setGeneratingContent(true);
     try {
-      // Check if Instagram requires image
-      if (targetPlatform === 'instagram' && !imageUrl.trim()) {
-        toast.error("Instagram posts require an image URL");
-        setGeneratingContent(false);
-        return;
-      }
 
       // REAL AI Content Generation using OpenAI GPT-4 Turbo
       const response = await fetch('/api/geo-core/content-generate', {
@@ -214,7 +224,11 @@ function ContentGeneratorPageInner() {
           influenceLevel,
           brandVoiceId: selectedVoiceId, // Include brand voice if selected
           language: language || 'en', // Pass current language preference
-          ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}), // Include imageUrl if provided
+          contentType: targetPlatform === 'linkedin' ? linkedinContentType : undefined, // Pass LinkedIn content type
+          // Only include imageUrl for platforms that support it (not Facebook, Instagram, LinkedIn, Medium)
+          ...(imageUrl.trim() && !['facebook', 'instagram', 'linkedin', 'medium'].includes(targetPlatform) 
+            ? { imageUrl: imageUrl.trim() } 
+            : {}),
           actionPlanId: actionPlanId || undefined, // Link to action plan if present
           actionPlanStepId: actionPlanStepId || undefined, // Link to action plan step if present
         }),
@@ -253,15 +267,13 @@ function ContentGeneratorPageInner() {
       
       toast.success("Content generated successfully!");
 
-      // Automatically run AI detection after content is generated
+      // Run AI detection after content is generated (user can manually humanize if needed)
       if (data.content) {
         console.log('🔍 Starting AI detection for generated content...');
         console.log('📝 Content preview (first 200 chars):', data.content.substring(0, 200));
         console.log('📏 Content length:', data.content.length);
         await detectAIInContent(data.content);
-        
-        // After detection completes, automatically run humanization (only once)
-        // We'll do this inside detectAIInContent after results are set
+        // Image modal will be shown after detection completes
       }
     } catch (error) {
       console.error('Generation error:', error);
@@ -288,6 +300,7 @@ function ContentGeneratorPageInner() {
       setOriginalContent(null); // Clear original since we're using humanized
       setHumanizedContent(null); // Clear humanized since we've applied it
       setAiDetectionResults(null); // Clear AI detection results since we're using humanized
+      // Don't show image modal again - it was already shown after content generation
       setOriginalAiPercentage(null); // Reset original AI percentage
       toast.success('Using generated version');
       // Don't re-run detection - humanized content is already processed
@@ -303,6 +316,7 @@ function ContentGeneratorPageInner() {
       setOriginalContent(null); // Clear since we're reverting
       toast.success('Reverted to original version');
       // Keep AI detection results as they are for the original content
+      // Don't show image modal again - it was already shown after content generation
     }
   };
 
@@ -423,17 +437,19 @@ function ContentGeneratorPageInner() {
           setOriginalAiPercentage(aiPercentage);
         }
         
-        // Automatically run humanization if AI is detected above threshold (only once on generation)
-        if (aiPercentage > 20 && !humanizedContent && !isHumanizing) {
-          toast.success(`AI detection complete: ${aiPercentage}% AI detected. Humanizing automatically...`);
-          // Automatically humanize (runs only once on generation) - pass detection results
-          setTimeout(() => {
-            handleMakeItHumanAuto(content, detectionResults);
-          }, 1000);
+        // Show AI detection results - user can manually humanize if needed
+        if (aiPercentage > 20) {
+          toast.success(`AI detection complete: ${aiPercentage}% AI detected. You can use "Make it Human" button to humanize if needed.`);
         } else {
-          if (aiPercentage <= 20) {
-            toast.success(`AI detection complete: ${aiPercentage}% AI detected - Content looks human!`);
-          }
+          toast.success(`AI detection complete: ${aiPercentage}% AI detected - Content looks human!`);
+        }
+        
+        // Show image modal after detection (skip for GitHub) - only once
+        if (targetPlatform !== 'github' && !imageModalShown) {
+          const keywords = targetKeywords.split(",").map(k => k.trim()).filter(Boolean);
+          setImageSearchQuery(topic || keywords[0] || '');
+          setImageModalShown(true); // Mark as shown
+          setTimeout(() => setShowImageModal(true), 500);
         }
       } else {
         console.warn('⚠️ AI detection returned no data and no error');
@@ -445,6 +461,147 @@ function ContentGeneratorPageInner() {
     } finally {
       setIsDetectingAI(false);
     }
+  };
+
+  // Fetch images from Pixabay
+  const handleFetchImages = async () => {
+    if (!imageSearchQuery || imageSearchQuery.trim().length === 0) {
+      toast.error('Please enter a search query');
+      return;
+    }
+
+    setFetchingImages(true);
+    setPixabayImages([]);
+
+    try {
+      const keywords = targetKeywords.split(",").map(k => k.trim()).filter(Boolean);
+      const response = await fetch('/api/geo-core/pixabay-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: imageSearchQuery,
+          keywords: keywords,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch images');
+      }
+      
+      if (data?.images && data.images.length > 0) {
+        setPixabayImages(data.images);
+      } else {
+        toast.error('No images found. Try a different search query.');
+      }
+    } catch (err) {
+      console.error('Error fetching images:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to fetch images');
+    } finally {
+      setFetchingImages(false);
+    }
+  };
+
+  // Upload image to Supabase Storage
+  const uploadImageToStorage = async (imageUrl: string, imageId: number): Promise<string | null> => {
+    try {
+      setUploadingImage(true);
+      
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      
+      const timestamp = Date.now();
+      const filename = `content-image-${imageId}-${timestamp}.jpg`;
+      
+      const { data, error } = await supabase.storage
+        .from('platform-content-images')
+        .upload(filename, blob, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+
+      if (error) {
+        console.error('Error uploading image:', error);
+        throw error;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('platform-content-images')
+        .getPublicUrl(data.path);
+
+      return urlData.publicUrl;
+    } catch (err) {
+      console.error('Failed to upload image:', err);
+      toast.error('Failed to upload image to storage');
+      return null;
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // Handle image selection
+  const handleSelectImage = async (image: any) => {
+    setSelectedImage(image);
+    
+    // Upload image to Supabase Storage
+    toast.loading('Uploading image...', { id: 'image-upload' });
+    const publicUrl = await uploadImageToStorage(image.largeImageURL, image.id);
+    
+    if (publicUrl) {
+      setUploadedImageUrl(publicUrl);
+      setImageUrl(publicUrl); // Also set imageUrl for schema generation
+      toast.success('Image uploaded successfully!', { id: 'image-upload' });
+    } else {
+      toast.error('Failed to upload image, but you can still continue', { id: 'image-upload' });
+    }
+  };
+
+  // Confirm image selection and close modal
+  const handleConfirmImage = async () => {
+    if (!selectedImage || !uploadedImageUrl || !contentId) {
+      setShowImageModal(false);
+      return;
+    }
+
+    // Update the content record with the image URL in metadata
+    try {
+      const { data: currentContent } = await supabase
+        .from('content_strategy')
+        .select('metadata')
+        .eq('id', contentId)
+        .single();
+
+      if (currentContent) {
+        const updatedMetadata = {
+          ...currentContent.metadata,
+          imageUrl: uploadedImageUrl,
+          imageData: {
+            url: uploadedImageUrl,
+            alt: selectedImage.tags || topic,
+            photographer: selectedImage.user,
+          },
+        };
+
+        const { error: updateError } = await supabase
+          .from('content_strategy')
+          .update({ metadata: updatedMetadata })
+          .eq('id', contentId);
+
+        if (updateError) {
+          console.error('Error updating content with image:', updateError);
+          toast.error('Failed to save image to content, but you can still proceed');
+        } else {
+          console.log('✅ Image URL saved to content metadata');
+        }
+      }
+    } catch (err) {
+      console.error('Error updating content with image:', err);
+      // Don't block the user - they can still proceed
+    }
+
+    setShowImageModal(false);
+    toast.success('Image selected! You can proceed to publish.');
   };
 
   // Handle "Ready to Publish?" button click - Generate schema and navigate
@@ -459,6 +616,9 @@ function ContentGeneratorPageInner() {
       const keywords = targetKeywords.split(",").map(k => k.trim()).filter(Boolean);
       
       toast.loading("Generating schema for publication...", { id: "schema-generation" });
+
+      // Only include imageUrl for platforms that support it (all except GitHub)
+      const includeImage = targetPlatform !== 'github' && uploadedImageUrl;
 
       // Generate schema for the current content (without creating duplicate DB entry)
       const response = await fetch('/api/geo-core/content-generate', {
@@ -477,7 +637,15 @@ function ContentGeneratorPageInner() {
           skipGeneration: true, // Skip AI generation AND database insertion, just create schema
           contentType: targetPlatform === "github" ? "documentation" : "article",
           tone: contentMetadata?.tone || "informative",
-          ...(imageUrl.trim() ? { imageUrl: imageUrl.trim() } : {}),
+          // Include imageUrl for all platforms except GitHub
+          ...(includeImage ? { 
+            imageUrl: uploadedImageUrl,
+            imageData: selectedImage ? {
+              url: uploadedImageUrl,
+              alt: selectedImage.tags || topic,
+              photographer: selectedImage.user,
+            } : null,
+          } : {}),
         }),
       });
 
@@ -501,6 +669,15 @@ function ContentGeneratorPageInner() {
         metadata: {
           ...contentMetadata,
           ...data.metadata,
+          // Include image data if available
+          ...(includeImage && uploadedImageUrl ? {
+            imageUrl: uploadedImageUrl,
+            imageData: selectedImage ? {
+              url: uploadedImageUrl,
+              alt: selectedImage.tags || topic,
+              photographer: selectedImage.user,
+            } : null,
+          } : {}),
         },
         generatedAt: new Date().toISOString(),
       };
@@ -609,10 +786,12 @@ function ContentGeneratorPageInner() {
         });
         
         setHumanizedContent(humanizedData.humanVersion);
-        toast.success(`Content auto-generated! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
+        toast.success(`Content humanized! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
         
-        // Automatically show comparison modal
+        // Show comparison modal
         setShowComparisonModal(true);
+        
+        // Don't show image modal again - it was already shown after content generation and AI detection
       } else {
         console.warn('⚠️ Humanization returned no data');
         toast.error('Humanization returned no data');
@@ -724,10 +903,12 @@ function ContentGeneratorPageInner() {
         });
         
         setHumanizedContent(humanizedData.humanVersion);
-        toast.success(`Content generated! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
+        toast.success(`Content humanized! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
         
-        // Show comparison modal instead of directly updating
+        // Show comparison modal
         setShowComparisonModal(true);
+        
+        // Don't show image modal again - it was already shown after content generation and AI detection
       } else {
         console.warn('⚠️ Humanization returned no data');
         toast.error('Humanization returned no data');
@@ -878,6 +1059,49 @@ function ContentGeneratorPageInner() {
                   </div>
                 </div>
 
+                {/* LinkedIn Content Type Selection */}
+                {targetPlatform === 'linkedin' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Content Format
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => setLinkedinContentType("linkedin_article")}
+                        className={`p-4 rounded-lg border-2 transition-all text-left ${
+                          linkedinContentType === "linkedin_article"
+                            ? "border-primary-500 bg-primary-50"
+                            : "border-gray-200 hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-2xl">📄</span>
+                          <span className="font-semibold text-sm text-gray-900">Article</span>
+                        </div>
+                        <div className="text-xs text-gray-600">
+                          Long, detailed, well-researched with clear sections and headings
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => setLinkedinContentType("linkedin_post")}
+                        className={`p-4 rounded-lg border-2 transition-all text-left ${
+                          linkedinContentType === "linkedin_post"
+                            ? "border-primary-500 bg-primary-50"
+                            : "border-gray-200 hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-2xl">📝</span>
+                          <span className="font-semibold text-sm text-gray-900">Post</span>
+                        </div>
+                        <div className="text-xs text-gray-600">
+                          Short to medium, casual, conversational, flexible format
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Brand Voice Profile Selection */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -917,53 +1141,6 @@ function ContentGeneratorPageInner() {
                   )}
                 </div>
 
-                {/* Image Upload (Required for Instagram, Optional for others) */}
-                {targetPlatform === 'instagram' && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Image (Required for Instagram) *
-                    </label>
-                    <ImageUpload
-                      onImageUploaded={(url) => setImageUrl(url)}
-                      currentImageUrl={imageUrl}
-                      maxSizeMB={8}
-                      className="w-full"
-                    />
-                    <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                      <p className="text-xs text-blue-900 font-semibold mb-1">
-                        📸 Instagram Image Requirements:
-                      </p>
-                      <ul className="text-xs text-blue-700 space-y-0.5 ml-4">
-                        <li>• <strong>Required</strong> for all Instagram posts</li>
-                        <li>• Formats: JPEG, PNG, WebP</li>
-                        <li>• <strong>Max size: 8MB</strong> (Instagram API limit)</li>
-                        <li>• Aspect ratio: 4:5 (portrait) to 1.91:1 (landscape)</li>
-                        <li>• Min width: 320px</li>
-                        <li>• Stored securely in your cloud storage</li>
-                      </ul>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Optional Image Upload for Other Platforms */}
-                {(targetPlatform === 'facebook' || targetPlatform === 'linkedin' || targetPlatform === 'medium') && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Image (Optional - Enhances Engagement)
-                    </label>
-                    <ImageUpload
-                      onImageUploaded={(url) => setImageUrl(url)}
-                      currentImageUrl={imageUrl}
-                      maxSizeMB={20}
-                      className="w-full"
-                    />
-                    <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-lg">
-                      <p className="text-xs text-gray-600">
-                        💡 <strong>Tip:</strong> Posts with images get 2-3x more engagement on {targetPlatform}!
-                      </p>
-                    </div>
-                  </div>
-                )}
 
                 {/* Influence Level */}
                 <div>
@@ -1441,6 +1618,7 @@ function ContentGeneratorPageInner() {
               <button
                 onClick={() => {
                   setShowComparisonModal(false);
+                  // Don't show image modal again - it was already shown after content generation
                 }}
                 className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
@@ -1501,6 +1679,194 @@ function ContentGeneratorPageInner() {
                 >
                   <CheckCircle className="w-4 h-4" />
                   Use Humanized
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Selection Modal */}
+      {showImageModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 bg-gradient-to-r from-cyan-50 to-blue-50 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
+                  <ImageIcon className="w-5 h-5 text-cyan-600" />
+                  Select Image for Your Content
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Choose an image to enhance your content (optional)
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowImageModal(false);
+                  setSelectedImage(null);
+                  setUploadedImageUrl(null);
+                }}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto flex-1">
+              {/* Search Query */}
+              <div className="space-y-2 mb-4">
+                <label className="text-sm font-medium text-gray-700">Search Query</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={imageSearchQuery}
+                    onChange={(e) => setImageSearchQuery(e.target.value)}
+                    placeholder="Enter search terms for images..."
+                    className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all text-sm text-gray-800"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !fetchingImages) {
+                        handleFetchImages();
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={handleFetchImages}
+                    disabled={fetchingImages || !imageSearchQuery.trim()}
+                    className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-600 hover:to-blue-700 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {fetchingImages ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Search className="w-4 h-4" />
+                    )}
+                    Search
+                  </button>
+                </div>
+              </div>
+              
+              {/* Quick suggestions */}
+              <div className="flex flex-wrap gap-2 mb-6">
+                <span className="text-xs text-gray-400">Suggestions:</span>
+                {targetKeywords.split(",").map((kw: string, i: number) => {
+                  const trimmedKw = kw.trim();
+                  if (!trimmedKw) return null;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setImageSearchQuery(trimmedKw)}
+                      className="px-3 py-1 bg-cyan-50 text-cyan-700 rounded-lg text-xs hover:bg-cyan-100 transition-colors font-medium"
+                    >
+                      {trimmedKw}
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={() => setImageSearchQuery(topic)}
+                  className="px-3 py-1 bg-purple-50 text-purple-700 rounded-lg text-xs hover:bg-purple-100 transition-colors font-medium"
+                >
+                  Use topic
+                </button>
+              </div>
+
+              {/* Image Grid */}
+              {fetchingImages ? (
+                <div className="py-12 text-center">
+                  <Loader2 className="w-10 h-10 animate-spin text-cyan-600 mx-auto mb-3" />
+                  <p className="text-gray-600">Searching for images...</p>
+                </div>
+              ) : pixabayImages.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {pixabayImages.slice(0, 5).map((image) => (
+                      <button
+                        key={image.id}
+                        onClick={() => handleSelectImage(image)}
+                        className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all group focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 ${
+                          selectedImage?.id === image.id
+                            ? 'border-cyan-500 ring-2 ring-cyan-500'
+                            : 'border-gray-200 hover:border-cyan-400'
+                        }`}
+                      >
+                        <Image
+                          src={image.webformatURL}
+                          alt={image.tags}
+                          fill
+                          className="object-cover"
+                        />
+                        {selectedImage?.id === image.id && (
+                          <div className="absolute inset-0 bg-cyan-500/20 flex items-center justify-center">
+                            <div className="bg-cyan-500 text-white rounded-full p-2">
+                              <CheckCircle className="w-6 h-6" />
+                            </div>
+                          </div>
+                        )}
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                          <p className="text-white text-xs truncate">by {image.user}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-center pt-2 border-t border-gray-100">
+                    <p className="text-xs text-gray-400">
+                      Images powered by{' '}
+                      <a
+                        href="https://pixabay.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-cyan-600 hover:underline"
+                      >
+                        Pixabay
+                      </a>
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-12 text-center">
+                  <ImageIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500">Search for images to get started</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer with Confirm Button */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div className="text-sm text-gray-600">
+                {selectedImage ? (
+                  <span className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-green-500" />
+                    Image selected {uploadingImage && '(uploading...)'}
+                  </span>
+                ) : (
+                  'Select an image or skip to continue'
+                )}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowImageModal(false);
+                    setSelectedImage(null);
+                    setUploadedImageUrl(null);
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={handleConfirmImage}
+                  disabled={uploadingImage}
+                  className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-600 hover:to-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {uploadingImage ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4" />
+                      Continue
+                    </>
+                  )}
                 </button>
               </div>
             </div>

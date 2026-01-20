@@ -67,6 +67,7 @@ interface Project {
   gsc_enabled?: boolean;
   gsc_keywords_count?: number;
   last_gsc_sync?: string;
+  brand_summary?: any;
 }
 
 interface Session {
@@ -114,6 +115,8 @@ export default function AIVisibility() {
   const [projectStats, setProjectStats] = useState<any>(null);
   const [projectResponses, setProjectResponses] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('summary');
+  const [brandSummary, setBrandSummary] = useState<any>(null);
+  const [loadingBrandSummary, setLoadingBrandSummary] = useState(false);
   const [resultsView, setResultsView] = useState<'mentioned' | 'missed'>('mentioned');
   const [showCompletionNotification, setShowCompletionNotification] = useState(false);
   const [showAnalysisStartNotification, setShowAnalysisStartNotification] = useState(false);
@@ -218,6 +221,25 @@ export default function AIVisibility() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject?.id, activeTab, projectSessions.length, viewMode]);
 
+  // Fetch brand summary when switching to summary tab
+  useEffect(() => {
+    if (viewMode === 'details' && selectedProject && activeTab === 'summary') {
+      // Check if there's a running analysis
+      const hasRunningSession = projectSessions.some(s => s.status === 'running');
+      
+      // Only fetch if:
+      // 1. We don't already have a cached summary, AND
+      // 2. There's no running analysis (to avoid showing old summary during new analysis)
+      if (!selectedProject.brand_summary && !hasRunningSession && !brandSummary) {
+        fetchBrandSummary();
+      } else if (hasRunningSession) {
+        // Clear summary when analysis is running
+        setBrandSummary(null);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject?.id, activeTab, viewMode, selectedProject?.brand_summary, projectSessions]);
+
   // Debug: Log modal state changes
   useEffect(() => {
     if (viewResponseModal) {
@@ -232,7 +254,7 @@ export default function AIVisibility() {
 
       const { data, error } = await supabase
         .from('brand_analysis_projects')
-        .select('*')
+        .select('*, brand_summary')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
@@ -364,16 +386,19 @@ export default function AIVisibility() {
 
   const fetchProjectDetails = async (projectId: string) => {
     try {
-      // Fetch project
+      // Clear brand summary immediately when switching projects to prevent showing old data
+      setBrandSummary(null);
+      
+      // Fetch project (including brand_summary)
       const { data: project, error: projectError } = await supabase
         .from('brand_analysis_projects')
-        .select('*')
+        .select('*, brand_summary, brand_summary_updated_at')
         .eq('id', projectId)
         .single();
 
       if (projectError) throw projectError;
       setSelectedProject(project);
-
+      
       // Fetch sessions
       const { data: sessions, error: sessionsError } = await supabase
         .from('brand_analysis_sessions')
@@ -384,6 +409,18 @@ export default function AIVisibility() {
 
       if (sessionsError) throw sessionsError;
       setProjectSessions(sessions || []);
+
+      // Check if there's a running analysis
+      const hasRunningSession = sessions?.some(s => s.status === 'running');
+      
+      // Only set brand summary if there's NO running analysis and summary exists
+      // This prevents showing old summary when new analysis is in progress
+      if (project.brand_summary && !hasRunningSession) {
+        setBrandSummary(project.brand_summary);
+      } else {
+        // Clear summary if no summary exists or analysis is running
+        setBrandSummary(null);
+      }
 
       // Calculate stats from latest completed session
       const latestCompleted = sessions?.find(s => s.status === 'completed');
@@ -451,6 +488,75 @@ export default function AIVisibility() {
     } catch (error) {
       console.error('Error fetching responses:', error);
       setProjectResponses([]);
+    }
+  };
+
+  const fetchBrandSummary = async () => {
+    if (!selectedProject || !selectedProject.website_url || !selectedProject.brand_name) {
+      setBrandSummary(null);
+      return;
+    }
+
+    setLoadingBrandSummary(true);
+    try {
+      // First, check if summary exists in the project data (from database)
+      if (selectedProject.brand_summary) {
+        console.log('✅ Using cached brand summary from database');
+        setBrandSummary(selectedProject.brand_summary);
+        setLoadingBrandSummary(false);
+        return;
+      }
+
+      // If no cached summary, fetch from edge function
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Supabase configuration missing');
+      }
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({
+          projectId: selectedProject.id, // Pass projectId so it can check cache and save result
+          url: selectedProject.website_url,
+          brandName: selectedProject.brand_name,
+          industry: selectedProject.industry || '',
+          keywords: selectedProject.keywords || []
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to fetch brand summary');
+      }
+
+      const data = await response.json();
+      setBrandSummary(data);
+      
+      // Refresh project data to get the newly saved summary
+      if (selectedProject.id) {
+        const { data: updatedProject } = await supabase
+          .from('brand_analysis_projects')
+          .select('brand_summary, brand_summary_updated_at')
+          .eq('id', selectedProject.id)
+          .single();
+        
+        if (updatedProject) {
+          setSelectedProject({ ...selectedProject, ...updatedProject });
+        }
+      }
+      
+      console.log('✅ Brand summary loaded:', data);
+    } catch (error) {
+      console.error('Error fetching brand summary:', error);
+      setBrandSummary(null);
+    } finally {
+      setLoadingBrandSummary(false);
     }
   };
 
@@ -591,27 +697,14 @@ export default function AIVisibility() {
     setIsAnalyzing(true);
 
     try {
-      // Step 1: Crawl website to get description and image
-      console.log('Crawling website...');
-      const crawlResponse = await fetch("/api/crawl-website", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: websiteUrl }),
-      });
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-      const crawlData = await crawlResponse.json();
-      let companyDescription = '';
-      let companyImageUrl = '';
-
-      if (crawlResponse.ok && crawlData.success) {
-        companyDescription = crawlData.description || '';
-        companyImageUrl = crawlData.imageUrl || '';
-        console.log('Website crawled successfully:', { description: companyDescription.substring(0, 50), imageUrl: companyImageUrl });
-      } else {
-        console.warn('Website crawl failed, continuing without description/image:', crawlData.error);
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error("Supabase configuration missing");
       }
 
-      // Step 2: Create/update project with crawled data (with optional GSC)
+      // Step 1: Create/update project first (without description/image yet)
       const response = await fetch("/api/ai-visibility", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -622,8 +715,8 @@ export default function AIVisibility() {
           keywords,
           competitors,
           platforms: selectedPlatforms,
-          companyDescription,
-          companyImageUrl,
+          companyDescription: '', // Will be set by brand-analysis-summary
+          companyImageUrl: '', // Will be set by brand-analysis-summary
           fetchGSCKeywords, // Include GSC checkbox state
         }),
       });
@@ -631,6 +724,59 @@ export default function AIVisibility() {
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Failed to create project");
+      }
+
+      // Step 2: Call brand-analysis-summary to get description and favicon (replaces crawler)
+      console.log('📊 Generating brand summary...');
+      let companyDescription = '';
+      let companyImageUrl = '';
+
+      try {
+        const summaryResponse = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            projectId: data.projectId,
+            url: websiteUrl,
+            brandName: brandName,
+            industry: industry || '',
+            keywords: keywords || []
+          }),
+        });
+
+        if (summaryResponse.ok) {
+          const summaryData = await summaryResponse.json();
+          console.log('✅ Brand summary generated successfully');
+          
+          // Extract truncated overview (5 lines) for card display
+          if (summaryData.summary?.overview) {
+            companyDescription = summaryData.summary.overview
+              .split('\n')
+              .slice(0, 5)
+              .join('\n');
+          }
+          companyImageUrl = summaryData.favicon || '';
+          
+          // Update project with truncated overview and favicon for cards
+          // The full summary is already saved in brand_summary column by the edge function
+          if (companyDescription || companyImageUrl) {
+            await supabase
+              .from('brand_analysis_projects')
+              .update({
+                company_description: companyDescription,
+                company_image_url: companyImageUrl,
+              })
+              .eq('id', data.projectId);
+          }
+        } else {
+          console.warn('⚠️ Brand summary generation failed, continuing without description/image');
+        }
+      } catch (summaryError) {
+        console.error('❌ Error generating brand summary:', summaryError);
+        // Continue even if summary generation fails
       }
 
       // Refresh projects and switch to projects view
@@ -673,7 +819,58 @@ export default function AIVisibility() {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
       const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-      // Call the brand-analysis edge function
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error("Supabase configuration missing");
+      }
+
+      // Step 1: Call brand-analysis-summary FIRST (replaces crawler)
+      console.log('📊 Generating brand summary...');
+      try {
+        const summaryResponse = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            projectId: project.id,
+            url: project.website_url,
+            brandName: project.brand_name,
+            industry: project.industry || '',
+            keywords: project.keywords || []
+          }),
+        });
+
+        if (summaryResponse.ok) {
+          const summaryData = await summaryResponse.json();
+          console.log('✅ Brand summary generated successfully');
+          
+          // Update project with summary data (for cards: truncated overview + favicon)
+          // The full summary is already saved in brand_summary column by the edge function
+          if (summaryData.summary?.overview) {
+            // Truncate overview to 5 lines for card display
+            const truncatedOverview = summaryData.summary.overview
+              .split('\n')
+              .slice(0, 5)
+              .join('\n');
+            
+            await supabase
+              .from('brand_analysis_projects')
+              .update({
+                company_description: truncatedOverview,
+                company_image_url: summaryData.favicon || null,
+              })
+              .eq('id', project.id);
+          }
+        } else {
+          console.warn('⚠️ Brand summary generation failed, continuing with analysis');
+        }
+      } catch (summaryError) {
+        console.error('❌ Error generating brand summary:', summaryError);
+        // Continue with analysis even if summary generation fails
+      }
+
+      // Step 2: Call the brand-analysis edge function
       const response = await fetch(`${supabaseUrl}/functions/v1/brand-analysis`, {
         method: "POST",
         headers: {
@@ -700,6 +897,9 @@ export default function AIVisibility() {
       setShowAnalysisStartNotification(true);
       setTimeout(() => setShowAnalysisStartNotification(false), 5000);
 
+      // Clear brand summary state since new analysis is starting
+      setBrandSummary(null);
+
       // Refresh projects to show updated status
       await fetchProjects();
       
@@ -716,6 +916,8 @@ export default function AIVisibility() {
   };
 
   const handleProjectClick = (project: Project) => {
+    // Clear brand summary immediately when switching projects to prevent showing old data
+    setBrandSummary(null);
     setSelectedProject(project);
     fetchProjectDetails(project.id);
     setViewMode('details');
@@ -997,20 +1199,24 @@ export default function AIVisibility() {
                       {/* Brand Header */}
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center gap-3 flex-1">
-                          {project.company_image_url ? (
-                            <img 
-                              src={project.company_image_url} 
-                              alt={project.brand_name}
-                              className="w-12 h-12 rounded-lg object-cover"
-                              onError={(e) => {
-                                // Fallback to initial if image fails to load
-                                e.currentTarget.style.display = 'none';
-                                const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                                if (fallback) fallback.style.display = 'flex';
-                              }}
-                            />
+                          {/* Use brand_summary.favicon if available, fallback to company_image_url */}
+                          {(project.brand_summary?.favicon || project.company_image_url) ? (
+                            <div className="w-12 h-12 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
+                              <img 
+                                src={project.brand_summary?.favicon || project.company_image_url} 
+                                alt={project.brand_name}
+                                className="w-full h-full object-contain"
+                                style={{ imageRendering: 'crisp-edges' }}
+                                onError={(e) => {
+                                  // Fallback to initial if image fails to load
+                                  e.currentTarget.style.display = 'none';
+                                  const fallback = e.currentTarget.parentElement?.nextElementSibling as HTMLElement;
+                                  if (fallback) fallback.style.display = 'flex';
+                                }}
+                              />
+                            </div>
                           ) : null}
-                          <div className={`w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center ${project.company_image_url ? 'hidden' : ''}`}>
+                          <div className={`w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center ${(project.brand_summary?.favicon || project.company_image_url) ? 'hidden' : ''}`}>
                             <span className="text-xl font-bold text-purple-600">
                               {project.brand_name.charAt(0).toUpperCase()}
                             </span>
@@ -1077,10 +1283,12 @@ export default function AIVisibility() {
                         </div>
                       </div>
 
-                      {/* Company Description */}
-                      {project.company_description && (
-                        <div className="text-sm text-gray-600 mb-3 line-clamp-3">
-                          {project.company_description.split('\n').slice(0, 3).join(' ')}
+                      {/* Company Description - Use brand_summary.overview (truncated to 5 lines) if available, fallback to company_description */}
+                      {(project.brand_summary?.summary?.overview || project.company_description) && (
+                        <div className="text-sm text-gray-600 mb-3 line-clamp-5">
+                          {project.brand_summary?.summary?.overview 
+                            ? project.brand_summary.summary.overview.split('\n').slice(0, 5).join('\n')
+                            : project.company_description?.split('\n').slice(0, 3).join(' ')}
                         </div>
                       )}
 
@@ -1632,20 +1840,24 @@ export default function AIVisibility() {
             <div className="flex items-start justify-between mb-4">
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-2">
-                  {selectedProject.company_image_url ? (
-                    <img 
-                      src={selectedProject.company_image_url} 
-                      alt={selectedProject.brand_name}
-                      className="w-12 h-12 rounded-lg object-cover border border-gray-200"
-                      onError={(e) => {
-                        // Fallback to initial if image fails to load
-                        e.currentTarget.style.display = 'none';
-                        const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                        if (fallback) fallback.style.display = 'flex';
-                      }}
-                    />
+                  {/* Use brand_summary.favicon if available, fallback to company_image_url */}
+                  {(brandSummary?.favicon || selectedProject.company_image_url) ? (
+                    <div className="w-12 h-12 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
+                      <img 
+                        src={brandSummary?.favicon || selectedProject.company_image_url} 
+                        alt={selectedProject.brand_name}
+                        className="w-full h-full object-contain"
+                        style={{ imageRendering: 'crisp-edges' }}
+                        onError={(e) => {
+                          // Fallback to initial if image fails to load
+                          e.currentTarget.style.display = 'none';
+                          const fallback = e.currentTarget.parentElement?.nextElementSibling as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    </div>
                   ) : null}
-                  <div className={`w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center ${selectedProject.company_image_url ? 'hidden' : ''}`}>
+                  <div className={`w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center ${(brandSummary?.favicon || selectedProject.company_image_url) ? 'hidden' : ''}`}>
                     <span className="text-xl font-bold text-purple-600">
                       {selectedProject.brand_name.charAt(0).toUpperCase()}
                     </span>
@@ -1663,12 +1875,12 @@ export default function AIVisibility() {
                     <span>{selectedProject.website_url}</span>
                   </div>
                 )}
-                {/* Company Description from Crawler */}
-                {selectedProject.company_description && (
+                {/* Brand Overview from brand-analysis-summary edge function */}
+                {(brandSummary?.summary?.overview || selectedProject.company_description) && (
                   <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="text-xs font-semibold text-gray-700 mb-1">About {selectedProject.brand_name}</div>
                     <div className="text-sm text-gray-600 whitespace-pre-line">
-                      {selectedProject.company_description}
+                      {brandSummary?.summary?.overview || selectedProject.company_description}
                     </div>
                   </div>
                 )}
@@ -1838,148 +2050,119 @@ export default function AIVisibility() {
                 {/* Tab Content */}
                 <div className="p-6">
                   {activeTab === 'summary' && (
-                    <div className="space-y-6">
-                      {/* Overview Stats */}
-                      <div dir={isRtl ? 'rtl' : 'ltr'}>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">{t.dashboard.aiVisibility.analysisOverview}</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                            <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.totalQueries}</div>
-                            <div className="text-2xl font-bold text-purple-600">
-                              {projectStats?.total_queries || projectResponses.length || 0}
-                            </div>
-                          </div>
-                          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.brandMentions}</div>
-                            <div className="text-2xl font-bold text-green-600">
-                              {projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0}
-                            </div>
-                          </div>
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.mentionRate}</div>
-                            <div className="text-2xl font-bold text-blue-600">
-                              {(() => {
-                                const totalMentions = projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0;
-                                const totalQueries = projectStats?.total_queries || projectResponses.length || 0;
-                                if (totalQueries > 0) {
-                                  return Math.round((totalMentions / totalQueries) * 100);
-                                }
-                                return 0;
-                              })()}%
-                            </div>
-                          </div>
-                          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                            <div className="text-sm text-gray-600 mb-1">{t.dashboard.aiVisibility.aiPlatforms}</div>
-                            <div className="text-2xl font-bold text-orange-600">
-                              {projectStats?.platforms_analyzed?.length || new Set(projectResponses.map(r => r.platform)).size || 0}
-                            </div>
-                          </div>
+                    <div className="space-y-6" dir={isRtl ? 'rtl' : 'ltr'}>
+                      {loadingBrandSummary ? (
+                        <div className="flex items-center justify-center py-12">
+                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600" />
+                          <span className="ml-4 text-gray-600">Loading brand summary...</span>
                         </div>
-                      </div>
-
-                      {/* Platform Breakdown */}
-                      {projectResponses.length > 0 && (
-                        <div dir={isRtl ? 'rtl' : 'ltr'}>
-                          <h3 className="text-lg font-semibold text-gray-900 mb-4">{t.dashboard.aiVisibility.platformPerformance}</h3>
-                          <div className="space-y-3">
-                            {Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
-                              const platformResponses = projectResponses.filter(r => r.platform === platform);
-                              const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
-                              const mentionRate = platformResponses.length > 0 ? (mentions / platformResponses.length) * 100 : 0;
-                              const avgSentiment = platformResponses
-                                .filter(r => r.response_metadata?.sentiment_score !== null)
-                                .reduce((sum, r) => sum + (r.response_metadata?.sentiment_score || 0), 0) / 
-                                platformResponses.filter(r => r.response_metadata?.sentiment_score !== null).length || 0;
-
-                              const platformOption = platformOptions.find(p => p.id === platform);
-                              return (
-                                <div key={platform} className="border border-gray-200 rounded-lg p-4">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div className="flex items-center gap-3">
-                                      <span className="px-3 py-1 bg-gray-100 text-gray-800 rounded text-sm font-medium capitalize flex items-center gap-2">
-                                        {platformOption?.icon ? (
-                                          <Image 
-                                            src={platformOption.icon} 
-                                            alt={platformOption.name} 
-                                            width={platformOption.id === 'gemini' ? 32 : 16} 
-                                            height={platformOption.id === 'gemini' ? 32 : 16} 
-                                            className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
-                                            quality={platformOption.id === 'gemini' ? 100 : 75}
-                                            unoptimized={platformOption.id === 'gemini'}
-                                          />
-                                        ) : null}
-                                        {platform}
-                                      </span>
-                                      <span className="text-sm text-gray-600">
-                                        {platformResponses.length} {t.dashboard.aiVisibility.queries}
-                                      </span>
-                                    </div>
-                                    <span className="text-sm font-semibold text-gray-900">
-                                      {Math.round(mentionRate)}% {t.dashboard.aiVisibility.mentionRate.toLowerCase()}
-                                    </span>
+                      ) : brandSummary?.summary ? (
+                        <>
+                          {/* Brand Overview */}
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Brand Overview</h3>
+                            <div className="bg-white border border-gray-200 rounded-lg p-6">
+                              {brandSummary.favicon && (
+                                <div className="flex items-center gap-3 mb-4">
+                                  <div className="w-10 h-10 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
+                                    <img 
+                                      src={brandSummary.favicon} 
+                                      alt="Brand favicon" 
+                                      className="w-full h-full object-contain"
+                                      style={{ imageRendering: 'crisp-edges' }}
+                                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                    />
                                   </div>
-                                  <div className="flex items-center gap-4 text-sm">
-                                    <span className="text-gray-600">
-                                      {t.dashboard.aiVisibility.mentions}: <span className="font-semibold text-gray-900">{mentions}</span>
-                                    </span>
-                                    {!isNaN(avgSentiment) && avgSentiment !== 0 && (
-                                      <span className="text-gray-600">
-                                        {t.dashboard.aiVisibility.avgSentiment}: <span className={`font-semibold ${
-                                          avgSentiment > 0.3 ? 'text-green-600' : avgSentiment < -0.3 ? 'text-red-600' : 'text-gray-600'
-                                        }`}>
-                                          {avgSentiment.toFixed(2)}
-                                        </span>
-                                      </span>
+                                  <div>
+                                    <h4 className="text-xl font-bold text-gray-900">{selectedProject?.brand_name}</h4>
+                                    {brandSummary.sourceUrl && (
+                                      <a 
+                                        href={brandSummary.sourceUrl} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="text-sm text-blue-600 hover:underline"
+                                      >
+                                        {brandSummary.sourceUrl}
+                                      </a>
                                     )}
                                   </div>
                                 </div>
-                              );
-                            })}
+                              )}
+                              <p className="text-gray-700 leading-relaxed whitespace-pre-line">
+                                {brandSummary.summary.overview}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      )}
 
-                      {/* Recent Activity */}
-                      {projectSessions.length > 0 && (
-                        <div dir={isRtl ? 'rtl' : 'ltr'}>
-                          <h3 className="text-lg font-semibold text-gray-900 mb-4">{t.dashboard.aiVisibility.analysisSessions}</h3>
-                          <div className="space-y-2">
-                            {projectSessions.slice(0, 5).map((session) => (
-                              <div key={session.id} className="border border-gray-200 rounded-lg p-3 flex items-center justify-between">
-                                <div>
-                                  <div className="text-sm font-medium text-gray-900">
-                                    {session.session_name || 'Analysis Session'}
-                                  </div>
-                                  <div className="text-xs text-gray-500">
-                                    {new Date(session.started_at).toLocaleString()}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className={`px-2 py-1 rounded text-xs ${
-                                    session.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                    session.status === 'running' ? 'bg-blue-100 text-blue-800' :
-                                    session.status === 'cancelled' ? 'bg-gray-100 text-gray-800' :
-                                    'bg-red-100 text-red-800'
-                                  }`}>
-                                    {session.status}
-                                  </span>
-                                  {session.status === 'completed' && session.results_summary && (
-                                    <span className="text-xs text-gray-600">
-                                      {session.results_summary.total_mentions || 0} mentions
-                                    </span>
-                                  )}
+                          {/* Brand Details Grid */}
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Brand Details</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                <div className="text-sm text-gray-600 mb-1">Industry</div>
+                                <div className="text-lg font-semibold text-gray-900">
+                                  {brandSummary.summary.industry !== 'unknown' ? brandSummary.summary.industry : 'N/A'}
                                 </div>
                               </div>
-                            ))}
+                              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                <div className="text-sm text-gray-600 mb-1">Founded Year</div>
+                                <div className="text-lg font-semibold text-gray-900">
+                                  {brandSummary.summary.founded_year !== 'unknown' ? brandSummary.summary.founded_year : 'N/A'}
+                                </div>
+                              </div>
+                              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                <div className="text-sm text-gray-600 mb-1">Headquarters</div>
+                                <div className="text-lg font-semibold text-gray-900">
+                                  {brandSummary.summary.headquarters !== 'unknown' ? brandSummary.summary.headquarters : 'N/A'}
+                                </div>
+                              </div>
+                              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                <div className="text-sm text-gray-600 mb-1">Business Model</div>
+                                <div className="text-lg font-semibold text-gray-900">
+                                  {brandSummary.summary.business_model !== 'unknown' ? brandSummary.summary.business_model : 'N/A'}
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      )}
 
-                      {projectResponses.length === 0 && !projectSessions.find(s => s.status === 'running') && (
-                        <div className="text-center py-12 text-gray-500" dir={isRtl ? 'rtl' : 'ltr'}>
+                          {/* Additional Information */}
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Additional Information</h3>
+                            <div className="space-y-4">
+                              {brandSummary.summary.typical_clients && brandSummary.summary.typical_clients !== 'unknown' && (
+                                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                  <div className="text-sm font-medium text-gray-700 mb-2">Typical Clients</div>
+                                  <div className="text-gray-600">{brandSummary.summary.typical_clients}</div>
+                                </div>
+                              )}
+                              {brandSummary.summary.brand_essence && brandSummary.summary.brand_essence !== 'unknown' && (
+                                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                  <div className="text-sm font-medium text-gray-700 mb-2">Brand Essence</div>
+                                  <div className="text-gray-600">{brandSummary.summary.brand_essence}</div>
+                                </div>
+                              )}
+                              {brandSummary.summary.key_offerings && brandSummary.summary.key_offerings !== 'unknown' && (
+                                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                  <div className="text-sm font-medium text-gray-700 mb-2">Key Offerings</div>
+                                  <div className="text-gray-600">{brandSummary.summary.key_offerings}</div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {brandSummary.lastUpdated && (
+                            <div className="text-xs text-gray-500 text-center">
+                              Last updated: {new Date(brandSummary.lastUpdated).toLocaleString()}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-center py-12 text-gray-500">
                           <FileText className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                          <p>{t.dashboard.aiVisibility.noAnalysisData}</p>
-                          <p className="text-sm mt-2">{t.dashboard.aiVisibility.runAnalysisToSee}</p>
+                          <p>No brand summary available</p>
+                          {(!selectedProject?.website_url || !selectedProject?.brand_name) && (
+                            <p className="text-sm mt-2">Please ensure the project has a website URL and brand name.</p>
+                          )}
                         </div>
                       )}
                     </div>

@@ -152,6 +152,7 @@ export async function POST(request: NextRequest) {
         userContext,
         brandVoice: brandVoiceProfile, // Pass brand voice profile
         language: preferredLanguage, // Pass language preference (from request or cookie)
+        contentType: contentType, // Pass contentType to handle LinkedIn article vs post
       }, learningRules);
     }
 
@@ -287,10 +288,11 @@ export async function POST(request: NextRequest) {
     // Save to database - use normalized platform value
     console.log('💾 Saving to database with platform:', normalizedPlatform);
     
-    // Merge imageUrl, schema, structured content, and action plan link into metadata
+    // Merge imageUrl, schema, structured content, contentType, and action plan link into metadata
     const contentMetadata = {
       ...result.metadata,
       ...(imageUrl ? { imageUrl } : {}), // Add imageUrl if provided
+      ...(contentType ? { contentType } : {}), // Add contentType (for LinkedIn article/post distinction)
       ...(actionPlanId && actionPlanStepId ? { 
         actionPlanId, 
         actionPlanStepId 
