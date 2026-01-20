@@ -99,7 +99,15 @@ export default function DashboardLayout({
   const allNavigation: NavigationItem[] = [
     { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
     { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
-    { name: t.dashboard.sidebar.contentGenerator, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
+    { 
+      name: t.dashboard.sidebar.contentGenerator, 
+      icon: Sparkles, 
+      requiredCapability: "canManageContent",
+      children: [
+        { name: t.dashboard.sidebar.newContent, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
+        { name: t.dashboard.sidebar.missedPrompts, href: "/dashboard/missed-prompts", icon: FileText, requiredCapability: "canManageContent" },
+      ]
+    },
     { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
     { name: t.dashboard.sidebar.keywords, href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
     { name: t.dashboard.sidebar.publication, href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },

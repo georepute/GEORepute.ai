@@ -89,27 +89,60 @@ async function uploadImageToLinkedIn(
   uploadUrl: string
 ): Promise<void> {
   try {
+    console.log(`📥 Downloading image from: ${imageUrl}`);
+    
     // Download the image
     const imageResponse = await fetch(imageUrl);
+    
     if (!imageResponse.ok) {
-      throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+      const errorText = await imageResponse.text().catch(() => 'Unknown error');
+      console.error(`❌ Failed to fetch image:`, {
+        status: imageResponse.status,
+        statusText: imageResponse.statusText,
+        url: imageUrl,
+        error: errorText
+      });
+      throw new Error(`Failed to fetch image: ${imageResponse.status} ${imageResponse.statusText}. URL: ${imageUrl}`);
+    }
+
+    // Check content type
+    const contentType = imageResponse.headers.get('content-type');
+    console.log(`📦 Image content type: ${contentType}`);
+    
+    if (!contentType || !contentType.startsWith('image/')) {
+      console.warn(`⚠️  Warning: Content type is not an image: ${contentType}`);
     }
 
     const imageBuffer = await imageResponse.arrayBuffer();
+    console.log(`📦 Image size: ${imageBuffer.byteLength} bytes`);
+
+    if (imageBuffer.byteLength === 0) {
+      throw new Error('Downloaded image is empty');
+    }
 
     // Upload to LinkedIn's upload URL
+    console.log(`📤 Uploading image to LinkedIn...`);
     const uploadResponse = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/octet-stream',
+        'Content-Type': contentType || 'application/octet-stream',
       },
       body: imageBuffer,
     });
 
     if (!uploadResponse.ok) {
-      throw new Error(`Failed to upload image: ${uploadResponse.status}`);
+      const errorText = await uploadResponse.text().catch(() => 'Unknown error');
+      console.error(`❌ Failed to upload to LinkedIn:`, {
+        status: uploadResponse.status,
+        statusText: uploadResponse.statusText,
+        error: errorText
+      });
+      throw new Error(`Failed to upload image to LinkedIn: ${uploadResponse.status} ${uploadResponse.statusText}`);
     }
+    
+    console.log(`✅ Image successfully uploaded to LinkedIn`);
   } catch (error: any) {
+    console.error(`❌ Image upload error:`, error);
     throw new Error(`Failed to upload image to LinkedIn: ${error.message}`);
   }
 }
@@ -293,9 +326,11 @@ export async function publishToLinkedIn(
         ];
         console.log(`✅ Image ready for LinkedIn post`);
       } catch (uploadError: any) {
-        console.error(`❌ Failed to upload image to LinkedIn:`, uploadError.message);
-        // Fall back to text-only post
-        console.log(`⚠️  Falling back to text-only post without image`);
+        console.error(`❌ Failed to upload image to LinkedIn:`, uploadError);
+        console.error(`   Image URL: ${content.metadata.imageUrl}`);
+        console.error(`   Error details:`, JSON.stringify(uploadError, null, 2));
+        // Don't silently fail - throw error so user knows image upload failed
+        throw new Error(`Failed to upload image to LinkedIn: ${uploadError.message || 'Unknown error'}. Please ensure the image URL is publicly accessible.`);
       }
     }
     // Add link if provided (only if no image)

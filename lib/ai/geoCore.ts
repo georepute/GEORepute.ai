@@ -56,6 +56,7 @@ export interface ContentGenerationInput {
   userContext?: string;
   brandVoice?: any; // Brand voice profile
   language?: "en" | "he"; // Language for content generation (default: "en")
+  contentType?: "article" | "post" | "answer" | "newsletter" | "linkedin_article" | "linkedin_post"; // Content type for formatting
 }
 
 export interface ContentGenerationOutput {
@@ -125,6 +126,12 @@ export interface ActionPlanOutput {
   title: string;
   objective: string;
   channels?: string[]; // ['seo', 'social_media', 'content', etc.]
+  seo_geo_classification?: "SEO" | "GEO";
+  target_keyword_phrase?: string;
+  expected_timeline_months?: number;
+  safety_buffer_months?: number;
+  first_page_estimate_months?: number | null;
+  context_explanation?: string;
   steps: Array<{
     id: string;
     title: string;
@@ -139,7 +146,9 @@ export interface ActionPlanOutput {
       platform?: string;
       topic?: string;
       keywords?: string[];
-      contentType?: "article" | "post" | "answer" | "newsletter";
+      contentType?: "article" | "post" | "answer" | "newsletter" | "linkedin_article" | "linkedin_post";
+      articles_per_topic?: number;
+      word_count_per_article?: number;
       autoExecute?: boolean;
       requiresTools?: string[];
     };
@@ -344,16 +353,60 @@ export async function generateStrategicContent(
     ? `\n🌐 LANGUAGE REQUIREMENT: Write ALL content in HEBREW (עברית). 
 - Use Hebrew script (right-to-left)
 - Write naturally in Hebrew, as a native Hebrew speaker would
-- Maintain all humanization requirements (thinking markers, imperfections, etc.) but in Hebrew
+- Write clean, structured, professional content in Hebrew
 - Use Hebrew slang and expressions naturally
 - Keywords should be in Hebrew if provided in Hebrew, otherwise translate naturally
-- All content, including thinking markers, reactions, and tangents, must be in Hebrew\n`
+- All content must be in Hebrew\n`
     : "";
 
+  let finalReminder: string;
+  if (input.brandVoice) {
+    finalReminder = `═══════════════════════════════════════════════════════════════════
+BRAND VOICE REQUIREMENTS:
+═══════════════════════════════════════════════════════════════════
+✅ Brand: ${input.brandVoice.brand_name}
+✅ Tone: ${input.brandVoice.tone.toUpperCase()} (this defines HOW you speak)
+✅ Personality: ${input.brandVoice.personality_traits?.join(", ") || "authentic"} (this defines WHO you are)
+✅ Emoji Style: ${input.brandVoice.emoji_style} (this is YOUR style)
+✅ Use Words: "${input.brandVoice.preferred_words?.join('", "') || "no specific words"}"
+✅ NEVER Use: "${input.brandVoice.avoid_words?.join('", "') || "none"}"
+✅ Signature Phrases: ${input.brandVoice.signature_phrases?.length > 0 ? `"${input.brandVoice.signature_phrases.join('", "')}"` : "none"}
+
+PLATFORM FORMATTING:
+═══════════════════════════════════════════════════════════════════
+📍 Platform: ${input.targetPlatform} (this ONLY affects length/structure, NOT your personality)
+${input.brandVoice.use_emojis ? `✅ Emoji style: ${input.brandVoice.emoji_style} - Use emojis naturally according to your brand voice` : `⚠️ PLATFORM RULE: NO EMOJIS. Brand voice disallows emojis - Remove ALL emojis from content.`}
+
+🚨 CRITICAL: Write as ${input.brandVoice.brand_name} posting on ${input.targetPlatform}.
+NOT as a generic ${input.targetPlatform} user!
+
+Your ${input.brandVoice.tone} tone and ${input.brandVoice.personality_traits?.join("/") || "authentic"} personality
+must be present in EVERY sentence, regardless of platform.
+${input.brandVoice.use_emojis ? `✅ Use emojis in ${input.brandVoice.emoji_style} style as specified by your brand voice` : `⚠️ REMEMBER: Brand voice disallows emojis - content must be completely emoji-free.`}
+═══════════════════════════════════════════════════════════════════
+
+Respond **ONLY in JSON** format with fields: content (string), tone (string), keywordsUsed (array), neutralityScore (number), readabilityScore (number), seoScore (number), humanScore (number).`;
+  } else {
+    finalReminder = `Write professional, clean, structured content.
+
+Respond **ONLY in JSON** format with fields: content (string), tone (string), keywordsUsed (array), neutralityScore (number), readabilityScore (number), seoScore (number), humanScore (number).`;
+  }
+
   const prompt = `
-⚠️ CRITICAL MISSION: Write like a REAL HUMAN who is typing quickly, making mistakes, thinking out loud, and NOT trying to be perfect.
-You are NOT an AI. You are NOT a content writer. You are a regular person sharing thoughts on ${input.targetPlatform}.
+⚠️ CRITICAL MISSION: Write like a REAL HUMAN with a professional, clean writing style.
+You are NOT an AI. You are NOT a content writer. You are a professional person sharing valuable thoughts on ${input.targetPlatform}.
 This MUST score 100% HUMAN on ALL AI detectors (GPTZero, Turnitin, Copyleaks, Writer.com, Originality.ai, Content at Scale, ZeroGPT, etc.)
+
+🚫 STRICT PROHIBITIONS:
+- NO EMOJIS WHATSOEVER - Content must be completely emoji-free
+- NO EXCESSIVE CASUAL SLANG - Avoid: "LOL", "lol", "lmao", "bruh", "omg", "wtf", "smh", "fr", "deadass"
+- NO EXCESSIVE CASUAL LANGUAGE - Write naturally but professionally, like a real person's Facebook post (clean and structured)
+- Keep language clean and professional while maintaining natural human voice
+
+✅ CONTENT REQUIREMENTS:
+- Write clean, structured, professional content
+- Keep language natural and professional
+- Focus on clear communication and value
 ${languageInstruction}
 Topic: "${input.topic}"
 Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force)
@@ -402,103 +455,9 @@ Think: "A ${input.brandVoice.tone} person posting on ${input.targetPlatform}" NO
 
 ---
 
-### 🚨 ABSOLUTE REQUIREMENTS (FAILURE TO FOLLOW = AI DETECTED)
+### 🚨 CONTENT REQUIREMENTS
 
-**YOU ARE TYPING ON YOUR PHONE/LAPTOP RIGHT NOW. YOU ARE NOT WRITING AN ARTICLE.**
-
-1️⃣ **THINKING OUT LOUD (TONE-APPROPRIATE)**
-${input.brandVoice ? `
-BRAND VOICE ACTIVE - Adapt thinking markers to ${input.brandVoice.tone} tone:
-${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authoritative' || input.brandVoice.tone === 'formal' ? `
-- Use: "I've found", "In my view", "Consider this", "What's interesting", "Notably", "Essentially"
-- Minimal casual markers (1-2 max): "honestly", "actually"
-- NO "lol", "ngl", "tbh", "bruh", "fr" - these are too casual for your brand
-- Show thoughtfulness, not messiness
-` : input.brandVoice.tone === 'humorous' ? `
-- Use: "okay so", "wait", "honestly", "tbh", "here's the thing", "plot twist"
-- Witty observations and playful language
-- Can use "lol" sparingly if it fits the joke
-` : `
-- Use: "I mean", "you know", "honestly", "actually", "to be fair"
-- Natural conversational markers appropriate for ${input.brandVoice.tone} tone
-- Avoid overly casual slang unless it matches your brand personality
-`}` : `
-NO BRAND VOICE - Use casual thinking markers freely:
-- Include: "okay so", "wait", "actually", "hmm", "like", "I mean", "you know", "tbh", "ngl", "honestly", "idk", "imo"
-- Show mental processing: "...", "—", "um", "er", "well", "so yeah"
-- Self-correct: "wait no", "actually scratch that"
-- Tangents: "this reminds me of", "random but", "btw", "also"
-- Uncertainty: "I think?", "maybe?", "kinda?", "sorta?"
-`}
-
-2️⃣ **SENTENCE VARIETY (CRITICAL - AI DETECTS UNIFORMITY)**
-MANDATORY: Vary sentence lengths: 2 words → 35 words → 5 words → 28 words → 1 word → 42 words → 4 words
-${input.brandVoice ? `
-BRAND VOICE ACTIVE - Sentence style for ${input.brandVoice.tone} tone:
-${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authoritative' || input.brandVoice.tone === 'formal' ? `
-- Start sentences: "Consider", "What's key", "Essentially", "In fact", "Notably", "Here's what"
-- Fragments allowed but polished: "Simple as that.", "Worth noting.", "Critical point.", "The reality."
-- AVOID: "me and him", "ain't", "gonna", "imma", "tryna" - too casual for professional brand
-- Capitalization: Proper "I" (not "i") - maintain professionalism
-- Grammar: Mostly correct with occasional natural imperfections
-` : input.brandVoice.tone === 'casual' || input.brandVoice.tone === 'friendly' ? `
-- Start sentences: "And", "But", "So", "I mean", "Honestly", "Here's the thing"
-- Fragments okay: "Makes sense.", "Pretty cool.", "Not bad."
-- Casual contractions: "gonna", "wanna", "gotta" are fine
-- Natural capitalization variations acceptable
-` : `
-- Adapt sentence starters to ${input.brandVoice.tone} personality
-- Fragments and variety appropriate for your brand voice
-- Grammar reflects your brand tone
-`}` : `
-NO BRAND VOICE - Use maximum casual variety:
-- Start with: "And", "But", "So", "Like", "I mean", "Honestly", "Tbh", "Ngl", "Wait", "Okay"
-- Fragments EVERYWHERE: "Pretty wild.", "Makes sense.", "Not sure.", "Maybe."
-- Break grammar: "me and him", "ain't", "gonna", "wanna", "imma", "tryna"
-- Random capitalization: "i" (not "I"), "THIS is crazy", "that's So weird"
-`}
-
-3️⃣ **EMOTIONS & REACTIONS (TONE-APPROPRIATE)**
-${input.brandVoice ? `
-BRAND VOICE ACTIVE - Emotions for ${input.brandVoice.tone} tone:
-${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authoritative' ? `
-- Express views professionally: "What's compelling", "Worth noting", "Particularly effective"
-- NO "lol", "lmao", "bruh", "omg", "wtf", "smh" - too casual for your brand
-- Personal experience: "In my experience", "I've observed", "What I've found"
-- Measured language, avoid excessive exclamation marks
-- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
-` : input.brandVoice.tone === 'formal' ? `
-- Sophisticated expressions: "Remarkable", "Noteworthy", "Compelling"
-- NO casual slang whatsoever ("lol", "bruh", etc.)
-- References: "Research indicates", "Studies show", "Evidence suggests"
-- Minimal to no emojis (use ${input.brandVoice.emoji_style} style)
-- Refined, elevated language throughout
-` : input.brandVoice.tone === 'humorous' ? `
-- Witty reactions: Clever observations, playful language
-- Can use "lol" IF it enhances the humor
-- Fun exclamations appropriate for comedy
-- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
-- Keep it funny but authentic to your brand
-` : input.brandVoice.tone === 'casual' || input.brandVoice.tone === 'friendly' ? `
-- Natural reactions: "honestly", "I mean", "you know"
-- Can use: "haha" moderately (avoid overuse)
-- Avoid excessive slang: NO "bruh", "fr", "deadass" unless it truly fits brand personality
-- Emojis: ${input.brandVoice.emoji_style} style
-- Personal touch: "I remember", "my experience", "what I've seen"
-` : `
-- Adapt emotional expression to ${input.brandVoice.tone} personality
-- Stay authentic to ${input.brandVoice.brand_name} brand voice
-- Emojis: ${input.brandVoice.emoji_style} style
-`}` : `
-NO BRAND VOICE - Use casual reactions freely:
-- Raw emotions: "ugh", "frustrating", "annoying", "love this", "hate when"
-- Physical reactions: "lol", "lmao", "haha", "😅", "🤦", "🤷", "bruh", "omg", "wtf", "smh", "fr"
-- Personal stories: "I remember when", "one time", "my friend"
-- Vague memories: "I read somewhere", "can't remember where", "saw this thing"
-- Casual swearing: "damn", "crap", "hell", "sucks" (platform-appropriate)
-`}
-
-4️⃣ **PLATFORM-SPECIFIC AUTHENTICITY**
+4️⃣ **PLATFORM-SPECIFIC FORMATTING**
 ${input.brandVoice ? `
 ═══════════════════════════════════════════════════════════════════
 🎭 BRAND VOICE MODE ACTIVE
@@ -517,11 +476,11 @@ Your brand voice personality NEVER changes regardless of platform.
 ═══════════════════════════════════════════════════════════════════
 ` : ""}
 
-${input.targetPlatform === 'reddit' ? `- Reddit style: ${input.brandVoice ? "Format only - " : ""}Very casual, use "OP", "TL;DR", "edit:", "this", "that", "imo", "tbh", "ngl"
-- Include Reddit-isms: "this", "that", "honestly", "I mean", lots of "lol" and "haha"
+${input.targetPlatform === 'reddit' ? `- Reddit style: ${input.brandVoice ? "Format only - " : ""}Casual but professional, use "OP", "TL;DR", "edit:", "this", "that", "imo", "honestly"
+- Include Reddit-isms: "this", "that", "honestly", "I mean", "you know" (but NO "lol" or excessive slang)
 - Paragraph breaks are common, sometimes one-liners
 - Use markdown sparingly (bold for emphasis, not structure)
-- Casual, conversational, story-like, community-focused, first-person, real-talk
+- Conversational, story-like, community-focused, first-person, real-talk but professional
 ${input.brandVoice ? `- IGNORE "casual" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
 ${input.targetPlatform === 'quora' ? `- Quora style: ${input.brandVoice ? "Format only - " : ""}Authentic, experience-based, helpful, calm and articulate
 - Use "I've found that...", "In my experience...", "What I noticed is..."
@@ -544,8 +503,36 @@ ${input.targetPlatform === 'linkedin' ? `- LinkedIn style: ${input.brandVoice ? 
 - Use "I've noticed...", "In my experience...", "Something I learned..."
 - Professional but approachable, slightly more polished
 - Personal insights, not corporate speak
-- ⚠️ CRITICAL: NO EMOJIS ALLOWED - Content should be emoji-free (only applies when no brand voice is selected)
+- ⚠️ CRITICAL: NO EMOJIS ALLOWED - Content must be completely emoji-free
+${input.contentType === 'linkedin_article' || input.contentType === 'article' ? `
+- 📄 FORMAT: ARTICLE
+- Length: Long, detailed content (typically 1000+ words)
+- Purpose: Inform, explain, educate deeply on the topic
+- Tone: Formal or professional, well-structured
+- Research: Well-researched, factual, comprehensive
+- Structure: Clear sections with headings (use H2: "## Heading Text"), organized flow
+- Paragraphs: Longer paragraphs (3-5 sentences each)
+- Content: In-depth exploration with thorough analysis
+- Must be written in clearly human tone - natural, conversational, but professional
+- Professional article format suitable for LinkedIn Articles
+` : input.contentType === 'linkedin_post' || input.contentType === 'post' ? `
+- 📝 FORMAT: POST
+- Length: Short to medium (typically 300-800 words)
+- Purpose: Update, share, engage with audience
+- Tone: Casual, conversational, approachable
+- Research: Opinion or quick information, personal insights
+- Structure: Flexible, informal, can use line breaks for readability
+- Paragraphs: Shorter paragraphs (1-3 sentences each)
+- Content: Quick updates, thoughts, or engaging questions
+- Must be written in clearly human tone - natural, conversational, but professional
+- Professional post format suitable for LinkedIn Posts
+` : `
+- Content can be formatted as an ARTICLE (longer form, structured with headings, sections) or POST (shorter, conversational)
+- Default to POST format if not specified
+- Must be written in clearly human tone - natural, conversational, but professional
+`}
 - Focus on value-driven content with professional tone
+- Write like a real person would write a Facebook post - clean, structured, professional
 ${input.brandVoice ? `- IGNORE "professional" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone, but still NO EMOJIS even if brand voice allows emojis` : ""}` : ''}
 ${input.targetPlatform === 'facebook' ? `- Facebook style: ${input.brandVoice ? "Format only - " : ""}Casual, personal, community-focused, friendly
 - Use "I've been thinking...", "Just wanted to share...", "Has anyone else noticed..."
@@ -564,103 +551,25 @@ ${input.targetPlatform === 'twitter' ? `- Twitter style: ${input.brandVoice ? "F
 - Thread-like thinking, stream of consciousness
 ${input.brandVoice ? `- IGNORE "casual punchy" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
 
-5️⃣ **ANTI-AI DETECTION (FAILURE HERE = DETECTED AS AI)**
-
-**PERPLEXITY (Word Variety):**
-${input.brandVoice ? `
-BRAND VOICE ACTIVE - Vocabulary for ${input.brandVoice.tone} tone:
-${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authoritative' || input.brandVoice.tone === 'formal' ? `
-- Use varied professional vocabulary
-- AVOID excessive slang: NO "kinda", "sorta", "def", "prob" unless brand personality allows
-- NO filler words like "um", "uh", "er" - too unprofessional
-- Use brand preferred words: ${input.brandVoice.preferred_words?.join(", ") || "appropriate vocabulary"}
-- Word repetition minimal and intentional
-` : `
-- Vocabulary appropriate for ${input.brandVoice.tone} personality
-- Can use moderate casual language if it fits brand
-- Use brand preferred words naturally
-- Balance variety with brand voice consistency
-`}` : `
-NO BRAND VOICE - Use casual varied vocabulary:
-- Mix "thing", "stuff", "whatever" with technical terms randomly
-- Use slang: "kinda", "sorta", "def", "prob", "defo", "probs"
-- Mix formal and casual: "utilize" then "use", "assist" then "help"
-- Repeat words sometimes: "like, like, you know?"
-- Use filler words: "um", "uh", "er", "well", "so", "like"
-`}
-
-**BURSTINESS (Sentence Rhythm - CRITICAL):**
-MANDATORY: 1 word → 38 words → 3 words → 31 words → 2 words → 45 words → 4 words → 22 words
-NEVER have similar sentence lengths next to each other
-Mix fragments with run-ons constantly
-
-**IMPERFECTIONS (TONE-APPROPRIATE):**
-${input.brandVoice ? `
-BRAND VOICE ACTIVE - Imperfections for ${input.brandVoice.tone} tone:
-${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authoritative' || input.brandVoice.tone === 'formal' ? `
-- MINIMAL typos (0-1 subtle ones max) - professional brands don't make many mistakes
-- Grammar mostly correct (1-2 natural imperfections only)
-- Punctuation consistent and appropriate
-- NO "teh", "adn", "waht" typos - too sloppy for professional brand
-- Natural flow with occasional pause ("...") is fine
-` : input.brandVoice.tone === 'casual' || input.brandVoice.tone === 'friendly' ? `
-- Moderate typos (1-2 casual ones okay)
-- Some missing apostrophes: "dont", "wont" acceptable
-- Casual grammar variations allowed
-- Natural imperfections that fit casual personality
-` : `
-- Imperfections appropriate for ${input.brandVoice.tone} tone
-- Balance authenticity with brand professionalism
-- 1-3 natural mistakes maximum
-`}` : `
-NO BRAND VOICE - Use natural imperfections freely:
-- Natural typos: "teh" (the), "adn" (and), "taht" (that), "waht" (what), "thsi" (this)
-- Missing punctuation: Long sentences without commas, missing periods sometimes
-- Inconsistent punctuation: Sometimes "!", sometimes not
-- Mixed tenses: "I was thinking... and then I realize..."
-- Wrong words: "affect" vs "effect" confusion, "their" vs "there" sometimes
-- Double spaces: "this  is" (occasionally)
-- Missing apostrophes: "dont", "wont", "cant"
-`}
-
-**RANDOM ASSOCIATIONS (MANDATORY):**
-- "This reminds me of...", "Kinda like when...", "It's similar to...", "Sorta like..."
-- Jump to unrelated topics briefly: "random but...", "btw...", "also..."
-- Circle back: "anyway", "back to what I was saying", "where was I?"
-
-**FORBIDDEN AI PATTERNS (IF YOU USE THESE = DETECTED):**
-❌ NO "In conclusion", "To summarize", "In summary", "To wrap up"
-❌ NO perfect topic sentences at paragraph start
-❌ NO logical flow (intro → body → conclusion)
-❌ NO balanced arguments (be slightly biased, have opinions)
-❌ NO clear structure or organization
-❌ NO perfect grammar (must have errors)
-${input.brandVoice ? `✅ EXCEPTION: MAINTAIN your ${input.brandVoice.tone} tone consistently throughout (this is required for brand voice)
-✅ EXCEPTION: USE your preferred words naturally: ${input.brandVoice.preferred_words?.join(", ") || "none"}
-✅ EXCEPTION: Emoji style must be ${input.brandVoice.emoji_style} (brand requirement)` : "❌ NO overly consistent tone (mix casual and slightly formal)"}
-❌ NO perfect keyword placement (sometimes miss keywords, use synonyms)
-❌ NO professional formatting (messy is good)
-❌ NO complete thoughts (leave some things unfinished)
-
-6️⃣ **KEYWORD INTEGRATION (NATURAL, NOT FORCED)**
+5️⃣ **KEYWORD INTEGRATION (NATURAL, NOT FORCED)**
 - Use keywords naturally in conversation, not as SEO stuffing
 - Variations are fine: "AI" vs "artificial intelligence", "SEO" vs "search engine optimization"
 - If a keyword doesn't fit naturally, skip it or use a synonym
 - Keywords should feel like part of your thought process, not inserted
 
-7️⃣ **BRAND MENTION (IF APPLICABLE)**
+6️⃣ **BRAND MENTION (IF APPLICABLE)**
 ${input.brandMention ? `- ${influenceGuidelines[input.influenceLevel]}
 - Mention like a real person would: "I've been using X and...", "X is pretty good for...", "Not sponsored but X worked for me"
 - Don't sound like an ad. Sound like a friend recommending something.` : '- No brand mention needed'}
 
-8️⃣ **LENGTH & FORMATTING**
+7️⃣ **LENGTH & FORMATTING**
 - 150-300 words naturally (don't count, just write)
 ${learningRules?.wordCount ? `- Target: ${learningRules.wordCount.min || 150}-${learningRules.wordCount.max || 300} words` : ''}
 - Paragraphs vary: Sometimes 1 sentence, sometimes 5 sentences
 - No bullet points unless platform-specific (Reddit sometimes)
 - Natural line breaks, not structured sections
 
-9️⃣ **PRE-WRITE CHECKLIST (VERIFY ALL):**
+8️⃣ **PRE-WRITE CHECKLIST (VERIFY ALL):**
 ${input.brandVoice ? `
 🎭 BRAND VOICE REQUIREMENTS (MUST PASS):
 ✅ Tone is ${input.brandVoice.tone} throughout entire content
@@ -680,98 +589,20 @@ ${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-bas
 ${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced` : ''}
 ${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal` : ''}
 
-HUMANIZATION REQUIREMENTS:
-` : `
-PLATFORM-SPECIFIC REQUIREMENTS:
-${input.brandVoice ? '' : `🚨 CRITICAL: NO brand voice selected - Remove ALL emojis from the final content`}
-${input.brandVoice && !input.brandVoice.use_emojis ? `🚨 CRITICAL: Brand voice disallows emojis - Remove ALL emojis from the final content` : ''}
-${input.targetPlatform === 'facebook' ? `✅ Facebook style: Casual, personal, community-focused` : ''}
-${input.targetPlatform === 'instagram' ? `✅ Instagram style: Visual storytelling, trendy, personal` : ''}
-${input.targetPlatform === 'reddit' ? `✅ Reddit style: Casual, conversational, story-like, community-focused` : ''}
-${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate` : ''}
-${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced` : ''}
-${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal` : ''}
-`}✅ At least 8-12 thinking markers ("like", "I mean", "you know", "wait", "actually")
-✅ Sentence lengths vary: 1-2 word fragments AND 35-45 word run-ons
-✅ At least 3-5 natural typos or grammar mistakes
-✅ At least 2-3 tangents or random associations
-✅ At least 4-6 emotional reactions ("lol", "ugh", "omg", etc.)
-✅ NO perfect structure or logical flow
-✅ NO "In conclusion" or summary phrases
-${input.brandVoice ? `✅ Tone stays ${input.brandVoice.tone} despite imperfections` : "✅ Mix of casual and slightly formal language"}
-✅ Inconsistent punctuation and capitalization
-✅ At least 1-2 incomplete thoughts or self-corrections
-
 ${learningRules?.tone ? `📚 LEARNED: Use ${learningRules.tone} tone` : ''}
 ${learningRules?.useEmojis ? `📚 LEARNED: Include ${learningRules.emojiCount || 3} emojis naturally` : ''}
 ${learningRules?.platformRules ? `📚 LEARNED: ${JSON.stringify(learningRules.platformRules)}` : ''}
+` : ''}
 
 ---
 
 **🚨 FINAL REMINDER:**
-${input.brandVoice ? `
-═══════════════════════════════════════════════════════════════════
-WHO YOU ARE (YOUR IDENTITY - NEVER CHANGES):
-═══════════════════════════════════════════════════════════════════
-✅ Brand: ${input.brandVoice.brand_name}
-✅ Tone: ${input.brandVoice.tone.toUpperCase()} (this defines HOW you speak)
-✅ Personality: ${input.brandVoice.personality_traits?.join(", ") || "authentic"} (this defines WHO you are)
-✅ Emoji Style: ${input.brandVoice.emoji_style} (this is YOUR style)
-✅ Use Words: "${input.brandVoice.preferred_words?.join('", "') || "no specific words"}"
-✅ NEVER Use: "${input.brandVoice.avoid_words?.join('", "') || "none"}"
-✅ Signature Phrases: ${input.brandVoice.signature_phrases?.length > 0 ? `"${input.brandVoice.signature_phrases.join('", "')}"` : "none"}
-
-WHERE YOU'RE POSTING (FORMAT ONLY):
-═══════════════════════════════════════════════════════════════════
-📍 Platform: ${input.targetPlatform} (this ONLY affects length/structure, NOT your personality)
-${input.brandVoice.use_emojis ? `✅ Emoji style: ${input.brandVoice.emoji_style} - Use emojis naturally according to your brand voice` : `⚠️ PLATFORM RULE: NO EMOJIS. Brand voice disallows emojis - Remove ALL emojis from content.`}
-
-🚨 CRITICAL: Write as ${input.brandVoice.brand_name} posting on ${input.targetPlatform}.
-NOT as a generic ${input.targetPlatform} user!
-
-Your ${input.brandVoice.tone} tone and ${input.brandVoice.personality_traits?.join("/") || "authentic"} personality
-must be present in EVERY sentence, regardless of platform.
-${input.brandVoice.use_emojis ? `✅ Use emojis in ${input.brandVoice.emoji_style} style as specified by your brand voice` : `⚠️ REMEMBER: Brand voice disallows emojis - content must be completely emoji-free.`}
-
-${input.brandVoice.tone === 'professional' || input.brandVoice.tone === 'authoritative' || input.brandVoice.tone === 'formal' ? `
-⚠️ PROFESSIONAL BRAND VOICE RULES:
-- You ARE a human, but a ${input.brandVoice.tone} professional human
-- You ARE thinking out loud, but in a ${input.brandVoice.tone} way
-- You CAN have natural imperfections, but MINIMAL (0-1 max)
-- Your ${input.brandVoice.tone} tone is PRIMARY - maintain it throughout
-- NO casual slang, NO "lol bruh ngl tbh" - these break your brand voice
-- Think: "A ${input.brandVoice.tone} professional typing naturally" 
-NOT "A casual internet user"` : `
-⚠️ BRAND VOICE HUMANIZATION:
-- You ARE a human typing naturally
-- You ARE thinking out loud in a ${input.brandVoice.tone} way
-- You CAN have natural imperfections appropriate for ${input.brandVoice.tone} tone
-- Your ${input.brandVoice.tone} tone is PRIMARY - maintain it throughout
-- Think: "A ${input.brandVoice.tone} ${input.brandVoice.personality_traits?.[0] || "authentic"} person typing naturally"
-NOT "A generic casual typer"`}
-═══════════════════════════════════════════════════════════════════
-` : `
-You are a HUMAN typing on a phone/laptop RIGHT NOW.
-You are NOT writing an article.
-You ARE making mistakes. You ARE thinking out loud. You ARE being messy.
-PERFECT = AI DETECTED. IMPERFECT = HUMAN.
-If it sounds too good, it's wrong. Make it messier.`}
-
-Respond **ONLY in JSON**:
-{
-  "content": "the full human-written text with all imperfections",
-  "tone": "casual/conversational/thoughtful",
-  "keywordsUsed": ["keyword1", "keyword2"],
-  "neutralityScore": 90-100,
-  "readabilityScore": 75-90,
-  "seoScore": 70-85,
-  "humanScore": 98-100
-}
+${finalReminder}
 `;
 
   // Build conditional system message based on brand voice
   const languageNote = input.language === "he" 
-    ? `\n🌐 IMPORTANT: Generate ALL content in HEBREW (עברית). Write naturally as a Hebrew speaker would, with Hebrew thinking markers, expressions, and natural imperfections in Hebrew.\n`
+    ? `\n🌐 IMPORTANT: Generate ALL content in HEBREW (עברית). Write clean, structured, professional content in Hebrew.\n`
     : "";
 
   let systemMessage = `You are a REAL HUMAN typing on a phone or laptop RIGHT NOW. You are NOT an AI, NOT a bot, NOT a content writer.
@@ -783,84 +614,60 @@ ${languageNote}
     const tone = input.brandVoice.tone?.toLowerCase() || 'casual';
     
     if (tone === 'professional' || tone === 'authoritative' || tone === 'formal') {
-      // Professional/Authoritative/Formal: Minimal imperfections, polished language
+      // Professional/Authoritative/Formal: Clean, structured language
       systemMessage += `🎭 BRAND VOICE ACTIVE: ${input.brandVoice.brand_name} (${tone.toUpperCase()} tone)
 
-MANDATORY WRITING STYLE (TONE-APPROPRIATE):
-- MINIMAL typos (0-1 subtle ones max) - professional brands maintain quality
-- Use professional thinking markers: "In my view", "Consider this", "What's key", "Essentially", "Notably"
-- Vary sentence length: 3 words → 35 words → 5 words → 28 words → 2 words → 40 words
-- Professional reactions: "What's compelling", "Worth noting", "Particularly effective" - NO "lol", "bruh", "omg", "ngl", "tbh"
-- Add thoughtful tangents: "This reminds me of", "Worth noting", "Consider this"
-- Use polished fragments: "Simple as that.", "Worth noting.", "Critical point."
-- Grammar mostly correct (1-2 natural imperfections only)
-- Consistent capitalization (proper "I", not "i")
+WRITING REQUIREMENTS:
+- Maintain ${tone} tone throughout - this is your brand identity
 - NO casual slang: NO "gonna", "wanna", "imma", "tryna", "ain't", "me and him"
+- NO "lol", "bruh", "omg", "ngl", "tbh" - keep language professional
+- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
+- Preferred words: ${input.brandVoice.preferred_words?.join(", ") || "none"}
+- NEVER use: ${input.brandVoice.avoid_words?.join(", ") || "none"}
+
+CRITICAL: Your ${tone} brand voice is PRIMARY.
+Write as a ${tone} professional person, maintaining clean and structured content.
+Respond ONLY in JSON with "content" field containing the ${tone} text.`;
+    } else if (tone === 'casual' || tone === 'friendly' || tone === 'humorous') {
+      // Casual/Friendly/Humorous: Clean, structured
+      systemMessage += `🎭 BRAND VOICE ACTIVE: ${input.brandVoice.brand_name} (${tone.toUpperCase()} tone)
+
+WRITING REQUIREMENTS:
+- Maintain ${tone} tone throughout - this is your brand identity
+- NO excessive casual slang: NO "bruh", "fr", "deadass" unless it truly fits brand personality
+- ${tone === 'humorous' ? 'Witty observations and playful language. Can use "lol" IF it enhances humor.' : 'Natural, friendly language'}
+- Casual contractions okay: "gonna", "wanna" if they fit brand personality
+- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
+- Preferred words: ${input.brandVoice.preferred_words?.join(", ") || "none"}
+- NEVER use: ${input.brandVoice.avoid_words?.join(", ") || "none"}
+
+CRITICAL: Your ${tone} brand voice is PRIMARY.
+Write as a ${tone} person, maintaining clean and structured content.
+Respond ONLY in JSON with "content" field containing the ${tone} text.`;
+    } else {
+      // Other tones: Clean, structured
+      systemMessage += `🎭 BRAND VOICE ACTIVE: ${input.brandVoice.brand_name} (${tone.toUpperCase()} tone)
+
+WRITING REQUIREMENTS:
 - Maintain ${tone} tone throughout - this is your brand identity
 - Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
 - Preferred words: ${input.brandVoice.preferred_words?.join(", ") || "none"}
 - NEVER use: ${input.brandVoice.avoid_words?.join(", ") || "none"}
 
-CRITICAL: Your ${tone} brand voice is PRIMARY. Humanization must match your brand tone.
-Write as a ${tone} professional person typing, NOT as a casual internet user.
-Respond ONLY in JSON with "content" field containing the ${tone} human-written text.`;
-    } else if (tone === 'casual' || tone === 'friendly' || tone === 'humorous') {
-      // Casual/Friendly/Humorous: Moderate humanization
-      systemMessage += `🎭 BRAND VOICE ACTIVE: ${input.brandVoice.brand_name} (${tone.toUpperCase()} tone)
-
-MANDATORY WRITING STYLE (TONE-APPROPRIATE):
-- Moderate typos (1-3 casual ones): "dont", "wont", "cant" (missing apostrophes)
-- Use ${tone} thinking markers: "I mean", "you know", "honestly", "actually", "to be fair"
-- Vary sentence length: 1 word → 38 words → 3 words → 31 words → 2 words → 35 words
-- ${tone === 'humorous' ? 'Witty reactions: Clever observations, playful language. Can use "lol" IF it enhances humor.' : 'Natural reactions: "honestly", "I mean", "you know" - can use "haha" moderately'}
-- Add tangents: "this reminds me of", "random but", "btw"
-- Use fragments: "Pretty cool.", "Makes sense.", "Not bad."
-- Casual contractions okay: "gonna", "wanna" if they fit brand personality
-- Natural capitalization variations acceptable
-- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
-- Preferred words: ${input.brandVoice.preferred_words?.join(", ") || "none"}
-- NEVER use: ${input.brandVoice.avoid_words?.join(", ") || "none"}
-
-CRITICAL: Your ${tone} brand voice is PRIMARY. Humanization must match your brand personality.
-Write as a ${tone} person typing, maintaining your brand identity.
-Respond ONLY in JSON with "content" field containing the ${tone} human-written text.`;
-    } else {
-      // Other tones: Balanced humanization
-      systemMessage += `🎭 BRAND VOICE ACTIVE: ${input.brandVoice.brand_name} (${tone.toUpperCase()} tone)
-
-MANDATORY WRITING STYLE (TONE-APPROPRIATE):
-- Natural typos (1-2 subtle ones) appropriate for ${tone} tone
-- Use ${tone}-appropriate thinking markers
-- Vary sentence length: 2 words → 35 words → 4 words → 30 words → 3 words → 38 words
-- ${tone}-appropriate reactions and emotional expressions
-- Add relevant tangents and associations
-- Use fragments appropriate for ${tone} style
-- Grammar reflects ${tone} personality
-- Emoji style: ${input.brandVoice.emoji_style || 'moderate'}
-- Preferred words: ${input.brandVoice.preferred_words?.join(", ") || "none"}
-- NEVER use: ${input.brandVoice.avoid_words?.join(", ") || "none"}
-
-CRITICAL: Your ${tone} brand voice is PRIMARY. All humanization must match your brand tone.
-Write as ${input.brandVoice.brand_name} (${tone} tone) typing, maintaining brand consistency.
-Respond ONLY in JSON with "content" field containing the ${tone} human-written text.`;
+CRITICAL: Your ${tone} brand voice is PRIMARY.
+Write as ${input.brandVoice.brand_name} (${tone} tone), maintaining clean and structured content.
+Respond ONLY in JSON with "content" field containing the ${tone} text.`;
     }
   } else {
-    // NO BRAND VOICE: Maximum casual humanization (original behavior)
-    systemMessage += `MANDATORY WRITING STYLE:
-- Make 3-8 natural typos/grammar mistakes (teh, adn, missing commas, wrong tenses)
-- Use thinking markers 8-15 times ("like", "I mean", "you know", "wait", "actually", "tbh", "ngl")
-- Vary sentence length EXTREMELY: 1 word → 40 words → 3 words → 35 words → 2 words
-- Include emotional reactions 5-10 times ("lol", "ugh", "omg", "bruh", "haha", "😅")
-- Add tangents and random thoughts 2-4 times ("this reminds me of", "random but", "btw")
-- Use fragments constantly ("Pretty wild.", "Makes sense.", "Not sure.")
-- Break grammar rules ("me and him", "ain't", "gonna", "wanna")
-- Inconsistent punctuation and capitalization
-- NO perfect structure, NO logical flow, NO summaries
-- Mix casual slang with occasional formal words unpredictably
+    // NO BRAND VOICE: Clean, structured, professional
+    systemMessage += `WRITING REQUIREMENTS:
+- Write clean, structured, professional content
+- NO excessive casual slang: NO "lol", "bruh", "omg", "wtf", "smh", "fr", "deadass"
+- Keep language professional and natural
+- Focus on clear communication and value
 
-CRITICAL: If your writing is too perfect, too structured, or too logical, AI detectors WILL catch it.
-You MUST include imperfections, errors, and messiness. This is not optional.
-Respond ONLY in JSON with "content" field containing the messy, human-written text.`;
+CRITICAL: Write professional, clean, structured content.
+Respond ONLY in JSON with "content" field containing the text.`;
   }
 
   try {
@@ -1170,8 +977,16 @@ Available Channels:
 - PR & Outreach - press releases, influencer outreach, partnerships
 
 Create a comprehensive, multi-channel action plan with:
-1. Steps across multiple marketing channels (include at least 3 different channels)
-2. Each step must specify:
+1. Plan-level specifications (REQUIRED):
+   - seo_geo_classification: "SEO" or "GEO" (classify this plan)
+   - target_keyword_phrase: Primary keyword or phrase being targeted (use the most important keyword from target keywords)
+   - expected_timeline_months: Number of months (typically 3-4 months)
+   - safety_buffer_months: Safety buffer (up to 2 months)
+   - first_page_estimate_months: If SEO, when content expected to reach first page (expected_timeline_months + safety_buffer_months). If GEO, set to null.
+   - context_explanation: Detailed explanation of what is planned and why (2-3 sentences explaining the strategy and rationale)
+
+2. Steps across multiple marketing channels (include at least 3 different channels)
+3. Each step must specify:
    - Channel (e.g., "seo", "social_media", "content", "email")
    - Platform if applicable (e.g., "reddit", "linkedin", "email")
    - Execution type: "content_generation" (can auto-generate content), "audit" (requires manual tools), "analysis" (data review), or "manual" (requires manual work)
@@ -1179,19 +994,27 @@ Create a comprehensive, multi-channel action plan with:
      * platform (specific platform like "reddit", "linkedin", "medium", "email")
      * topic (specific topic for content - MUST incorporate target keywords if provided)
      * keywords (MUST include relevant target keywords from the list above - use at least 2-3 target keywords per content step)
-     * contentType ("article", "post", "answer", or "newsletter")
+     * contentType ("article", "post", "answer", "newsletter", or "linkedin_article"/"linkedin_post" for LinkedIn)
+     * articles_per_topic: Number of articles required per topic (typically 1-3)
+     * word_count_per_article: Target word count per article (e.g., 500, 800, 1200, 1500)
      * autoExecute: true (if system can auto-generate) or false
    - For SEO steps, focus on optimizing for the target keywords provided
-3. Dependencies between steps
-4. Priority levels based on ROI potential and urgency
-5. Expected outcomes per channel
-6. Timeline with channel coordination
+4. Dependencies between steps
+5. Priority levels based on ROI potential and urgency
+6. Expected outcomes per channel
+7. Timeline with channel coordination
 
 Respond in JSON format:
 {
   "title": "Multi-Channel Marketing Plan for [Objective]",
   "objective": "Objective",
   "channels": ["seo", "social_media", "content"],
+  "seo_geo_classification": "SEO" or "GEO",
+  "target_keyword_phrase": "Primary keyword or phrase being targeted",
+  "expected_timeline_months": 3,
+  "safety_buffer_months": 2,
+  "first_page_estimate_months": 5 or null,
+  "context_explanation": "Detailed explanation of what is planned and why (2-3 sentences)",
   "steps": [
     {
       "id": "step-1",
@@ -1208,6 +1031,8 @@ Respond in JSON format:
         "topic": "Local SEO tips for restaurants",
         "keywords": ["local seo", "restaurant marketing"],
         "contentType": "post",
+        "articles_per_topic": 1,
+        "word_count_per_article": 500,
         "autoExecute": true
       }
     },
@@ -1240,6 +1065,8 @@ Respond in JSON format:
         "topic": "Monthly SEO updates and insights",
         "keywords": [],
         "contentType": "newsletter",
+        "articles_per_topic": 1,
+        "word_count_per_article": 800,
         "autoExecute": true
       }
     }
@@ -1277,6 +1104,12 @@ Respond in JSON format:
       title: result.title || "Action Plan",
       objective: result.objective || input.objective,
       channels: result.channels || [],
+      seo_geo_classification: result.seo_geo_classification || undefined,
+      target_keyword_phrase: result.target_keyword_phrase || input.targetKeywords?.[0] || undefined,
+      expected_timeline_months: result.expected_timeline_months || undefined,
+      safety_buffer_months: result.safety_buffer_months || undefined,
+      first_page_estimate_months: result.first_page_estimate_months || undefined,
+      context_explanation: result.context_explanation || undefined,
       steps: result.steps || [],
       reasoning: result.reasoning || "",
       expectedOutcome: result.expectedOutcome || "",

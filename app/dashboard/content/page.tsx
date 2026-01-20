@@ -295,7 +295,7 @@ function ContentInner() {
     
     // Only open modals if we're coming from AI Visibility AND data exists
     // Don't reopen if content was already published (sessionStorage would be cleared)
-    if (source === 'ai-visibility') {
+    if (source === 'ai-visibility' || source === 'missed-prompts') {
       // Check for content-generation step (Modal 1)
       if (step === 'content-generation') {
         const storedData = sessionStorage.getItem('editPromptData');
@@ -1621,7 +1621,7 @@ function ContentInner() {
               contentType: "answer",
             targetKeywords: aiVisibilityData?.keywords || [],
             generatedContent: responseData.response,
-              skipGeneration: true,
+              skipGeneration: false, // Create database entry so content appears in publication page
             imageUrl: includeImage ? uploadedImageUrl : null,
             imageData: includeImage && selectedImage ? {
               url: uploadedImageUrl,
@@ -2026,6 +2026,15 @@ function ContentInner() {
 
                               {/* Status & Actions */}
                               <div className="flex items-center gap-3">
+                                {/* LinkedIn Content Type Banner (for published LinkedIn content only) */}
+                                {item.status === "published" && 
+                                 (item.raw?.target_platform === "linkedin" || item.platforms?.includes("linkedin")) && 
+                                 (item.raw?.contentType === "linkedin_article" || 
+                                  item.raw?.metadata?.contentType === "linkedin_article") && (
+                                  <div className="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+                                    <span className="text-blue-700 font-semibold">📄 Article</span>
+                                  </div>
+                                )}
                                 {/* Status Badge */}
                                 <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm ${statusConfig.bg} ${statusConfig.text}`}>
                                   <StatusIcon className="w-4 h-4" />
@@ -2120,24 +2129,36 @@ function ContentInner() {
                             </div>
 
                             {/* Published URL */}
-                            {item.status === "published" && item.published_records && item.published_records.length > 0 && (
-                              <div className="mt-2 ml-0">
-                                {item.published_records.map((pub, idx) => (
-                                  pub.published_url ? (
-                                    <a
-                                      key={idx}
-                                      href={pub.published_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 hover:underline"
-                                    >
-                                      <ExternalLink className="w-3 h-3" />
-                                      View on {pub.platform || platform}
-                                    </a>
-                                  ) : null
-                                ))}
-                              </div>
-                            )}
+                    {/* LinkedIn Content Type Banner (for published LinkedIn content only) */}
+                    {item.status === "published" && 
+                     (item.raw?.target_platform === "linkedin" || item.platforms?.includes("linkedin")) && (
+                      <div className="mt-2 mb-2">
+                        {(item.raw?.contentType === "linkedin_article" || 
+                          item.raw?.metadata?.contentType === "linkedin_article") && (
+                          <div className="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg inline-block">
+                            <span className="text-blue-700 font-semibold text-sm">📄 Article</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {item.status === "published" && item.published_records && item.published_records.length > 0 && (
+                      <div className="mt-2 ml-0">
+                        {item.published_records.map((pub, idx) => (
+                          pub.published_url ? (
+                            <a
+                              key={idx}
+                              href={pub.published_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              View on {pub.platform || platform}
+                            </a>
+                          ) : null
+                        ))}
+                      </div>
+                    )}
                           </div>
                         );
                       })}
@@ -2253,6 +2274,18 @@ function ContentInner() {
 
                   {/* Right Side - Status, Keywords, Actions */}
                   <div className="flex flex-col items-end gap-3">
+                    {/* LinkedIn Content Type Banner (for published LinkedIn content only) */}
+                    {item.status === "published" && 
+                     (item.raw?.target_platform === "linkedin" || item.platforms?.includes("linkedin")) && (
+                      <>
+                        {(item.raw?.contentType === "linkedin_article" || 
+                          item.raw?.metadata?.contentType === "linkedin_article") && (
+                          <div className="px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-lg">
+                            <span className="text-blue-700 font-semibold text-sm">📄 Article</span>
+                          </div>
+                        )}
+                      </>
+                    )}
                     {/* Status Badge */}
                     {item.status === "review" ? (
                       <button className="px-4 py-2 bg-yellow-100 text-gray-900 rounded-lg font-medium flex items-center gap-2 hover:bg-yellow-200 transition-colors">
@@ -2928,6 +2961,17 @@ function ContentInner() {
                     <span className="font-medium">{viewContent.type}</span>
                     <span>•</span>
                     <span className="capitalize">{viewContent.raw?.target_platform || viewContent.platforms[0]}</span>
+                    {/* LinkedIn Content Type Banner */}
+                    {viewContent.status === "published" && 
+                     (viewContent.raw?.target_platform === "linkedin" || viewContent.platforms?.includes("linkedin")) && (
+                      <>
+                        <span>•</span>
+                        {(viewContent.raw?.contentType === "linkedin_article" || 
+                          viewContent.raw?.metadata?.contentType === "linkedin_article") && (
+                          <span className="px-2 py-1 bg-blue-50 border border-blue-200 rounded text-blue-700 font-semibold text-xs">📄 Article</span>
+                        )}
+                      </>
+                    )}
                     {viewContent.raw?.word_count && (
                       <>
                         <span>•</span>
@@ -3029,36 +3073,59 @@ function ContentInner() {
 
                 {viewMode === 'image' && (
                   <div className="flex flex-col items-center justify-center py-8">
-                    {viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image ? (
-                      <div className="w-full max-w-2xl">
-                        <div className="relative aspect-video rounded-xl overflow-hidden border border-gray-200 shadow-lg">
-                          <img
-                            src={viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image}
-                            alt={viewContent.title}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div className="mt-4 text-center">
-                          <p className="text-sm text-gray-600">
-                            This image will be published with your content to supported platforms.
-                          </p>
-                          <div className="mt-2 flex flex-wrap justify-center gap-2">
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Reddit</span>
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Medium</span>
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Quora</span>
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Facebook</span>
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">LinkedIn</span>
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Instagram</span>
-                            <span className="px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs line-through">GitHub</span>
+                    {(() => {
+                      // Check multiple possible locations for image URL
+                      const imageUrl = 
+                        viewContent.raw?.metadata?.imageUrl || 
+                        viewContent.raw?.metadata?.imageData?.url ||
+                        viewContent.raw?.metadata?.structuredSEO?.ogTags?.image ||
+                        viewContent.raw?.metadata?.image?.url;
+                      
+                      console.log('🔍 Image check:', {
+                        hasRaw: !!viewContent.raw,
+                        hasMetadata: !!viewContent.raw?.metadata,
+                        imageUrl: viewContent.raw?.metadata?.imageUrl,
+                        imageDataUrl: viewContent.raw?.metadata?.imageData?.url,
+                        ogImage: viewContent.raw?.metadata?.structuredSEO?.ogTags?.image,
+                        imageUrl2: viewContent.raw?.metadata?.image?.url,
+                        finalImageUrl: imageUrl,
+                        fullMetadata: viewContent.raw?.metadata
+                      });
+                      
+                      return imageUrl ? (
+                        <div className="w-full max-w-2xl">
+                          <div className="relative aspect-video rounded-xl overflow-hidden border border-gray-200 shadow-lg">
+                            <img
+                              src={imageUrl}
+                              alt={viewContent.title}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                console.error('❌ Image failed to load:', imageUrl);
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          </div>
+                          <div className="mt-4 text-center">
+                            <p className="text-sm text-gray-600">
+                              This image will be published with your content to supported platforms.
+                            </p>
+                            <div className="mt-2 flex flex-wrap justify-center gap-2">
+                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Reddit</span>
+                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Medium</span>
+                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Quora</span>
+                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Facebook</span>
+                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">LinkedIn</span>
+                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Instagram</span>
+                              <span className="px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs line-through">GitHub</span>
+                            </div>
+                          </div>
+                          <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                            <p className="text-xs text-gray-500 break-all">
+                              <strong>Image URL:</strong> {imageUrl}
+                            </p>
                           </div>
                         </div>
-                        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                          <p className="text-xs text-gray-500 break-all">
-                            <strong>Image URL:</strong> {viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image}
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
+                      ) : (
                       <div className="text-gray-500 text-center py-12">
                         <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                           <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3068,7 +3135,8 @@ function ContentInner() {
                         <p className="font-medium text-gray-700">No Image Available</p>
                         <p className="text-sm mt-1">This content doesn&apos;t have an associated image.</p>
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -3224,20 +3292,26 @@ function ContentInner() {
                     Copy Schema
                   </button>
                 )}
-                {viewMode === 'image' && (viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image) && (
-                <button
-                  onClick={() => {
-                      const imageUrl = viewContent.raw?.metadata?.imageUrl || viewContent.raw?.metadata?.structuredSEO?.ogTags?.image;
-                      if (imageUrl) {
-                        navigator.clipboard.writeText(imageUrl);
-                        toast.success("Image URL copied to clipboard!");
-                      }
-                    }}
-                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
-                  >
-                    Copy Image URL
-                </button>
-                )}
+                {viewMode === 'image' && (() => {
+                  const imageUrl = 
+                    viewContent.raw?.metadata?.imageUrl || 
+                    viewContent.raw?.metadata?.imageData?.url ||
+                    viewContent.raw?.metadata?.structuredSEO?.ogTags?.image ||
+                    viewContent.raw?.metadata?.image?.url;
+                  return imageUrl ? (
+                    <button
+                      onClick={() => {
+                        if (imageUrl) {
+                          navigator.clipboard.writeText(imageUrl);
+                          toast.success("Image URL copied to clipboard!");
+                        }
+                      }}
+                      className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
+                    >
+                      Copy Image URL
+                    </button>
+                  ) : null;
+                })()}
                 <button
                   onClick={() => {
                     setShowViewModal(false);
