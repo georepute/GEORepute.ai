@@ -33,6 +33,7 @@ import {
   Brain,
   Server,
   Package,
+  Map,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -116,6 +117,7 @@ export default function DashboardLayout({
       requiredCapability: "canViewAnalytics",
       children: [
         { name: t.dashboard.sidebar.googleSearchConsole, href: "/dashboard/google-search-console", icon: Search, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.googleMaps, href: "/dashboard/google-maps", icon: Map, requiredCapability: "canViewAnalytics" },
       ]
     },
     { 
