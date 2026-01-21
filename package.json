@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:llm-keys": "npx tsx scripts/test-llm-keys.ts"
   },
   "dependencies": {
     "@stripe/stripe-js": "^8.5.2",
