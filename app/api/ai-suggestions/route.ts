@@ -51,30 +51,69 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const response = await fetch(edgeFunctionUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${edgeFunctionKey}`,
-      },
-      body: JSON.stringify({
-        brandName,
-        websiteUrl,
-        industry,
-        language: preferredLanguage,
-      }),
-    });
+    // Create AbortController for timeout handling
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second timeout
+
+    let response;
+    try {
+      response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${edgeFunctionKey}`,
+        },
+        body: JSON.stringify({
+          brandName,
+          websiteUrl,
+          industry,
+          language: preferredLanguage,
+        }),
+        signal: controller.signal,
+      });
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        console.error('Edge Function request timed out');
+        return NextResponse.json(
+          { error: 'Request timed out. The AI generation is taking longer than expected. Please try again.', success: false },
+          { status: 504 }
+        );
+      }
+      console.error('Edge Function fetch error:', fetchError);
+      return NextResponse.json(
+        { error: fetchError.message || 'Failed to connect to edge function', success: false },
+        { status: 500 }
+      );
+    }
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const error = await response.json();
+      let error;
+      try {
+        error = await response.json();
+      } catch (parseError) {
+        // If we can't parse the error, use the status text
+        error = { error: response.statusText || 'Failed to generate suggestions' };
+      }
       console.error('Edge Function error:', error);
       return NextResponse.json(
-        { error: error.error || 'Failed to generate suggestions' },
+        { error: error.error || 'Failed to generate suggestions', success: false },
         { status: response.status }
       );
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      console.error('Error parsing edge function response:', parseError);
+      return NextResponse.json(
+        { error: 'Invalid response from edge function', success: false },
+        { status: 500 }
+      );
+    }
 
     console.log(`✅ Generated ${data.count?.competitors || 0} competitors and ${data.count?.keywords || 0} keywords`);
 

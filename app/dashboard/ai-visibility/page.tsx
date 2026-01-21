@@ -49,6 +49,7 @@ import {
   LineChart,
   Line
 } from 'recharts';
+import { CompetitorLogo } from '@/components/CompetitorLogo';
 
 type ViewMode = 'projects' | 'form' | 'details';
 
@@ -58,7 +59,7 @@ interface Project {
   industry: string;
   website_url?: string;
   active_platforms?: string[];
-  competitors?: string[];
+  competitors?: Array<string | { name: string; domain?: string }>;
   keywords?: string[];
   last_analysis_at?: string;
   created_at: string;
@@ -98,7 +99,8 @@ export default function AIVisibility() {
   const [brandName, setBrandName] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [industry, setIndustry] = useState("Marketing");
-  const [competitors, setCompetitors] = useState<string[]>([]);
+  // Competitors can be either string[] (old format) or Array<{name: string, domain?: string}> (new format)
+  const [competitors, setCompetitors] = useState<Array<string | { name: string; domain?: string }>>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newCompetitor, setNewCompetitor] = useState("");
   const [newKeyword, setNewKeyword] = useState("");
@@ -713,7 +715,8 @@ export default function AIVisibility() {
           websiteUrl,
           industry,
           keywords,
-          competitors,
+          // Preserve full competitor objects (with domain) when saving to database
+          competitors: competitors.map(c => typeof c === 'string' ? c : { name: c.name, domain: c.domain }),
           platforms: selectedPlatforms,
           companyDescription: '', // Will be set by brand-analysis-summary
           companyImageUrl: '', // Will be set by brand-analysis-summary
@@ -1008,9 +1011,16 @@ export default function AIVisibility() {
   };
 
   const addCompetitor = () => {
-    if (newCompetitor.trim() && !competitors.includes(newCompetitor.trim())) {
-      setCompetitors([...competitors, newCompetitor.trim()]);
-      setNewCompetitor("");
+    const trimmed = newCompetitor.trim();
+    if (trimmed) {
+      // Check if competitor already exists (handle both string and object formats)
+      const exists = competitors.some(c => 
+        typeof c === 'string' ? c === trimmed : c.name === trimmed
+      );
+      if (!exists) {
+        setCompetitors([...competitors, trimmed]);
+        setNewCompetitor("");
+      }
     }
   };
 
@@ -2474,9 +2484,21 @@ export default function AIVisibility() {
                               <Target className="w-12 h-12 mx-auto mb-4 text-gray-400" />
                               <p>No competitors mentioned in responses</p>
                               {selectedProject?.competitors && Array.isArray(selectedProject.competitors) && selectedProject.competitors.length > 0 && (
-                                <p className="text-sm mt-2">
-                                  Tracked competitors: {selectedProject.competitors.join(', ')}
-                                </p>
+                                <div className="text-sm mt-2">
+                                  <span className="text-gray-600">Tracked competitors: </span>
+                                  <div className="flex flex-wrap gap-2 mt-1">
+                                    {selectedProject.competitors.map((comp, idx) => {
+                                      const compName = typeof comp === 'string' ? comp : comp.name;
+                                      const compDomain = typeof comp === 'string' ? undefined : comp.domain;
+                                      return (
+                                        <span key={idx} className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-xs">
+                                          <CompetitorLogo name={compName} domain={compDomain} size={16} />
+                                          {compName}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                               )}
                             </div>
                           ) : (
@@ -3544,20 +3566,38 @@ export default function AIVisibility() {
                 </div>
                 {competitors.length > 0 && (
                   <div className="flex flex-wrap gap-2">
-                    {competitors.map((competitor) => (
-                      <span
-                        key={competitor}
-                        className="px-3 py-1 bg-gray-200 text-gray-900 rounded-lg flex items-center gap-2"
-                      >
-                        {competitor}
-                        <button
-                          onClick={() => setCompetitors(competitors.filter(c => c !== competitor))}
-                          className="text-gray-400 hover:text-white"
+                    {competitors.map((competitor, idx) => {
+                      // Handle both string and object formats
+                      const competitorName = typeof competitor === 'string' ? competitor : competitor.name;
+                      const competitorDomain = typeof competitor === 'string' ? undefined : competitor.domain;
+                      const competitorKey = typeof competitor === 'string' ? competitor : `${competitor.name}-${idx}`;
+                      
+                      return (
+                        <span
+                          key={competitorKey}
+                          className="px-3 py-1.5 bg-gray-200 text-gray-900 rounded-lg flex items-center gap-2"
                         >
-                          ×
-                        </button>
-                      </span>
-                    ))}
+                          <CompetitorLogo
+                            name={competitorName}
+                            domain={competitorDomain}
+                            size={20}
+                            className="flex-shrink-0"
+                          />
+                          <span className="text-sm font-medium">{competitorName}</span>
+                          <button
+                            onClick={() => setCompetitors(competitors.filter(c => 
+                              typeof competitor === 'string' 
+                                ? c !== competitor 
+                                : (typeof c === 'object' && c.name !== competitor.name)
+                            ))}
+                            className="text-gray-400 hover:text-gray-600 ml-auto flex-shrink-0 flex items-center justify-center"
+                            style={{ fontSize: '18px', lineHeight: 1, width: '18px', height: '18px' }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -3677,7 +3717,11 @@ export default function AIVisibility() {
                 </div>
                 <div>
                   <span className="text-sm font-medium text-gray-600">Competitors:</span>
-                  <p className="text-gray-900">{competitors.length > 0 ? competitors.join(", ") : "None"}</p>
+                  <p className="text-gray-900">
+                    {competitors.length > 0 
+                      ? competitors.map(c => typeof c === 'string' ? c : c.name).join(", ")
+                      : "None"}
+                  </p>
                 </div>
                 <div>
                   <span className="text-sm font-medium text-gray-600">Keywords:</span>

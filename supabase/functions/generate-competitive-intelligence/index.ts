@@ -22,6 +22,14 @@ function getApiKey(keyType: string): string | null {
   return null;
 }
 
+// Helper function to normalize domain (remove http://, https://, trailing slashes)
+function normalizeDomain(domain: string): string {
+  return domain
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '')
+    .split('/')[0];
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -29,7 +37,54 @@ serve(async (req) => {
   }
 
   try {
-    const { brandName, websiteUrl, industry, language, companyContext } = await req.json();
+    // Read request body with error handling
+    let requestBody;
+    try {
+      requestBody = await req.json();
+    } catch (bodyError: any) {
+      console.error('Error reading request body:', bodyError);
+      const errorMessage = bodyError?.message || 'Unknown error';
+      
+      // Check for specific connection errors
+      if (errorMessage.includes('connection') || errorMessage.includes('body')) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Connection error while reading request. The request may have timed out or been interrupted. Please try again.',
+            success: false 
+          }),
+          { 
+            status: 408, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        );
+      }
+      
+      return new Response(
+        JSON.stringify({ 
+          error: `Failed to read request body: ${errorMessage}. Please ensure the request is properly formatted.`,
+          success: false 
+        }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    if (!requestBody) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Request body is empty',
+          success: false 
+        }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    const { brandName, websiteUrl, industry, language, companyContext } = requestBody;
 
     // Validate input
     if (!brandName || !websiteUrl || !industry) {
@@ -166,7 +221,7 @@ Website: ${websiteUrl}
 Industry: ${industry}${contextInstructions}${competitorRules}
 
 Please provide:
-1. A list of 8-12 main competitors (company/brand names) that operate in the same industry and market space. ${companyContext ? 'CRITICAL: These competitors MUST be at a similar company stage, traffic level, and market position as described above. This ensures fair comparison.' : 'Include both direct competitors and notable alternative solutions.'}
+1. A list of 8-12 main competitors (company/brand names) that operate in the same industry and market space. ${companyContext ? 'CRITICAL: These competitors MUST be at a similar company stage, traffic level, and market position as described above. This ensures fair comparison.' : 'Include both direct competitors and notable alternative solutions.'} For each competitor, provide both the company name and their primary website domain/URL. IMPORTANT: Research and provide the actual, real website domain for each competitor - this is critical for fetching their logos.
 2. A list of 15-20 relevant target keywords that would be important for brand monitoring, SEO, and AI visibility in this industry. Include:
    - Product/service keywords
    - Industry-specific terms
@@ -175,9 +230,24 @@ Please provide:
 
 Format your response as JSON with this exact structure:
 {
-  "competitors": ["Competitor 1", "Competitor 2", "Competitor 3", ...],
+  "competitors": [
+    {"name": "Competitor 1", "domain": "competitor1.com"},
+    {"name": "Competitor 2", "domain": "competitor2.com"},
+    ...
+  ],
   "keywords": ["keyword 1", "keyword 2", "keyword 3", ...]
 }
+
+CRITICAL REQUIREMENTS for competitors:
+- Always include both "name" and "domain" fields
+- The domain MUST be the actual, real website domain (e.g., "example.com" without http:// or https://)
+- Use your knowledge to provide accurate domains for well-known companies worldwide
+- For international companies with local presence, prefer the main global domain (e.g., "pepsico.com" for "PepsiCo Pakistan")
+- For regional companies, use appropriate country TLDs (.com, .co.uk, .com.au, .co.jp, .com.br, .de, .fr, etc.)
+- For lesser-known competitors, make your best educated guess based on the company name
+- Common patterns: companyname.com, company-name.com, companyname.co.[country], companyname.[country]
+- Try to provide the most likely domain - the system will automatically try variations if needed
+- Only use null for the domain field if you truly cannot determine any reasonable domain
 
 Rules:
 - Competitors should be actual brand/company names (can remain in original language)
@@ -238,11 +308,30 @@ Rules:
     }
 
     // Validate and clean the data
-    const competitors = Array.isArray(parsedData.competitors)
-      ? parsedData.competitors
-          .filter((c: unknown) => typeof c === 'string' && c.trim())
-          .map((c: string) => c.trim())
-      : [];
+    // Handle both old format (string[]) and new format (object with name and domain)
+    let competitors: Array<{ name: string; domain?: string }> = [];
+    if (Array.isArray(parsedData.competitors)) {
+      competitors = parsedData.competitors
+        .map((c: unknown) => {
+          if (typeof c === 'string') {
+            // Old format: just a string
+            return { name: c.trim(), domain: undefined };
+          } else if (c && typeof c === 'object' && 'name' in c) {
+            // New format: object with name and domain
+            const competitorObj = c as { name?: string; domain?: string };
+            return {
+              name: competitorObj.name ? competitorObj.name.trim() : '',
+              domain: competitorObj.domain 
+                ? normalizeDomain(competitorObj.domain.trim())
+                : undefined
+            };
+          }
+          return null;
+        })
+        .filter((c: { name: string; domain?: string } | null): c is { name: string; domain?: string } => 
+          c !== null && c.name.length > 0
+        );
+    }
 
     const keywords = Array.isArray(parsedData.keywords)
       ? parsedData.keywords
@@ -255,6 +344,7 @@ Rules:
     }
 
     console.log(`✅ Generated ${competitors.length} competitors and ${keywords.length} keywords`);
+    console.log(`   Competitors with domains: ${competitors.filter(c => c.domain).length}`);
 
     return new Response(
       JSON.stringify({
