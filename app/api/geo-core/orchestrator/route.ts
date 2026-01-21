@@ -127,10 +127,17 @@ export async function GET(request: NextRequest) {
         }),
       }));
 
+      // Normalize content type - show "Article" for all LinkedIn content types
+      let contentType = item.metadata?.contentType || "Article";
+      if (contentType === "linkedin_post" || contentType === "linkedin_article" || 
+          item.metadata?.contentType === "linkedin_post" || item.metadata?.contentType === "linkedin_article") {
+        contentType = "Article";
+      }
+
       return {
         id: item.id,
         title: item.topic || "Untitled",
-        type: item.metadata?.contentType || "Article",
+        type: contentType,
         status: item.status || "draft",
         platforms: item.target_platform ? [item.target_platform] : [],
         publishDate: item.scheduled_at || item.created_at,
@@ -909,13 +916,18 @@ export async function POST(request: NextRequest) {
                     console.log("💡 Schema is stored in metadata for your website use");
                   }
                   
+                  // Log image URL for debugging
+                  const imageUrl = contentStrategy.metadata?.imageUrl;
+                  console.log(`📸 LinkedIn publish - Image URL:`, imageUrl);
+                  console.log(`📸 LinkedIn publish - Full metadata:`, JSON.stringify(contentStrategy.metadata, null, 2));
+                  
                   linkedInResult = await publishToLinkedIn(linkedInConfig, {
                     title: contentStrategy.topic || "Untitled",
                     content: linkedInContent,
                     tags: contentStrategy.metadata?.tags || [],
                     metadata: {
                       link: contentStrategy.metadata?.link,
-                      imageUrl: contentStrategy.metadata?.imageUrl,
+                      imageUrl: imageUrl,
                     },
                   });
 

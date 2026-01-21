@@ -9,6 +9,9 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SERVICE_ROLE_KEY')!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+// Note: brand-analysis-summary is now called from the frontend when user clicks "Launch Analysis"
+// It runs BEFORE the brand-analysis process starts, not after completion
 // Helper to get API key from Supabase Edge Function secrets
 // Secrets are set using: supabase secrets set OPENAI_API_KEY=your_key
 function getApiKey(keyType) {
@@ -1763,6 +1766,9 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
     await supabase.from('brand_analysis_projects').update({
       last_analysis_at: new Date().toISOString()
     }).eq('id', projectId);
+    
+    // Note: brand summary is now generated when user clicks "Launch Analysis", not after completion
+    
     console.log(`Analysis completed: ${completedQueries}/${totalQueries} queries successful, ${totalMentions} mentions found`);
     console.log(`Working platforms: ${workingPlatforms.join(', ')}`);
     if (failedPlatforms.length > 0) {
@@ -1943,6 +1949,9 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
       await supabase.from('brand_analysis_projects').update({
         last_analysis_at: new Date().toISOString()
       }).eq('id', projectId);
+      
+      // Note: brand summary is now generated when user clicks "Launch Analysis", not after completion
+      
       console.log(`Analysis fully completed for session: ${sessionId}`);
     }
     return {

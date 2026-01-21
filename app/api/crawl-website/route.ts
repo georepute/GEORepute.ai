@@ -120,29 +120,67 @@ async function crawlWithPlaywright(normalizedUrl: string) {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-blink-features=AutomationControlled',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
       ],
+      timeout: 60000, // Increase browser launch timeout
     });
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1920, height: 1080 },
       locale: 'en-US',
+      ignoreHTTPSErrors: true,
+      // Set longer timeouts for navigation
+      navigationTimeout: 60000,
     });
 
     const page = await context.newPage();
 
-    // Navigate to the URL and wait for network to be idle
-    // This will handle Cloudflare challenges automatically
-    await page.goto(normalizedUrl, {
-      waitUntil: 'networkidle',
-      timeout: 30000, // 30 second timeout
-    });
+    // Navigate to the URL with a more lenient wait strategy
+    // Use 'load' instead of 'networkidle' to avoid timeout on sites with continuous network activity
+    try {
+      await page.goto(normalizedUrl, {
+        waitUntil: 'load',
+        timeout: 60000, // Increased to 60 seconds
+      });
+    } catch (timeoutError: any) {
+      // Fallback: try with domcontentloaded if load times out
+      console.warn('Initial page load timed out, trying with domcontentloaded...');
+      try {
+        await page.goto(normalizedUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 60000,
+        });
+      } catch (fallbackError: any) {
+        // If both fail, try without waiting (just navigate)
+        console.warn('domcontentloaded also timed out, proceeding without wait...');
+        await page.goto(normalizedUrl, {
+          waitUntil: 'commit',
+          timeout: 60000,
+        });
+      }
+    }
 
     // Wait a bit more for any JavaScript to finish rendering
-    await page.waitForTimeout(2000);
+    // Use a shorter timeout to avoid hanging on slow sites
+    try {
+      await page.waitForTimeout(3000);
+    } catch (e) {
+      // Continue even if wait fails
+      console.warn('Wait timeout warning, proceeding...');
+    }
 
     // Get the fully rendered HTML
-    const html = await page.content();
+    // Even if navigation had issues, try to get whatever content is available
+    let html: string;
+    try {
+      html = await page.content();
+    } catch (contentError: any) {
+      console.warn('Error getting page content, trying alternative method...', contentError.message);
+      // Fallback: try to get HTML from the page state
+      html = await page.evaluate(() => document.documentElement.outerHTML).catch(() => '<html></html>');
+    }
     
     if (!cheerio) {
       // Fallback: simple text extraction without cheerio
