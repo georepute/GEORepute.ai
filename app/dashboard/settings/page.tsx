@@ -29,6 +29,9 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useLanguage } from "@/lib/language-context";
+import { ConnectIntegrationDialog } from "@/components/integrations/ConnectIntegrationDialog";
+import { IntegrationCredential } from "@/types/integrations";
+import { supabase } from "@/lib/supabase/client";
 
 export default function Settings() {
   const { isRtl, t } = useLanguage();
@@ -1664,7 +1667,362 @@ NEXT_PUBLIC_GITHUB_CLIENT_ID=prod_client_id`}
 
       {/* Google Search Console Integration */}
       <GoogleSearchConsoleSettings />
+
+      {/* WordPress Integration */}
+      <WordPressIntegrationSettings />
+
+      {/* Shopify Fully Managed Integration */}
+      <ShopifyFullyManagedIntegrationSettings />
     </div>
+  );
+}
+
+// WordPress Integration Component
+function WordPressIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [integrations, setIntegrations] = useState<IntegrationCredential[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  useEffect(() => {
+    loadWordPressIntegrations();
+  }, []);
+
+  const loadWordPressIntegrations = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('integration_credentials')
+        .select('*')
+        .eq('platform', 'WordPress')
+        .eq('created_by_user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading WordPress integrations:', error);
+        return;
+      }
+
+      setIntegrations(data || []);
+      setIsConnected((data || []).length > 0);
+    } catch (error) {
+      console.error('Error loading WordPress integrations:', error);
+    }
+  };
+
+  const handleIntegrationAdded = (integration: IntegrationCredential) => {
+    setIntegrations(prev => [integration, ...prev]);
+    setIsConnected(true);
+    setDialogOpen(false);
+  };
+
+  const handleDisconnect = async (integrationId: string) => {
+    if (!confirm("Are you sure you want to disconnect this WordPress integration?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase.functions.invoke('integrations-api', {
+        method: 'DELETE',
+        body: { integrationId }
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Failed to disconnect');
+      }
+
+      toast.success("WordPress integration disconnected");
+      await loadWordPressIntegrations();
+    } catch (error: any) {
+      console.error('Disconnect error:', error);
+      toast.error(error.message || "Failed to disconnect");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+        <div className="flex items-center gap-4 mb-6">
+          <div className="w-12 h-12 bg-blue-600 text-white rounded flex items-center justify-center font-bold text-lg">
+            WP
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-gray-900">WordPress (Self-Hosted)</h3>
+            <p className="text-sm text-gray-600">
+              Connect your WordPress site using Application Passwords
+            </p>
+          </div>
+          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+            isConnected 
+              ? "bg-green-100 text-green-700" 
+              : "bg-gray-100 text-gray-700"
+          }`}>
+            {isConnected ? "Connected" : "Not Connected"}
+          </span>
+        </div>
+
+        {!isConnected ? (
+          <div className="space-y-4">
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-900 mb-3">
+                Connect your WordPress site to automatically publish content. You'll need to generate an Application Password in WordPress.
+              </p>
+              <button
+                onClick={() => setDialogOpen(true)}
+                disabled={loading}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
+              >
+                {loading ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    Connect WordPress
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {integrations.map((integration) => (
+              <div key={integration.id} className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-gray-900">{integration.account_name || integration.account_id}</p>
+                    <p className="text-sm text-gray-600">{integration.account_id}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Connected {new Date(integration.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDisconnect(integration.id)}
+                    disabled={loading}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader className="w-4 h-4 animate-spin" />
+                        Disconnecting...
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="w-4 h-4" />
+                        Disconnect
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={() => setDialogOpen(true)}
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add Another WordPress Site
+            </button>
+          </div>
+        )}
+      </div>
+
+      <ConnectIntegrationDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onIntegrationAdded={handleIntegrationAdded}
+        preselectedPlatform="WordPress"
+      />
+    </>
+  );
+}
+
+// Shopify Fully Managed Integration Component
+function ShopifyFullyManagedIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [integrations, setIntegrations] = useState<IntegrationCredential[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  useEffect(() => {
+    loadShopifyIntegrations();
+    
+    // Handle OAuth callback
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const state = urlParams.get('state');
+    if (code && state) {
+      // Dialog will handle this
+      setDialogOpen(true);
+    }
+  }, []);
+
+  const loadShopifyIntegrations = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('integration_credentials')
+        .select('*')
+        .eq('platform', 'ShopifyFullyManaged')
+        .eq('created_by_user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading Shopify integrations:', error);
+        return;
+      }
+
+      setIntegrations(data || []);
+      setIsConnected((data || []).length > 0);
+    } catch (error) {
+      console.error('Error loading Shopify integrations:', error);
+    }
+  };
+
+  const handleIntegrationAdded = (integration: IntegrationCredential) => {
+    setIntegrations(prev => [integration, ...prev]);
+    setIsConnected(true);
+    setDialogOpen(false);
+    // Clean URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+  };
+
+  const handleDisconnect = async (integrationId: string) => {
+    if (!confirm("Are you sure you want to disconnect this Shopify integration?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase.functions.invoke('integrations-api', {
+        method: 'DELETE',
+        body: { integrationId }
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Failed to disconnect');
+      }
+
+      toast.success("Shopify integration disconnected");
+      await loadShopifyIntegrations();
+    } catch (error: any) {
+      console.error('Disconnect error:', error);
+      toast.error(error.message || "Failed to disconnect");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+        <div className="flex items-center gap-4 mb-6">
+          <div className="w-12 h-12 bg-green-600 text-white rounded flex items-center justify-center font-bold text-lg">
+            S
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-gray-900">Shopify Fully Managed</h3>
+            <p className="text-sm text-gray-600">
+              Connect your Shopify store using your own custom app credentials
+            </p>
+          </div>
+          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+            isConnected 
+              ? "bg-green-100 text-green-700" 
+              : "bg-gray-100 text-gray-700"
+          }`}>
+            {isConnected ? "Connected" : "Not Connected"}
+          </span>
+        </div>
+
+        {!isConnected ? (
+          <div className="space-y-4">
+            <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+              <p className="text-sm text-green-900 mb-3">
+                Connect your Shopify store to automatically publish content. You'll need to create a custom app in your Shopify admin.
+              </p>
+              <button
+                onClick={() => setDialogOpen(true)}
+                disabled={loading}
+                className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
+              >
+                {loading ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    Connect Shopify
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {integrations.map((integration) => (
+              <div key={integration.id} className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-gray-900">{integration.account_name || integration.account_id}</p>
+                    <p className="text-sm text-gray-600">{integration.account_id}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Connected {new Date(integration.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleDisconnect(integration.id)}
+                    disabled={loading}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader className="w-4 h-4 animate-spin" />
+                        Disconnecting...
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="w-4 h-4" />
+                        Disconnect
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={() => setDialogOpen(true)}
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add Another Shopify Store
+            </button>
+          </div>
+        )}
+      </div>
+
+      <ConnectIntegrationDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onIntegrationAdded={handleIntegrationAdded}
+        preselectedPlatform="ShopifyFullyManaged"
+      />
+    </>
   );
 }
 
