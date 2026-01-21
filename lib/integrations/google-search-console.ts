@@ -165,6 +165,7 @@ export class GoogleSearchConsoleService {
 
   /**
    * Verify a site with Google Site Verification API
+   * Throws an error if verification fails
    */
   async verifySite(siteUrl: string, method: string): Promise<boolean> {
     try {
@@ -184,14 +185,16 @@ export class GoogleSearchConsoleService {
       });
 
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error verifying site:', error);
-      return false;
+      // Throw the error so the caller knows verification failed
+      throw new Error(error.message || 'Failed to verify domain. Please ensure the DNS record is correctly added.');
     }
   }
 
   /**
    * Verify URL site (alias for verifySite)
+   * Throws an error if verification fails
    */
   async verifyUrlSite(siteUrl: string, method: string): Promise<boolean> {
     return this.verifySite(siteUrl, method);

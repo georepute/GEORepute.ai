@@ -5,7 +5,7 @@ import { cookies } from 'next/headers';
 
 /**
  * GET /api/integrations/google-search-console/domains
- * List all user's GSC domains
+ * List all domains from domains table
  */
 export async function GET(request: NextRequest) {
   try {
@@ -16,12 +16,38 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get all domains for the user
-    const { data: domains, error } = await supabase
-      .from('gsc_domains')
-      .select('*')
+    // Get user's organization
+    const { data: orgUser, error: orgError } = await supabase
+      .from('organization_users')
+      .select('organization_id')
       .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false });
+      .eq('status', 'active')
+      .single();
+
+    let domains;
+    let error;
+
+    if (orgError) {
+      // If no organization, get domains by user_id
+      const result = await supabase
+        .from('domains')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false });
+      
+      domains = result.data;
+      error = result.error;
+    } else {
+      // Get all domains for the organization
+      const result = await supabase
+        .from('domains')
+        .select('*')
+        .eq('organization_id', orgUser.organization_id)
+        .order('created_at', { ascending: false });
+      
+      domains = result.data;
+      error = result.error;
+    }
 
     if (error) throw error;
 
@@ -40,7 +66,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/integrations/google-search-console/domains
- * Add a new domain and get verification token
+ * Add an existing domain to GSC and get verification token
  */
 export async function POST(request: NextRequest) {
   try {
@@ -52,11 +78,33 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { domainUrl } = body;
+    const { domainId } = body;
 
-    if (!domainUrl) {
+    if (!domainId) {
       return NextResponse.json(
-        { error: 'Domain URL is required' },
+        { error: 'Domain ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Get the domain from domains table
+    const { data: domain, error: domainError } = await supabase
+      .from('domains')
+      .select('*')
+      .eq('id', domainId)
+      .single();
+
+    if (domainError || !domain) {
+      return NextResponse.json(
+        { error: 'Domain not found' },
+        { status: 404 }
+      );
+    }
+
+    // Check if domain already has GSC integration
+    if (domain.gsc_integration) {
+      return NextResponse.json(
+        { error: 'Domain already has GSC integration' },
         { status: 400 }
       );
     }
@@ -76,21 +124,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if domain already exists
-    const { data: existingDomain } = await supabase
-      .from('gsc_domains')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .eq('domain_url', domainUrl)
-      .maybeSingle();
-
-    if (existingDomain) {
-      return NextResponse.json(
-        { error: 'Domain already exists' },
-        { status: 400 }
-      );
-    }
-
     // Create GSC client
     const client = createGSCClientFromTokens({
       access_token: integration.access_token,
@@ -99,6 +132,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Clean domain name (remove protocol and trailing slashes)
+    const domainUrl = domain.domain;
     const cleanDomain = domainUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
     
     // For Search Console, we'll use domain properties (sc-domain:) which require INET_DOMAIN verification
@@ -153,22 +187,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Store domain in database
-    const { data: domain, error: domainError } = await supabase
-      .from('gsc_domains')
-      .insert({
+    // Update domain with GSC integration data
+    const { data: updatedDomain, error: updateError } = await supabase
+      .from('domains')
+      .update({
         user_id: session.user.id,
-        integration_id: integration.id,
-        domain_url: domainUrl,
-        site_url: siteUrl,
-        verification_method: verificationMethod,
-        verification_token: verificationToken,
-        verification_status: 'pending',
+        gsc_integration: {
+          integration_id: integration.id,
+          domain_url: domainUrl,
+          site_url: siteUrl,
+          verification_method: verificationMethod,
+          verification_token: verificationToken,
+          verification_status: 'pending',
+          permission_level: 'siteOwner',
+          last_synced_at: null,
+        },
+        updated_at: new Date().toISOString(),
       })
+      .eq('id', domainId)
       .select()
       .single();
 
-    if (domainError) throw domainError;
+    if (updateError) throw updateError;
 
     // Prepare response based on verification method
     let instructions: any;
@@ -198,15 +238,15 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      domain,
+      domain: updatedDomain,
       verificationToken,
       verificationMethod,
       instructions,
     });
   } catch (error: any) {
-    console.error('Add domain error:', error);
+    console.error('Add domain to GSC error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to add domain' },
+      { error: error.message || 'Failed to add domain to GSC' },
       { status: 500 }
     );
   }
@@ -214,7 +254,7 @@ export async function POST(request: NextRequest) {
 
 /**
  * DELETE /api/integrations/google-search-console/domains
- * Remove a domain
+ * Remove GSC integration from a domain
  */
 export async function DELETE(request: NextRequest) {
   try {
@@ -235,25 +275,26 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Delete domain (will cascade delete analytics)
+    // Remove GSC integration from domain
     const { error } = await supabase
-      .from('gsc_domains')
-      .delete()
-      .eq('id', domainId)
-      .eq('user_id', session.user.id);
+      .from('domains')
+      .update({
+        gsc_integration: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', domainId);
 
     if (error) throw error;
 
     return NextResponse.json({
       success: true,
-      message: 'Domain removed successfully',
+      message: 'GSC integration removed successfully',
     });
   } catch (error: any) {
-    console.error('Delete domain error:', error);
+    console.error('Delete GSC integration error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to delete domain' },
+      { error: error.message || 'Failed to remove GSC integration' },
       { status: 500 }
     );
   }
 }
-

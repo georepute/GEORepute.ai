@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     const state = searchParams.get('state');
     
     // Parse return_to from state parameter (passed during OAuth initiation)
-    let returnTo = '/dashboard/settings';
+    let returnTo = '/dashboard/google-search-console';
     if (state) {
       try {
         const stateData = JSON.parse(decodeURIComponent(state));
@@ -51,10 +51,22 @@ export async function GET(request: NextRequest) {
     }
 
     // Initialize OAuth client
+    // Use NEXT_PUBLIC_GOOGLE_CLIENT_ID for client-side access, but also check server-side vars
+    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+    const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const googleRedirectUri = process.env.GOOGLE_REDIRECT_URI;
+
+    if (!googleClientId || !googleClientSecret || !googleRedirectUri) {
+      console.error('❌ Missing required Google OAuth environment variables');
+      return NextResponse.redirect(
+        new URL(`${returnTo}?error=oauth_not_configured`, request.url)
+      );
+    }
+
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
+      googleClientId,
+      googleClientSecret,
+      googleRedirectUri
     );
 
     // Exchange code for tokens
@@ -161,13 +173,25 @@ export async function GET(request: NextRequest) {
 
     // Redirect back to original page with success message
     const returnUrl = new URL(returnTo, request.url);
-    returnUrl.searchParams.set('success', 'gsc_connected');
+    returnUrl.searchParams.set('gsc_connected', 'true');
     return NextResponse.redirect(returnUrl);
   } catch (error: any) {
     console.error('❌ GSC OAuth callback error:', error);
-    const returnTo = request.nextUrl.searchParams.get('return_to') || '/dashboard/settings';
+    
+    // Try to parse state for return_to
+    let returnTo = '/dashboard/google-search-console';
+    const stateParam = request.nextUrl.searchParams.get('state');
+    if (stateParam) {
+      try {
+        const state = JSON.parse(decodeURIComponent(stateParam));
+        returnTo = state.return_to || returnTo;
+      } catch (e) {
+        console.error('Failed to parse state parameter in error handler:', e);
+      }
+    }
+    
     return NextResponse.redirect(
-      new URL(`${returnTo}?error=${encodeURIComponent(error.message)}`, request.url)
+      new URL(`${returnTo}?gsc_error=${encodeURIComponent(error.message)}`, request.url)
     );
   }
 }

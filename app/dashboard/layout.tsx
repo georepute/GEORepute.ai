@@ -31,6 +31,8 @@ import {
   Zap,
   Globe,
   Brain,
+  Server,
+  Package,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -97,6 +99,7 @@ export default function DashboardLayout({
   };
 
   const allNavigation: NavigationItem[] = [
+    { name: t.dashboard.sidebar.domainManagement, href: "/dashboard/domains", icon: Server, requiredCapability: "canManageSettings" },
     { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
     { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
     { 
@@ -115,6 +118,14 @@ export default function DashboardLayout({
     // { name: t.dashboard.sidebar.reputation, href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
     // { name: t.dashboard.sidebar.leads, href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
     // { name: t.dashboard.sidebar.adSync, href: "/dashboard/adsync", icon: Zap, requiredCapability: "canViewAnalytics" },
+    { 
+      name: t.dashboard.sidebar.assetsHub, 
+      icon: Package, 
+      requiredCapability: "canViewAnalytics",
+      children: [
+        { name: t.dashboard.sidebar.googleSearchConsole, href: "/dashboard/google-search-console", icon: Search, requiredCapability: "canViewAnalytics" },
+      ]
+    },
     { 
       name: t.dashboard.sidebar.analytics, 
       icon: BarChart3, 

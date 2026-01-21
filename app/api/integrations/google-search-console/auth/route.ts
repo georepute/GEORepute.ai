@@ -20,7 +20,11 @@ export async function GET(request: NextRequest) {
     // Generate authorization URL
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline', // Get refresh token
-      scope: ['https://www.googleapis.com/auth/webmasters.readonly'],
+      scope: [
+        'https://www.googleapis.com/auth/webmasters.readonly',
+        'https://www.googleapis.com/auth/siteverification', // Required for domain verification
+        'https://www.googleapis.com/auth/webmasters', // Required for adding sites to GSC
+      ],
       prompt: 'consent', // Force consent screen to always get refresh token
     });
 

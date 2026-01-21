@@ -5,10 +5,20 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { TrendingUp, TrendingDown, Minus, MousePointerClick, Eye, ExternalLink, Search, Globe } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+interface GSCIntegrationData {
+  domain_url?: string;
+  verification_status?: 'pending' | 'verified' | 'failed';
+  last_synced_at?: string;
+  [key: string]: any;
+}
+
 interface Domain {
   id: string;
-  domain_url: string;
-  verification_status: string;
+  domain: string;
+  gsc_integration?: GSCIntegrationData | null;
+  // Computed fields for backward compatibility
+  domain_url?: string;
+  verification_status?: string;
   last_synced_at?: string;
 }
 
@@ -95,7 +105,16 @@ export default function GSCAnalyticsPage() {
       setLoadingDomains(true);
       const response = await fetch('/api/integrations/google-search-console/domains');
       const data = await response.json();
-      const verifiedDomains = data.domains?.filter((d: Domain) => d.verification_status === 'verified') || [];
+      
+      // Map domains and filter for verified ones
+      const mappedDomains = (data.domains || []).map((domain: any) => ({
+        ...domain,
+        domain_url: domain.gsc_integration?.domain_url || domain.domain,
+        verification_status: domain.gsc_integration?.verification_status || 'pending',
+        last_synced_at: domain.gsc_integration?.last_synced_at,
+      }));
+      
+      const verifiedDomains = mappedDomains.filter((d: Domain) => d.verification_status === 'verified');
       setDomains(verifiedDomains);
       
       if (verifiedDomains.length > 0 && !selectedDomain) {
@@ -307,6 +326,7 @@ export default function GSCAnalyticsPage() {
       });
 
       // Sync search appearance data
+      // Note: searchAppearance must be queried alone, cannot be combined with other dimensions
       const appearanceResponse = await fetch('/api/integrations/google-search-console/analytics/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -314,7 +334,7 @@ export default function GSCAnalyticsPage() {
           domainId: selectedDomain,
           startDate: getDateDaysAgo(7),
           endDate: getDateDaysAgo(0),
-          dimensions: ['date', 'searchAppearance'],
+          dimensions: ['searchAppearance'],
         }),
       });
 
@@ -386,7 +406,7 @@ export default function GSCAnalyticsPage() {
             </div>
             <h2 className="text-xl font-semibold text-gray-900 mb-2">No Verified Domains</h2>
             <p className="text-gray-600 mb-4">
-              You need to add and verify a domain before viewing analytics.
+              You need to add and verify a domain on google search console before viewing analytics.
             </p>
             <a
               href="/dashboard/google-search-console"
@@ -410,13 +430,6 @@ export default function GSCAnalyticsPage() {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Search Console Analytics</h1>
             <p className="text-gray-600">Track your website's search performance and insights</p>
           </div>
-          <a
-            href="/dashboard/google-search-console"
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm whitespace-nowrap"
-          >
-            <ExternalLink className="w-4 h-4" />
-            Add Domain
-          </a>
         </div>
 
         {/* Controls */}
