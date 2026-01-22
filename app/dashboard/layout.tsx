@@ -109,6 +109,7 @@ export default function DashboardLayout({
       children: [
         { name: t.dashboard.sidebar.newContent, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.missedPrompts, href: "/dashboard/missed-prompts", icon: FileText, requiredCapability: "canManageContent" },
+        { name: t.dashboard.sidebar.blog, href: "/dashboard/blog", icon: Globe, requiredCapability: "canManageContent" },
       ]
     },
     { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },

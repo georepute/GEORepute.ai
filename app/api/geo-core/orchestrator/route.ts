@@ -8,6 +8,7 @@ import { publishToQuora, QuoraConfig } from "@/lib/integrations/quora";
 import { publishToFacebook, FacebookConfig } from "@/lib/integrations/facebook";
 import { publishToLinkedIn, LinkedInConfig } from "@/lib/integrations/linkedin";
 import { publishToInstagram, InstagramConfig } from "@/lib/integrations/instagram";
+import { publishToShopify, ShopifyConfig } from "@/lib/integrations/shopify";
 
 /**
  * Content Orchestrator API
@@ -1149,6 +1150,63 @@ export async function POST(request: NextRequest) {
                   })
                   .eq("id", instagramIntegration.id);
               }
+            }
+          }
+
+          // Auto-publish to Shopify if platform is Shopify
+          let shopifyResult: any = null;
+          if (platform === "shopify") {
+            try {
+              const { data: shopifyIntegration } = await supabase
+                .from("platform_integrations")
+                .select("*")
+                .eq("user_id", session.user.id)
+                .eq("platform", "shopify")
+                .eq("status", "connected")
+                .maybeSingle();
+
+              if (shopifyIntegration && shopifyIntegration.access_token) {
+                const shopDomain = shopifyIntegration.metadata?.shopDomain || shopifyIntegration.platform_user_id;
+                
+                if (shopDomain) {
+                  const shopifyConfig: ShopifyConfig = {
+                    accessToken: shopifyIntegration.access_token,
+                    shopDomain: shopDomain,
+                  };
+
+                  shopifyResult = await publishToShopify(shopifyConfig, {
+                    title: contentStrategy.topic || "Untitled",
+                    body_html: contentStrategy.generated_content || "",
+                    author: "GeoRepute.ai",
+                    tags: contentStrategy.target_keywords?.join(", ") || "",
+                    published: true,
+                    image: contentStrategy.metadata?.imageUrl ? {
+                      src: contentStrategy.metadata.imageUrl,
+                    } : undefined,
+                  });
+
+                  if (shopifyResult.success && shopifyResult.url) {
+                    publishUrl = shopifyResult.url;
+                    console.log("✅ Shopify publish successful:", publishUrl);
+                    
+                    // Update last_used_at for the integration
+                    await supabase
+                      .from("platform_integrations")
+                      .update({ last_used_at: new Date().toISOString() })
+                      .eq("id", shopifyIntegration.id);
+                  }
+                } else {
+                  throw new Error("Shopify shop domain not configured");
+                }
+              } else {
+                throw new Error("Shopify integration not found or not connected. Please connect your Shopify store in Settings.");
+              }
+            } catch (shopifyError: any) {
+              console.error("Shopify publish error:", shopifyError);
+              shopifyResult = {
+                success: false,
+                error: shopifyError.message || "Shopify publish failed",
+              };
             }
           }
           

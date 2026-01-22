@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { 
   Settings as SettingsIcon,
   User,
@@ -25,7 +26,8 @@ import {
   Plus,
   Edit2,
   Trash2,
-  Star
+  Star,
+  ExternalLink
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useLanguage } from "@/lib/language-context";
@@ -1662,6 +1664,9 @@ NEXT_PUBLIC_GITHUB_CLIENT_ID=prod_client_id`}
       {/* Instagram Integration */}
       <InstagramIntegrationSettings />
 
+      {/* Shopify Integration */}
+      <ShopifyIntegrationSettings />
+
       {/* Google Search Console Integration */}
       <GoogleSearchConsoleSettings />
     </div>
@@ -2744,6 +2749,238 @@ function FacebookIntegrationSettings() {
               <>
                 <XCircle className="w-4 h-4" />
                 Disconnect
+              </>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Shopify Integration Component
+function ShopifyIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [shopDomain, setShopDomain] = useState("");
+  const [isConnected, setIsConnected] = useState(false);
+  const [shopName, setShopName] = useState("");
+  const [connectedDomain, setConnectedDomain] = useState("");
+
+  useEffect(() => {
+    loadShopifyConfig();
+    
+    // Check for success/error messages in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const success = urlParams.get("success");
+    const error = urlParams.get("error");
+    const tab = urlParams.get("tab");
+    
+    if (tab === "integrations") {
+      if (success) {
+        toast.success(success);
+        loadShopifyConfig();
+        // Clean URL
+        window.history.replaceState({}, "", "/dashboard/settings?tab=integrations");
+      } else if (error) {
+        toast.error(error);
+        // Clean URL
+        window.history.replaceState({}, "", "/dashboard/settings?tab=integrations");
+      }
+    }
+  }, []);
+
+  const loadShopifyConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/shopify");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.connected && data.config) {
+          setIsConnected(true);
+          setShopName(data.config.shopName || "");
+          setConnectedDomain(data.config.shopDomain || "");
+        } else {
+          setIsConnected(false);
+          setShopName("");
+          setConnectedDomain("");
+        }
+      }
+    } catch (error) {
+      console.error("Error loading Shopify config:", error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleConnect = async () => {
+    if (!shopDomain.trim()) {
+      toast.error("Please enter your Shopify store domain");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/shopify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "initiate",
+          shopDomain: shopDomain.trim(),
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.authUrl) {
+        // Redirect to Shopify OAuth
+        window.location.href = data.authUrl;
+      } else {
+        toast.error(data.error || "Failed to initiate Shopify connection");
+      }
+    } catch (error: any) {
+      console.error("Shopify connect error:", error);
+      toast.error("Failed to connect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect your Shopify store?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/shopify", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Shopify disconnected successfully");
+        setIsConnected(false);
+        setShopName("");
+        setConnectedDomain("");
+        setShopDomain("");
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/shopify.svg" alt="Shopify" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">Shopify Blog Publishing</h3>
+          <p className="text-sm text-gray-600">
+            Publish blog posts directly to your Shopify store
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-900 mb-4">
+              Connect your Shopify store to publish blog posts directly. You'll be redirected to Shopify to authorize access.
+            </p>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Shopify Store Domain *
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={shopDomain}
+                  onChange={(e) => setShopDomain(e.target.value)}
+                  placeholder="mystore"
+                  className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none"
+                />
+                <span className="flex items-center px-3 bg-gray-100 border border-gray-300 border-l-0 rounded-r-lg text-gray-500 text-sm">
+                  .myshopify.com
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Enter your store name (e.g., "mystore" for mystore.myshopify.com)
+              </p>
+            </div>
+
+            <button
+              onClick={handleConnect}
+              disabled={loading || !shopDomain.trim()}
+              className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <ExternalLink className="w-4 h-4" />
+                  Connect Shopify Store
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <p className="text-xs text-gray-600">
+              <strong>Note:</strong> You'll need to be logged into your Shopify admin to authorize the connection.
+              We only request permission to read and write blog content.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <div>
+                <p className="text-sm font-medium text-green-900">
+                  Connected to: {shopName || connectedDomain}
+                </p>
+                <p className="text-xs text-green-700">
+                  {connectedDomain}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-900">
+              <strong>Ready to publish!</strong> Go to the <Link href="/dashboard/blog" className="text-blue-600 hover:underline font-medium">Blog section</Link> in Content Generator to create and publish blog posts to your Shopify store.
+            </p>
+          </div>
+
+          <button
+            onClick={handleDisconnect}
+            disabled={loading}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Disconnecting...
+              </>
+            ) : (
+              <>
+                <XCircle className="w-4 h-4" />
+                Disconnect Shopify
               </>
             )}
           </button>

@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       language, // Language for content generation ("en" or "he")
       actionPlanId, // Optional: Link content to action plan
       actionPlanStepId, // Optional: Link content to specific step
+      sourceMissedPrompt, // Optional: Original missed prompt this content was created from
     } = body;
 
     // Get language preference: from request body, or from cookies as fallback
@@ -297,6 +298,7 @@ export async function POST(request: NextRequest) {
         actionPlanId, 
         actionPlanStepId 
       } : {}), // Link to action plan if provided
+      ...(sourceMissedPrompt ? { sourceMissedPrompt } : {}), // Track original missed prompt
       schema: {
         jsonLd: schemaJson, // Store as JSON for API access
         scriptTags: schemaScriptTags, // Store as HTML script tags for embedding

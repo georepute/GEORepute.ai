@@ -12,7 +12,6 @@ import {
   Copy,
   Check,
   AlertCircle,
-  Lightbulb,
   Brain,
   BarChart3,
   ChevronRight,
@@ -1397,25 +1396,6 @@ function ContentGeneratorPageInner() {
                           }
                         `}</style>
                       )}
-                    </div>
-                  </div>
-
-                  {/* Tips */}
-                  <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                    <div className="flex items-start gap-2">
-                      <Lightbulb className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <h4 className="font-semibold text-blue-900 text-sm mb-1">
-                          Pro Tips
-                        </h4>
-                        <ul className="text-xs text-blue-800 space-y-1">
-                          <li>• Test with GPTZero or Copyleaks to verify human score</li>
-                          <li>• Reddit platform typically scores highest (96%+)</li>
-                          <li>• Use "Subtle" influence for maximum authenticity</li>
-                          <li>• Add personal context for even better results</li>
-                          <li>• SEO schema is automatically generated in the background (check console/terminal)</li>
-                        </ul>
-                      </div>
                     </div>
                   </div>
 

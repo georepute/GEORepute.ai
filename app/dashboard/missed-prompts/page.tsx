@@ -16,6 +16,8 @@ import {
   Sparkles,
   TrendingUp,
   Lightbulb,
+  CheckCircle,
+  ExternalLink,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -36,6 +38,19 @@ interface Session {
   started_at: string;
 }
 
+interface PublishedContent {
+  id: string;
+  topic: string;
+  status: string;
+  published_url?: string;
+  target_platform: string;
+  created_at: string;
+  metadata?: {
+    sourceMissedPrompt?: string;
+    [key: string]: any;
+  };
+}
+
 export default function MissedPromptsPage() {
   const { isRtl, t, language } = useLanguage();
   const supabase = createClientComponentClient();
@@ -48,13 +63,14 @@ export default function MissedPromptsPage() {
   const [projectResponses, setProjectResponses] = useState<any[]>([]);
   const [loadingResponses, setLoadingResponses] = useState(false);
   const [viewResponseModal, setViewResponseModal] = useState<{ open: boolean; response: any; prompt: string } | null>(null);
+  const [publishedContent, setPublishedContent] = useState<PublishedContent[]>([]);
 
   // Fetch projects on mount
   useEffect(() => {
     fetchProjects();
   }, []);
 
-  // Fetch responses when project is selected
+  // Fetch responses and published content when project is selected
   useEffect(() => {
     if (selectedProject) {
       const latestCompleted = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
@@ -66,8 +82,61 @@ export default function MissedPromptsPage() {
           fetchProjectResponses(latestSession.id);
         }
       }
+      // Also fetch published content for this project's brand
+      fetchPublishedContent();
     }
   }, [selectedProject, projectSessions]);
+
+  // Fetch published content to check which prompts have been addressed
+  const fetchPublishedContent = async () => {
+    if (!selectedProject) return;
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Fetch all published content for this user (including metadata for sourceMissedPrompt)
+      const { data, error } = await supabase
+        .from('content_strategy')
+        .select('id, topic, status, published_url, target_platform, created_at, metadata')
+        .eq('user_id', user.id)
+        .eq('status', 'published')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching published content:', error);
+        return;
+      }
+
+      setPublishedContent(data || []);
+    } catch (error) {
+      console.error('Error fetching published content:', error);
+    }
+  };
+
+  // Check if a prompt has published content
+  const getPublishedContentForPrompt = (prompt: string): PublishedContent | undefined => {
+    // Normalize the prompt for comparison
+    const normalizedPrompt = prompt.trim().toLowerCase();
+    
+    // Check if any published content matches this prompt
+    return publishedContent.find(content => {
+      // First check the sourceMissedPrompt in metadata (most reliable)
+      if (content.metadata?.sourceMissedPrompt) {
+        const normalizedSource = content.metadata.sourceMissedPrompt.trim().toLowerCase();
+        if (normalizedSource === normalizedPrompt) {
+          return true;
+        }
+      }
+      
+      // Fallback: check if topic matches (for backward compatibility)
+      const normalizedTopic = content.topic.trim().toLowerCase();
+      // Check for exact match or if one contains the other (to handle slight variations)
+      return normalizedTopic === normalizedPrompt || 
+             normalizedTopic.includes(normalizedPrompt) || 
+             normalizedPrompt.includes(normalizedTopic);
+    });
+  };
 
   const fetchProjects = async () => {
     try {
@@ -306,45 +375,72 @@ export default function MissedPromptsPage() {
                 {Object.entries(groupedByPrompt).map(([promptKey, responses]) => {
                   const firstResponse = responses[0];
                   const uniquePrompt = firstResponse.prompt;
+                  const publishedForPrompt = getPublishedContentForPrompt(uniquePrompt);
+                  const isPublished = !!publishedForPrompt;
 
                   return (
                     <div
                       key={promptKey}
-                      className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors bg-white"
+                      className={`border rounded-lg p-4 transition-colors bg-white ${
+                        isPublished 
+                          ? 'border-green-200 bg-green-50/30' 
+                          : 'border-gray-200 hover:bg-gray-50'
+                      }`}
                     >
                       {/* Query Section */}
                       <div className="mb-4">
                         <div className="flex items-center justify-between mb-1">
                           <div className="text-sm font-medium text-gray-700">Query:</div>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              // Store data in sessionStorage for the content generation page
-                              const editData = {
-                                prompt: uniquePrompt,
-                                responses: responses.map(r => ({
-                                  id: r.id,
-                                  platform: r.platform,
-                                  response: r.response,
-                                  response_metadata: r.response_metadata
-                                })),
-                                projectId: selectedProject?.id,
-                                brandName: selectedProject?.brand_name,
-                                industry: selectedProject?.industry,
-                                keywords: selectedProject?.keywords || [],
-                                competitors: selectedProject?.competitors || []
-                              };
-                              sessionStorage.setItem('editPromptData', JSON.stringify(editData));
-                              router.push('/dashboard/content?source=missed-prompts&step=content-generation');
-                            }}
-                            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors"
-                            title="Generate new optimized content for this prompt"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                            Generate New Content
-                          </button>
+                          {isPublished ? (
+                            <div className="flex items-center gap-2">
+                              <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-md">
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                Published
+                              </span>
+                              {publishedForPrompt?.published_url && (
+                                <a
+                                  href={publishedForPrompt.published_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors"
+                                  title="View published content"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  View
+                                </a>
+                              )}
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                // Store data in sessionStorage for the content generation page
+                                const editData = {
+                                  prompt: uniquePrompt,
+                                  responses: responses.map(r => ({
+                                    id: r.id,
+                                    platform: r.platform,
+                                    response: r.response,
+                                    response_metadata: r.response_metadata
+                                  })),
+                                  projectId: selectedProject?.id,
+                                  brandName: selectedProject?.brand_name,
+                                  industry: selectedProject?.industry,
+                                  keywords: selectedProject?.keywords || [],
+                                  competitors: selectedProject?.competitors || []
+                                };
+                                sessionStorage.setItem('editPromptData', JSON.stringify(editData));
+                                router.push('/dashboard/content?source=missed-prompts&step=content-generation');
+                              }}
+                              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors"
+                              title="Generate new optimized content for this prompt"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              Generate New Content
+                            </button>
+                          )}
                         </div>
                         <div className="text-sm text-gray-900 bg-gray-50 p-2 rounded">
                           {uniquePrompt}
@@ -353,9 +449,15 @@ export default function MissedPromptsPage() {
 
                       {/* Status Badge */}
                       <div className="flex items-center justify-end mb-4">
-                        <span className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800">
-                          Brand Not Mentioned
-                        </span>
+                        {isPublished ? (
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
+                            Content Published on {publishedForPrompt?.target_platform}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800">
+                            Brand Not Mentioned
+                          </span>
+                        )}
                       </div>
 
                       {/* All Responses from Different Models */}

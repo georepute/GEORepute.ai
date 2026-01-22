@@ -174,6 +174,7 @@ function ContentInner() {
     { id: 'linkedin', name: 'LinkedIn', icon: '/linkedin.svg', color: 'bg-sky-100 text-sky-700 border-sky-200' },
     { id: 'instagram', name: 'Instagram', icon: '/instagram-1-svgrepo-com.svg', color: 'bg-pink-100 text-pink-700 border-pink-200' },
     { id: 'github', name: 'GitHub', icon: '/github-142.svg', color: 'bg-gray-800 text-white border-gray-700' },
+    { id: 'shopify', name: 'Shopify', icon: '/shopify.svg', color: 'bg-green-100 text-green-700 border-green-200' },
   ];
 
 
@@ -1454,6 +1455,8 @@ function ContentInner() {
       brandName: editData?.brandName || '',
       brandVoice: selectedVoiceId ? brandVoices.find((v: any) => v.id === selectedVoiceId) : null,
       influenceLevel: influenceLevel,
+      // Store the original missed prompt for tracking
+      sourceMissedPrompt: editData?.prompt || editedPrompt,
     };
     sessionStorage.setItem('aiVisibilityResponses', JSON.stringify(publicationData));
     
@@ -1631,6 +1634,7 @@ function ContentInner() {
             language: language || 'en', // Pass current language preference
             actionPlanId: actionPlanContext?.planId || undefined, // Link to action plan if present
             actionPlanStepId: actionPlanContext?.stepId || undefined, // Link to action plan step if present
+            sourceMissedPrompt: aiVisibilityData?.sourceMissedPrompt || undefined, // Track original missed prompt
             }),
           });
 

@@ -229,15 +229,16 @@ export default function AIVisibility() {
       // Check if there's a running analysis
       const hasRunningSession = projectSessions.some(s => s.status === 'running');
       
-      // Only fetch if:
-      // 1. We don't already have a cached summary, AND
-      // 2. There's no running analysis (to avoid showing old summary during new analysis)
-      if (!selectedProject.brand_summary && !hasRunningSession && !brandSummary) {
+      // Only fetch if we don't already have a summary showing
+      // Keep showing existing summary during analysis - don't clear it
+      if (!brandSummary && selectedProject.brand_summary) {
+        // Use cached summary from database
+        setBrandSummary(selectedProject.brand_summary);
+      } else if (!brandSummary && !selectedProject.brand_summary && !hasRunningSession) {
+        // Fetch new summary only if we don't have one and no analysis is running
         fetchBrandSummary();
-      } else if (hasRunningSession) {
-        // Clear summary when analysis is running
-        setBrandSummary(null);
       }
+      // Note: Don't clear summary when analysis is running - we want to keep showing it
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject?.id, activeTab, viewMode, selectedProject?.brand_summary, projectSessions]);
@@ -386,10 +387,14 @@ export default function AIVisibility() {
     }
   };
 
-  const fetchProjectDetails = async (projectId: string) => {
+  const fetchProjectDetails = async (projectId: string, preserveBrandSummary: boolean = false) => {
     try {
-      // Clear brand summary immediately when switching projects to prevent showing old data
-      setBrandSummary(null);
+      // Only clear brand summary when switching to a DIFFERENT project
+      // Don't clear when refreshing the same project (e.g., during analysis)
+      const isSameProject = selectedProject?.id === projectId;
+      if (!preserveBrandSummary && !isSameProject) {
+        setBrandSummary(null);
+      }
       
       // Fetch project (including brand_summary)
       const { data: project, error: projectError } = await supabase
@@ -412,16 +417,10 @@ export default function AIVisibility() {
       if (sessionsError) throw sessionsError;
       setProjectSessions(sessions || []);
 
-      // Check if there's a running analysis
-      const hasRunningSession = sessions?.some(s => s.status === 'running');
-      
-      // Only set brand summary if there's NO running analysis and summary exists
-      // This prevents showing old summary when new analysis is in progress
-      if (project.brand_summary && !hasRunningSession) {
+      // Set brand summary from project data if available and we don't already have one showing
+      // Keep showing existing brand summary during analysis
+      if (project.brand_summary && !brandSummary) {
         setBrandSummary(project.brand_summary);
-      } else {
-        // Clear summary if no summary exists or analysis is running
-        setBrandSummary(null);
       }
 
       // Calculate stats from latest completed session
@@ -827,50 +826,64 @@ export default function AIVisibility() {
       }
 
       // Step 1: Call brand-analysis-summary FIRST (replaces crawler)
-      console.log('📊 Generating brand summary...');
-      try {
-        const summaryResponse = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            projectId: project.id,
-            url: project.website_url,
-            brandName: project.brand_name,
-            industry: project.industry || '',
-            keywords: project.keywords || []
-          }),
-        });
+      // Only call if we don't already have a cached summary
+      console.log('📊 Checking brand summary...');
+      let summaryData = null;
+      
+      // Check if we already have a cached summary in the project
+      if (project.brand_summary) {
+        console.log('✅ Using cached brand summary from project');
+        summaryData = project.brand_summary;
+        setBrandSummary(summaryData);
+      } else {
+        // Fetch new summary
+        try {
+          const summaryResponse = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${supabaseAnonKey}`,
+            },
+            body: JSON.stringify({
+              projectId: project.id,
+              url: project.website_url,
+              brandName: project.brand_name,
+              industry: project.industry || '',
+              keywords: project.keywords || []
+            }),
+          });
 
-        if (summaryResponse.ok) {
-          const summaryData = await summaryResponse.json();
-          console.log('✅ Brand summary generated successfully');
-          
-          // Update project with summary data (for cards: truncated overview + favicon)
-          // The full summary is already saved in brand_summary column by the edge function
-          if (summaryData.summary?.overview) {
-            // Truncate overview to 5 lines for card display
-            const truncatedOverview = summaryData.summary.overview
-              .split('\n')
-              .slice(0, 5)
-              .join('\n');
+          if (summaryResponse.ok) {
+            summaryData = await summaryResponse.json();
+            console.log('✅ Brand summary generated successfully');
             
-            await supabase
-              .from('brand_analysis_projects')
-              .update({
-                company_description: truncatedOverview,
-                company_image_url: summaryData.favicon || null,
-              })
-              .eq('id', project.id);
+            // Set the brand summary state immediately so it shows in the UI
+            setBrandSummary(summaryData);
+            
+            // Update project with summary data (for cards: truncated overview + favicon)
+            // The full summary is already saved in brand_summary column by the edge function
+            if (summaryData.summary?.overview) {
+              // Truncate overview to 5 lines for card display
+              const truncatedOverview = summaryData.summary.overview
+                .split('\n')
+                .slice(0, 5)
+                .join('\n');
+              
+              await supabase
+                .from('brand_analysis_projects')
+                .update({
+                  company_description: truncatedOverview,
+                  company_image_url: summaryData.favicon || null,
+                })
+                .eq('id', project.id);
+            }
+          } else {
+            console.warn('⚠️ Brand summary generation failed, continuing with analysis');
           }
-        } else {
-          console.warn('⚠️ Brand summary generation failed, continuing with analysis');
+        } catch (summaryError) {
+          console.error('❌ Error generating brand summary:', summaryError);
+          // Continue with analysis even if summary generation fails
         }
-      } catch (summaryError) {
-        console.error('❌ Error generating brand summary:', summaryError);
-        // Continue with analysis even if summary generation fails
       }
 
       // Step 2: Call the brand-analysis edge function
@@ -900,15 +913,14 @@ export default function AIVisibility() {
       setShowAnalysisStartNotification(true);
       setTimeout(() => setShowAnalysisStartNotification(false), 5000);
 
-      // Clear brand summary state since new analysis is starting
-      setBrandSummary(null);
+      // Note: Don't clear brand summary - we want to keep showing it during analysis
 
       // Refresh projects to show updated status
       await fetchProjects();
       
-      // If this project is selected, refresh its details
+      // If this project is selected, refresh its details but preserve brand summary
       if (selectedProject?.id === project.id) {
-        await fetchProjectDetails(project.id);
+        await fetchProjectDetails(project.id, true);
       }
     } catch (error: any) {
       console.error('Error starting analysis:', error);
@@ -1085,11 +1097,17 @@ export default function AIVisibility() {
   };
 
   // Calculate overall stats
+  const projectsWithStats = projects.map(p => ({ project: p, stats: getProjectStats(p.id) }));
+  const projectsWithSentiment = projectsWithStats.filter(ps => ps.stats.sentiment !== 0);
+  
   const overallStats = {
-    totalMentions: projects.reduce((sum, p) => sum + getProjectStats(p.id).mentions, 0),
+    totalMentions: projectsWithStats.reduce((sum, ps) => sum + ps.stats.mentions, 0),
     activePlatforms: new Set(projects.flatMap(p => p.active_platforms || [])).size,
     avgVisibility: projects.length > 0 
-      ? Math.round(projects.reduce((sum, p) => sum + getProjectStats(p.id).visibility, 0) / projects.length)
+      ? Math.round(projectsWithStats.reduce((sum, ps) => sum + ps.stats.visibility, 0) / projects.length)
+      : 0,
+    avgSentiment: projectsWithSentiment.length > 0
+      ? Math.round(projectsWithSentiment.reduce((sum, ps) => sum + ps.stats.sentiment, 0) / projectsWithSentiment.length)
       : 0,
   };
 
@@ -1142,13 +1160,25 @@ export default function AIVisibility() {
               <p className="text-sm text-gray-600">{t.dashboard.aiVisibility.avgVisibility}</p>
               <p className="text-xs text-gray-500 mt-1">{t.dashboard.aiVisibility.mentionRate}</p>
             </div>
-            <div className="bg-white border-2 border-red-200 rounded-lg p-6">
+            <div className={`bg-white border-2 rounded-lg p-6 ${
+              overallStats.avgSentiment > 30 ? 'border-green-200' :
+              overallStats.avgSentiment < -30 ? 'border-red-200' :
+              'border-gray-200'
+            }`}>
               <div className={`flex items-center justify-between mb-2 ${isRtl ? 'flex-row-reverse' : ''}`}>
-                <BarChart3 className="w-5 h-5 text-red-600" />
-                <span className="text-2xl font-bold text-gray-900">0%</span>
+                <BarChart3 className={`w-5 h-5 ${
+                  overallStats.avgSentiment > 30 ? 'text-green-600' :
+                  overallStats.avgSentiment < -30 ? 'text-red-600' :
+                  'text-gray-400'
+                }`} />
+                <span className="text-2xl font-bold text-gray-900">{overallStats.avgSentiment}%</span>
               </div>
               <p className="text-sm text-gray-600">{t.dashboard.aiVisibility.avgSentiment}</p>
-              <p className="text-xs text-gray-500 mt-1">-100%</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {overallStats.avgSentiment > 30 ? 'Positive' :
+                 overallStats.avgSentiment < -30 ? 'Negative' :
+                 'Neutral'}
+              </p>
             </div>
           </div>
 
@@ -1729,22 +1759,28 @@ export default function AIVisibility() {
                       <div>
                         <h3 className="text-lg font-semibold text-gray-900 mb-3">All Competitors ({results.competitors.all.length})</h3>
                         <div className="space-y-2">
-                          {results.competitors.all.map((competitor: string, idx: number) => (
-                            <div key={idx} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                              <span className="text-gray-900 font-medium">{competitor}</span>
-                            </div>
-                          ))}
+                          {results.competitors.all.map((competitor: string | { name: string; domain?: string }, idx: number) => {
+                            const competitorName = typeof competitor === 'string' ? competitor : competitor.name;
+                            return (
+                              <div key={idx} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                                <span className="text-gray-900 font-medium">{competitorName}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                       {results.competitors.organic && results.competitors.organic.length > 0 && (
                         <div>
                           <h3 className="text-lg font-semibold text-gray-900 mb-3">Organic Competitors ({results.competitors.organic.length})</h3>
                           <div className="space-y-2">
-                            {results.competitors.organic.map((competitor: string, idx: number) => (
-                              <div key={idx} className="p-3 bg-blue-50 rounded-lg">
-                                <span className="text-blue-900 font-medium">{competitor}</span>
-                              </div>
-                            ))}
+                            {results.competitors.organic.map((competitor: string | { name: string; domain?: string }, idx: number) => {
+                              const competitorName = typeof competitor === 'string' ? competitor : competitor.name;
+                              return (
+                                <div key={idx} className="p-3 bg-blue-50 rounded-lg">
+                                  <span className="text-blue-900 font-medium">{competitorName}</span>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -2017,8 +2053,25 @@ export default function AIVisibility() {
                       const competitorMap: Record<string, number> = {};
                       projectResponses.forEach((response) => {
                         const competitors = response.response_metadata?.competitors_found || [];
-                        competitors.forEach((comp: string) => {
-                          competitorMap[comp] = (competitorMap[comp] || 0) + 1;
+                        competitors.forEach((comp: string | { name: string; domain?: string }) => {
+                          // Handle both string, JSON string, and object formats
+                          let compName: string;
+                          if (typeof comp === 'string') {
+                            if (comp.startsWith('{') && comp.includes('name')) {
+                              try {
+                                compName = JSON.parse(comp).name || comp;
+                              } catch {
+                                compName = comp;
+                              }
+                            } else {
+                              compName = comp;
+                            }
+                          } else {
+                            compName = comp?.name || String(comp);
+                          }
+                          if (compName) {
+                            competitorMap[compName] = (competitorMap[compName] || 0) + 1;
+                          }
                         });
                       });
                       const topCompetitor = Object.entries(competitorMap).sort((a, b) => b[1] - a[1])[0];
@@ -2450,7 +2503,25 @@ export default function AIVisibility() {
                           projectResponses.forEach((response) => {
                             const metadata = response.response_metadata;
                             if (metadata?.competitors_found && Array.isArray(metadata.competitors_found)) {
-                              metadata.competitors_found.forEach((competitor: string) => {
+                              metadata.competitors_found.forEach((comp: string | { name: string; domain?: string }) => {
+                                // Handle both string, JSON string, and object formats
+                                let competitor: string;
+                                if (typeof comp === 'string') {
+                                  // Check if it's a JSON string
+                                  if (comp.startsWith('{') && comp.includes('name')) {
+                                    try {
+                                      competitor = JSON.parse(comp).name || comp;
+                                    } catch {
+                                      competitor = comp;
+                                    }
+                                  } else {
+                                    competitor = comp;
+                                  }
+                                } else {
+                                  competitor = comp?.name || '';
+                                }
+                                if (!competitor) return;
+                                
                                 if (!competitorData[competitor]) {
                                   competitorData[competitor] = {
                                     mentions: 0,
@@ -2488,8 +2559,30 @@ export default function AIVisibility() {
                                   <span className="text-gray-600">Tracked competitors: </span>
                                   <div className="flex flex-wrap gap-2 mt-1">
                                     {selectedProject.competitors.map((comp, idx) => {
-                                      const compName = typeof comp === 'string' ? comp : comp.name;
-                                      const compDomain = typeof comp === 'string' ? undefined : comp.domain;
+                                      // Handle different formats: string, JSON string, or object
+                                      let compName: string;
+                                      let compDomain: string | undefined;
+                                      
+                                      if (typeof comp === 'string') {
+                                        // Check if it's a JSON string that needs parsing
+                                        if (comp.startsWith('{') && comp.includes('name')) {
+                                          try {
+                                            const parsed = JSON.parse(comp);
+                                            compName = parsed.name || comp;
+                                            compDomain = parsed.domain;
+                                          } catch {
+                                            compName = comp;
+                                          }
+                                        } else {
+                                          compName = comp;
+                                        }
+                                      } else if (comp && typeof comp === 'object') {
+                                        compName = comp.name || 'Unknown';
+                                        compDomain = comp.domain;
+                                      } else {
+                                        compName = String(comp);
+                                      }
+                                      
                                       return (
                                         <span key={idx} className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-xs">
                                           <CompetitorLogo name={compName} domain={compDomain} size={16} />
@@ -2891,10 +2984,24 @@ export default function AIVisibility() {
                                 const competitorMentionCount: Record<string, number> = {};
                                 
                                 projectResponses.forEach((response) => {
-                                  const competitors = (response.response_metadata?.competitors_found || []) as string[];
+                                  const competitorsRaw = response.response_metadata?.competitors_found || [];
+                                  // Extract competitor names, handling both string and object formats
+                                  const competitorNames = competitorsRaw.map((comp: string | { name: string; domain?: string }) => {
+                                    if (typeof comp === 'string') {
+                                      if (comp.startsWith('{') && comp.includes('name')) {
+                                        try {
+                                          return JSON.parse(comp).name || comp;
+                                        } catch {
+                                          return comp;
+                                        }
+                                      }
+                                      return comp;
+                                    }
+                                    return comp?.name || String(comp);
+                                  }).filter(Boolean);
                                   // Track unique competitors per response to avoid double counting
-                                  const uniqueCompetitors = [...new Set(competitors)];
-                                  uniqueCompetitors.forEach((competitor) => {
+                                  const uniqueCompetitors = [...new Set(competitorNames)] as string[];
+                                  uniqueCompetitors.forEach((competitor: string) => {
                                     competitorMentionCount[competitor] = (competitorMentionCount[competitor] || 0) + 1;
                                   });
                                 });
@@ -3719,7 +3826,20 @@ export default function AIVisibility() {
                   <span className="text-sm font-medium text-gray-600">Competitors:</span>
                   <p className="text-gray-900">
                     {competitors.length > 0 
-                      ? competitors.map(c => typeof c === 'string' ? c : c.name).join(", ")
+                      ? competitors.map(c => {
+                          if (typeof c === 'string') {
+                            // Check if it's a JSON string
+                            if (c.startsWith('{') && c.includes('name')) {
+                              try {
+                                return JSON.parse(c).name || c;
+                              } catch {
+                                return c;
+                              }
+                            }
+                            return c;
+                          }
+                          return c?.name || String(c);
+                        }).join(", ")
                       : "None"}
                   </p>
                 </div>
