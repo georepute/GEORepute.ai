@@ -37,6 +37,7 @@ export async function POST(request: NextRequest) {
       actionPlanId, // Optional: Link content to action plan
       actionPlanStepId, // Optional: Link content to specific step
       sourceMissedPrompt, // Optional: Original missed prompt this content was created from
+      skipSchema, // Skip schema generation (generate content only, schema later)
     } = body;
 
     // Get language preference: from request body, or from cookies as fallback
@@ -157,8 +158,9 @@ export async function POST(request: NextRequest) {
       }, learningRules);
     }
 
-    // Generate Structured SEO Elements (headings, FAQs, meta description, OG tags, internal links, canonical) for SCHEMA DATA - AUTOMATIC
+    // Generate Structured SEO Elements (headings, FAQs, meta description, OG tags, internal links, canonical) for SCHEMA DATA
     // NOTE: These are for schema only, NOT added to content text (content stays natural)
+    // Skip schema generation if skipSchema is true (for blog content generation - schema generated separately)
     let metaDescription = result.content.substring(0, 160);
     let headings: any[] = [];
     let faqs: any[] = [];
@@ -167,6 +169,9 @@ export async function POST(request: NextRequest) {
     let internalLinks: any[] = [];
     let canonicalUrl: string | undefined = undefined;
 
+    if (skipSchema) {
+      console.log("⏭️ Skipping schema generation (skipSchema: true)");
+    } else {
     try {
       const keywordsArray = targetKeywords 
         ? (Array.isArray(targetKeywords) ? targetKeywords : targetKeywords.split(",").map((k: string) => k.trim()).filter(Boolean))
@@ -245,12 +250,17 @@ export async function POST(request: NextRequest) {
         canonicalUrl: "✅ Generated",
       });
     }
+    } // End of if (!skipSchema) for structured SEO
 
     // ========================================
     // SEO SCHEMA GENERATION - ENABLED
     // ========================================
     let schemaJson: any[] = [];
     let schemaScriptTags = "";
+    
+    if (skipSchema) {
+      console.log("⏭️ Skipping JSON-LD schema generation (skipSchema: true)");
+    } else {
     
     try {
       const keywordsArray = Array.isArray(targetKeywords) ? targetKeywords : targetKeywords.split(",").map((k: string) => k.trim()).filter(Boolean);
@@ -285,6 +295,7 @@ export async function POST(request: NextRequest) {
       // Schema generation failed, but continue without it
       // This ensures content generation always succeeds even if schema fails
     }
+    } // End of if (!skipSchema) for JSON-LD schema
 
     // Save to database - use normalized platform value
     console.log('💾 Saving to database with platform:', normalizedPlatform);

@@ -50,13 +50,13 @@ export interface KeywordForecast {
 export interface ContentGenerationInput {
   topic: string;
   targetKeywords: string[];
-  targetPlatform: "reddit" | "quora" | "medium" | "github" | "linkedin" | "twitter" | "instagram" | "facebook";
+  targetPlatform: "reddit" | "quora" | "medium" | "github" | "linkedin" | "twitter" | "instagram" | "facebook" | "shopify";
   brandMention?: string;
   influenceLevel: "subtle" | "moderate" | "strong";
   userContext?: string;
   brandVoice?: any; // Brand voice profile
   language?: "en" | "he"; // Language for content generation (default: "en")
-  contentType?: "article" | "post" | "answer" | "newsletter" | "linkedin_article" | "linkedin_post"; // Content type for formatting
+  contentType?: "article" | "post" | "answer" | "newsletter" | "linkedin_article" | "linkedin_post" | "blog_article"; // Content type for formatting
 }
 
 export interface ContentGenerationOutput {
@@ -329,6 +329,7 @@ export async function generateStrategicContent(
     twitter: "short, witty, spontaneous, a bit emotional",
     facebook: "casual, personal, community-focused, friendly",
     instagram: "visual storytelling, authentic, trendy, personal",
+    shopify: "professional, informative, comprehensive, SEO-optimized, blog-style with HTML formatting",
   };
 
   const influenceGuidelines = {
@@ -550,6 +551,33 @@ ${input.targetPlatform === 'twitter' ? `- Twitter style: ${input.brandVoice ? "F
 - Emojis feel natural: 😅 🤷 💭 🔥 📈
 - Thread-like thinking, stream of consciousness
 ${input.brandVoice ? `- IGNORE "casual punchy" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
+${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
+- 📝 SHOPIFY BLOG ARTICLE FORMAT (COMPREHENSIVE LONG-FORM):
+- LENGTH: 1200-2000 words - this is a FULL blog article, NOT a short post
+- STRUCTURE: Use proper HTML formatting for Shopify:
+  * <h2> for main section headings (4-6 sections minimum)
+  * <h3> for subsections
+  * <p> for paragraphs
+  * <ul><li> for bullet points
+  * <ol><li> for numbered lists
+  * <strong> for emphasis
+  * <em> for italic text
+  * <a href="..."> for links if relevant
+- INTRODUCTION: Hook the reader with a compelling opening paragraph
+- BODY: Comprehensive coverage with multiple sections:
+  * Each section should have 2-4 paragraphs
+  * Include practical tips and examples
+  * Add actionable advice readers can implement
+  * Use subheadings to break up content
+- CONCLUSION: Summary with clear call-to-action
+- SEO: Include target keywords in:
+  * At least 2 headings
+  * First paragraph
+  * Throughout content naturally (2-3% density)
+- TONE: Professional, informative, engaging, helpful
+- NO EMOJIS in blog content
+- Write like a professional blogger, not a casual social post
+${input.brandVoice ? `- Maintain your ${input.brandVoice.tone} brand voice tone throughout` : ""}` : ''}
 
 5️⃣ **KEYWORD INTEGRATION (NATURAL, NOT FORCED)**
 - Use keywords naturally in conversation, not as SEO stuffing
@@ -563,10 +591,22 @@ ${input.brandMention ? `- ${influenceGuidelines[input.influenceLevel]}
 - Don't sound like an ad. Sound like a friend recommending something.` : '- No brand mention needed'}
 
 7️⃣ **LENGTH & FORMATTING**
+${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
+- BLOG ARTICLE FORMAT: Write a comprehensive, long-form blog post (1200-2000 words)
+- Include an engaging introduction that hooks the reader
+- Use HTML headings: <h2> for main sections, <h3> for subsections
+- Include 4-6 main sections with detailed content in each
+- Add practical tips, examples, and actionable advice
+- Use bullet points (<ul><li>) and numbered lists (<ol><li>) where appropriate
+- Include a conclusion with a call-to-action
+- Format with proper HTML tags for Shopify: <p>, <h2>, <h3>, <ul>, <li>, <strong>, <em>
+- Make content SEO-optimized with keywords in headings and throughout
+` : `
 - 150-300 words naturally (don't count, just write)
 ${learningRules?.wordCount ? `- Target: ${learningRules.wordCount.min || 150}-${learningRules.wordCount.max || 300} words` : ''}
+`}
 - Paragraphs vary: Sometimes 1 sentence, sometimes 5 sentences
-- No bullet points unless platform-specific (Reddit sometimes)
+- No bullet points unless platform-specific (Reddit, Shopify blog)
 - Natural line breaks, not structured sections
 
 8️⃣ **PRE-WRITE CHECKLIST (VERIFY ALL):**
@@ -688,7 +728,8 @@ Respond ONLY in JSON with "content" field containing the text.`;
       top_p: 0.98,             // Maximum creative token selection
       frequency_penalty: 0.7,  // Very strong penalty to prevent repetition
       presence_penalty: 0.7,   // Very strong encouragement for variety
-      max_tokens: 2000,
+      // Use higher token limit for blog articles to allow longer content
+      max_tokens: (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : 2000,
     });
 
     const raw = response.choices[0]?.message?.content || "{}";

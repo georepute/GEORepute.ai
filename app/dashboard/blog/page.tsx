@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useLanguage } from "@/lib/language-context";
+import dynamic from "next/dynamic";
 import { 
   FileText,
   Send,
@@ -22,9 +23,19 @@ import {
   Sparkles,
   Store,
   ArrowRight,
+  Search,
+  Camera,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Link from "next/link";
+import Image from "next/image";
+import "react-quill/dist/quill.snow.css";
+
+// Dynamic import for React Quill (client-side only)
+const ReactQuill = dynamic(() => import("react-quill"), { 
+  ssr: false,
+  loading: () => <div className="h-64 bg-gray-100 rounded-lg animate-pulse flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+});
 
 interface ShopifyBlog {
   id: number;
@@ -71,9 +82,43 @@ export default function BlogPage() {
   const [contentGenerated, setContentGenerated] = useState(false);
   const [sendingToPublication, setSendingToPublication] = useState(false);
 
+  // Image selection state (Pixabay)
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [imageSearchQuery, setImageSearchQuery] = useState("");
+  const [fetchingImages, setFetchingImages] = useState(false);
+  const [pixabayImages, setPixabayImages] = useState<any[]>([]);
+  const [selectedImage, setSelectedImage] = useState<any | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+
+
   // Published posts state
   const [publishedPosts, setPublishedPosts] = useState<any[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
+
+  // React Quill editor configuration
+  const quillModules = useMemo(() => ({
+    toolbar: [
+      [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
+      ['bold', 'italic', 'underline', 'strike'],
+      [{ 'color': [] }, { 'background': [] }],
+      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+      [{ 'indent': '-1'}, { 'indent': '+1' }],
+      [{ 'align': [] }],
+      ['blockquote', 'code-block'],
+      ['link', 'image'],
+      ['clean']
+    ],
+  }), []);
+
+  const quillFormats = [
+    'header',
+    'bold', 'italic', 'underline', 'strike',
+    'color', 'background',
+    'list', 'bullet', 'indent',
+    'align',
+    'blockquote', 'code-block',
+    'link', 'image'
+  ];
 
   // Check Shopify connection on mount
   useEffect(() => {
@@ -158,7 +203,7 @@ export default function BlogPage() {
 
     setGeneratingContent(true);
     try {
-      // Call the content generation API
+      // Call the content generation API (skip schema - will be generated when sending to publication)
       const response = await fetch("/api/geo-core/content-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -168,6 +213,7 @@ export default function BlogPage() {
           targetKeywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
           influenceLevel: "moderate",
           contentType: "blog_article",
+          skipSchema: true, // Schema will be generated when clicking "Send to Publication"
         }),
       });
 
@@ -179,16 +225,36 @@ export default function BlogPage() {
       const data = await response.json();
       
       if (data.content) {
-        // Update the post with generated content
+        // Generate a summary from the content (first 2-3 sentences or 150-200 chars)
+        let generatedSummary = data.structuredSEO?.metaDescription || "";
+        if (!generatedSummary) {
+          // Extract summary from content - get text without HTML tags
+          const textContent = data.content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+          // Get first ~200 characters ending at a word boundary
+          if (textContent.length > 200) {
+            generatedSummary = textContent.substring(0, 200).replace(/\s+\S*$/, '') + '...';
+          } else {
+            generatedSummary = textContent;
+          }
+        }
+
+        // Update the post with generated content and summary
+        // NOTE: Schema will be generated separately when clicking "Send to Publication"
         setPost({
           ...post,
           title: topic.trim(),
           content: data.content,
           tags: targetKeywords || "",
-          summary: data.metadata?.summary || "",
+          summary: generatedSummary,
         });
+        
         setContentGenerated(true);
-        toast.success("Blog content generated! Review and edit as needed.");
+        
+        // Set image search query and show image modal
+        setImageSearchQuery(topic.trim());
+        setShowImageModal(true);
+        
+        toast.success("Blog content generated! Now select a featured image.");
       } else {
         throw new Error("No content generated");
       }
@@ -198,6 +264,114 @@ export default function BlogPage() {
     } finally {
       setGeneratingContent(false);
     }
+  };
+
+  // Fetch images from Pixabay
+  const handleFetchImages = async () => {
+    if (!imageSearchQuery || imageSearchQuery.trim().length === 0) {
+      toast.error("Please enter a search query");
+      return;
+    }
+
+    setFetchingImages(true);
+    setPixabayImages([]);
+
+    try {
+      const response = await fetch("/api/geo-core/pixabay-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: imageSearchQuery,
+          keywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to fetch images");
+      }
+
+      const data = await response.json();
+      if (data.images && data.images.length > 0) {
+        setPixabayImages(data.images);
+      } else {
+        toast.error("No images found. Try a different search query.");
+      }
+    } catch (err) {
+      console.error("Error fetching images:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to fetch images");
+    } finally {
+      setFetchingImages(false);
+    }
+  };
+
+  // Upload image to Supabase Storage
+  const uploadImageToStorage = async (imageUrl: string, imageId: number): Promise<string | null> => {
+    try {
+      setUploadingImage(true);
+
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+
+      const timestamp = Date.now();
+      const filename = `blog-image-${imageId}-${timestamp}.jpg`;
+
+      const { data, error } = await supabase.storage
+        .from("platform-content-images")
+        .upload(filename, blob, {
+          contentType: "image/jpeg",
+          upsert: true,
+        });
+
+      if (error) {
+        console.error("Error uploading image:", error);
+        throw error;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from("platform-content-images")
+        .getPublicUrl(data.path);
+
+      return urlData.publicUrl;
+    } catch (err) {
+      console.error("Failed to upload image:", err);
+      toast.error("Failed to upload image to storage");
+      return null;
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // Handle image selection
+  const handleSelectImage = async (image: any) => {
+    setSelectedImage(image);
+
+    // Upload image to Supabase Storage
+    toast.loading("Uploading image...", { id: "image-upload" });
+    const publicUrl = await uploadImageToStorage(image.largeImageURL, image.id);
+
+    if (publicUrl) {
+      setPost({ ...post, imageUrl: publicUrl });
+      toast.success("Image uploaded and selected!", { id: "image-upload" });
+    } else {
+      toast.error("Failed to upload image", { id: "image-upload" });
+    }
+  };
+
+  // Confirm image selection and close modal
+  const handleConfirmImage = () => {
+    if (!selectedImage && !post.imageUrl) {
+      toast.error("Please select an image or skip");
+      return;
+    }
+    setShowImageModal(false);
+    toast.success("Featured image set! Review your blog post below.");
+  };
+
+  // Skip image selection
+  const handleSkipImage = () => {
+    setShowImageModal(false);
+    toast.success("Image skipped. You can add one later.");
   };
 
   const handleStartOver = () => {
@@ -211,6 +385,10 @@ export default function BlogPage() {
       imageUrl: "",
       summary: "",
     });
+    // Reset image selection state
+    setSelectedImage(null);
+    setPixabayImages([]);
+    setImageSearchQuery("");
     setContentGenerated(false);
   };
 
@@ -231,7 +409,6 @@ export default function BlogPage() {
 
     setSendingToPublication(true);
     try {
-      // First, save the content to content_strategy table
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toast.error("Please log in to continue");
@@ -239,7 +416,50 @@ export default function BlogPage() {
         return;
       }
 
-      // Check for existing draft with same title - update it instead of creating duplicate
+      // Clean up imageUrl - don't store base64 data URLs (too large)
+      const cleanImageUrl = post.imageUrl && !post.imageUrl.startsWith('data:') ? post.imageUrl : "";
+      const keywordsArray = post.tags ? post.tags.split(",").map(t => t.trim()) : [];
+
+      let schemaData = null;
+      let structuredSEO = null;
+
+      // Generate schema for the content
+      toast.loading("Generating SEO schema...", { id: "schema-generation" });
+      console.log("🔄 Generating schema for blog content...");
+      
+      const schemaResponse = await fetch("/api/geo-core/content-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: post.title,
+          targetPlatform: "shopify",
+          targetKeywords: keywordsArray,
+          influenceLevel: "moderate",
+          contentType: "blog_article",
+          skipGeneration: true, // Use existing content, just generate schema
+          generatedContent: post.content,
+          imageUrl: cleanImageUrl || undefined,
+        }),
+      });
+
+      if (schemaResponse.ok) {
+        const schemaResult = await schemaResponse.json();
+        schemaData = schemaResult.schema || null;
+        structuredSEO = schemaResult.structuredSEO || null;
+        console.log("✅ Schema generated:", JSON.stringify(schemaData, null, 2));
+        console.log("✅ Structured SEO:", JSON.stringify(structuredSEO, null, 2));
+        toast.success("Schema generated!", { id: "schema-generation" });
+      } else {
+        const errorData = await schemaResponse.json().catch(() => ({}));
+        console.error("❌ Schema generation failed:", errorData);
+        toast.error("Schema generation failed: " + (errorData.error || "Unknown error"), { id: "schema-generation" });
+      }
+
+      // Debug: Log what we're about to save
+      console.log("📋 Schema data to save:", schemaData ? "Present" : "Missing");
+      console.log("📋 StructuredSEO to save:", structuredSEO ? "Present" : "Missing");
+
+      // Step 2: Check for existing draft with same title
       const { data: existingContent } = await supabase
         .from("content_strategy")
         .select("id")
@@ -252,8 +472,17 @@ export default function BlogPage() {
       let contentRecord;
       let insertError;
 
-      // Clean up imageUrl - don't store base64 data URLs (too large)
-      const cleanImageUrl = post.imageUrl && !post.imageUrl.startsWith('data:') ? post.imageUrl : "";
+      // Build metadata with schema
+      const contentMetadata = {
+        author: post.author || "GeoRepute.ai",
+        tags: post.tags,
+        imageUrl: cleanImageUrl,
+        summary: post.summary,
+        shopifyBlogId: selectedBlogId,
+        contentType: "blog_article",
+        schema: schemaData,
+        structuredSEO: structuredSEO,
+      };
 
       if (existingContent) {
         // Update existing draft
@@ -261,15 +490,8 @@ export default function BlogPage() {
           .from("content_strategy")
           .update({
             generated_content: post.content,
-            target_keywords: post.tags ? post.tags.split(",").map(t => t.trim()) : [],
-            metadata: {
-              author: post.author || "GeoRepute.ai",
-              tags: post.tags,
-              imageUrl: cleanImageUrl,
-              summary: post.summary,
-              shopifyBlogId: selectedBlogId,
-              contentType: "blog_article",
-            },
+            target_keywords: keywordsArray,
+            metadata: contentMetadata,
           })
           .eq("id", existingContent.id)
           .select()
@@ -277,7 +499,6 @@ export default function BlogPage() {
         
         contentRecord = data;
         insertError = error;
-        toast.success("Updated existing draft!");
       } else {
         // Create new content record
         const { data, error } = await supabase
@@ -288,15 +509,8 @@ export default function BlogPage() {
             generated_content: post.content,
             target_platform: "shopify",
             status: "draft",
-            target_keywords: post.tags ? post.tags.split(",").map(t => t.trim()) : [],
-            metadata: {
-              author: post.author || "GeoRepute.ai",
-              tags: post.tags,
-              imageUrl: cleanImageUrl,
-              summary: post.summary,
-              shopifyBlogId: selectedBlogId,
-              contentType: "blog_article",
-            },
+            target_keywords: keywordsArray,
+            metadata: contentMetadata,
           })
           .select()
           .single();
@@ -316,21 +530,16 @@ export default function BlogPage() {
         content: post.content,
         topic: post.title,
         targetPlatform: "shopify",
-        targetKeywords: post.tags ? post.tags.split(",").map(t => t.trim()) : [],
-        metadata: {
-          author: post.author || "GeoRepute.ai",
-          tags: post.tags,
-          imageUrl: cleanImageUrl,
-          summary: post.summary,
-          shopifyBlogId: selectedBlogId,
-          contentType: "blog_article",
-        },
+        targetKeywords: keywordsArray,
+        metadata: contentMetadata,
+        schema: schemaData,
+        structuredSEO: structuredSEO,
         generatedAt: new Date().toISOString(),
       };
 
       sessionStorage.setItem('contentToPublish', JSON.stringify(publishData));
 
-      toast.success("Content saved! Redirecting to publication page...");
+      toast.success("Content saved with schema! Redirecting...");
       
       // Clear form and reset state
       setTopic("");
@@ -538,20 +747,25 @@ export default function BlogPage() {
                         />
                       </div>
 
-                      {/* Content */}
+                      {/* Content - Rich Text Editor */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Content * <span className="text-gray-400 font-normal">(HTML supported)</span>
+                          Content * <span className="text-gray-400 font-normal">(Use the toolbar to format)</span>
                         </label>
-                        <textarea
-                          value={post.content}
-                          onChange={(e) => setPost({ ...post, content: e.target.value })}
-                          placeholder="Write your blog post content here... HTML tags are supported."
-                          rows={12}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all resize-none font-mono text-sm"
-                        />
+                        <div className="border border-gray-300 rounded-lg overflow-hidden focus-within:border-purple-500 focus-within:ring-2 focus-within:ring-purple-500/20 transition-all">
+                          <ReactQuill
+                            theme="snow"
+                            value={post.content}
+                            onChange={(content) => setPost({ ...post, content })}
+                            modules={quillModules}
+                            formats={quillFormats}
+                            placeholder="Write your blog post content here..."
+                            className="bg-white"
+                            style={{ minHeight: '350px' }}
+                          />
+                        </div>
                         <p className="text-xs text-gray-500 mt-1">
-                          Tip: Use HTML tags like &lt;p&gt;, &lt;h2&gt;, &lt;ul&gt;, &lt;strong&gt; for formatting
+                          Use the toolbar above to add headings, bold, lists, links, and more
                         </p>
                       </div>
 
@@ -740,6 +954,180 @@ export default function BlogPage() {
           </div>
         )}
       </div>
+
+      {/* Image Selection Modal */}
+      {showImageModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
+                  <Camera className="w-5 h-5 text-purple-600" />
+                  Select Featured Image
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Choose an image for your blog post
+                </p>
+              </div>
+              <button
+                onClick={handleSkipImage}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto flex-1">
+              {/* Search Input */}
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Search for images
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={imageSearchQuery}
+                    onChange={(e) => setImageSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleFetchImages()}
+                    placeholder="Enter search terms for images..."
+                    className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all text-sm text-gray-800"
+                  />
+                  <button
+                    onClick={handleFetchImages}
+                    disabled={fetchingImages || !imageSearchQuery.trim()}
+                    className="px-6 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-600 hover:to-indigo-700 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {fetchingImages ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Searching...
+                      </>
+                    ) : (
+                      <>
+                        <Search className="w-4 h-4" />
+                        Search
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Image Grid */}
+              {fetchingImages ? (
+                <div className="text-center py-12">
+                  <Loader2 className="w-10 h-10 animate-spin text-purple-600 mx-auto mb-3" />
+                  <p className="text-gray-600">Searching for images...</p>
+                </div>
+              ) : pixabayImages.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {pixabayImages.slice(0, 9).map((image) => (
+                      <button
+                        key={image.id}
+                        onClick={() => handleSelectImage(image)}
+                        disabled={uploadingImage}
+                        className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all ${
+                          selectedImage?.id === image.id
+                            ? "border-purple-500 ring-2 ring-purple-500/30"
+                            : "border-gray-200 hover:border-purple-300"
+                        } ${uploadingImage ? "opacity-50 cursor-not-allowed" : ""}`}
+                      >
+                        <Image
+                          src={image.webformatURL}
+                          alt={image.tags || "Image"}
+                          fill
+                          className="object-cover"
+                        />
+                        {selectedImage?.id === image.id && (
+                          <div className="absolute inset-0 bg-purple-500/20 flex items-center justify-center">
+                            <CheckCircle className="w-8 h-8 text-white drop-shadow-lg" />
+                          </div>
+                        )}
+                        {uploadingImage && selectedImage?.id === image.id && (
+                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                            <Loader2 className="w-8 h-8 text-white animate-spin" />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 text-center">
+                    Images powered by{" "}
+                    <a
+                      href="https://pixabay.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-purple-600 hover:underline"
+                    >
+                      Pixabay
+                    </a>
+                  </p>
+                </div>
+              ) : (
+                <div className="text-center py-12 text-gray-500">
+                  <ImageIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                  <p>Search for images to see results</p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    Try keywords like "{topic || "your blog topic"}"
+                  </p>
+                </div>
+              )}
+
+              {/* Selected Image Preview */}
+              {selectedImage && post.imageUrl && (
+                <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center gap-4">
+                    <div className="relative w-20 h-14 rounded-lg overflow-hidden border-2 border-green-300">
+                      <Image
+                        src={post.imageUrl}
+                        alt="Selected image"
+                        fill
+                        className="object-cover"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-green-900">Image Selected!</p>
+                      <p className="text-xs text-green-700">
+                        {selectedImage.tags || "Featured image"}
+                      </p>
+                    </div>
+                    <CheckCircle className="w-6 h-6 text-green-600" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
+              <button
+                onClick={handleSkipImage}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
+              >
+                Skip for now
+              </button>
+              <button
+                onClick={handleConfirmImage}
+                disabled={!selectedImage || uploadingImage}
+                className="px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {uploadingImage ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4" />
+                    Use Selected Image
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
