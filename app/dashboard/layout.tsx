@@ -114,6 +114,7 @@ export default function DashboardLayout({
       ]
     },
     { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
+    { name: t.dashboard.sidebar.kf2, href: "/dashboard/kf2", icon: Target, requiredCapability: "canManageKeywords" },
     { name: t.dashboard.sidebar.keywords, href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
     { name: t.dashboard.sidebar.publication, href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
     { name: t.dashboard.sidebar.rankings, href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
