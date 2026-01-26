@@ -1747,33 +1747,85 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
     }
     // Analyze cross-platform comparison
     const platformComparison = analyzeCrossPlatformResults(platformResults, project.brand_name, project.competitors || []);
-    // Update session completion with cross-platform analysis
+    
+    // Calculate average sentiment from all responses
+    const { data: allResponsesForSentiment } = await supabase
+      .from('ai_platform_responses')
+      .select('response_metadata')
+      .eq('session_id', session.id);
+    
+    const responsesWithSentiment = (allResponsesForSentiment || []).filter(
+      r => r.response_metadata?.brand_mentioned && r.response_metadata?.sentiment_score !== null && r.response_metadata?.sentiment_score !== undefined
+    );
+    const avgSentiment = responsesWithSentiment.length > 0
+      ? responsesWithSentiment.reduce((sum, r) => sum + (r.response_metadata?.sentiment_score || 0), 0) / responsesWithSentiment.length
+      : 0;
+    
+    // Keep session as "running" - competitor-analysis-engine will mark it "completed"
     await supabase.from('brand_analysis_sessions').update({
-      status: 'completed',
-      completed_at: new Date().toISOString(),
       completed_queries: completedQueries,
       results_summary: {
         total_queries: totalQueries,
         successful_queries: completedQueries,
         total_mentions: totalMentions,
         mention_rate: completedQueries > 0 ? totalMentions / completedQueries : 0,
+        avg_sentiment: Math.round(avgSentiment * 100), // Store as percentage
         platforms_analyzed: workingPlatforms,
         failed_platforms: failedPlatforms,
-        platform_comparison: platformComparison
+        platform_comparison: platformComparison,
+        brand_analysis_completed_at: new Date().toISOString()
       }
     }).eq('id', session.id);
-    // Update project last analysis timestamp
-    await supabase.from('brand_analysis_projects').update({
-      last_analysis_at: new Date().toISOString()
-    }).eq('id', projectId);
     
-    // Note: brand summary is now generated when user clicks "Launch Analysis", not after completion
-    
-    console.log(`Analysis completed: ${completedQueries}/${totalQueries} queries successful, ${totalMentions} mentions found`);
+    console.log(`Brand analysis completed: ${completedQueries}/${totalQueries} queries successful, ${totalMentions} mentions found`);
     console.log(`Working platforms: ${workingPlatforms.join(', ')}`);
     if (failedPlatforms.length > 0) {
       console.log(`Failed platforms: ${failedPlatforms.join(', ')}`);
     }
+    
+    // Run competitor analysis engine - it will mark session as "completed" when done
+    try {
+      console.log(`🔍 Starting competitor analysis for session: ${session.id}`);
+      const competitorResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/competitor-analysis-engine`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'full-analysis',
+          sessionId: session.id,
+          projectId: projectId,
+          brandName: project.brand_name,
+          competitors: project.competitors || []
+        })
+      });
+      
+      if (competitorResponse.ok) {
+        console.log(`✅ Competitor analysis completed for session: ${session.id}`);
+      } else {
+        console.error(`❌ Competitor analysis failed: ${competitorResponse.status}`);
+        // If competitor analysis fails, mark session as completed anyway
+        await supabase.from('brand_analysis_sessions').update({
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        }).eq('id', session.id);
+        await supabase.from('brand_analysis_projects').update({
+          last_analysis_at: new Date().toISOString()
+        }).eq('id', projectId);
+      }
+    } catch (competitorError) {
+      console.error('Error running competitor analysis:', competitorError);
+      // If competitor analysis fails, mark session as completed anyway
+      await supabase.from('brand_analysis_sessions').update({
+        status: 'completed',
+        completed_at: new Date().toISOString()
+      }).eq('id', session.id);
+      await supabase.from('brand_analysis_projects').update({
+        last_analysis_at: new Date().toISOString()
+      }).eq('id', projectId);
+    }
+    
     return {
       success: true,
       session_id: session.id,
@@ -1813,6 +1865,34 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
 ) {
   try {
     console.log(`Processing batch starting at index ${batchStartIndex} for session: ${sessionId} (language: ${language})`);
+    
+    // Check if session is paused before processing
+    const { data: sessionCheck, error: sessionCheckError } = await supabase
+      .from('brand_analysis_sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .single();
+    
+    if (sessionCheck?.status === 'paused') {
+      console.log(`⏸️ Session ${sessionId} is paused. Stopping batch processing.`);
+      return {
+        paused: true,
+        message: 'Analysis is paused',
+        batchStartIndex,
+        totalQueries: queries.length
+      };
+    }
+    
+    if (sessionCheck?.status === 'cancelled') {
+      console.log(`🛑 Session ${sessionId} is cancelled. Stopping batch processing.`);
+      return {
+        cancelled: true,
+        message: 'Analysis was cancelled',
+        batchStartIndex,
+        totalQueries: queries.length
+      };
+    }
+    
     // Get project details
     const { data: project, error: projectError } = await supabase.from('brand_analysis_projects').select('*').eq('id', projectId).single();
     if (projectError || !project) {
@@ -1932,27 +2012,83 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
       console.log('All batches completed, finalizing session');
       // Analyze cross-platform comparison
       const { data: allResponses } = await supabase.from('ai_platform_responses').select('*').eq('session_id', sessionId);
+      
+      // CRITICAL FIX: Count total mentions from ALL responses in the database, not just this batch
+      // The local `totalMentions` variable only counts the current batch, not all batches
+      const actualTotalMentions = (allResponses || []).filter(
+        (r: any) => r.response_metadata && r.response_metadata.brand_mentioned === true
+      ).length;
+      
+      console.log(`📊 Final stats: ${actualTotalMentions} total mentions from ${(allResponses || []).length} responses`);
+      
+      // Calculate average sentiment from all responses with brand mentions
+      const responsesWithSentiment = (allResponses || []).filter(
+        r => r.response_metadata?.brand_mentioned && r.response_metadata?.sentiment_score !== null && r.response_metadata?.sentiment_score !== undefined
+      );
+      const avgSentiment = responsesWithSentiment.length > 0
+        ? responsesWithSentiment.reduce((sum, r) => sum + (r.response_metadata?.sentiment_score || 0), 0) / responsesWithSentiment.length
+        : 0;
+      
+      console.log(`📊 Average sentiment: ${Math.round(avgSentiment * 100)}% from ${responsesWithSentiment.length} responses`);
+      
+      // Keep session as "running" - competitor-analysis-engine will mark it "completed"
       await supabase.from('brand_analysis_sessions').update({
-        status: 'completed',
-        completed_at: new Date().toISOString(),
         completed_queries: newCompletedQueries,
         results_summary: {
           total_queries: totalQueries,
           successful_queries: newCompletedQueries,
-          total_mentions: totalMentions,
-          mention_rate: newCompletedQueries > 0 ? totalMentions / newCompletedQueries : 0,
+          total_mentions: actualTotalMentions,
+          mention_rate: newCompletedQueries > 0 ? actualTotalMentions / newCompletedQueries : 0,
+          avg_sentiment: Math.round(avgSentiment * 100), // Store as percentage
           platforms_analyzed: platforms,
-          completed_at: new Date().toISOString()
+          brand_analysis_completed_at: new Date().toISOString()
         }
       }).eq('id', sessionId);
-      // Update project last analysis timestamp
-      await supabase.from('brand_analysis_projects').update({
-        last_analysis_at: new Date().toISOString()
-      }).eq('id', projectId);
       
-      // Note: brand summary is now generated when user clicks "Launch Analysis", not after completion
+      console.log(`Brand analysis queries completed for session: ${sessionId}, starting competitor analysis...`);
       
-      console.log(`Analysis fully completed for session: ${sessionId}`);
+      // Run competitor analysis engine - it will mark session as "completed" when done
+      try {
+        console.log(`🔍 Starting competitor analysis for session: ${sessionId}`);
+        const competitorResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/competitor-analysis-engine`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            action: 'full-analysis',
+            sessionId: sessionId,
+            projectId: projectId,
+            brandName: project.brand_name,
+            competitors: project.competitors || []
+          })
+        });
+        
+        if (competitorResponse.ok) {
+          console.log(`✅ Competitor analysis completed for session: ${sessionId}`);
+        } else {
+          console.error(`❌ Competitor analysis failed: ${competitorResponse.status}`);
+          // If competitor analysis fails, mark session as completed anyway
+          await supabase.from('brand_analysis_sessions').update({
+            status: 'completed',
+            completed_at: new Date().toISOString()
+          }).eq('id', sessionId);
+          await supabase.from('brand_analysis_projects').update({
+            last_analysis_at: new Date().toISOString()
+          }).eq('id', projectId);
+        }
+      } catch (competitorError) {
+        console.error('Error running competitor analysis:', competitorError);
+        // If competitor analysis fails, mark session as completed anyway
+        await supabase.from('brand_analysis_sessions').update({
+          status: 'completed',
+          completed_at: new Date().toISOString()
+        }).eq('id', sessionId);
+        await supabase.from('brand_analysis_projects').update({
+          last_analysis_at: new Date().toISOString()
+        }).eq('id', projectId);
+      }
     }
     return {
       success: true,
@@ -1989,7 +2125,85 @@ Deno.serve(async (req) => {
       'gemini',
       'perplexity',
       'groq'
-    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false, language } = body;
+    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false, language, action } = body;
+    
+    // Handle resume action
+    if (action === 'resume' && sessionId) {
+      console.log(`🔄 Resuming analysis for session: ${sessionId}`);
+      
+      // Get session data
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('brand_analysis_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+      
+      if (sessionError || !sessionData) {
+        throw new Error(`Failed to fetch session: ${sessionError?.message}`);
+      }
+      
+      // Get project data
+      const { data: projectData, error: projectError } = await supabase
+        .from('brand_analysis_projects')
+        .select('*')
+        .eq('id', projectId)
+        .single();
+      
+      if (projectError || !projectData) {
+        throw new Error(`Failed to fetch project: ${projectError?.message}`);
+      }
+      
+      // Get already processed query indices
+      const { data: existingResponses, error: responsesError } = await supabase
+        .from('ai_platform_responses')
+        .select('query')
+        .eq('session_id', sessionId);
+      
+      const processedQueries = new Set((existingResponses || []).map(r => r.query));
+      const allQueries = sessionData.queries || [];
+      
+      // Find remaining queries that haven't been processed
+      const remainingQueries = allQueries.filter((q: string) => !processedQueries.has(q));
+      
+      console.log(`📊 Total queries: ${allQueries.length}, Already processed: ${processedQueries.size}, Remaining: ${remainingQueries.length}`);
+      
+      if (remainingQueries.length === 0) {
+        // All queries already processed, mark as completed
+        await supabase
+          .from('brand_analysis_sessions')
+          .update({ status: 'completed', completed_at: new Date().toISOString() })
+          .eq('id', sessionId);
+        
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'All queries already processed',
+          completed: true
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+      
+      // Resume processing with remaining queries
+      const platformsToUse = projectData.active_platforms || platforms;
+      const result = await processBatchOfQueries(
+        projectId,
+        platformsToUse,
+        sessionId,
+        remainingQueries,
+        0, // Start from beginning of remaining queries
+        3, // Batch size
+        'en'
+      );
+      
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Analysis resumed successfully',
+        remaining_queries: remainingQueries.length,
+        ...result
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
     
     // Get language preference: from request body, or from cookies as fallback
     let preferredLanguage: "en" | "he" = language || "en";

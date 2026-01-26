@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useLanguage } from "@/lib/language-context";
@@ -32,7 +32,9 @@ import {
   Send,
   Pencil,
   CheckCircle,
-  XCircle
+  XCircle,
+  Trophy,
+  AlertTriangle
 } from "lucide-react";
 import {
   PieChart,
@@ -74,24 +76,62 @@ interface Project {
 interface Session {
   id: string;
   project_id: string;
-  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
   completed_queries?: number;
   total_queries?: number;
   results_summary?: any;
   session_name?: string;
   started_at: string;
+  competitor_analysis?: {
+    competitor_data?: Array<{
+      name: string;
+      mentions: number;
+      sentiment: number;
+      relevance: number;
+      platforms: string[];
+      trends: { mentions_trend: number; sentiment_trend: number };
+    }>;
+    rankings?: Array<{
+      name: string;
+      rank: number;
+      ranking_score: number;
+      mentions: number;
+      sentiment: number;
+    }>;
+    market_positions?: Array<{
+      brand: string;
+      market_share: number;
+      sentiment_score: number;
+      competitive_strength: number;
+      positioning: 'leader' | 'challenger' | 'follower' | 'niche';
+    }>;
+    share_of_voice?: Array<{
+      brand: string;
+      mentions: number;
+      share_percentage: number;
+    }>;
+    competitive_gaps?: Array<{
+      type: string;
+      severity: 'high' | 'medium' | 'low';
+      description: string;
+      recommendation: string;
+    }>;
+    summary?: any;
+  };
 }
 
-export default function AIVisibility() {
+function AIVisibilityContent() {
   const { isRtl, t, language } = useLanguage();
   const supabase = createClientComponentClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
   
   // View mode: 'projects' (list), 'form' (new analysis), 'details' (project details)
   const [viewMode, setViewMode] = useState<ViewMode>('projects');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
   
   // Form state
   const [currentStep, setCurrentStep] = useState(1);
@@ -125,7 +165,10 @@ export default function AIVisibility() {
   const [showAnalysisStartModal, setShowAnalysisStartModal] = useState(false);
   const [analysisStartInfo, setAnalysisStartInfo] = useState<any>(null);
   const [stoppingAnalysis, setStoppingAnalysis] = useState<string | null>(null);
+  const [pausingAnalysis, setPausingAnalysis] = useState<string | null>(null);
+  const [resumingAnalysis, setResumingAnalysis] = useState<string | null>(null);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [showProjectDetailsSettings, setShowProjectDetailsSettings] = useState(false);
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
   const [viewResponseModal, setViewResponseModal] = useState<{ open: boolean; response: any; prompt: string } | null>(null);
   
@@ -147,14 +190,100 @@ export default function AIVisibility() {
     { id: "claude", name: "Claude", icon: "/images/claude.png" },
     { id: "groq", name: "Grok", icon: "/images/groq.png" },
   ];
+  
+  // Helper function to extract name and domain from competitor string/object
+  // Handles: plain strings, JSON strings like '{"name":"X","domain":"x.com"}', or objects
+  const parseCompetitorNameGlobal = (value: string | any): { name: string; domain?: string } => {
+    if (!value) return { name: 'Unknown' };
+    
+    // If it's already a plain string (not JSON)
+    if (typeof value === 'string') {
+      // Check if it looks like JSON
+      if (value.startsWith('{') && value.includes('"name"')) {
+        try {
+          const parsed = JSON.parse(value);
+          return { name: parsed.name || value, domain: parsed.domain };
+        } catch {
+          return { name: value };
+        }
+      }
+      return { name: value };
+    }
+    
+    // If it's an object
+    if (typeof value === 'object' && value.name) {
+      return { name: value.name, domain: value.domain };
+    }
+    
+    return { name: String(value) };
+  };
+  
+  // Render competitor name as clickable link if domain exists
+  const renderCompetitorLink = (value: string | any, isYourBrand: boolean = false, showBadge: boolean = false) => {
+    const { name, domain } = parseCompetitorNameGlobal(value);
+    const isBrand = name === selectedProject?.brand_name || isYourBrand;
+    
+    // For your brand, use the project's website_url if available
+    const brandDomain = isBrand ? (selectedProject?.website_url || domain) : domain;
+    
+    const badge = isBrand && showBadge ? (
+      <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">Your Brand</span>
+    ) : null;
+    
+    if (brandDomain) {
+      const url = brandDomain.startsWith('http') ? brandDomain : `https://${brandDomain}`;
+      return (
+        <>
+          <a 
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${isBrand ? 'font-semibold text-purple-700' : 'text-gray-900'} hover:underline`}
+          >
+            {name}
+          </a>
+          {badge}
+        </>
+      );
+    }
+    
+    return (
+      <span className={isBrand ? 'font-semibold text-purple-700' : 'text-gray-900'}>
+        {name}
+        {badge}
+      </span>
+    );
+  };
 
   // Fetch projects and domain intelligence jobs on mount
   useEffect(() => {
-    if (viewMode === 'projects') {
+    if (viewMode === 'projects' || !initialLoadDone) {
       fetchProjects();
       fetchDomainIntelligenceJobs();
     }
   }, [viewMode]);
+  
+  // Restore selected project from URL on initial load
+  useEffect(() => {
+    const projectId = searchParams.get('project');
+    const tab = searchParams.get('tab');
+    
+    if (projectId && projects.length > 0 && !initialLoadDone) {
+      const project = projects.find(p => p.id === projectId);
+      if (project) {
+        setSelectedProject(project);
+        setViewMode('details');
+        if (tab) {
+          setActiveTab(tab);
+        }
+        // Fetch sessions and details for this project
+        fetchProjectDetails(project.id);
+      }
+      setInitialLoadDone(true);
+    } else if (projects.length > 0 && !initialLoadDone) {
+      setInitialLoadDone(true);
+    }
+  }, [projects, searchParams, initialLoadDone]);
 
   // Check GSC connection status when form is shown
   useEffect(() => {
@@ -675,6 +804,7 @@ export default function AIVisibility() {
       if (selectedProject?.id === projectId) {
         setViewMode('projects');
         setSelectedProject(null);
+        router.push('/dashboard/ai-visibility', { scroll: false });
       }
     } catch (error: any) {
       console.error('Error deleting project:', error);
@@ -936,6 +1066,8 @@ export default function AIVisibility() {
     setSelectedProject(project);
     fetchProjectDetails(project.id);
     setViewMode('details');
+    // Update URL with project ID for persistence on refresh
+    router.push(`/dashboard/ai-visibility?project=${project.id}`, { scroll: false });
   };
 
   const handleStopAnalysis = async (sessionId: string, projectId: string) => {
@@ -973,6 +1105,126 @@ export default function AIVisibility() {
     }
   };
 
+  const handlePauseAnalysis = async (sessionId: string, projectId: string) => {
+    setPausingAnalysis(sessionId);
+    setShowProjectDetailsSettings(false);
+    try {
+      const { error } = await supabase
+        .from('brand_analysis_sessions')
+        .update({
+          status: 'paused',
+          results_summary: {
+            paused: true,
+            paused_at: new Date().toISOString(),
+            partial_results: true
+          }
+        })
+        .eq('id', sessionId);
+
+      if (error) throw error;
+
+      // Refresh data
+      await fetchProjects();
+      if (selectedProject && selectedProject.id === projectId) {
+        await fetchProjectDetails(projectId);
+      }
+    } catch (error) {
+      console.error('Error pausing analysis:', error);
+      alert('Failed to pause analysis. Please try again.');
+    } finally {
+      setPausingAnalysis(null);
+    }
+  };
+
+  const handleResumeAnalysis = async (sessionId: string, projectId: string) => {
+    setResumingAnalysis(sessionId);
+    setShowProjectDetailsSettings(false);
+    try {
+      // Get the session data to resume
+      const { data: sessionData, error: fetchError } = await supabase
+        .from('brand_analysis_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // Get the project data
+      const { data: projectData, error: projectError } = await supabase
+        .from('brand_analysis_projects')
+        .select('*')
+        .eq('id', projectId)
+        .single();
+
+      if (projectError) throw projectError;
+
+      // Update session status to running
+      const { error: updateError } = await supabase
+        .from('brand_analysis_sessions')
+        .update({
+          status: 'running',
+          results_summary: {
+            ...sessionData.results_summary,
+            resumed: true,
+            resumed_at: new Date().toISOString()
+          }
+        })
+        .eq('id', sessionId);
+
+      if (updateError) throw updateError;
+
+      // Get the user's access token
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      if (!authSession?.access_token) {
+        throw new Error('No authentication token available');
+      }
+
+      // Call the brand-analysis edge function to resume
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+      const response = await fetch(`${supabaseUrl}/functions/v1/brand-analysis`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authSession.access_token}`,
+        },
+        body: JSON.stringify({
+          action: 'resume',
+          sessionId: sessionId,
+          projectId: projectId,
+          brandName: projectData.brand_name,
+          websiteUrl: projectData.website_url,
+          industry: projectData.industry,
+          platforms: projectData.active_platforms,
+          competitors: projectData.competitors,
+          keywords: projectData.keywords,
+          companyDescription: projectData.company_description,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to resume analysis');
+      }
+
+      // Refresh data
+      await fetchProjects();
+      if (selectedProject && selectedProject.id === projectId) {
+        await fetchProjectDetails(projectId);
+      }
+    } catch (error: any) {
+      console.error('Error resuming analysis:', error);
+      alert(`Failed to resume analysis: ${error.message}`);
+      
+      // Revert status back to paused if resume failed
+      await supabase
+        .from('brand_analysis_sessions')
+        .update({ status: 'paused' })
+        .eq('id', sessionId);
+    } finally {
+      setResumingAnalysis(null);
+    }
+  };
+
   const handleNewAnalysis = () => {
     setViewMode('form');
     setCurrentStep(1);
@@ -985,6 +1237,8 @@ export default function AIVisibility() {
       setViewMode('projects');
       setSelectedProject(null);
       setSelectedDomainJob(null);
+      // Clear URL params when going back to projects list
+      router.push('/dashboard/ai-visibility', { scroll: false });
     } else if (viewMode === 'form' && currentStep > 1) {
       setCurrentStep(currentStep - 1);
     }
@@ -1225,6 +1479,7 @@ export default function AIVisibility() {
                   }
                   
                   const isRunning = session?.status === 'running';
+                  const isPaused = session?.status === 'paused';
                   const isCancelled = session?.status === 'cancelled';
                   const progress = session && session.total_queries 
             ? Math.round((session.completed_queries || 0) / session.total_queries * 100)
@@ -1305,13 +1560,51 @@ export default function AIVisibility() {
                                   setOpenDropdown(null);
                                 }}
                               />
-                              <div className="absolute right-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+                              <div className="absolute right-0 mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-20 py-1">
+                                {/* Pause/Resume Analysis - only show when analysis is running or paused */}
+                                {isRunning && session?.id && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenDropdown(null);
+                                      handlePauseAnalysis(session.id, project.id);
+                                    }}
+                                    disabled={pausingAnalysis === session.id}
+                                    className={`w-full flex items-center gap-2 px-4 py-2 ${isRtl ? 'text-right' : 'text-left'} text-amber-600 hover:bg-amber-50 transition-colors`}
+                                  >
+                                    {pausingAnalysis === session.id ? (
+                                      <RefreshCw className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <StopCircle className="w-4 h-4" />
+                                    )}
+                                    <span>Pause Analysis</span>
+                                  </button>
+                                )}
+                                {isPaused && session?.id && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenDropdown(null);
+                                      handleResumeAnalysis(session.id, project.id);
+                                    }}
+                                    disabled={resumingAnalysis === session.id}
+                                    className={`w-full flex items-center gap-2 px-4 py-2 ${isRtl ? 'text-right' : 'text-left'} text-green-600 hover:bg-green-50 transition-colors`}
+                                  >
+                                    {resumingAnalysis === session.id ? (
+                                      <RefreshCw className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                      <Play className="w-4 h-4" />
+                                    )}
+                                    <span>Resume Analysis</span>
+                                  </button>
+                                )}
+                                {/* Delete Project */}
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleDeleteProject(project.id, project.brand_name);
                                   }}
-                                  className={`w-full flex items-center gap-2 px-4 py-2 ${isRtl ? 'text-right' : 'text-left'} text-red-600 hover:bg-red-50 transition-colors rounded-lg`}
+                                  className={`w-full flex items-center gap-2 px-4 py-2 ${isRtl ? 'text-right' : 'text-left'} text-red-600 hover:bg-red-50 transition-colors`}
                                   disabled={deletingProject === project.id}
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -1351,6 +1644,25 @@ export default function AIVisibility() {
                           <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
                             <div
                               className="h-full bg-blue-600 transition-all duration-300"
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Progress Bar for Paused */}
+                      {isPaused && (
+                        <div className="mb-4">
+                          <div className={`flex items-center justify-between text-xs mb-1 ${isRtl ? 'flex-row-reverse' : ''}`}>
+                            <span className="text-amber-600 font-medium flex items-center gap-1">
+                              <StopCircle className="w-3 h-3" />
+                              Paused
+                            </span>
+                            <span className="text-gray-600">{progress}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-amber-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-amber-500 transition-all duration-300"
                               style={{ width: `${progress}%` }}
                             />
                           </div>
@@ -1434,6 +1746,28 @@ export default function AIVisibility() {
                               <>
                                 <StopCircle className="w-4 h-4" />
                                 {t.dashboard.aiVisibility.stop}
+                              </>
+                            )}
+                          </button>
+                        )}
+                        {isPaused && session?.id && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleResumeAnalysis(session.id, project.id);
+                            }}
+                            disabled={resumingAnalysis === session.id}
+                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {resumingAnalysis === session.id ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                Resuming...
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-4 h-4" />
+                                Resume
                               </>
                             )}
                           </button>
@@ -1844,6 +2178,7 @@ export default function AIVisibility() {
   if (viewMode === 'details' && selectedProject) {
     const latestSession = projectSessions[0];
     const isRunning = latestSession?.status === 'running';
+    const isPaused = latestSession?.status === 'paused';
     const progress = latestSession && latestSession.total_queries 
       ? Math.round((latestSession.completed_queries || 0) / latestSession.total_queries * 100)
       : 0;
@@ -1931,10 +2266,84 @@ export default function AIVisibility() {
                   </div>
                 )}
               </div>
-              <div className="text-sm text-gray-500 ml-4">
-                Updated {selectedProject.last_analysis_at 
-                  ? new Date(selectedProject.last_analysis_at).toLocaleString()
-                  : new Date(selectedProject.created_at).toLocaleString()}
+              <div className="flex items-center gap-3 ml-4">
+                <div className="text-sm text-gray-500">
+                  Updated {selectedProject.last_analysis_at 
+                    ? new Date(selectedProject.last_analysis_at).toLocaleString()
+                    : new Date(selectedProject.created_at).toLocaleString()}
+                </div>
+                {/* Settings Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowProjectDetailsSettings(!showProjectDetailsSettings)}
+                    className="p-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+                  >
+                    <Settings className="w-4 h-4 text-gray-500" />
+                  </button>
+                  {showProjectDetailsSettings && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setShowProjectDetailsSettings(false)}
+                      />
+                      <div className="absolute right-0 mt-1 w-56 bg-white rounded-lg shadow-lg border border-gray-200 z-20 py-1">
+                        {/* Pause/Resume Analysis - only show when analysis is running or paused */}
+                        {(() => {
+                          const latestSession = projectSessions.find(s => s.project_id === selectedProject?.id);
+                          const isRunning = latestSession?.status === 'running';
+                          const isPaused = latestSession?.status === 'paused';
+                          
+                          if (isRunning || isPaused) {
+                            return isPaused ? (
+                              <button
+                                onClick={() => latestSession && handleResumeAnalysis(latestSession.id, selectedProject.id)}
+                                disabled={resumingAnalysis === latestSession?.id}
+                                className="w-full flex items-center gap-2 px-4 py-2 text-left text-green-600 hover:bg-green-50 transition-colors"
+                              >
+                                {resumingAnalysis === latestSession?.id ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Play className="w-4 h-4" />
+                                )}
+                                <span>Resume Analysis</span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => latestSession && handlePauseAnalysis(latestSession.id, selectedProject.id)}
+                                disabled={pausingAnalysis === latestSession?.id}
+                                className="w-full flex items-center gap-2 px-4 py-2 text-left text-amber-600 hover:bg-amber-50 transition-colors"
+                              >
+                                {pausingAnalysis === latestSession?.id ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <StopCircle className="w-4 h-4" />
+                                )}
+                                <span>Pause Analysis</span>
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
+                        {/* Delete Project */}
+                        <button
+                          onClick={() => {
+                            setShowProjectDetailsSettings(false);
+                            handleDeleteProject(selectedProject.id, selectedProject.brand_name);
+                          }}
+                          disabled={deletingProject === selectedProject.id}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-left text-red-600 hover:bg-red-50 transition-colors"
+                        >
+                          {deletingProject === selectedProject.id ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-4 h-4" />
+                          )}
+                          <span>Delete Project</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -2482,6 +2891,169 @@ export default function AIVisibility() {
                   )}
                   {activeTab === 'competitors' && (
                     <div className="space-y-6">
+                      {/* Advanced Competitor Analysis Section */}
+                      {(() => {
+                        const latestSession = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
+                        const competitorAnalysis = latestSession?.competitor_analysis;
+                        
+                        if (competitorAnalysis && competitorAnalysis.rankings && competitorAnalysis.rankings.length > 0) {
+                          return (
+                            <div className="space-y-6">
+                              {/* Rankings Section */}
+                              <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg p-6">
+                                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                  <Trophy className="w-5 h-5 text-purple-600" />
+                                  Competitor Rankings
+                                </h3>
+                                <div className="space-y-3">
+                                  {competitorAnalysis.rankings.slice(0, 5).map((competitor: any, idx: number) => {
+                                    const { name } = parseCompetitorNameGlobal(competitor.name);
+                                    const isYourBrand = name === selectedProject?.brand_name;
+                                    return (
+                                      <div key={competitor.name} className="flex items-center justify-between bg-white rounded-lg p-4 shadow-sm">
+                                        <div className="flex items-center gap-4">
+                                          <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-white ${
+                                            idx === 0 ? 'bg-yellow-500' : idx === 1 ? 'bg-gray-400' : idx === 2 ? 'bg-amber-600' : 'bg-gray-300'
+                                          }`}>
+                                            {competitor.rank}
+                                          </span>
+                                          <div>
+                                            {renderCompetitorLink(competitor.name, isYourBrand, true)}
+                                            <div className="text-sm text-gray-500">{competitor.mentions} mentions</div>
+                                          </div>
+                                        </div>
+                                        <div className="text-right">
+                                          <div className="text-lg font-semibold text-gray-900">{Math.round(competitor.ranking_score * 100)}%</div>
+                                          <div className="text-xs text-gray-500">Overall Score</div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                              
+                              {/* Market Position Section */}
+                              {competitorAnalysis.market_positions && competitorAnalysis.market_positions.length > 0 && (
+                                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                    <Target className="w-5 h-5 text-purple-600" />
+                                    Market Positioning
+                                  </h3>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                    {['leader', 'challenger', 'follower', 'niche'].map((position) => {
+                                      const count = competitorAnalysis.market_positions?.filter((p: any) => p.positioning === position).length || 0;
+                                      const brands = competitorAnalysis.market_positions?.filter((p: any) => p.positioning === position).map((p: any) => parseCompetitorNameGlobal(p.brand).name) || [];
+                                      return (
+                                        <div key={position} className={`rounded-lg p-4 text-center ${
+                                          position === 'leader' ? 'bg-green-50 border border-green-200' :
+                                          position === 'challenger' ? 'bg-blue-50 border border-blue-200' :
+                                          position === 'follower' ? 'bg-yellow-50 border border-yellow-200' :
+                                          'bg-gray-50 border border-gray-200'
+                                        }`}>
+                                          <div className="text-2xl font-bold">{count}</div>
+                                          <div className="text-sm capitalize font-medium">{position}s</div>
+                                          <div className="text-xs text-gray-500 mt-1 truncate" title={brands.join(', ')}>
+                                            {brands.slice(0, 2).join(', ')}{brands.length > 2 ? '...' : ''}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                  <div className="space-y-2">
+                                    {competitorAnalysis.market_positions?.map((pos: any) => {
+                                      const { name } = parseCompetitorNameGlobal(pos.brand);
+                                      return (
+                                        <div key={pos.brand} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                          <div className="flex items-center gap-3">
+                                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                              pos.positioning === 'leader' ? 'bg-green-100 text-green-800' :
+                                              pos.positioning === 'challenger' ? 'bg-blue-100 text-blue-800' :
+                                              pos.positioning === 'follower' ? 'bg-yellow-100 text-yellow-800' :
+                                              'bg-gray-100 text-gray-800'
+                                            }`}>
+                                              {pos.positioning}
+                                            </span>
+                                            {renderCompetitorLink(pos.brand, name === selectedProject?.brand_name, false)}
+                                          </div>
+                                          <div className="flex items-center gap-4 text-sm">
+                                            <span className="text-gray-600">{Math.round(pos.market_share * 100)}% share</span>
+                                            <span className="text-gray-600">{Math.round(pos.sentiment_score * 100)}% sentiment</span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Share of Voice Section */}
+                              {competitorAnalysis.share_of_voice && competitorAnalysis.share_of_voice.length > 0 && (
+                                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                    <BarChart3 className="w-5 h-5 text-purple-600" />
+                                    Share of Voice
+                                  </h3>
+                                  <div className="space-y-3">
+                                    {competitorAnalysis.share_of_voice.map((sov: any) => {
+                                      const { name } = parseCompetitorNameGlobal(sov.brand);
+                                      const isYourBrand = name === selectedProject?.brand_name;
+                                      return (
+                                        <div key={sov.brand} className="space-y-1">
+                                          <div className="flex justify-between text-sm">
+                                            {renderCompetitorLink(sov.brand, isYourBrand, false)}
+                                            <span className="font-medium">{sov.share_percentage}%</span>
+                                          </div>
+                                          <div className="w-full bg-gray-200 rounded-full h-2">
+                                            <div 
+                                              className={`h-2 rounded-full ${isYourBrand ? 'bg-purple-600' : 'bg-indigo-400'}`}
+                                              style={{ width: `${Math.min(sov.share_percentage, 100)}%` }}
+                                            />
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Competitive Gaps Section */}
+                              {competitorAnalysis.competitive_gaps && competitorAnalysis.competitive_gaps.length > 0 && (
+                                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                                  <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                    <AlertTriangle className="w-5 h-5 text-amber-600" />
+                                    Competitive Gaps & Recommendations
+                                  </h3>
+                                  <div className="space-y-3">
+                                    {competitorAnalysis.competitive_gaps.map((gap: any, idx: number) => (
+                                      <div key={idx} className={`p-4 rounded-lg border-l-4 ${
+                                        gap.severity === 'high' ? 'bg-red-50 border-red-500' :
+                                        gap.severity === 'medium' ? 'bg-yellow-50 border-yellow-500' :
+                                        'bg-blue-50 border-blue-500'
+                                      }`}>
+                                        <div className="flex items-center justify-between mb-2">
+                                          <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                            gap.severity === 'high' ? 'bg-red-100 text-red-800' :
+                                            gap.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                            'bg-blue-100 text-blue-800'
+                                          }`}>
+                                            {gap.severity.toUpperCase()} PRIORITY
+                                          </span>
+                                          <span className="text-xs text-gray-500 capitalize">{gap.type.replace('_', ' ')}</span>
+                                        </div>
+                                        <p className="text-sm text-gray-700 mb-2">{gap.description}</p>
+                                        <p className="text-sm text-gray-600 italic">💡 {gap.recommendation}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
+                      
+                      {/* Original Competitor Mentions Section */}
                       <div>
                         <h3 className="text-lg font-semibold text-gray-900 mb-4">Competitor Mentions</h3>
                         {projectResponses.length === 0 ? (
@@ -3174,6 +3746,72 @@ export default function AIVisibility() {
                                 )}
                               </div>
                             </div>
+                            
+                            
+                            {/* Market Position Chart - Advanced Competitor Analysis */}
+                            {(() => {
+                              const latestSession = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
+                              const competitorAnalysis = latestSession?.competitor_analysis;
+                              
+                              if (competitorAnalysis?.market_positions && competitorAnalysis.market_positions.length > 0) {
+                                const positionData = competitorAnalysis.market_positions.map((pos: any) => {
+                                  const { name } = parseCompetitorNameGlobal(pos.brand);
+                                  return {
+                                    name: name,
+                                    marketShare: Math.round(pos.market_share * 100),
+                                    sentiment: Math.round(pos.sentiment_score * 100),
+                                    strength: Math.round(pos.competitive_strength * 100),
+                                    positioning: pos.positioning,
+                                    isBrand: name === selectedProject?.brand_name
+                                  };
+                                });
+                                
+                                return (
+                                  <div className="bg-white border border-gray-200 rounded-lg p-6">
+                                    <h4 className="text-md font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                      <Target className="w-5 h-5 text-purple-600" />
+                                      Competitive Strength Analysis
+                                    </h4>
+                                    <ResponsiveContainer width="100%" height={350}>
+                                      <BarChart data={positionData} layout="vertical">
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                        <XAxis 
+                                          type="number" 
+                                          domain={[0, 100]}
+                                          stroke="#6b7280"
+                                          tick={{ fill: '#6b7280', fontSize: 12 }}
+                                        />
+                                        <YAxis 
+                                          type="category"
+                                          dataKey="name"
+                                          stroke="#6b7280"
+                                          tick={{ fill: '#6b7280', fontSize: 12 }}
+                                          width={120}
+                                        />
+                                        <Tooltip 
+                                          contentStyle={{ 
+                                            backgroundColor: '#fff', 
+                                            border: '1px solid #e5e7eb', 
+                                            borderRadius: '8px',
+                                            padding: '12px'
+                                          }}
+                                          formatter={(value: number, name: string) => {
+                                            const label = name === 'marketShare' ? 'Market Share' : 
+                                                          name === 'sentiment' ? 'Sentiment' : 'Competitive Strength';
+                                            return [`${value}%`, label];
+                                          }}
+                                        />
+                                        <Legend />
+                                        <Bar dataKey="marketShare" name="Market Share" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                                        <Bar dataKey="sentiment" name="Sentiment" fill="#10b981" radius={[0, 4, 4, 0]} />
+                                        <Bar dataKey="strength" name="Competitive Strength" fill="#9333ea" radius={[0, 4, 4, 0]} />
+                                      </BarChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
                           </div>
                         )}
                       </div>
@@ -3217,28 +3855,48 @@ export default function AIVisibility() {
                   Export Report
                   <ChevronDown className="w-4 h-4" />
                 </button>
-                {/* Show Run Analysis button when not running */}
+                {/* Show Run Analysis / Resume button when not running */}
                 {!isRunning && (
-                  <button
-                    onClick={() => {
-                      if (!selectedProject) return;
-                      handleRunAnalysis(selectedProject);
-                    }}
-                    disabled={isAnalyzing}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isAnalyzing ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        Starting...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4" />
-                        Run Analysis
-                      </>
-                    )}
-                  </button>
+                  isPaused && latestSession ? (
+                    <button
+                      onClick={() => handleResumeAnalysis(latestSession.id, selectedProject.id)}
+                      disabled={resumingAnalysis === latestSession.id}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {resumingAnalysis === latestSession.id ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Resuming...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4" />
+                          Resume Analysis
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (!selectedProject) return;
+                        handleRunAnalysis(selectedProject);
+                      }}
+                      disabled={isAnalyzing}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isAnalyzing ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Starting...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4" />
+                          Run Analysis
+                        </>
+                      )}
+                    </button>
+                  )
                 )}
 
               </div>
@@ -3299,6 +3957,46 @@ export default function AIVisibility() {
                       <>
                         <StopCircle className="w-4 h-4" />
                         Stop Analysis
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+              
+              {/* Paused Status */}
+              {isPaused && latestSession?.id && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <StopCircle className="w-5 h-5 text-amber-600" />
+                    <span className="text-sm font-semibold text-amber-900">Analysis Paused</span>
+                  </div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-gray-600">Progress</span>
+                    <span className="text-sm font-semibold text-amber-600">{progress}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-amber-200 rounded-full overflow-hidden mb-2">
+                    <div
+                      className="h-full bg-amber-500 transition-all duration-300"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-gray-600 mb-3">
+                    {latestSession.completed_queries || 0} of {latestSession.total_queries || 0} queries completed
+                  </div>
+                  <button
+                    onClick={() => handleResumeAnalysis(latestSession.id, selectedProject!.id)}
+                    disabled={resumingAnalysis === latestSession.id}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {resumingAnalysis === latestSession.id ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        Resuming...
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" />
+                        Resume Analysis
                       </>
                     )}
                   </button>
@@ -4277,5 +4975,21 @@ function KeywordsTab({ selectedProject }: { selectedProject: Project }) {
         )}
       </div>
     </div>
+  );
+}
+
+// Wrap the component with Suspense to handle useSearchParams
+export default function AIVisibility() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    }>
+      <AIVisibilityContent />
+    </Suspense>
   );
 }
