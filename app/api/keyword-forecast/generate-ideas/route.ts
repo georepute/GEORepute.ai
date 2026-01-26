@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
       }));
 
       if (ideas.length === 0) {
-        console.warn('No keywords returned from Google Ads API. Using mock data.');
+        console.warn('No keywords returned. Using mock data.');
         return NextResponse.json({
           success: true,
           ideas: generateMockKeywordIdeas(url),
@@ -157,7 +157,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         ideas,
-        message: `Generated ${ideas.length} keyword ideas from Google Ads API`,
+        message: `Generated ${ideas.length} keyword ideas`,
       });
 
     } catch (apiError: any) {

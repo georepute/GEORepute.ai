@@ -17,26 +17,27 @@ export async function GET(request: NextRequest) {
 
     // Get the authenticated user using the proper auth helper
     const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (authError || !user) {
+    if (!session) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    // Fetch the keyword plan
+    // Fetch the keyword plan (RLS policy will ensure user can access organization plans)
     const { data: plan, error: planError } = await supabase
       .from('keyword_plans')
       .select('*')
       .eq('id', planId)
-      .eq('user_id', user.id)
       .single();
 
     if (planError || !plan) {
       return NextResponse.json(
-        { error: 'Plan not found' },
+        { error: 'Plan not found or you do not have access to it' },
         { status: 404 }
       );
     }
@@ -97,9 +98,9 @@ export async function GET(request: NextRequest) {
 
         if (forecasts.length > 0) {
           isRealData = true;
-          message = `Generated forecast for ${forecasts.length} keywords from Google Ads API`;
+          message = `Generated forecast for ${forecasts.length} keywords`;
         } else {
-          console.warn('No forecasts returned from Google Ads API. Using mock data.');
+          console.warn('No forecasts returned. Using mock data.');
           forecasts = generateMockForecasts(plan.keywords);
         }
 
@@ -116,6 +117,27 @@ export async function GET(request: NextRequest) {
         
         forecasts = generateMockForecasts(plan.keywords);
       }
+    }
+
+    // Save the forecast data to the database
+    try {
+      const { error: updateError } = await supabase
+        .from('keyword_plans')
+        .update({ 
+          forecast: forecasts,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', planId);
+
+      if (updateError) {
+        console.error('Error saving forecast to database:', updateError);
+        // Don't fail the request, just log the error
+      } else {
+        console.log(`Forecast saved to database for plan ${planId}`);
+      }
+    } catch (saveError) {
+      console.error('Error updating plan with forecast:', saveError);
+      // Don't fail the request, just log the error
     }
 
     return NextResponse.json({

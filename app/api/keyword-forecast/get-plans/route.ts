@@ -6,20 +6,40 @@ export async function GET(request: NextRequest) {
   try {
     // Get the authenticated user using the proper auth helper
     const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-    if (authError || !user) {
+    if (!session) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
-    // Fetch user's keyword plans
+    // Get user's organization ID
+    const { data: orgUser, error: orgError } = await supabase
+      .from('organization_users')
+      .select('organization_id')
+      .eq('user_id', session.user.id)
+      .eq('status', 'active')
+      .single();
+
+    if (orgError || !orgUser) {
+      console.error('Organization error:', orgError);
+      // Return empty array if user has no organization
+      return NextResponse.json({
+        success: true,
+        plans: [],
+        message: 'No active organization found.',
+      });
+    }
+
+    // Fetch organization's keyword plans (all plans in the organization)
     const { data: plans, error: dbError } = await supabase
       .from('keyword_plans')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('organization_id', orgUser.organization_id)
       .order('created_at', { ascending: false });
 
     if (dbError) {

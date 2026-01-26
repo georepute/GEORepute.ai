@@ -24,6 +24,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get user's organization ID
+    const { data: orgUser, error: orgError } = await supabase
+      .from('organization_users')
+      .select('organization_id')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .single();
+
+    if (orgError || !orgUser) {
+      return NextResponse.json(
+        { error: 'No active organization found. Please join or create an organization first.' },
+        { status: 403 }
+      );
+    }
+
     // Check for required Google Ads API credentials
     const {
       GOOGLE_ADS_CLIENT_ID,
@@ -86,6 +101,7 @@ export async function POST(request: NextRequest) {
       .from('keyword_plans')
       .insert({
         user_id: user.id,
+        organization_id: orgUser.organization_id,
         name: planName,
         keywords: keywords,
         google_ads_plan_id: googleAdsPlanId,
