@@ -48,6 +48,16 @@ interface QuoraConfig {
   formkey: string;
 }
 
+interface ShopifyConfig {
+  accessToken: string;
+  shopDomain: string;
+}
+
+interface WordPressConfig {
+  accessToken: string;
+  siteId: string;
+}
+
 // CORS headers for browser requests
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -123,6 +133,8 @@ Deno.serve(async (req) => {
         let facebookResult: any = null;
         let mediumResult: any = null;
         let quoraResult: any = null;
+        let shopifyResult: any = null;
+        let wordpressResult: any = null;
 
         // Get GitHub integration if platform is GitHub
         if (platform === "github") {
@@ -1047,6 +1059,246 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Get Shopify integration if platform is Shopify
+        if (platform === "shopify") {
+          try {
+            const { data: shopifyIntegration } = await supabase
+              .from("platform_integrations")
+              .select("*")
+              .eq("user_id", content.user_id)
+              .eq("platform", "shopify")
+              .eq("status", "connected")
+              .maybeSingle();
+
+            if (shopifyIntegration && shopifyIntegration.access_token) {
+              const shopDomain = shopifyIntegration.metadata?.shopDomain || shopifyIntegration.platform_user_id;
+              
+              if (!shopDomain) {
+                throw new Error("Shopify shop domain not found. Please reconnect your Shopify integration.");
+              }
+
+              // Normalize shop domain
+              let normalizedDomain = shopDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+              if (!normalizedDomain.includes('.myshopify.com')) {
+                normalizedDomain = `${normalizedDomain}.myshopify.com`;
+              }
+
+              // Get or create blog
+              const blogId = content.metadata?.shopifyBlogId;
+              let targetBlogId = blogId;
+
+              if (!targetBlogId) {
+                // Get first available blog
+                const blogsResponse = await fetch(
+                  `https://${normalizedDomain}/admin/api/2024-01/blogs.json`,
+                  {
+                    method: 'GET',
+                    headers: {
+                      'X-Shopify-Access-Token': shopifyIntegration.access_token,
+                      'Content-Type': 'application/json',
+                    },
+                  }
+                );
+
+                if (blogsResponse.ok) {
+                  const blogsData = await blogsResponse.json();
+                  if (blogsData.blogs && blogsData.blogs.length > 0) {
+                    targetBlogId = blogsData.blogs[0].id;
+                  }
+                }
+
+                if (!targetBlogId) {
+                  throw new Error("No blog found in Shopify store. Please create a blog first.");
+                }
+              }
+
+              // Prepare article payload
+              const articlePayload = {
+                article: {
+                  title: content.topic || "Untitled",
+                  author: content.metadata?.author || "GeoRepute.ai",
+                  body_html: content.generated_content || "",
+                  published: true,
+                  tags: content.metadata?.tags || content.target_keywords?.join(", ") || "",
+                  summary_html: content.metadata?.summary || "",
+                  ...(content.metadata?.imageUrl && {
+                    image: { src: content.metadata.imageUrl },
+                  }),
+                },
+              };
+
+              // Create article
+              const articleResponse = await fetch(
+                `https://${normalizedDomain}/admin/api/2024-01/blogs/${targetBlogId}/articles.json`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'X-Shopify-Access-Token': shopifyIntegration.access_token,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(articlePayload),
+                }
+              );
+
+              if (articleResponse.ok) {
+                const articleData = await articleResponse.json();
+                const article = articleData.article;
+
+                // Get blog handle for URL
+                let blogHandle = 'news';
+                try {
+                  const blogInfoResponse = await fetch(
+                    `https://${normalizedDomain}/admin/api/2024-01/blogs/${targetBlogId}.json`,
+                    {
+                      method: 'GET',
+                      headers: {
+                        'X-Shopify-Access-Token': shopifyIntegration.access_token,
+                        'Content-Type': 'application/json',
+                      },
+                    }
+                  );
+                  if (blogInfoResponse.ok) {
+                    const blogInfo = await blogInfoResponse.json();
+                    blogHandle = blogInfo.blog?.handle || 'news';
+                  }
+                } catch (e) {
+                  // Use default handle
+                }
+
+                const articleUrl = `https://${normalizedDomain}/blogs/${blogHandle}/${article.handle}`;
+
+                publishUrl = articleUrl;
+                shopifyResult = {
+                  success: true,
+                  url: articleUrl,
+                  articleId: article.id,
+                  blogId: targetBlogId,
+                };
+
+                // Update last_used_at
+                await supabase
+                  .from("platform_integrations")
+                  .update({ last_used_at: new Date().toISOString() })
+                  .eq("id", shopifyIntegration.id);
+              } else {
+                const errorData = await articleResponse.json().catch(() => ({}));
+                const errorMessage = errorData.errors 
+                  ? (typeof errorData.errors === 'string' ? errorData.errors : JSON.stringify(errorData.errors))
+                  : `Shopify API Error (${articleResponse.status})`;
+                shopifyResult = {
+                  success: false,
+                  error: errorMessage,
+                };
+              }
+            } else {
+              throw new Error("Shopify integration not found or not connected.");
+            }
+          } catch (shopifyError: any) {
+            console.error(`Shopify publish error for content ${content.id}:`, shopifyError);
+            shopifyResult = {
+              success: false,
+              error: shopifyError.message || "Shopify publish failed",
+            };
+          }
+        }
+
+        // Get WordPress.com integration if platform is WordPress
+        if (platform === "wordpress") {
+          try {
+            const { data: wordpressIntegration } = await supabase
+              .from("platform_integrations")
+              .select("*")
+              .eq("user_id", content.user_id)
+              .eq("platform", "wordpress")
+              .eq("status", "connected")
+              .maybeSingle();
+
+            if (wordpressIntegration && wordpressIntegration.access_token) {
+              const siteId = content.metadata?.wordpressSiteId || 
+                             wordpressIntegration.platform_user_id || 
+                             wordpressIntegration.metadata?.siteId;
+              
+              if (!siteId) {
+                throw new Error("WordPress.com site ID not found. Please select a site in your WordPress integration.");
+              }
+
+              // Prepare post payload
+              const postPayload: any = {
+                title: content.topic || "Untitled",
+                content: content.generated_content || "",
+                status: 'publish',
+              };
+
+              // Add optional fields
+              if (content.metadata?.summary) {
+                postPayload.excerpt = content.metadata.summary;
+              }
+              if (content.metadata?.tags) {
+                postPayload.tags = Array.isArray(content.metadata.tags) 
+                  ? content.metadata.tags.join(',') 
+                  : content.metadata.tags;
+              }
+              if (content.target_keywords && content.target_keywords.length > 0) {
+                postPayload.tags = (postPayload.tags ? postPayload.tags + ',' : '') + content.target_keywords.join(',');
+              }
+              if (content.metadata?.imageUrl) {
+                postPayload.featured_image = content.metadata.imageUrl;
+              }
+              // WordPress-specific: Add categories
+              if (content.metadata?.categories) {
+                postPayload.categories = Array.isArray(content.metadata.categories)
+                  ? content.metadata.categories.join(',')
+                  : content.metadata.categories;
+              }
+
+              // Create post
+              const postResponse = await fetch(
+                `https://public-api.wordpress.com/rest/v1.1/sites/${siteId}/posts/new`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${wordpressIntegration.access_token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify(postPayload),
+                }
+              );
+
+              if (postResponse.ok) {
+                const postData = await postResponse.json();
+
+                publishUrl = postData.URL;
+                wordpressResult = {
+                  success: true,
+                  url: postData.URL,
+                  postId: postData.ID,
+                  siteId: siteId,
+                };
+
+                // Update last_used_at
+                await supabase
+                  .from("platform_integrations")
+                  .update({ last_used_at: new Date().toISOString() })
+                  .eq("id", wordpressIntegration.id);
+              } else {
+                const errorData = await postResponse.json().catch(() => ({}));
+                wordpressResult = {
+                  success: false,
+                  error: errorData.message || `WordPress API Error (${postResponse.status})`,
+                };
+              }
+            } else {
+              throw new Error("WordPress.com integration not found or not connected.");
+            }
+          } catch (wordpressError: any) {
+            console.error(`WordPress publish error for content ${content.id}:`, wordpressError);
+            wordpressResult = {
+              success: false,
+              error: wordpressError.message || "WordPress publish failed",
+            };
+          }
+        }
+
         // Get platform post ID based on platform
         const getPlatformPostId = () => {
           switch (platform) {
@@ -1057,6 +1309,8 @@ Deno.serve(async (req) => {
             case "facebook": return facebookResult?.postId;
             case "medium": return mediumResult?.postId;
             case "quora": return quoraResult?.postId;
+            case "shopify": return shopifyResult?.articleId?.toString();
+            case "wordpress": return wordpressResult?.postId?.toString();
             default: return null;
           }
         };
@@ -1065,7 +1319,7 @@ Deno.serve(async (req) => {
         const getErrorMessage = () => {
           return gitHubResult?.error || redditResult?.error || linkedInResult?.error || 
                  instagramResult?.error || facebookResult?.error || mediumResult?.error || 
-                 quoraResult?.error || null;
+                 quoraResult?.error || shopifyResult?.error || wordpressResult?.error || null;
         };
 
         // Check if schema exists in content metadata
@@ -1101,6 +1355,8 @@ Deno.serve(async (req) => {
               facebook: facebookResult || null,
               medium: mediumResult || null,
               quora: quoraResult || null,
+              shopify: shopifyResult || null,
+              wordpress: wordpressResult || null,
               // Schema data (for SEO)
               schema: schemaData ? {
                 jsonLd: schemaData.jsonLd,

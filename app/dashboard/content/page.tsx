@@ -175,6 +175,7 @@ function ContentInner() {
     { id: 'instagram', name: 'Instagram', icon: '/instagram-1-svgrepo-com.svg', color: 'bg-pink-100 text-pink-700 border-pink-200' },
     { id: 'github', name: 'GitHub', icon: '/github-142.svg', color: 'bg-gray-800 text-white border-gray-700' },
     { id: 'shopify', name: 'Shopify', icon: '/shopify.svg', color: 'bg-green-100 text-green-700 border-green-200' },
+    { id: 'wordpress', name: 'WordPress.com', icon: '/wordpress.svg', color: 'bg-blue-100 text-blue-700 border-blue-200' },
   ];
 
 

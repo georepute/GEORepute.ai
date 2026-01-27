@@ -43,15 +43,24 @@ interface ShopifyBlog {
   handle: string;
 }
 
+interface WordPressSite {
+  ID: number;
+  name: string;
+  URL: string;
+}
+
 interface BlogPost {
   id?: string;
   title: string;
   content: string;
   author: string;
   tags: string;
+  categories?: string; // WordPress-specific: comma-separated categories
   imageUrl?: string;
   summary?: string;
 }
+
+type PublishPlatform = "shopify" | "wordpress";
 
 export default function BlogPage() {
   const { isRtl, t } = useLanguage();
@@ -59,12 +68,26 @@ export default function BlogPage() {
   const router = useRouter();
   
   const [loading, setLoading] = useState(true);
+  
+  // Platform selection
+  const [selectedPlatform, setSelectedPlatform] = useState<PublishPlatform>("shopify");
+  
+  // Shopify state
   const [shopifyConnected, setShopifyConnected] = useState(false);
   const [shopName, setShopName] = useState("");
   const [shopDomain, setShopDomain] = useState("");
   const [blogs, setBlogs] = useState<ShopifyBlog[]>([]);
   const [selectedBlogId, setSelectedBlogId] = useState<number | null>(null);
   const [loadingBlogs, setLoadingBlogs] = useState(false);
+  
+  // WordPress.com state
+  const [wordpressConnected, setWordpressConnected] = useState(false);
+  const [wordpressUsername, setWordpressUsername] = useState("");
+  const [wordpressSiteName, setWordpressSiteName] = useState("");
+  const [wordpressSiteUrl, setWordpressSiteUrl] = useState("");
+  const [wordpressSites, setWordpressSites] = useState<WordPressSite[]>([]);
+  const [selectedWordPressSiteId, setSelectedWordPressSiteId] = useState<number | null>(null);
+  const [loadingWordPressSites, setLoadingWordPressSites] = useState(false);
 
   // Blog post form state
   const [topic, setTopic] = useState("");
@@ -74,6 +97,7 @@ export default function BlogPage() {
     content: "",
     author: "",
     tags: "",
+    categories: "",
     imageUrl: "",
     summary: "",
   });
@@ -120,11 +144,57 @@ export default function BlogPage() {
     'link', 'image'
   ];
 
-  // Check Shopify connection on mount
+  // Check platform connections on mount
   useEffect(() => {
-    checkShopifyConnection();
+    checkConnections();
     loadPublishedPosts();
   }, []);
+
+  const checkConnections = async () => {
+    setLoading(true);
+    try {
+      // Check both platforms in parallel
+      const [shopifyRes, wordpressRes] = await Promise.all([
+        fetch("/api/integrations/shopify"),
+        fetch("/api/integrations/wordpress"),
+      ]);
+
+      // Handle Shopify
+      if (shopifyRes.ok) {
+        const data = await shopifyRes.json();
+        if (data.success && data.connected && data.config) {
+          setShopifyConnected(true);
+          setShopName(data.config.shopName || "");
+          setShopDomain(data.config.shopDomain || "");
+          setSelectedPlatform("shopify");
+          // Load available blogs
+          await loadShopifyBlogs(data.config.shopDomain);
+        }
+      }
+
+      // Handle WordPress.com
+      if (wordpressRes.ok) {
+        const data = await wordpressRes.json();
+        if (data.success && data.connected && data.config) {
+          setWordpressConnected(true);
+          setWordpressUsername(data.config.username || "");
+          setWordpressSiteName(data.config.siteName || "");
+          setWordpressSiteUrl(data.config.siteUrl || "");
+          if (data.config.siteId) {
+            setSelectedWordPressSiteId(parseInt(data.config.siteId));
+          }
+          // If Shopify not connected, default to WordPress
+          if (!shopifyConnected) {
+            setSelectedPlatform("wordpress");
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error checking connections:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const checkShopifyConnection = async () => {
     try {
@@ -170,18 +240,43 @@ export default function BlogPage() {
     }
   };
 
+  const loadWordPressSites = async () => {
+    setLoadingWordPressSites(true);
+    try {
+      const response = await fetch("/api/integrations/wordpress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get-sites" }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.sites) {
+          setWordpressSites(data.sites);
+          // Auto-select first site if available and none selected
+          if (data.sites.length > 0 && !selectedWordPressSiteId) {
+            setSelectedWordPressSiteId(data.sites[0].ID);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error loading WordPress sites:", error);
+    } finally {
+      setLoadingWordPressSites(false);
+    }
+  };
+
   const loadPublishedPosts = async () => {
     setLoadingPosts(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Get posts published to Shopify
+      // Get posts published to Shopify and WordPress
       const { data, error } = await supabase
         .from("published_content")
         .select("*, content_strategy(*)")
         .eq("user_id", user.id)
-        .eq("platform", "shopify")
+        .in("platform", ["shopify", "wordpress"])
         .order("published_at", { ascending: false })
         .limit(20);
 
@@ -209,7 +304,7 @@ export default function BlogPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: topic.trim(),
-          targetPlatform: "shopify",
+          targetPlatform: selectedPlatform,
           targetKeywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
           influenceLevel: "moderate",
           contentType: "blog_article",
@@ -382,6 +477,7 @@ export default function BlogPage() {
       content: "",
       author: "",
       tags: "",
+      categories: "",
       imageUrl: "",
       summary: "",
     });
@@ -432,7 +528,7 @@ export default function BlogPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: post.title,
-          targetPlatform: "shopify",
+          targetPlatform: selectedPlatform,
           targetKeywords: keywordsArray,
           influenceLevel: "moderate",
           contentType: "blog_article",
@@ -465,24 +561,34 @@ export default function BlogPage() {
         .select("id")
         .eq("user_id", user.id)
         .eq("topic", post.title)
-        .eq("target_platform", "shopify")
+        .eq("target_platform", selectedPlatform)
         .eq("status", "draft")
         .maybeSingle();
 
       let contentRecord;
       let insertError;
 
-      // Build metadata with schema
-      const contentMetadata = {
+      // Build metadata with schema (platform-specific)
+      const contentMetadata: Record<string, any> = {
         author: post.author || "GeoRepute.ai",
         tags: post.tags,
         imageUrl: cleanImageUrl,
         summary: post.summary,
-        shopifyBlogId: selectedBlogId,
         contentType: "blog_article",
         schema: schemaData,
         structuredSEO: structuredSEO,
       };
+      
+      // Add platform-specific fields
+      if (selectedPlatform === "shopify") {
+        contentMetadata.shopifyBlogId = selectedBlogId;
+      } else if (selectedPlatform === "wordpress") {
+        contentMetadata.wordpressSiteId = selectedWordPressSiteId;
+        // Add WordPress-specific categories
+        if (post.categories) {
+          contentMetadata.categories = post.categories;
+        }
+      }
 
       if (existingContent) {
         // Update existing draft
@@ -507,7 +613,7 @@ export default function BlogPage() {
             user_id: user.id,
             topic: post.title,
             generated_content: post.content,
-            target_platform: "shopify",
+            target_platform: selectedPlatform,
             status: "draft",
             target_keywords: keywordsArray,
             metadata: contentMetadata,
@@ -529,7 +635,7 @@ export default function BlogPage() {
         contentId: contentRecord.id,
         content: post.content,
         topic: post.title,
-        targetPlatform: "shopify",
+        targetPlatform: selectedPlatform,
         targetKeywords: keywordsArray,
         metadata: contentMetadata,
         schema: schemaData,
@@ -549,6 +655,7 @@ export default function BlogPage() {
         content: "",
         author: "",
         tags: "",
+        categories: "",
         imageUrl: "",
         summary: "",
       });
@@ -590,59 +697,152 @@ export default function BlogPage() {
         </div>
 
         {/* Not Connected State */}
-        {!shopifyConnected && (
+        {!shopifyConnected && !wordpressConnected && (
           <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-            <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-green-500 to-green-600 rounded-2xl flex items-center justify-center">
+            <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center">
               <Store className="w-8 h-8 text-white" />
             </div>
             <h2 className="text-xl font-semibold text-gray-900 mb-2">
               Connect Your Blog Platform
             </h2>
             <p className="text-gray-600 mb-6 max-w-md mx-auto">
-              Connect your Shopify store to start publishing blog posts directly from GeoRepute.ai
+              Connect your blog platform to start publishing blog posts directly from GeoRepute.ai
             </p>
-            <Link
-              href="/dashboard/settings?tab=integrations"
-              className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
-            >
-              <Settings className="w-5 h-5" />
-              Connect Shopify
-            </Link>
+            
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <Link
+                href="/dashboard/settings?tab=integrations"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+              >
+                <Image src="/shopify.svg" alt="Shopify" width={20} height={20} />
+                Connect Shopify
+              </Link>
+              <Link
+                href="/dashboard/settings?tab=integrations"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              >
+                <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} />
+                Connect WordPress.com
+              </Link>
+            </div>
 
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              <p className="text-sm text-gray-500 mb-4">Coming Soon</p>
-              <div className="flex items-center justify-center gap-4">
-                <div className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-lg text-gray-400">
-                  <span className="text-lg">📝</span>
-                  <span className="text-sm">WordPress</span>
-                </div>
-              </div>
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <p className="text-sm text-gray-500">
+                Go to <Link href="/dashboard/settings?tab=integrations" className="text-purple-600 hover:underline font-medium">Settings → Integrations</Link> to connect your platforms
+              </p>
             </div>
           </div>
         )}
 
         {/* Connected State - Create Blog Post */}
-        {shopifyConnected && (
+        {(shopifyConnected || wordpressConnected) && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Main Content - Blog Editor */}
             <div className="lg:col-span-2 space-y-6">
-              {/* Connection Status */}
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  <div>
-                    <p className="text-sm font-medium text-green-900">
-                      Connected to Shopify: {shopName || shopDomain}
-                    </p>
-                  </div>
+              {/* Platform Selector - Always show both platforms */}
+              <div className="bg-white border border-gray-200 rounded-lg p-4">
+                <p className="text-sm font-medium text-gray-700 mb-3">Publish to:</p>
+                <div className="flex flex-wrap gap-3">
+                  {/* Shopify */}
+                  {shopifyConnected ? (
+                    <button
+                      onClick={() => setSelectedPlatform("shopify")}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${
+                        selectedPlatform === "shopify"
+                          ? "bg-green-50 border-green-500 text-green-700"
+                          : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      <Image src="/shopify.svg" alt="Shopify" width={20} height={20} />
+                      <span className="font-medium">Shopify</span>
+                      {selectedPlatform === "shopify" && (
+                        <CheckCircle className="w-4 h-4 text-green-600" />
+                      )}
+                    </button>
+                  ) : (
+                    <Link
+                      href="/dashboard/settings?tab=integrations"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-green-400 hover:text-green-600 transition-colors"
+                    >
+                      <Image src="/shopify.svg" alt="Shopify" width={20} height={20} className="opacity-50" />
+                      <span className="font-medium">Connect Shopify</span>
+                    </Link>
+                  )}
+
+                  {/* WordPress.com */}
+                  {wordpressConnected ? (
+                    <button
+                      onClick={() => setSelectedPlatform("wordpress")}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${
+                        selectedPlatform === "wordpress"
+                          ? "bg-blue-50 border-blue-500 text-blue-700"
+                          : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} />
+                      <span className="font-medium">WordPress.com</span>
+                      {selectedPlatform === "wordpress" && (
+                        <CheckCircle className="w-4 h-4 text-blue-600" />
+                      )}
+                    </button>
+                  ) : (
+                    <Link
+                      href="/dashboard/settings?tab=integrations"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
+                    >
+                      <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} className="opacity-50" />
+                      <span className="font-medium">Connect WordPress.com</span>
+                    </Link>
+                  )}
                 </div>
-                <Link
-                  href="/dashboard/settings?tab=integrations"
-                  className="text-sm text-green-700 hover:text-green-800 font-medium"
-                >
-                  Manage
-                </Link>
               </div>
+
+              {/* Connection Status - Only show for the currently selected connected platform */}
+              {((selectedPlatform === "shopify" && shopifyConnected) || 
+                (selectedPlatform === "wordpress" && wordpressConnected)) && (
+                <div className={`${
+                  selectedPlatform === "shopify" 
+                    ? "bg-green-50 border-green-200" 
+                    : "bg-blue-50 border-blue-200"
+                } border rounded-lg p-4 flex items-center justify-between`}>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle className={`w-5 h-5 ${
+                      selectedPlatform === "shopify" ? "text-green-600" : "text-blue-600"
+                    }`} />
+                    <div>
+                      {selectedPlatform === "shopify" && shopifyConnected ? (
+                        <p className="text-sm font-medium text-green-900">
+                          Connected to Shopify: {shopName || shopDomain}
+                        </p>
+                      ) : selectedPlatform === "wordpress" && wordpressConnected ? (
+                        <p className="text-sm font-medium text-blue-900">
+                          Connected to WordPress.com: {wordpressSiteName || wordpressUsername}
+                          {wordpressSiteUrl && (
+                            <a 
+                              href={wordpressSiteUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="ml-2 text-blue-600 hover:underline text-xs"
+                            >
+                              ({wordpressSiteUrl})
+                            </a>
+                          )}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Link
+                    href="/dashboard/settings?tab=integrations"
+                    className={`text-sm font-medium ${
+                      selectedPlatform === "shopify" 
+                        ? "text-green-700 hover:text-green-800" 
+                        : "text-blue-700 hover:text-blue-800"
+                    }`}
+                  >
+                    Manage
+                  </Link>
+                </div>
+              )}
 
               {/* Blog Post Form */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
@@ -796,6 +996,24 @@ export default function BlogPage() {
                           />
                           <p className="text-xs text-gray-500 mt-1">Comma-separated</p>
                         </div>
+
+                        {/* Categories - WordPress only */}
+                        {selectedPlatform === "wordpress" && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Categories
+                              <span className="ml-2 text-xs font-normal text-blue-600">(WordPress only)</span>
+                            </label>
+                            <input
+                              type="text"
+                              value={post.categories || ""}
+                              onChange={(e) => setPost({ ...post, categories: e.target.value })}
+                              placeholder="News, Tutorials, Reviews"
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Comma-separated. Categories are broader groupings for your posts.</p>
+                          </div>
+                        )}
                       </div>
 
                       {/* Featured Image */}
@@ -857,11 +1075,11 @@ export default function BlogPage() {
 
             {/* Sidebar - Published Posts */}
             <div className="space-y-6">
-              {/* Select Blog */}
-              {blogs.length > 1 && (
+              {/* Shopify Blog Selector */}
+              {selectedPlatform === "shopify" && blogs.length > 1 && (
                 <div className="bg-white rounded-xl border border-gray-200 p-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Blog
+                    Select Shopify Blog
                   </label>
                   <select
                     value={selectedBlogId || ""}
@@ -874,6 +1092,56 @@ export default function BlogPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {/* WordPress Site Selector */}
+              {selectedPlatform === "wordpress" && wordpressConnected && (
+                <div className="bg-white rounded-xl border border-gray-200 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      WordPress.com Site
+                    </label>
+                    <button
+                      onClick={loadWordPressSites}
+                      disabled={loadingWordPressSites}
+                      className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                    >
+                      {loadingWordPressSites ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3 h-3" />
+                      )}
+                      Refresh
+                    </button>
+                  </div>
+                  
+                  {wordpressSites.length > 0 ? (
+                    <select
+                      value={selectedWordPressSiteId || ""}
+                      onChange={(e) => setSelectedWordPressSiteId(Number(e.target.value))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none"
+                    >
+                      {wordpressSites.map((site) => (
+                        <option key={site.ID} value={site.ID}>
+                          {site.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-sm text-gray-500 py-2">
+                      {wordpressSiteName ? (
+                        <span className="text-gray-700 font-medium">{wordpressSiteName}</span>
+                      ) : (
+                        <button
+                          onClick={loadWordPressSites}
+                          className="text-blue-600 hover:underline"
+                        >
+                          Load sites
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -900,9 +1168,18 @@ export default function BlogPage() {
                           key={post.id}
                           className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                         >
-                          <p className="font-medium text-gray-900 text-sm truncate">
-                            {post.content_strategy?.topic || "Untitled"}
-                          </p>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="font-medium text-gray-900 text-sm truncate flex-1">
+                              {post.content_strategy?.topic || "Untitled"}
+                            </p>
+                            <span className={`flex-shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded ${
+                              post.platform === "wordpress" 
+                                ? "bg-blue-100 text-blue-700" 
+                                : "bg-green-100 text-green-700"
+                            }`}>
+                              {post.platform === "wordpress" ? "WP" : "Shopify"}
+                            </span>
+                          </div>
                           <div className="flex items-center justify-between mt-1">
                             <span className="text-xs text-gray-500">
                               {new Date(post.published_at).toLocaleDateString()}

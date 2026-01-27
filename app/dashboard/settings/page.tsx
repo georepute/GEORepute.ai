@@ -27,7 +27,8 @@ import {
   Edit2,
   Trash2,
   Star,
-  ExternalLink
+  ExternalLink,
+  RefreshCw
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useLanguage } from "@/lib/language-context";
@@ -1667,6 +1668,9 @@ NEXT_PUBLIC_GITHUB_CLIENT_ID=prod_client_id`}
       {/* Shopify Integration */}
       <ShopifyIntegrationSettings />
 
+      {/* WordPress.com Integration */}
+      <WordPressIntegrationSettings />
+
       {/* Google Search Console Integration */}
       <GoogleSearchConsoleSettings />
     </div>
@@ -2984,6 +2988,307 @@ function ShopifyIntegrationSettings() {
               </>
             )}
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// WordPress.com Integration Component
+function WordPressIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [username, setUsername] = useState("");
+  const [siteName, setSiteName] = useState("");
+  const [siteUrl, setSiteUrl] = useState("");
+  const [sites, setSites] = useState<Array<{ ID: number; name: string; URL: string }>>([]);
+  const [showSiteSelector, setShowSiteSelector] = useState(false);
+
+  useEffect(() => {
+    loadWordPressConfig();
+    
+    // Check for success/error messages in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const success = urlParams.get("success");
+    const error = urlParams.get("error");
+    const tab = urlParams.get("tab");
+    
+    if (tab === "integrations") {
+      if (success && success.includes("WordPress")) {
+        toast.success(success);
+        loadWordPressConfig();
+        // Clean URL
+        window.history.replaceState({}, "", "/dashboard/settings?tab=integrations");
+      } else if (error) {
+        // Error is handled by Shopify component, but refresh config anyway
+        loadWordPressConfig();
+      }
+    }
+  }, []);
+
+  const loadWordPressConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/wordpress");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.connected && data.config) {
+          setIsConnected(true);
+          setUsername(data.config.username || "");
+          setSiteName(data.config.siteName || "");
+          setSiteUrl(data.config.siteUrl || "");
+        } else {
+          setIsConnected(false);
+          setUsername("");
+          setSiteName("");
+          setSiteUrl("");
+        }
+      }
+    } catch (error) {
+      console.error("Error loading WordPress config:", error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleConnect = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/wordpress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "initiate",
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok && data.authUrl) {
+        // Redirect to WordPress.com OAuth
+        window.location.href = data.authUrl;
+      } else {
+        toast.error(data.error || "Failed to initiate WordPress.com connection");
+      }
+    } catch (error: any) {
+      console.error("WordPress connect error:", error);
+      toast.error("Failed to connect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect your WordPress.com account?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/wordpress", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("WordPress.com disconnected successfully");
+        setIsConnected(false);
+        setUsername("");
+        setSiteName("");
+        setSiteUrl("");
+        setSites([]);
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadSites = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/wordpress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get-sites" }),
+      });
+
+      const data = await response.json();
+      if (response.ok && data.sites) {
+        setSites(data.sites);
+        setShowSiteSelector(true);
+      } else {
+        toast.error(data.error || "Failed to load sites");
+      }
+    } catch (error: any) {
+      console.error("Load sites error:", error);
+      toast.error("Failed to load sites: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectSite = async (site: { ID: number; name: string; URL: string }) => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/wordpress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "select-site",
+          siteId: site.ID,
+          siteName: site.name,
+          siteUrl: site.URL,
+        }),
+      });
+
+      if (response.ok) {
+        toast.success(`Selected site: ${site.name}`);
+        setSiteName(site.name);
+        setSiteUrl(site.URL);
+        setShowSiteSelector(false);
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to select site");
+      }
+    } catch (error: any) {
+      console.error("Select site error:", error);
+      toast.error("Failed to select site: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/wordpress.svg" alt="WordPress" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">WordPress.com Blog Publishing</h3>
+          <p className="text-sm text-gray-600">
+            Publish blog posts directly to your WordPress.com site
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-900 mb-4">
+              Connect your WordPress.com account to publish blog posts directly. You'll be redirected to WordPress.com to authorize access.
+            </p>
+            
+            <button
+              onClick={handleConnect}
+              disabled={loading}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <ExternalLink className="w-4 h-4" />
+                  Connect WordPress.com
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <p className="text-xs text-gray-600">
+              <strong>Note:</strong> This integration works with WordPress.com hosted sites only. 
+              For self-hosted WordPress.org sites, you would need to use Application Passwords.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <div>
+                <p className="text-sm font-medium text-green-900">
+                  Connected as: {username}
+                </p>
+                {siteName && (
+                  <p className="text-xs text-green-700">
+                    Selected site: {siteName}
+                  </p>
+                )}
+                {siteUrl && (
+                  <a 
+                    href={siteUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-xs text-green-600 hover:underline"
+                  >
+                    {siteUrl}
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Site Selector */}
+          {showSiteSelector && sites.length > 0 && (
+            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <p className="text-sm font-medium text-gray-700 mb-3">Select a site to publish to:</p>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {sites.map((site) => (
+                  <button
+                    key={site.ID}
+                    onClick={() => handleSelectSite(site)}
+                    className="w-full text-left p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                  >
+                    <p className="font-medium text-gray-900">{site.name}</p>
+                    <p className="text-xs text-gray-500">{site.URL}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <button
+              onClick={loadSites}
+              disabled={loading}
+              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loading ? (
+                <Loader className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              {showSiteSelector ? "Refresh Sites" : "Change Site"}
+            </button>
+
+            <button
+              onClick={handleDisconnect}
+              disabled={loading}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <XCircle className="w-4 h-4" />
+              Disconnect
+            </button>
+          </div>
+
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-900">
+              <strong>Ready to publish!</strong> Go to the <Link href="/dashboard/blog" className="text-blue-600 hover:underline font-medium">Blog section</Link> in Content Generator to create and publish blog posts to your WordPress.com site.
+            </p>
+          </div>
         </div>
       )}
     </div>
