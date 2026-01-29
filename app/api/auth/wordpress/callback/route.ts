@@ -107,20 +107,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Verify the connection and get user info
+    // Try to verify the connection and get user info
     const verifyResult = await verifyWordPressConnection(tokenResult.accessToken);
 
-    if (!verifyResult.success) {
-      console.error("Connection verification failed:", verifyResult.error);
-      return NextResponse.redirect(
-        `${baseUrl}/dashboard/settings?tab=integrations&error=${encodeURIComponent(verifyResult.error || "Failed to verify connection")}`
-      );
-    }
-
-    // Get user's sites
+    // Get user's sites - this might work even if /me fails
     const sitesResult = await getWordPressSites(tokenResult.accessToken);
     const sites = sitesResult.sites || [];
     const primarySite = sites.length > 0 ? sites[0] : null;
+
+    // If both verification and sites fetch failed, return error
+    if (!verifyResult.success && !sitesResult.success) {
+      console.error("Connection verification failed:", verifyResult.error);
+      console.error("Sites fetch also failed:", sitesResult.error);
+      return NextResponse.redirect(
+        `${baseUrl}/dashboard/settings?tab=integrations&error=${encodeURIComponent(verifyResult.error || sitesResult.error || "Failed to verify connection")}`
+      );
+    }
+
+    // Log if verification failed but we can still proceed with sites
+    if (!verifyResult.success && sitesResult.success) {
+      console.warn("User verification failed but sites fetch succeeded. Proceeding with limited info.");
+    }
 
     // Update the integration record with the access token
     const { error: updateError } = await supabase
@@ -128,16 +135,16 @@ export async function GET(request: NextRequest) {
       .update({
         access_token: tokenResult.accessToken,
         platform_user_id: primarySite?.ID?.toString() || tokenResult.blogId || '',
-        platform_username: verifyResult.user?.username || verifyResult.user?.display_name || '',
+        platform_username: verifyResult.user?.username || verifyResult.user?.display_name || primarySite?.name || 'WordPress User',
         status: "connected",
         error_message: null,
         metadata: {
           ...pendingIntegration.metadata,
-          userId: verifyResult.user?.ID,
-          username: verifyResult.user?.username,
-          displayName: verifyResult.user?.display_name,
-          email: verifyResult.user?.email,
-          avatarUrl: verifyResult.user?.avatar_URL,
+          userId: verifyResult.user?.ID || null,
+          username: verifyResult.user?.username || null,
+          displayName: verifyResult.user?.display_name || null,
+          email: verifyResult.user?.email || null,
+          avatarUrl: verifyResult.user?.avatar_URL || null,
           blogId: tokenResult.blogId,
           blogUrl: tokenResult.blogUrl,
           siteId: primarySite?.ID,
@@ -146,6 +153,7 @@ export async function GET(request: NextRequest) {
           sitesCount: sites.length,
           connected_at: new Date().toISOString(),
           oauth_state: null, // Clear the state
+          verificationSkipped: !verifyResult.success, // Track if we skipped verification
         },
         last_used_at: new Date().toISOString(),
       })

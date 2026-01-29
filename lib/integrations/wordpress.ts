@@ -1,13 +1,43 @@
 /**
- * WordPress.com Integration Service
- * Handles OAuth authentication and blog publishing to WordPress.com sites
- * 
- * Note: This only works with WordPress.com hosted sites, not self-hosted WordPress.org sites
+ * WordPress Integration Service
+ * Supports both:
+ * 1. WordPress.com (OAuth authentication)
+ * 2. Self-hosted WordPress (Application Passwords authentication)
  */
 
+// ============================================================================
+// Configuration Types
+// ============================================================================
+
+/**
+ * WordPress.com configuration (OAuth)
+ */
 export interface WordPressConfig {
   accessToken: string;
   siteId: string; // WordPress.com site ID or domain
+}
+
+/**
+ * Self-hosted WordPress configuration (Application Passwords)
+ */
+export interface SelfHostedWordPressConfig {
+  siteUrl: string;      // e.g., "https://example.com"
+  username: string;     // WordPress username
+  applicationPassword: string; // Application password (not regular password)
+}
+
+/**
+ * Unified WordPress configuration that works with both types
+ */
+export interface UnifiedWordPressConfig {
+  type: 'wordpress_com' | 'self_hosted';
+  // WordPress.com specific
+  accessToken?: string;
+  siteId?: string;
+  // Self-hosted specific
+  siteUrl?: string;
+  username?: string;
+  applicationPassword?: string;
 }
 
 export interface WordPressSite {
@@ -376,15 +406,39 @@ export async function verifyWordPressConnection(accessToken: string): Promise<{
     });
 
     if (!response.ok) {
+      // Try to get error details from response
+      const errorData = await response.json().catch(() => ({}));
+      console.error('WordPress.com /me API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorData,
+      });
+
       if (response.status === 401) {
         return {
           success: false,
           error: 'Invalid or expired access token. Please reconnect your WordPress.com account.',
         };
       }
+      
+      if (response.status === 403) {
+        // 403 usually means the app needs approval or scope issues
+        const errorMessage = errorData.message || errorData.error || '';
+        if (errorMessage.includes('not approved') || errorMessage.includes('approval')) {
+          return {
+            success: false,
+            error: 'WordPress.com app needs approval. Please submit your app for review at developer.wordpress.com',
+          };
+        }
+        return {
+          success: false,
+          error: `Access denied (403). ${errorMessage || 'Your WordPress.com app may need approval or additional permissions.'}`,
+        };
+      }
+      
       return {
         success: false,
-        error: `Failed to verify connection (${response.status})`,
+        error: `Failed to verify connection (${response.status}): ${errorData.message || errorData.error || response.statusText}`,
       };
     }
 
@@ -400,6 +454,7 @@ export async function verifyWordPressConnection(accessToken: string): Promise<{
       },
     };
   } catch (error: any) {
+    console.error('WordPress.com verification exception:', error);
     return {
       success: false,
       error: error.message || 'Failed to verify WordPress.com connection',
@@ -418,7 +473,7 @@ export function generateWordPressAuthUrl(
   clientId: string,
   redirectUri: string,
   state: string,
-  scopes: string[] = ['posts', 'media'],
+  scopes: string[] = ['auth', 'posts', 'media', 'sites'],
   blog?: string
 ): string {
   const params = new URLSearchParams({
@@ -580,5 +635,504 @@ export async function uploadWordPressMedia(
       success: false,
       error: error.message || 'Failed to upload WordPress media',
     };
+  }
+}
+
+// ============================================================================
+// Self-Hosted WordPress Functions (Application Passwords)
+// ============================================================================
+
+/**
+ * Get Basic Auth header for self-hosted WordPress
+ */
+function getSelfHostedAuthHeader(username: string, applicationPassword: string): string {
+  const credentials = Buffer.from(`${username}:${applicationPassword}`).toString('base64');
+  return `Basic ${credentials}`;
+}
+
+/**
+ * Normalize site URL (ensure it has protocol and no trailing slash)
+ */
+function normalizeSiteUrl(url: string): string {
+  let normalized = url.trim();
+  
+  // Add https:// if no protocol
+  if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+    normalized = `https://${normalized}`;
+  }
+  
+  // Remove trailing slash
+  normalized = normalized.replace(/\/+$/, '');
+  
+  return normalized;
+}
+
+/**
+ * Verify self-hosted WordPress connection using Application Password
+ */
+export async function verifySelfHostedWordPressConnection(config: SelfHostedWordPressConfig): Promise<{
+  success: boolean;
+  user?: {
+    id: number;
+    name: string;
+    username: string;
+    email?: string;
+    avatar_urls?: { [key: string]: string };
+  };
+  siteInfo?: {
+    name: string;
+    description: string;
+    url: string;
+    home: string;
+  };
+  error?: string;
+}> {
+  try {
+    const siteUrl = normalizeSiteUrl(config.siteUrl);
+    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
+
+    // First, verify the connection by getting current user info
+    const userResponse = await fetch(`${siteUrl}/wp-json/wp/v2/users/me`, {
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!userResponse.ok) {
+      const errorData = await userResponse.json().catch(() => ({}));
+      console.error('Self-hosted WordPress auth error:', userResponse.status, errorData);
+      
+      if (userResponse.status === 401) {
+        return {
+          success: false,
+          error: 'Invalid username or application password. Please check your credentials.',
+        };
+      }
+      
+      if (userResponse.status === 403) {
+        return {
+          success: false,
+          error: 'Access forbidden. Make sure the Application Password has the correct permissions.',
+        };
+      }
+      
+      if (userResponse.status === 404) {
+        return {
+          success: false,
+          error: 'WordPress REST API not found. Make sure the site URL is correct and REST API is enabled.',
+        };
+      }
+      
+      return {
+        success: false,
+        error: errorData.message || `Connection failed (${userResponse.status})`,
+      };
+    }
+
+    const userData = await userResponse.json();
+
+    // Get site info
+    let siteInfo = null;
+    try {
+      const siteResponse = await fetch(`${siteUrl}/wp-json`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (siteResponse.ok) {
+        siteInfo = await siteResponse.json();
+      }
+    } catch (e) {
+      // Site info is optional, continue without it
+      console.warn('Could not fetch site info:', e);
+    }
+
+    return {
+      success: true,
+      user: {
+        id: userData.id,
+        name: userData.name,
+        username: userData.slug,
+        email: userData.email,
+        avatar_urls: userData.avatar_urls,
+      },
+      siteInfo: siteInfo ? {
+        name: siteInfo.name,
+        description: siteInfo.description,
+        url: siteInfo.url,
+        home: siteInfo.home,
+      } : undefined,
+    };
+  } catch (error: any) {
+    console.error('Self-hosted WordPress verification error:', error);
+    
+    // Check for common network errors
+    if (error.code === 'ENOTFOUND' || error.message?.includes('ENOTFOUND')) {
+      return {
+        success: false,
+        error: 'Site not found. Please check the URL is correct.',
+      };
+    }
+    
+    if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
+      return {
+        success: false,
+        error: 'Connection refused. The site may be down or blocking connections.',
+      };
+    }
+    
+    return {
+      success: false,
+      error: error.message || 'Failed to verify self-hosted WordPress connection',
+    };
+  }
+}
+
+/**
+ * Publish a post to self-hosted WordPress using Application Password
+ */
+export async function publishToSelfHostedWordPress(
+  config: SelfHostedWordPressConfig,
+  post: WordPressPost
+): Promise<WordPressPublishResult> {
+  try {
+    const siteUrl = normalizeSiteUrl(config.siteUrl);
+    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
+
+    // Build the post payload for WordPress REST API
+    const postPayload: any = {
+      title: post.title,
+      content: post.content,
+      status: post.status || 'publish',
+    };
+
+    // Add optional fields
+    if (post.excerpt) postPayload.excerpt = post.excerpt;
+    if (post.date) postPayload.date = post.date;
+    if (post.slug) postPayload.slug = post.slug;
+    
+    // Tags need to be tag IDs in self-hosted WP, but we can pass names and let WP create them
+    if (post.tags && post.tags.length > 0) {
+      // For self-hosted WP, we need to get/create tag IDs or use tag names if REST API supports it
+      postPayload.tags = []; // We'll handle tags separately
+    }
+    
+    // Categories need to be category IDs
+    if (post.categories && post.categories.length > 0) {
+      postPayload.categories = []; // We'll handle categories separately
+    }
+
+    console.log('Publishing post to self-hosted WordPress:', {
+      siteUrl,
+      title: post.title,
+      status: post.status,
+    });
+
+    const response = await fetch(`${siteUrl}/wp-json/wp/v2/posts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(postPayload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('Self-hosted WordPress publish error:', response.status, errorData);
+      
+      if (response.status === 401) {
+        return {
+          success: false,
+          error: 'Authentication failed. Please check your Application Password.',
+        };
+      }
+      
+      if (response.status === 403) {
+        return {
+          success: false,
+          error: 'Permission denied. Your user may not have permission to create posts.',
+        };
+      }
+      
+      return {
+        success: false,
+        error: errorData.message || `Failed to publish post (${response.status})`,
+      };
+    }
+
+    const data = await response.json();
+
+    console.log('Successfully published to self-hosted WordPress:', {
+      postId: data.id,
+      url: data.link,
+    });
+
+    // Handle tags after post creation (if any)
+    if (post.tags && post.tags.length > 0) {
+      try {
+        await addTagsToSelfHostedPost(config, data.id, post.tags);
+      } catch (tagError) {
+        console.warn('Failed to add tags to post:', tagError);
+      }
+    }
+
+    return {
+      success: true,
+      url: data.link,
+      postId: data.id,
+      siteId: siteUrl,
+    };
+  } catch (error: any) {
+    console.error('Self-hosted WordPress publish error:', error);
+    return {
+      success: false,
+      error: error.message || 'Unknown error publishing to self-hosted WordPress',
+    };
+  }
+}
+
+/**
+ * Add tags to a self-hosted WordPress post
+ */
+async function addTagsToSelfHostedPost(
+  config: SelfHostedWordPressConfig,
+  postId: number,
+  tagNames: string[]
+): Promise<void> {
+  const siteUrl = normalizeSiteUrl(config.siteUrl);
+  const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
+  
+  const tagIds: number[] = [];
+  
+  for (const tagName of tagNames) {
+    // First, try to find existing tag
+    const searchResponse = await fetch(
+      `${siteUrl}/wp-json/wp/v2/tags?search=${encodeURIComponent(tagName)}`,
+      {
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+    
+    if (searchResponse.ok) {
+      const existingTags = await searchResponse.json();
+      const exactMatch = existingTags.find((t: any) => 
+        t.name.toLowerCase() === tagName.toLowerCase()
+      );
+      
+      if (exactMatch) {
+        tagIds.push(exactMatch.id);
+        continue;
+      }
+    }
+    
+    // Create new tag if not found
+    const createResponse = await fetch(`${siteUrl}/wp-json/wp/v2/tags`, {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: tagName }),
+    });
+    
+    if (createResponse.ok) {
+      const newTag = await createResponse.json();
+      tagIds.push(newTag.id);
+    }
+  }
+  
+  // Update post with tag IDs
+  if (tagIds.length > 0) {
+    await fetch(`${siteUrl}/wp-json/wp/v2/posts/${postId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ tags: tagIds }),
+    });
+  }
+}
+
+/**
+ * Get posts from self-hosted WordPress
+ */
+export async function getSelfHostedWordPressPosts(
+  config: SelfHostedWordPressConfig,
+  options: { per_page?: number; status?: string } = {}
+): Promise<{
+  success: boolean;
+  posts?: any[];
+  error?: string;
+}> {
+  try {
+    const siteUrl = normalizeSiteUrl(config.siteUrl);
+    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
+    
+    const params = new URLSearchParams();
+    if (options.per_page) params.append('per_page', options.per_page.toString());
+    if (options.status) params.append('status', options.status);
+    
+    const response = await fetch(`${siteUrl}/wp-json/wp/v2/posts?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errorData.message || `Failed to fetch posts (${response.status})`,
+      };
+    }
+
+    const posts = await response.json();
+    return {
+      success: true,
+      posts,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to fetch self-hosted WordPress posts',
+    };
+  }
+}
+
+/**
+ * Update a post on self-hosted WordPress
+ */
+export async function updateSelfHostedWordPressPost(
+  config: SelfHostedWordPressConfig,
+  postId: number,
+  updates: Partial<WordPressPost>
+): Promise<WordPressPublishResult> {
+  try {
+    const siteUrl = normalizeSiteUrl(config.siteUrl);
+    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
+    
+    const updatePayload: any = {};
+    if (updates.title) updatePayload.title = updates.title;
+    if (updates.content) updatePayload.content = updates.content;
+    if (updates.excerpt) updatePayload.excerpt = updates.excerpt;
+    if (updates.status) updatePayload.status = updates.status;
+    if (updates.slug) updatePayload.slug = updates.slug;
+    
+    const response = await fetch(`${siteUrl}/wp-json/wp/v2/posts/${postId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updatePayload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errorData.message || `Failed to update post (${response.status})`,
+      };
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      url: data.link,
+      postId: data.id,
+      siteId: siteUrl,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to update self-hosted WordPress post',
+    };
+  }
+}
+
+/**
+ * Delete a post from self-hosted WordPress
+ */
+export async function deleteSelfHostedWordPressPost(
+  config: SelfHostedWordPressConfig,
+  postId: number
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const siteUrl = normalizeSiteUrl(config.siteUrl);
+    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
+    
+    const response = await fetch(`${siteUrl}/wp-json/wp/v2/posts/${postId}?force=true`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': authHeader,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errorData.message || `Failed to delete post (${response.status})`,
+      };
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'Failed to delete self-hosted WordPress post',
+    };
+  }
+}
+
+// ============================================================================
+// Unified Publishing Function (Works with both WordPress.com and Self-Hosted)
+// ============================================================================
+
+/**
+ * Publish to WordPress - automatically detects type and uses appropriate method
+ */
+export async function publishToWordPressUnified(
+  config: UnifiedWordPressConfig,
+  post: WordPressPost
+): Promise<WordPressPublishResult> {
+  if (config.type === 'self_hosted') {
+    if (!config.siteUrl || !config.username || !config.applicationPassword) {
+      return {
+        success: false,
+        error: 'Missing self-hosted WordPress credentials (siteUrl, username, or applicationPassword)',
+      };
+    }
+    
+    return publishToSelfHostedWordPress({
+      siteUrl: config.siteUrl,
+      username: config.username,
+      applicationPassword: config.applicationPassword,
+    }, post);
+  } else {
+    // WordPress.com
+    if (!config.accessToken || !config.siteId) {
+      return {
+        success: false,
+        error: 'Missing WordPress.com credentials (accessToken or siteId)',
+      };
+    }
+    
+    return publishToWordPress({
+      accessToken: config.accessToken,
+      siteId: config.siteId,
+    }, post);
   }
 }

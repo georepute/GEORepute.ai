@@ -116,13 +116,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // For skipGeneration mode, create a simple result object
+    // Use provided content (e.g. humanized from publication flow) when given; otherwise generate
     let result: any;
     let learningRules: any = {};
 
-    if (skipGeneration && generatedContent) {
-      // Use provided content, skip AI generation
-      console.log("⏭️ Skipping AI generation, using provided content");
+    if (generatedContent) {
+      // Use provided content (humanized or pre-generated) - for both schema-only and DB insert flows
+      console.log("⏭️ Using provided content (no AI generation)");
       result = {
         content: generatedContent,
         keywordDensity: 0,

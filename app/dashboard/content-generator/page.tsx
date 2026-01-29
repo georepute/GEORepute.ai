@@ -292,7 +292,7 @@ function ContentGeneratorPageInner() {
   };
 
   // Handle using humanized version
-  const handleUseHumanized = () => {
+  const handleUseHumanized = async () => {
     if (humanizedContent) {
       setGeneratedContent(humanizedContent);
       setShowComparisonModal(false);
@@ -301,8 +301,22 @@ function ContentGeneratorPageInner() {
       setAiDetectionResults(null); // Clear AI detection results since we're using humanized
       // Don't show image modal again - it was already shown after content generation
       setOriginalAiPercentage(null); // Reset original AI percentage
-      toast.success('Using generated version');
-      // Don't re-run detection - humanized content is already processed
+      toast.success('Using humanized version');
+      // Persist humanized content to DB so publication page and view modal show it
+      if (contentId) {
+        try {
+          const { error } = await supabase
+            .from('content_strategy')
+            .update({ generated_content: humanizedContent })
+            .eq('id', contentId);
+          if (error) {
+            console.error('Error saving humanized content to database:', error);
+            toast.error('Humanized content saved locally; refresh the publication page if you don’t see it.');
+          }
+        } catch (err) {
+          console.error('Error saving humanized content:', err);
+        }
+      }
     }
   };
 

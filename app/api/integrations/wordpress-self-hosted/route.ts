@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
-import { verifyWordPressConnection, generateWordPressAuthUrl, getWordPressSites } from "@/lib/integrations/wordpress";
+import { 
+  verifySelfHostedWordPressConnection, 
+  getSelfHostedWordPressPosts,
+  SelfHostedWordPressConfig 
+} from "@/lib/integrations/wordpress";
 
 /**
- * WordPress.com Integration API
- * GET: Get user's WordPress.com configuration
- * POST: Initiate OAuth flow (generate auth URL)
- * DELETE: Disconnect WordPress.com
+ * Self-Hosted WordPress Integration API
+ * GET: Get user's self-hosted WordPress configuration
+ * POST: Connect/verify self-hosted WordPress
+ * DELETE: Disconnect self-hosted WordPress
  */
 
 export async function GET(request: NextRequest) {
@@ -21,12 +25,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get WordPress integration from platform_integrations table
+    // Get self-hosted WordPress integration from platform_integrations table
     const { data: integration, error } = await supabase
       .from("platform_integrations")
       .select("*")
       .eq("user_id", session.user.id)
-      .eq("platform", "wordpress")
+      .eq("platform", "wordpress_self_hosted")
       .maybeSingle();
 
     if (error && error.code !== "PGRST116") {
@@ -44,15 +48,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Format config from integration data
+    // Format config from integration data (don't expose the password)
     const wordpressConfig = {
-      siteId: integration.platform_user_id || "",
-      siteName: integration.platform_username || "",
       siteUrl: integration.metadata?.siteUrl || "",
-      username: integration.metadata?.username || "",
+      siteName: integration.metadata?.siteName || "",
+      username: integration.platform_username || "",
       connected: integration.status === "connected",
       connectedAt: integration.created_at,
       lastUsedAt: integration.last_used_at,
+      userInfo: integration.metadata?.userInfo || null,
     };
 
     return NextResponse.json(
@@ -64,7 +68,7 @@ export async function GET(request: NextRequest) {
       { status: 200 }
     );
   } catch (error: any) {
-    console.error("WordPress config GET error:", error);
+    console.error("Self-hosted WordPress config GET error:", error);
     return NextResponse.json(
       { error: error.message || "Internal server error" },
       { status: 500 }
@@ -84,40 +88,69 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { action } = body;
+    const { action, siteUrl, username, applicationPassword } = body;
 
-    // Action: initiate - Generate OAuth URL
-    if (action === "initiate") {
-      const clientId = process.env.WORDPRESS_CLIENT_ID;
-      if (!clientId) {
+    // Action: connect - Verify and store credentials
+    if (action === "connect") {
+      if (!siteUrl || !username || !applicationPassword) {
         return NextResponse.json(
-          { error: "WordPress.com app not configured. Please contact support." },
-          { status: 500 }
+          { error: "Site URL, username, and application password are required" },
+          { status: 400 }
         );
       }
 
-      // Generate state for CSRF protection
-      const state = `${session.user.id}:${Date.now()}:${Math.random().toString(36).substring(7)}`;
+      // Verify the connection
+      const config: SelfHostedWordPressConfig = {
+        siteUrl,
+        username,
+        applicationPassword,
+      };
+
+      const verifyResult = await verifySelfHostedWordPressConnection(config);
+
+      if (!verifyResult.success) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: verifyResult.error,
+          },
+          { status: 400 }
+        );
+      }
 
       // Check if integration already exists
       const { data: existingIntegration } = await supabase
         .from("platform_integrations")
         .select("id")
         .eq("user_id", session.user.id)
-        .eq("platform", "wordpress")
+        .eq("platform", "wordpress_self_hosted")
         .maybeSingle();
 
       const integrationData = {
         user_id: session.user.id,
-        platform: "wordpress",
-        status: "disconnected",
+        platform: "wordpress_self_hosted",
+        platform_user_id: verifyResult.user?.id?.toString() || "",
+        platform_username: username,
+        access_token: applicationPassword, // Store application password as access_token
+        status: "connected",
+        error_message: null,
         metadata: {
-          oauth_state: state,
-          initiated_at: new Date().toISOString(),
+          siteUrl: siteUrl,
+          siteName: verifyResult.siteInfo?.name || siteUrl,
+          siteDescription: verifyResult.siteInfo?.description || "",
+          userInfo: {
+            id: verifyResult.user?.id,
+            name: verifyResult.user?.name,
+            username: verifyResult.user?.username,
+            avatar: verifyResult.user?.avatar_urls?.['96'] || verifyResult.user?.avatar_urls?.['48'] || null,
+          },
+          connected_at: new Date().toISOString(),
+          type: 'self_hosted',
         },
+        last_used_at: new Date().toISOString(),
       };
 
-      // Store state in database for verification on callback
+      // Store or update credentials
       if (existingIntegration) {
         const { error: updateError } = await supabase
           .from("platform_integrations")
@@ -138,26 +171,20 @@ export async function POST(request: NextRequest) {
           throw insertError;
         }
       }
-      
-      console.log("Stored OAuth state for WordPress.com:", { state: state.substring(0, 20) + "..." });
 
-      // Get base URL from request
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
-        `${request.headers.get('x-forwarded-proto') || 'https'}://${request.headers.get('host')}`;
-      const redirectUri = `${baseUrl}/api/auth/wordpress/callback`;
-
-      // Request scopes for auth (user info), posts, media, and sites
-      const authUrl = generateWordPressAuthUrl(
-        clientId,
-        redirectUri,
-        state,
-        ['auth', 'posts', 'media', 'sites'] // auth scope needed for /me endpoint
-      );
+      console.log("Self-hosted WordPress connection successful:", {
+        siteUrl,
+        username,
+        siteName: verifyResult.siteInfo?.name,
+        userId: session.user.id,
+      });
 
       return NextResponse.json(
         {
           success: true,
-          authUrl,
+          message: "Self-hosted WordPress connected successfully!",
+          siteInfo: verifyResult.siteInfo,
+          userInfo: verifyResult.user,
         },
         { status: 200 }
       );
@@ -169,17 +196,23 @@ export async function POST(request: NextRequest) {
         .from("platform_integrations")
         .select("*")
         .eq("user_id", session.user.id)
-        .eq("platform", "wordpress")
+        .eq("platform", "wordpress_self_hosted")
         .maybeSingle();
 
       if (!integration || !integration.access_token) {
         return NextResponse.json(
-          { error: "WordPress.com not connected" },
+          { error: "Self-hosted WordPress not connected" },
           { status: 400 }
         );
       }
 
-      const verification = await verifyWordPressConnection(integration.access_token);
+      const config: SelfHostedWordPressConfig = {
+        siteUrl: integration.metadata?.siteUrl || "",
+        username: integration.platform_username || "",
+        applicationPassword: integration.access_token,
+      };
+
+      const verification = await verifySelfHostedWordPressConnection(config);
 
       if (!verification.success) {
         // Update status to error
@@ -204,34 +237,41 @@ export async function POST(request: NextRequest) {
         {
           success: true,
           user: verification.user,
+          siteInfo: verification.siteInfo,
         },
         { status: 200 }
       );
     }
 
-    // Action: get-sites - Get user's WordPress.com sites
-    if (action === "get-sites") {
+    // Action: get-posts - Get recent posts
+    if (action === "get-posts") {
       const { data: integration } = await supabase
         .from("platform_integrations")
         .select("*")
         .eq("user_id", session.user.id)
-        .eq("platform", "wordpress")
+        .eq("platform", "wordpress_self_hosted")
         .maybeSingle();
 
       if (!integration || !integration.access_token) {
         return NextResponse.json(
-          { error: "WordPress.com not connected" },
+          { error: "Self-hosted WordPress not connected" },
           { status: 400 }
         );
       }
 
-      const sitesResult = await getWordPressSites(integration.access_token);
+      const config: SelfHostedWordPressConfig = {
+        siteUrl: integration.metadata?.siteUrl || "",
+        username: integration.platform_username || "",
+        applicationPassword: integration.access_token,
+      };
 
-      if (!sitesResult.success) {
+      const postsResult = await getSelfHostedWordPressPosts(config, { per_page: 10 });
+
+      if (!postsResult.success) {
         return NextResponse.json(
           { 
             success: false, 
-            error: sitesResult.error,
+            error: postsResult.error,
           },
           { status: 400 }
         );
@@ -240,61 +280,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: true,
-          sites: sitesResult.sites,
-        },
-        { status: 200 }
-      );
-    }
-
-    // Action: select-site - Select a specific site for publishing
-    if (action === "select-site") {
-      const { siteId, siteName, siteUrl } = body;
-
-      if (!siteId) {
-        return NextResponse.json(
-          { error: "Site ID is required" },
-          { status: 400 }
-        );
-      }
-
-      const { data: integration } = await supabase
-        .from("platform_integrations")
-        .select("*")
-        .eq("user_id", session.user.id)
-        .eq("platform", "wordpress")
-        .maybeSingle();
-
-      if (!integration) {
-        return NextResponse.json(
-          { error: "WordPress.com not connected" },
-          { status: 400 }
-        );
-      }
-
-      // Update the selected site
-      const { error: updateError } = await supabase
-        .from("platform_integrations")
-        .update({
-          platform_user_id: siteId.toString(),
-          platform_username: siteName,
-          metadata: {
-            ...integration.metadata,
-            siteId,
-            siteName,
-            siteUrl,
-            selected_at: new Date().toISOString(),
-          },
-        })
-        .eq("id", integration.id);
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      return NextResponse.json(
-        {
-          success: true,
-          message: "Site selected successfully",
+          posts: postsResult.posts,
         },
         { status: 200 }
       );
@@ -305,7 +291,7 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   } catch (error: any) {
-    console.error("WordPress POST error:", error);
+    console.error("Self-hosted WordPress POST error:", error);
     return NextResponse.json(
       { error: error.message || "Internal server error" },
       { status: 500 }
@@ -324,12 +310,12 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Delete WordPress integration
+    // Delete self-hosted WordPress integration
     const { error: deleteError } = await supabase
       .from("platform_integrations")
       .delete()
       .eq("user_id", session.user.id)
-      .eq("platform", "wordpress");
+      .eq("platform", "wordpress_self_hosted");
 
     if (deleteError) {
       throw deleteError;
@@ -338,12 +324,12 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        message: "WordPress.com disconnected successfully",
+        message: "Self-hosted WordPress disconnected successfully",
       },
       { status: 200 }
     );
   } catch (error: any) {
-    console.error("WordPress disconnect error:", error);
+    console.error("Self-hosted WordPress disconnect error:", error);
     return NextResponse.json(
       { error: error.message || "Internal server error" },
       { status: 500 }

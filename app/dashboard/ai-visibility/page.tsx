@@ -1,10 +1,29 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useLanguage } from "@/lib/language-context";
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+// @ts-ignore - pptxgenjs types may not be available
+import PptxGenJS from 'pptxgenjs';
+import {
+  Chart,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Title,
+  Tooltip as ChartTooltip,
+  Legend as ChartLegend,
+  PointElement,
+  LineElement,
+  BarController,
+  PieController,
+  DoughnutController,
+} from 'chart.js';
 import { 
   Target,
   ArrowRight,
@@ -52,6 +71,22 @@ import {
   Line
 } from 'recharts';
 import { CompetitorLogo } from '@/components/CompetitorLogo';
+
+// Register Chart.js components
+Chart.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  ArcElement,
+  Title,
+  ChartTooltip,
+  ChartLegend,
+  PointElement,
+  LineElement,
+  BarController,
+  PieController,
+  DoughnutController
+);
 
 type ViewMode = 'projects' | 'form' | 'details';
 
@@ -171,6 +206,8 @@ function AIVisibilityContent() {
   const [showProjectDetailsSettings, setShowProjectDetailsSettings] = useState(false);
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
   const [viewResponseModal, setViewResponseModal] = useState<{ open: boolean; response: any; prompt: string } | null>(null);
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
   
   // Domain Intelligence state
   const [domainIntelligenceJobs, setDomainIntelligenceJobs] = useState<any[]>([]);
@@ -1135,6 +1172,1408 @@ function AIVisibilityContent() {
       setPausingAnalysis(null);
     }
   };
+
+  // Export handlers
+  const handleExportPDF = async () => {
+    if (!selectedProject) return;
+    
+    setShowExportDropdown(false);
+    
+    try {
+      const latestSession = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
+      if (!latestSession) {
+        alert('No completed analysis found. Please wait for the analysis to complete.');
+        return;
+      }
+
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      let yPos = 20;
+      const margin = 20;
+      const lineHeight = 7;
+      const logoSize = 30; // Logo size in mm
+
+      // Helper function to add new page if needed
+      const checkPageBreak = (requiredSpace: number) => {
+        if (yPos + requiredSpace > pageHeight - margin) {
+          doc.addPage();
+          yPos = margin;
+        }
+      };
+
+      // Helper function to add image from URL (with better CORS handling)
+      const addImageFromUrl = async (url: string, x: number, y: number, width: number, height: number): Promise<boolean> => {
+        return new Promise(async (resolve) => {
+          try {
+            // Try using a CORS proxy as first attempt
+            const corsProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+            let imgData: string;
+            let success = false;
+            
+            // Method 1: Try CORS proxy
+            try {
+              const proxyResponse = await fetch(corsProxyUrl, { 
+                mode: 'cors',
+                credentials: 'omit',
+                signal: AbortSignal.timeout(5000)
+              });
+              
+              if (proxyResponse.ok) {
+                const blob = await proxyResponse.blob();
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  imgData = reader.result as string;
+                  try {
+                    doc.addImage(imgData, 'PNG', x, y, width, height);
+                    resolve(true);
+                    success = true;
+                  } catch (error) {
+                    console.error('Error adding proxied image to PDF:', error);
+                  }
+                };
+                reader.onerror = () => {
+                  console.warn('Error reading proxied image blob');
+                };
+                reader.readAsDataURL(blob);
+                await new Promise(r => setTimeout(r, 1000));
+                if (success) return;
+              }
+            } catch (proxyError) {
+              console.warn('CORS proxy failed, trying direct fetch:', proxyError);
+            }
+            
+            // Method 2: Try direct fetch
+            try {
+              const response = await fetch(url, { 
+                mode: 'cors', 
+                credentials: 'omit',
+                signal: AbortSignal.timeout(5000)
+              });
+              if (response.ok) {
+                const blob = await response.blob();
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  imgData = reader.result as string;
+                  try {
+                    doc.addImage(imgData, 'PNG', x, y, width, height);
+                    resolve(true);
+                    success = true;
+                  } catch (error) {
+                    console.error('Error adding image to PDF:', error);
+                  }
+                };
+                reader.onerror = () => {
+                  console.warn('Error reading image blob');
+                };
+                reader.readAsDataURL(blob);
+                await new Promise(r => setTimeout(r, 1000));
+                if (success) return;
+              }
+            } catch (fetchError) {
+              console.warn('Direct fetch failed, trying image element:', fetchError);
+            }
+            
+            // Method 3: Fallback - Direct image load with canvas (may fail due to CORS)
+            const img = document.createElement('img') as HTMLImageElement;
+            img.crossOrigin = 'anonymous';
+            
+            const timeout = setTimeout(() => {
+              console.warn('Image load timeout, skipping logo:', url);
+              resolve(false);
+            }, 5000);
+            
+            img.onload = () => {
+              clearTimeout(timeout);
+              try {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                  imgData = canvas.toDataURL('image/png');
+                  doc.addImage(imgData, 'PNG', x, y, width, height);
+                  resolve(true);
+                } else {
+                  resolve(false);
+                }
+              } catch (error) {
+                console.warn('Error converting image to base64 (CORS likely blocked):', error);
+                resolve(false);
+              }
+            };
+            
+            img.onerror = () => {
+              clearTimeout(timeout);
+              console.warn('Image load failed (CORS blocked):', url);
+              resolve(false);
+            };
+            
+            img.src = url;
+          } catch (error) {
+            console.warn('Error in addImageFromUrl, skipping logo:', error);
+            resolve(false);
+          }
+        });
+      };
+
+      // Add Project Logo (if available) - Top right corner
+      let logoAdded = false;
+      if (selectedProject.company_image_url) {
+        try {
+          const logoWidth = 30;
+          const logoHeight = 30;
+          logoAdded = await addImageFromUrl(
+            selectedProject.company_image_url, 
+            pageWidth - margin - logoWidth, 
+            margin, 
+            logoWidth, 
+            logoHeight
+          );
+          if (!logoAdded) {
+            console.warn('Logo could not be loaded, continuing without logo');
+          }
+        } catch (error) {
+          console.error('Error adding logo:', error);
+        }
+      }
+
+      // Title (positioned to not overlap with logo)
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      const titleY = logoAdded ? margin + 8 : yPos;
+      doc.text('AI Visibility Report', margin, titleY);
+      yPos = logoAdded ? margin + logoSize + 5 : yPos + 10;
+
+      // Project Information
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Project Information', margin, yPos);
+      yPos += 8;
+
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Brand Name: ${selectedProject.brand_name}`, margin, yPos);
+      yPos += lineHeight;
+      doc.text(`Industry: ${selectedProject.industry}`, margin, yPos);
+      yPos += lineHeight;
+      if (selectedProject.website_url) {
+        doc.text(`Website: ${selectedProject.website_url}`, margin, yPos);
+        yPos += lineHeight;
+      }
+      if (selectedProject.active_platforms && selectedProject.active_platforms.length > 0) {
+        doc.text(`Platforms: ${selectedProject.active_platforms.join(', ')}`, margin, yPos);
+        yPos += lineHeight;
+      }
+      
+      // Company Description
+      if (selectedProject.company_description) {
+        checkPageBreak(20);
+        yPos += 3;
+        doc.setFont('helvetica', 'bold');
+        doc.text('Company Description:', margin, yPos);
+        yPos += lineHeight;
+        doc.setFont('helvetica', 'normal');
+        const descriptionLines = doc.splitTextToSize(selectedProject.company_description, pageWidth - 2 * margin);
+        descriptionLines.forEach((line: string) => {
+          checkPageBreak(lineHeight);
+          doc.text(line, margin, yPos);
+          yPos += lineHeight;
+        });
+      }
+      
+      yPos += 5;
+
+      // Visibility Score
+      checkPageBreak(20);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Visibility Score', margin, yPos);
+      yPos += 8;
+
+      const totalMentions = projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0;
+      const totalQueries = projectStats?.total_queries || projectResponses.length || 0;
+      const visibilityScore = totalQueries > 0 ? Math.round((totalMentions / totalQueries) * 100) : 0;
+
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Score: ${visibilityScore}%`, margin, yPos);
+      yPos += lineHeight;
+      doc.text(`Mentions: ${totalMentions} of ${totalQueries} prompts`, margin, yPos);
+      yPos += 10;
+
+      // Generate charts directly from data using Chart.js
+      try {
+        if (projectResponses.length === 0) {
+          console.log('No project responses data available for charts');
+        } else {
+
+          // Helper function to create a chart and return canvas image data
+          const createChartImage = async (
+            type: 'pie' | 'bar',
+            data: any[],
+            labels: string[],
+            title: string,
+            width: number = 600,
+            height: number = 400
+          ): Promise<string | null> => {
+            try {
+              // Create a temporary canvas
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) return null;
+
+              // Create Chart.js chart
+              const chart = new Chart(ctx, {
+                type: type === 'pie' ? 'doughnut' : 'bar',
+                data: {
+                  labels: labels,
+                  datasets: [{
+                    label: title,
+                    data: data.map(d => d.value || d),
+                    backgroundColor: type === 'pie' 
+                      ? data.map((_, i) => {
+                          const colors = ['#10b981', '#6b7280', '#ef4444', '#9333ea', '#3b82f6', '#f59e0b'];
+                          return colors[i % colors.length];
+                        })
+                      : '#9333ea',
+                    borderColor: '#ffffff',
+                    borderWidth: 2,
+                  }],
+                },
+                options: {
+                  responsive: false,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    title: {
+                      display: true,
+                      text: title,
+                      font: { size: 16, weight: 'bold' },
+                    },
+                    legend: {
+                      display: type === 'pie',
+                      position: 'right',
+                    },
+                  },
+                },
+              });
+
+              // Wait for chart to render
+              await new Promise(resolve => setTimeout(resolve, 500));
+
+              // Get image data
+              const imageData = canvas.toDataURL('image/png', 0.95);
+              
+              // Destroy chart
+              chart.destroy();
+              canvas.remove();
+              
+              return imageData;
+            } catch (error) {
+              console.error('Error creating chart:', error);
+              return null;
+            }
+          };
+
+          checkPageBreak(30);
+          doc.setFontSize(14);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Visual Analytics', margin, yPos);
+          yPos += 10;
+
+          // Chart 1: Sentiment Distribution (Pie Chart)
+          const sentiments = projectResponses
+            .filter(r => r.response_metadata?.sentiment_score !== null)
+            .map(r => r.response_metadata.sentiment_score);
+          const positive = sentiments.filter(s => s > 0.3).length;
+          const negative = sentiments.filter(s => s < -0.3).length;
+          const neutral = sentiments.filter(s => s >= -0.3 && s <= 0.3).length;
+          const total = sentiments.length;
+
+          if (total > 0) {
+            const sentimentData = [
+              { name: 'Positive', value: positive },
+              { name: 'Neutral', value: neutral },
+              { name: 'Negative', value: negative },
+            ].filter(item => item.value > 0);
+
+            if (sentimentData.length > 0) {
+              checkPageBreak(90);
+              doc.setFontSize(12);
+              doc.setFont('helvetica', 'bold');
+              doc.text('Sentiment Distribution', margin, yPos);
+              yPos += 6;
+
+              const chartImage = await createChartImage(
+                'pie',
+                sentimentData,
+                sentimentData.map(d => d.name),
+                'Sentiment Distribution',
+                600,
+                400
+              );
+
+              if (chartImage) {
+                const availableWidth = pageWidth - 2 * margin;
+                const chartHeight = 80; // mm
+                const chartWidth = availableWidth;
+                
+                if (yPos + chartHeight > pageHeight - margin - 20) {
+                  doc.addPage();
+                  yPos = margin;
+                  doc.setFontSize(12);
+                  doc.setFont('helvetica', 'bold');
+                  doc.text('Sentiment Distribution', margin, yPos);
+                  yPos += 6;
+                }
+
+                const chartX = (pageWidth - chartWidth) / 2;
+                doc.addImage(chartImage, 'PNG', chartX, yPos, chartWidth, chartHeight);
+                yPos += chartHeight + 10;
+                console.log('✓ Added Sentiment Distribution chart');
+              }
+            }
+          }
+
+          // Chart 2: Platform Performance (Bar Chart)
+          const platformData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+            const platformResponses = projectResponses.filter(r => r.platform === platform);
+            const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+            const total = platformResponses.length;
+            const mentionRate = total > 0 ? (mentions / total) * 100 : 0;
+            return {
+              platform: platform.charAt(0).toUpperCase() + platform.slice(1),
+              mentionRate: Math.round(mentionRate),
+            };
+          }).sort((a, b) => b.mentionRate - a.mentionRate);
+
+          if (platformData.length > 0) {
+            checkPageBreak(90);
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Platform Performance', margin, yPos);
+            yPos += 6;
+
+            const chartImage = await createChartImage(
+              'bar',
+              platformData.map(p => p.mentionRate),
+              platformData.map(p => p.platform),
+              'Platform Performance (Mention Rate %)',
+              600,
+              400
+            );
+
+            if (chartImage) {
+              const availableWidth = pageWidth - 2 * margin;
+              const chartHeight = 80; // mm
+              const chartWidth = availableWidth;
+              
+              if (yPos + chartHeight > pageHeight - margin - 20) {
+                doc.addPage();
+                yPos = margin;
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'bold');
+                doc.text('Platform Performance', margin, yPos);
+                yPos += 6;
+              }
+
+              const chartX = (pageWidth - chartWidth) / 2;
+              doc.addImage(chartImage, 'PNG', chartX, yPos, chartWidth, chartHeight);
+              yPos += chartHeight + 10;
+              console.log('✓ Added Platform Performance chart');
+            }
+          }
+        }
+      } catch (chartError) {
+        console.error('Error generating charts:', chartError);
+        // Fallback: Add text-based analytics if charts failed
+        if (projectResponses.length > 0) {
+          try {
+            checkPageBreak(20);
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Analytics Data (Charts unavailable):', margin, yPos);
+            yPos += lineHeight;
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Total Responses: ${projectResponses.length}`, margin, yPos);
+            yPos += lineHeight;
+            const mentions = projectResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+            doc.text(`Brand Mentions: ${mentions}`, margin, yPos);
+          } catch (e) {
+            console.error('Error adding fallback analytics:', e);
+          }
+        }
+      }
+
+      // Results Summary
+      if (latestSession.results_summary) {
+        checkPageBreak(30);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Results Summary', margin, yPos);
+        yPos += 8;
+
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'normal');
+        const summary = latestSession.results_summary;
+        if (summary.avg_sentiment !== undefined) {
+          doc.text(`Average Sentiment: ${summary.avg_sentiment}%`, margin, yPos);
+          yPos += lineHeight;
+        }
+        if (summary.platform_breakdown) {
+          doc.text('Platform Breakdown:', margin, yPos);
+          yPos += lineHeight;
+          Object.entries(summary.platform_breakdown).forEach(([platform, data]: [string, any]) => {
+            checkPageBreak(lineHeight);
+            doc.text(`  ${platform}: ${data.mentions || 0} mentions`, margin + 5, yPos);
+            yPos += lineHeight;
+          });
+        }
+        yPos += 5;
+      }
+
+      // Competitor Analysis
+      if (latestSession.competitor_analysis) {
+        checkPageBreak(30);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Competitor Analysis', margin, yPos);
+        yPos += 8;
+
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'normal');
+
+        // Rankings - Create a table
+        if (latestSession.competitor_analysis.rankings && latestSession.competitor_analysis.rankings.length > 0) {
+          doc.setFont('helvetica', 'bold');
+          doc.text('Competitor Rankings:', margin, yPos);
+          yPos += 8;
+          
+          // Table dimensions
+          const tableTop = yPos;
+          const col1 = margin; // Rank
+          const col2 = margin + 15; // Name
+          const col3 = margin + 80; // Domain
+          const col4 = margin + 120; // Mentions
+          const col5 = margin + 150; // Score
+          const rowHeight = 7;
+          
+          // Draw table header
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.text('Rank', col1, yPos);
+          doc.text('Name', col2, yPos);
+          doc.text('Domain', col3, yPos);
+          doc.text('Mentions', col4, yPos);
+          doc.text('Score', col5, yPos);
+          
+          // Draw header underline
+          yPos += 3;
+          doc.setLineWidth(0.5);
+          doc.line(col1, yPos, col5 + 30, yPos);
+          yPos += 2;
+          
+          // Table rows
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          latestSession.competitor_analysis.rankings.slice(0, 10).forEach((rank: any, idx: number) => {
+            checkPageBreak(rowHeight + 2);
+            
+            // Parse competitor name (handle both string and object formats)
+            let competitorName = '';
+            let competitorDomain = '';
+            
+            if (typeof rank.name === 'string') {
+              // Try to parse if it's a JSON string
+              try {
+                const parsed = JSON.parse(rank.name);
+                if (parsed.name) {
+                  competitorName = parsed.name;
+                  competitorDomain = parsed.domain || '';
+                } else {
+                  competitorName = rank.name;
+                }
+              } catch {
+                // Not JSON, use as is
+                competitorName = rank.name;
+              }
+            } else if (rank.name && typeof rank.name === 'object') {
+              competitorName = rank.name.name || rank.name;
+              competitorDomain = rank.name.domain || '';
+            } else {
+              competitorName = String(rank.name || 'N/A');
+            }
+            
+            // Truncate long names/domains
+            const maxNameWidth = 50;
+            const maxDomainWidth = 30;
+            if (competitorName.length > maxNameWidth) {
+              competitorName = competitorName.substring(0, maxNameWidth - 3) + '...';
+            }
+            if (competitorDomain.length > maxDomainWidth) {
+              competitorDomain = competitorDomain.substring(0, maxDomainWidth - 3) + '...';
+            }
+            
+            // Draw row data
+            doc.text((idx + 1).toString(), col1, yPos);
+            doc.text(competitorName, col2, yPos);
+            doc.text(competitorDomain || 'N/A', col3, yPos);
+            doc.text(rank.mentions?.toString() || '0', col4, yPos);
+            doc.text(rank.ranking_score?.toFixed(2) || '0.00', col5, yPos);
+            
+            // Draw row separator
+            yPos += rowHeight;
+            doc.setLineWidth(0.1);
+            doc.setDrawColor(200, 200, 200);
+            doc.line(col1, yPos, col5 + 30, yPos);
+            yPos += 2;
+          });
+          
+          yPos += 3;
+        }
+
+        // Market Positioning - Create a table
+        if (latestSession.competitor_analysis.market_positions && latestSession.competitor_analysis.market_positions.length > 0) {
+          checkPageBreak(30);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Market Positioning:', margin, yPos);
+          yPos += 8;
+          
+          // Table dimensions
+          const col1 = margin; // Brand
+          const col2 = margin + 50; // Positioning
+          const col3 = margin + 100; // Market Share
+          const col4 = margin + 140; // Sentiment
+          const rowHeight = 7;
+          
+          // Draw table header
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.text('Brand', col1, yPos);
+          doc.text('Positioning', col2, yPos);
+          doc.text('Market Share', col3, yPos);
+          doc.text('Sentiment', col4, yPos);
+          
+          // Draw header underline
+          yPos += 3;
+          doc.setLineWidth(0.5);
+          doc.line(col1, yPos, col4 + 30, yPos);
+          yPos += 2;
+          
+          // Table rows
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          latestSession.competitor_analysis.market_positions.slice(0, 10).forEach((pos: any) => {
+            checkPageBreak(rowHeight + 2);
+            
+            // Parse brand name
+            const { name: brandName } = parseCompetitorNameGlobal(pos.brand);
+            const positioning = (pos.positioning || 'N/A').substring(0, 30);
+            const marketShare = `${pos.market_share || 0}%`;
+            const sentiment = pos.sentiment_score?.toFixed(1) || 'N/A';
+            
+            doc.text(brandName.substring(0, 40), col1, yPos);
+            doc.text(positioning, col2, yPos);
+            doc.text(marketShare, col3, yPos);
+            doc.text(sentiment, col4, yPos);
+            
+            // Draw row separator
+            yPos += rowHeight;
+            doc.setLineWidth(0.1);
+            doc.setDrawColor(200, 200, 200);
+            doc.line(col1, yPos, col4 + 30, yPos);
+            yPos += 2;
+          });
+          
+          yPos += 3;
+        }
+
+        // Share of Voice - Create a table
+        if (latestSession.competitor_analysis.share_of_voice && latestSession.competitor_analysis.share_of_voice.length > 0) {
+          checkPageBreak(30);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Share of Voice:', margin, yPos);
+          yPos += 8;
+          
+          // Table dimensions
+          const col1 = margin; // Brand
+          const col2 = margin + 60; // Mentions
+          const col3 = margin + 100; // Share %
+          const rowHeight = 7;
+          
+          // Draw table header
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.text('Brand', col1, yPos);
+          doc.text('Mentions', col2, yPos);
+          doc.text('Share %', col3, yPos);
+          
+          // Draw header underline
+          yPos += 3;
+          doc.setLineWidth(0.5);
+          doc.line(col1, yPos, col3 + 30, yPos);
+          yPos += 2;
+          
+          // Table rows
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(9);
+          latestSession.competitor_analysis.share_of_voice.slice(0, 10).forEach((sov: any) => {
+            checkPageBreak(rowHeight + 2);
+            
+            // Parse brand name
+            const { name: brandName } = parseCompetitorNameGlobal(sov.brand);
+            const mentions = sov.mentions?.toString() || '0';
+            const sharePercent = `${sov.share_percentage || 0}%`;
+            
+            doc.text(brandName.substring(0, 50), col1, yPos);
+            doc.text(mentions, col2, yPos);
+            doc.text(sharePercent, col3, yPos);
+            
+            // Draw row separator
+            yPos += rowHeight;
+            doc.setLineWidth(0.1);
+            doc.setDrawColor(200, 200, 200);
+            doc.line(col1, yPos, col3 + 30, yPos);
+            yPos += 2;
+          });
+          
+          yPos += 3;
+        }
+      }
+
+      // Footer
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.text(
+          `Page ${i} of ${totalPages} | Generated on ${new Date().toLocaleDateString()}`,
+          pageWidth / 2,
+          pageHeight - 10,
+          { align: 'center' }
+        );
+      }
+
+      // Save PDF
+      const fileName = `AI_Visibility_Report_${selectedProject.brand_name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+      doc.save(fileName);
+    } catch (error) {
+      console.error('Error exporting PDF:', error);
+      alert('Failed to export PDF: ' + (error instanceof Error ? error.message : 'Unknown error. Please try again.'));
+    }
+  };
+
+  const handleExportCSV = async () => {
+    if (!selectedProject) return;
+    
+    setShowExportDropdown(false);
+    
+    try {
+      const latestSession = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
+      if (!latestSession) {
+        alert('No completed analysis found. Please wait for the analysis to complete.');
+        return;
+      }
+
+      // Prepare CSV data
+      const csvRows: string[] = [];
+
+      // Header
+      csvRows.push('AI Visibility Report');
+      csvRows.push(`Brand: ${selectedProject.brand_name}`);
+      csvRows.push(`Industry: ${selectedProject.industry}`);
+      csvRows.push(`Website: ${selectedProject.website_url || 'N/A'}`);
+      csvRows.push(`Generated: ${new Date().toLocaleString()}`);
+      csvRows.push('');
+
+      // Visibility Score
+      const totalMentions = projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0;
+      const totalQueries = projectStats?.total_queries || projectResponses.length || 0;
+      const visibilityScore = totalQueries > 0 ? Math.round((totalMentions / totalQueries) * 100) : 0;
+      
+      csvRows.push('Visibility Score');
+      csvRows.push(`Score,${visibilityScore}%`);
+      csvRows.push(`Total Mentions,${totalMentions}`);
+      csvRows.push(`Total Queries,${totalQueries}`);
+      csvRows.push('');
+
+      // Results Summary
+      if (latestSession.results_summary) {
+        csvRows.push('Results Summary');
+        const summary = latestSession.results_summary;
+        if (summary.avg_sentiment !== undefined) {
+          csvRows.push(`Average Sentiment,${summary.avg_sentiment}%`);
+        }
+        if (summary.platform_breakdown) {
+          csvRows.push('Platform Breakdown');
+          csvRows.push('Platform,Mentions');
+          Object.entries(summary.platform_breakdown).forEach(([platform, data]: [string, any]) => {
+            csvRows.push(`${platform},${data.mentions || 0}`);
+          });
+        }
+        csvRows.push('');
+      }
+
+      // Competitor Rankings
+      if (latestSession.competitor_analysis?.rankings && latestSession.competitor_analysis.rankings.length > 0) {
+        csvRows.push('Competitor Rankings');
+        csvRows.push('Rank,Name,Mentions,Ranking Score,Sentiment');
+        latestSession.competitor_analysis.rankings.forEach((rank: any, idx: number) => {
+          csvRows.push(`${idx + 1},${rank.name},${rank.mentions},${rank.ranking_score},${rank.sentiment || 'N/A'}`);
+        });
+        csvRows.push('');
+      }
+
+      // Market Positioning
+      if (latestSession.competitor_analysis?.market_positions && latestSession.competitor_analysis.market_positions.length > 0) {
+        csvRows.push('Market Positioning');
+        csvRows.push('Brand,Positioning,Market Share,Sentiment Score,Competitive Strength');
+        latestSession.competitor_analysis.market_positions.forEach((pos: any) => {
+          csvRows.push(`${pos.brand},${pos.positioning},${pos.market_share}%,${pos.sentiment_score},${pos.competitive_strength}`);
+        });
+        csvRows.push('');
+      }
+
+      // Share of Voice
+      if (latestSession.competitor_analysis?.share_of_voice && latestSession.competitor_analysis.share_of_voice.length > 0) {
+        csvRows.push('Share of Voice');
+        csvRows.push('Brand,Mentions,Share Percentage');
+        latestSession.competitor_analysis.share_of_voice.forEach((sov: any) => {
+          csvRows.push(`${sov.brand},${sov.mentions},${sov.share_percentage}%`);
+        });
+        csvRows.push('');
+      }
+
+      // AI Platform Responses
+      if (projectResponses.length > 0) {
+        csvRows.push('AI Platform Responses');
+        csvRows.push('Platform,Query,Brand Mentioned,Sentiment,Response Preview');
+        projectResponses.slice(0, 100).forEach((response: any) => {
+          const platform = response.platform || 'Unknown';
+          const query = (response.query || '').replace(/,/g, ';').substring(0, 100);
+          const mentioned = response.response_metadata?.brand_mentioned ? 'Yes' : 'No';
+          const sentiment = response.response_metadata?.sentiment_score || 'N/A';
+          const preview = (response.response_text || '').replace(/,/g, ';').replace(/\n/g, ' ').substring(0, 200);
+          csvRows.push(`${platform},${query},${mentioned},${sentiment},${preview}`);
+        });
+      }
+
+      // Convert to CSV string and download
+      const csvContent = csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `AI_Visibility_Report_${selectedProject.brand_name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+      alert('Failed to export CSV. Please try again.');
+    }
+  };
+
+  const handleExportPPT = async () => {
+    if (!selectedProject) return;
+    
+    setShowExportDropdown(false);
+    
+    try {
+      const latestSession = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
+      if (!latestSession) {
+        alert('No completed analysis found. Please wait for the analysis to complete.');
+        return;
+      }
+
+      const pptx = new PptxGenJS();
+      pptx.layout = 'LAYOUT_WIDE';
+      
+      // Set presentation properties
+      pptx.author = 'GeoRepute.ai';
+      pptx.company = 'GeoRepute.ai';
+      pptx.title = `AI Visibility Report - ${selectedProject.brand_name}`;
+      pptx.subject = 'AI Visibility Analysis';
+
+      // Slide 1: Title Slide with Logo
+      const titleSlide = pptx.addSlide();
+      
+      // Add logo if available (convert to base64 first)
+      if (selectedProject.company_image_url) {
+        try {
+          // Convert image URL to base64
+          const logoBase64 = await new Promise<string | null>((resolve) => {
+            const img = document.createElement('img') as HTMLImageElement;
+            img.crossOrigin = 'anonymous';
+            
+            img.onload = () => {
+              try {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(img, 0, 0);
+                  const base64 = canvas.toDataURL('image/png');
+                  resolve(base64);
+                } else {
+                  resolve(null);
+                }
+              } catch (error) {
+                console.error('Error converting logo to base64:', error);
+                resolve(null);
+              }
+            };
+            
+            img.onerror = () => {
+              // Try fetch method as fallback
+              const imageUrl = selectedProject.company_image_url;
+              if (imageUrl) {
+                fetch(imageUrl, { mode: 'cors', credentials: 'omit' })
+                  .then(response => response.blob())
+                  .then(blob => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = () => resolve(null);
+                    reader.readAsDataURL(blob);
+                  })
+                  .catch(() => resolve(null));
+              } else {
+                resolve(null);
+              }
+            };
+            
+            const imageUrl = selectedProject.company_image_url;
+            if (imageUrl) {
+              img.src = imageUrl;
+            } else {
+              resolve(null);
+            }
+          });
+          
+          if (logoBase64) {
+            titleSlide.addImage({
+              data: logoBase64,
+              x: 7.5,
+              y: 0.5,
+              w: 1.5,
+              h: 1.5,
+            });
+          }
+        } catch (error) {
+          console.error('Error adding logo to PPT:', error);
+        }
+      }
+
+      titleSlide.addText('AI Visibility Report', {
+        x: 1,
+        y: 2,
+        w: 8,
+        h: 1,
+        fontSize: 44,
+        bold: true,
+        color: '363636',
+      });
+
+      titleSlide.addText(selectedProject.brand_name, {
+        x: 1,
+        y: 3.2,
+        w: 8,
+        h: 0.8,
+        fontSize: 32,
+        color: '9333ea',
+      });
+
+      titleSlide.addText(`Generated: ${new Date().toLocaleDateString()}`, {
+        x: 1,
+        y: 4.5,
+        w: 8,
+        h: 0.5,
+        fontSize: 14,
+        color: '666666',
+      });
+
+      // Slide 2: Project Information
+      const infoSlide = pptx.addSlide();
+      infoSlide.addText('Project Information', {
+        x: 0.5,
+        y: 0.3,
+        w: 9,
+        h: 0.6,
+        fontSize: 32,
+        bold: true,
+        color: '363636',
+      });
+
+      const infoData = [
+        [{ text: 'Brand Name' }, { text: selectedProject.brand_name }],
+        [{ text: 'Industry' }, { text: selectedProject.industry }],
+        [{ text: 'Website' }, { text: selectedProject.website_url || 'N/A' }],
+        [{ text: 'Platforms' }, { text: selectedProject.active_platforms?.join(', ') || 'N/A' }],
+      ];
+
+      infoSlide.addTable(infoData, {
+        x: 0.5,
+        y: 1.2,
+        w: 9,
+        colW: [2.5, 6.5],
+        border: { type: 'solid', color: 'CCCCCC', pt: 1 },
+        fill: { color: 'F5F5F5' },
+        fontSize: 14,
+      });
+
+      // Add company description if available
+      if (selectedProject.company_description) {
+        infoSlide.addText('Company Description', {
+          x: 0.5,
+          y: 3.5,
+          w: 9,
+          h: 0.5,
+          fontSize: 20,
+          bold: true,
+          color: '363636',
+        });
+
+        infoSlide.addText(selectedProject.company_description, {
+          x: 0.5,
+          y: 4.2,
+          w: 9,
+          h: 1.5,
+          fontSize: 12,
+          color: '666666',
+          wrap: true,
+        });
+      }
+
+      // Slide 3: Visibility Score
+      const visibilitySlide = pptx.addSlide();
+      visibilitySlide.addText('Visibility Score', {
+        x: 0.5,
+        y: 0.3,
+        w: 9,
+        h: 0.6,
+        fontSize: 32,
+        bold: true,
+        color: '363636',
+      });
+
+      const totalMentions = projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0;
+      const totalQueries = projectStats?.total_queries || projectResponses.length || 0;
+      const visibilityScore = totalQueries > 0 ? Math.round((totalMentions / totalQueries) * 100) : 0;
+
+      // Large visibility score
+      visibilitySlide.addText(`${visibilityScore}%`, {
+        x: 3,
+        y: 1.5,
+        w: 4,
+        h: 1.5,
+        fontSize: 72,
+        bold: true,
+        color: '9333ea',
+        align: 'center',
+      });
+
+      visibilitySlide.addText(`Your brand appears in ${totalMentions} of ${totalQueries} prompts`, {
+        x: 1,
+        y: 3.5,
+        w: 8,
+        h: 0.6,
+        fontSize: 18,
+        color: '666666',
+        align: 'center',
+      });
+
+      // Results Summary
+      if (latestSession.results_summary) {
+        const summarySlide = pptx.addSlide();
+        summarySlide.addText('Results Summary', {
+          x: 0.5,
+          y: 0.3,
+          w: 9,
+          h: 0.6,
+          fontSize: 32,
+          bold: true,
+          color: '363636',
+        });
+
+        const summaryData: any[] = [];
+        const summary = latestSession.results_summary;
+        
+        if (summary.avg_sentiment !== undefined) {
+          summaryData.push([{ text: 'Average Sentiment' }, { text: `${summary.avg_sentiment}%` }]);
+        }
+        summaryData.push([{ text: 'Total Mentions' }, { text: totalMentions.toString() }]);
+        summaryData.push([{ text: 'Total Queries' }, { text: totalQueries.toString() }]);
+        summaryData.push([{ text: 'Visibility Score' }, { text: `${visibilityScore}%` }]);
+
+        if (summary.platform_breakdown) {
+          summarySlide.addText('Platform Breakdown', {
+            x: 0.5,
+            y: 2.5,
+            w: 9,
+            h: 0.5,
+            fontSize: 20,
+            bold: true,
+            color: '363636',
+          });
+
+          const platformData = [[{ text: 'Platform' }, { text: 'Mentions' }]];
+          Object.entries(summary.platform_breakdown).forEach(([platform, data]: [string, any]) => {
+            platformData.push([{ text: platform }, { text: (data.mentions || 0).toString() }]);
+          });
+
+          summarySlide.addTable(platformData, {
+            x: 0.5,
+            y: 3.2,
+            w: 9,
+            colW: [4.5, 4.5],
+            border: { type: 'solid', color: 'CCCCCC', pt: 1 },
+            fill: { color: 'F5F5F5' },
+            fontSize: 14,
+          });
+        } else {
+          summarySlide.addTable(summaryData, {
+            x: 2,
+            y: 2,
+            w: 6,
+            colW: [3, 3],
+            border: { type: 'solid', color: 'CCCCCC', pt: 1 },
+            fill: { color: 'F5F5F5' },
+            fontSize: 14,
+          });
+        }
+      }
+
+      // Competitor Analysis Slides
+      if (latestSession.competitor_analysis) {
+        // Competitor Rankings
+        if (latestSession.competitor_analysis.rankings && latestSession.competitor_analysis.rankings.length > 0) {
+          const rankingsSlide = pptx.addSlide();
+          rankingsSlide.addText('Competitor Rankings', {
+            x: 0.5,
+            y: 0.3,
+            w: 9,
+            h: 0.6,
+            fontSize: 32,
+            bold: true,
+            color: '363636',
+          });
+
+          const rankingsData = [[{ text: 'Rank' }, { text: 'Name' }, { text: 'Domain' }, { text: 'Mentions' }, { text: 'Score' }]];
+          latestSession.competitor_analysis.rankings.slice(0, 10).forEach((rank: any, idx: number) => {
+            // Parse competitor name (handle both string and object formats)
+            let competitorName = '';
+            let competitorDomain = '';
+            
+            if (typeof rank.name === 'string') {
+              try {
+                const parsed = JSON.parse(rank.name);
+                if (parsed.name) {
+                  competitorName = parsed.name;
+                  competitorDomain = parsed.domain || 'N/A';
+                } else {
+                  competitorName = rank.name;
+                  competitorDomain = 'N/A';
+                }
+              } catch {
+                competitorName = rank.name;
+                competitorDomain = 'N/A';
+              }
+            } else if (rank.name && typeof rank.name === 'object') {
+              competitorName = rank.name.name || rank.name;
+              competitorDomain = rank.name.domain || 'N/A';
+            } else {
+              competitorName = String(rank.name || 'N/A');
+              competitorDomain = 'N/A';
+            }
+            
+            rankingsData.push([
+              { text: (idx + 1).toString() },
+              { text: competitorName },
+              { text: competitorDomain },
+              { text: rank.mentions?.toString() || '0' },
+              { text: rank.ranking_score?.toFixed(2) || 'N/A' },
+            ]);
+          });
+
+          rankingsSlide.addTable(rankingsData, {
+            x: 0.5,
+            y: 1.2,
+            w: 9,
+            colW: [0.8, 3, 2, 1.5, 1.7],
+            border: { type: 'solid', color: 'CCCCCC', pt: 1 },
+            fill: { color: 'F5F5F5' },
+            fontSize: 11,
+          });
+        }
+
+        // Market Positioning
+        if (latestSession.competitor_analysis.market_positions && latestSession.competitor_analysis.market_positions.length > 0) {
+          const positioningSlide = pptx.addSlide();
+          positioningSlide.addText('Market Positioning', {
+            x: 0.5,
+            y: 0.3,
+            w: 9,
+            h: 0.6,
+            fontSize: 32,
+            bold: true,
+            color: '363636',
+          });
+
+          const positioningData = [[{ text: 'Brand' }, { text: 'Positioning' }, { text: 'Market Share' }, { text: 'Sentiment' }]];
+          latestSession.competitor_analysis.market_positions.slice(0, 10).forEach((pos: any) => {
+            // Parse brand name
+            const { name: brandName } = parseCompetitorNameGlobal(pos.brand);
+            positioningData.push([
+              { text: brandName },
+              { text: pos.positioning || 'N/A' },
+              { text: `${pos.market_share || 0}%` },
+              { text: pos.sentiment_score?.toFixed(1) || 'N/A' },
+            ]);
+          });
+
+          positioningSlide.addTable(positioningData, {
+            x: 0.5,
+            y: 1.2,
+            w: 9,
+            colW: [2.5, 2.5, 2, 2],
+            border: { type: 'solid', color: 'CCCCCC', pt: 1 },
+            fill: { color: 'F5F5F5' },
+            fontSize: 12,
+          });
+        }
+
+        // Share of Voice
+        if (latestSession.competitor_analysis.share_of_voice && latestSession.competitor_analysis.share_of_voice.length > 0) {
+          const sovSlide = pptx.addSlide();
+          sovSlide.addText('Share of Voice', {
+            x: 0.5,
+            y: 0.3,
+            w: 9,
+            h: 0.6,
+            fontSize: 32,
+            bold: true,
+            color: '363636',
+          });
+
+          const sovData = [[{ text: 'Brand' }, { text: 'Mentions' }, { text: 'Share %' }]];
+          latestSession.competitor_analysis.share_of_voice.slice(0, 10).forEach((sov: any) => {
+            // Parse brand name
+            const { name: brandName } = parseCompetitorNameGlobal(sov.brand);
+            sovData.push([
+              { text: brandName },
+              { text: sov.mentions?.toString() || '0' },
+              { text: `${sov.share_percentage || 0}%` },
+            ]);
+          });
+
+          sovSlide.addTable(sovData, {
+            x: 0.5,
+            y: 1.2,
+            w: 9,
+            colW: [5, 2, 2],
+            border: { type: 'solid', color: 'CCCCCC', pt: 1 },
+            fill: { color: 'F5F5F5' },
+            fontSize: 12,
+          });
+        }
+      }
+
+      // Generate charts using Chart.js (same as PDF)
+      if (projectResponses.length > 0) {
+        // Helper function to create a chart and return canvas image data
+        const createChartImage = async (
+          type: 'pie' | 'bar',
+          data: any[],
+          labels: string[],
+          title: string,
+          width: number = 600,
+          height: number = 400
+        ): Promise<string | null> => {
+          try {
+            // Create a temporary canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+
+            // Create Chart.js chart
+            const chart = new Chart(ctx, {
+              type: type === 'pie' ? 'doughnut' : 'bar',
+              data: {
+                labels: labels,
+                datasets: [{
+                  label: title,
+                  data: data.map(d => d.value || d),
+                  backgroundColor: type === 'pie' 
+                    ? data.map((_, i) => {
+                        const colors = ['#10b981', '#6b7280', '#ef4444', '#9333ea', '#3b82f6', '#f59e0b'];
+                        return colors[i % colors.length];
+                      })
+                    : '#9333ea',
+                  borderColor: '#ffffff',
+                  borderWidth: 2,
+                }],
+              },
+              options: {
+                responsive: false,
+                maintainAspectRatio: false,
+                plugins: {
+                  title: {
+                    display: true,
+                    text: title,
+                    font: { size: 16, weight: 'bold' },
+                  },
+                  legend: {
+                    display: type === 'pie',
+                    position: 'right',
+                  },
+                },
+              },
+            });
+
+            // Wait for chart to render
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Get image data
+            const imageData = canvas.toDataURL('image/png', 0.95);
+            
+            // Destroy chart
+            chart.destroy();
+            canvas.remove();
+            
+            return imageData;
+          } catch (error) {
+            console.error('Error creating chart:', error);
+            return null;
+          }
+        };
+
+        // Chart 1: Sentiment Distribution (Pie Chart)
+        const sentiments = projectResponses
+          .filter(r => r.response_metadata?.sentiment_score !== null)
+          .map(r => r.response_metadata.sentiment_score);
+        const positive = sentiments.filter(s => s > 0.3).length;
+        const negative = sentiments.filter(s => s < -0.3).length;
+        const neutral = sentiments.filter(s => s >= -0.3 && s <= 0.3).length;
+        const total = sentiments.length;
+
+        if (total > 0) {
+          const sentimentData = [
+            { name: 'Positive', value: positive },
+            { name: 'Neutral', value: neutral },
+            { name: 'Negative', value: negative },
+          ].filter(item => item.value > 0);
+
+          if (sentimentData.length > 0) {
+            const chartImage = await createChartImage(
+              'pie',
+              sentimentData,
+              sentimentData.map(d => d.name),
+              'Sentiment Distribution',
+              600,
+              400
+            );
+
+            if (chartImage) {
+              const chartSlide = pptx.addSlide();
+              chartSlide.addText('Sentiment Distribution', {
+                x: 0.5,
+                y: 0.3,
+                w: 9,
+                h: 0.5,
+                fontSize: 24,
+                bold: true,
+                color: '363636',
+              });
+              chartSlide.addImage({
+                data: chartImage,
+                x: 1,
+                y: 1.2,
+                w: 8,
+                h: 4.5,
+              });
+              console.log('✓ Added Sentiment Distribution chart to PPT');
+            }
+          }
+        }
+
+        // Chart 2: Platform Performance (Bar Chart)
+        const platformData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+          const platformResponses = projectResponses.filter(r => r.platform === platform);
+          const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+          const total = platformResponses.length;
+          const mentionRate = total > 0 ? (mentions / total) * 100 : 0;
+          return {
+            platform: platform.charAt(0).toUpperCase() + platform.slice(1),
+            mentionRate: Math.round(mentionRate),
+          };
+        }).sort((a, b) => b.mentionRate - a.mentionRate);
+
+        if (platformData.length > 0) {
+          const chartImage = await createChartImage(
+            'bar',
+            platformData.map(p => p.mentionRate),
+            platformData.map(p => p.platform),
+            'Platform Performance (Mention Rate %)',
+            600,
+            400
+          );
+
+          if (chartImage) {
+            const chartSlide = pptx.addSlide();
+            chartSlide.addText('Platform Performance', {
+              x: 0.5,
+              y: 0.3,
+              w: 9,
+              h: 0.5,
+              fontSize: 24,
+              bold: true,
+              color: '363636',
+            });
+            chartSlide.addImage({
+              data: chartImage,
+              x: 1,
+              y: 1.2,
+              w: 8,
+              h: 4.5,
+            });
+            console.log('✓ Added Platform Performance chart to PPT');
+          }
+        }
+      }
+
+      // Save PowerPoint
+      const fileName = `AI_Visibility_Report_${selectedProject.brand_name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pptx`;
+      await pptx.writeFile({ fileName });
+    } catch (error) {
+      console.error('Error exporting PowerPoint:', error);
+      alert('Failed to export PowerPoint: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  };
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setShowExportDropdown(false);
+      }
+    };
+
+    if (showExportDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showExportDropdown]);
 
   const handleResumeAnalysis = async (sessionId: string, projectId: string) => {
     setResumingAnalysis(sessionId);
@@ -3850,11 +5289,42 @@ function AIVisibilityContent() {
                   <Settings className="w-4 h-4" />
                   Configure Project
                 </button>
-                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-                  <Download className="w-4 h-4" />
-                  Export Report
-                  <ChevronDown className="w-4 h-4" />
-                </button>
+                <div className="relative" ref={exportDropdownRef}>
+                  <button 
+                    onClick={() => setShowExportDropdown(!showExportDropdown)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Report
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showExportDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                  
+                  {showExportDropdown && (
+                    <div className="absolute z-50 w-full mt-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                      <button
+                        onClick={handleExportPDF}
+                        className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                      >
+                        <FileText className="w-4 h-4 text-red-600" />
+                        <span>Export as PDF</span>
+                      </button>
+                      <button
+                        onClick={handleExportCSV}
+                        className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center gap-2 border-t border-gray-100"
+                      >
+                        <FileText className="w-4 h-4 text-green-600" />
+                        <span>Export as CSV</span>
+                      </button>
+                      <button
+                        onClick={handleExportPPT}
+                        className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center gap-2 border-t border-gray-100"
+                      >
+                        <FileText className="w-4 h-4 text-blue-600" />
+                        <span>Export as PowerPoint</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
                 {/* Show Run Analysis / Resume button when not running */}
                 {!isRunning && (
                   isPaused && latestSession ? (

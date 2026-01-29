@@ -345,6 +345,65 @@ function ContentInner() {
           }
         }
       }
+    } else {
+      // No source param: restore from Content Generator (contentToPublish) or Missed Prompts / AI Visibility (aiVisibilityResponses)
+      const contentToPublishRaw = sessionStorage.getItem('contentToPublish');
+      if (contentToPublishRaw) {
+        try {
+          const publishData = JSON.parse(contentToPublishRaw);
+          const keywords = Array.isArray(publishData.targetKeywords)
+            ? publishData.targetKeywords
+            : (typeof publishData.targetKeywords === 'string'
+                ? publishData.targetKeywords.split(',').map((k: string) => k.trim()).filter(Boolean)
+                : []);
+          const publicationData = {
+            responses: [{
+              id: `cg-${Date.now()}`,
+              prompt: publishData.topic || '',
+              response: publishData.content || '',
+              platform: publishData.targetPlatform || 'medium',
+              response_metadata: {},
+              status: 'pending',
+              selectedPlatforms: [],
+              publishedUrls: [],
+              platformSchemas: {},
+              contentId: publishData.contentId,
+            }],
+            projectName: 'Content Generator',
+            projectId: '',
+            keywords,
+            industry: '',
+            brandName: '',
+            brandVoice: null,
+            influenceLevel: 'subtle',
+            sourceMissedPrompt: publishData.topic,
+          };
+          setAiVisibilityData(publicationData);
+          sessionStorage.setItem('aiVisibilityResponses', JSON.stringify(publicationData));
+          sessionStorage.removeItem('contentToPublish');
+          setImageSearchQuery(publishData.topic || '');
+          setShowImageModal(true);
+        } catch (error) {
+          console.error('Error parsing contentToPublish:', error);
+          sessionStorage.removeItem('contentToPublish');
+        }
+      } else {
+        // Missed prompts / AI Visibility: user approved (humanized) content but landed without source; restore from aiVisibilityResponses
+        const storedAi = sessionStorage.getItem('aiVisibilityResponses');
+        if (storedAi) {
+          try {
+            const data = JSON.parse(storedAi);
+            const hasPublishedContent = data.responses?.[0]?.platformSchemas && Object.keys(data.responses[0].platformSchemas || {}).length > 0;
+            if (!hasPublishedContent) {
+              setAiVisibilityData(data);
+              if (data.responses?.[0]?.prompt) setImageSearchQuery(data.responses[0].prompt);
+              setShowImageModal(true);
+            }
+          } catch (error) {
+            console.error('Error parsing aiVisibilityResponses:', error);
+          }
+        }
+      }
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1460,7 +1519,16 @@ function ContentInner() {
       sourceMissedPrompt: editData?.prompt || editedPrompt,
     };
     sessionStorage.setItem('aiVisibilityResponses', JSON.stringify(publicationData));
-    
+    // Also store in contentToPublish so publication page shows humanized content when landing without source (e.g. missed-prompts flow)
+    const contentToPublishPayload = {
+      content: contentToApprove,
+      topic: editedPrompt,
+      targetPlatform: 'medium',
+      targetKeywords: Array.isArray(editData?.keywords) ? editData.keywords : (editData?.keywords || '').toString(),
+      contentId: null,
+    };
+    sessionStorage.setItem('contentToPublish', JSON.stringify(contentToPublishPayload));
+
     // Set aiVisibilityData state so Modal 2 can access it
     setAiVisibilityData(publicationData);
     
@@ -3038,17 +3106,29 @@ function ContentInner() {
               <div className="prose prose-sm max-w-none">
                 {viewMode === 'content' && (
                   <>
-                    {/* Show Content */}
-                    {viewContent.raw?.generated_content ? (
-                      <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
-                        {viewContent.raw.generated_content}
-                      </div>
-                    ) : (
-                      <div className="text-gray-500 text-center py-12">
-                        <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                        <p>No content available</p>
-                      </div>
-                    )}
+                    {/* Show Content: prefer humanized content from session when this draft matches (by contentId or topic/prompt) */}
+                    {(() => {
+                      const sessionResponse = aiVisibilityData?.responses?.[0];
+                      const contentIdMatch = sessionResponse?.contentId === viewContent.id;
+                      const topicMatch = sessionResponse?.prompt && (
+                        viewContent.title === sessionResponse.prompt ||
+                        (viewContent.raw?.topic && String(viewContent.raw.topic).trim() === String(sessionResponse.prompt).trim())
+                      );
+                      const humanizedFromSession = (contentIdMatch || topicMatch) && sessionResponse?.response
+                        ? sessionResponse.response
+                        : null;
+                      const displayContent = humanizedFromSession || viewContent.raw?.generated_content;
+                      return displayContent ? (
+                        <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
+                          {displayContent}
+                        </div>
+                      ) : (
+                        <div className="text-gray-500 text-center py-12">
+                          <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                          <p>No content available</p>
+                        </div>
+                      );
+                    })()}
 
                     {/* Published URL Link in View Modal */}
                     {viewContent.status === "published" && viewContent.published_records && viewContent.published_records.length > 0 && (
@@ -3273,8 +3353,17 @@ function ContentInner() {
                 {viewMode === 'content' && (
                   <button
                     onClick={() => {
-                      if (viewContent.raw?.generated_content) {
-                        navigator.clipboard.writeText(viewContent.raw.generated_content);
+                      const sessionResponse = aiVisibilityData?.responses?.[0];
+                      const contentIdMatch = sessionResponse?.contentId === viewContent.id;
+                      const topicMatch = sessionResponse?.prompt && (
+                        viewContent.title === sessionResponse.prompt ||
+                        (viewContent.raw?.topic && String(viewContent.raw.topic).trim() === String(sessionResponse.prompt).trim())
+                      );
+                      const toCopy = (contentIdMatch || topicMatch) && sessionResponse?.response
+                        ? sessionResponse.response
+                        : viewContent.raw?.generated_content;
+                      if (toCopy) {
+                        navigator.clipboard.writeText(toCopy);
                         toast.success("Content copied to clipboard!");
                       }
                     }}
