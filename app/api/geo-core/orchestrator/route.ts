@@ -9,7 +9,7 @@ import { publishToFacebook, FacebookConfig } from "@/lib/integrations/facebook";
 import { publishToLinkedIn, LinkedInConfig } from "@/lib/integrations/linkedin";
 import { publishToInstagram, InstagramConfig } from "@/lib/integrations/instagram";
 import { publishToShopify, ShopifyConfig } from "@/lib/integrations/shopify";
-import { publishToWordPress, WordPressConfig, publishToSelfHostedWordPress, SelfHostedWordPressConfig } from "@/lib/integrations/wordpress";
+import { publishToWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
 
 /**
  * Content Orchestrator API
@@ -1238,6 +1238,12 @@ export async function POST(request: NextRequest) {
                     excerpt: contentStrategy.metadata?.excerpt || "",
                     status: "publish",
                     tags: contentStrategy.target_keywords || [],
+                    featured_image: contentStrategy.metadata?.imageUrl || undefined,
+                    categories: contentStrategy.metadata?.categories
+                      ? (Array.isArray(contentStrategy.metadata.categories)
+                          ? contentStrategy.metadata.categories
+                          : String(contentStrategy.metadata.categories).split(',').map((c: string) => c.trim()))
+                      : undefined,
                   });
 
                   if (wordpressResult.success && wordpressResult.url) {
@@ -1265,60 +1271,6 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Auto-publish to Self-Hosted WordPress if platform is wordpress_self_hosted
-          if (platform === "wordpress_self_hosted") {
-            try {
-              const { data: wordpressSelfHostedIntegration } = await supabase
-                .from("platform_integrations")
-                .select("*")
-                .eq("user_id", session.user.id)
-                .eq("platform", "wordpress_self_hosted")
-                .eq("status", "connected")
-                .maybeSingle();
-
-              if (wordpressSelfHostedIntegration && wordpressSelfHostedIntegration.access_token) {
-                const siteUrl = wordpressSelfHostedIntegration.metadata?.siteUrl;
-                
-                if (siteUrl) {
-                  const selfHostedConfig: SelfHostedWordPressConfig = {
-                    siteUrl: siteUrl,
-                    username: wordpressSelfHostedIntegration.platform_username || "",
-                    applicationPassword: wordpressSelfHostedIntegration.access_token,
-                  };
-
-                  wordpressResult = await publishToSelfHostedWordPress(selfHostedConfig, {
-                    title: contentStrategy.topic || "Untitled",
-                    content: contentStrategy.generated_content || "",
-                    excerpt: contentStrategy.metadata?.excerpt || "",
-                    status: "publish",
-                    tags: contentStrategy.target_keywords || [],
-                  });
-
-                  if (wordpressResult.success && wordpressResult.url) {
-                    publishUrl = wordpressResult.url;
-                    console.log("✅ Self-hosted WordPress publish successful:", publishUrl);
-                    
-                    // Update last_used_at for the integration
-                    await supabase
-                      .from("platform_integrations")
-                      .update({ last_used_at: new Date().toISOString() })
-                      .eq("id", wordpressSelfHostedIntegration.id);
-                  }
-                } else {
-                  throw new Error("Self-hosted WordPress site URL not configured. Please reconnect in Settings.");
-                }
-              } else {
-                throw new Error("Self-hosted WordPress integration not found or not connected. Please connect your WordPress site in Settings.");
-              }
-            } catch (wordpressError: any) {
-              console.error("Self-hosted WordPress publish error:", wordpressError);
-              wordpressResult = {
-                success: false,
-                error: wordpressError.message || "Self-hosted WordPress publish failed",
-              };
-            }
-          }
-          
           console.log("📝 Creating published_content record:", {
             contentId,
             platform,

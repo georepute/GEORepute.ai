@@ -1241,8 +1241,28 @@ Deno.serve(async (req) => {
               if (content.target_keywords && content.target_keywords.length > 0) {
                 postPayload.tags = (postPayload.tags ? postPayload.tags + ',' : '') + content.target_keywords.join(',');
               }
-              if (content.metadata?.imageUrl) {
-                postPayload.featured_image = content.metadata.imageUrl;
+              // WordPress featured_image must be an attachment ID; upload image URL first
+              if (content.metadata?.imageUrl && /^https?:\/\//i.test(content.metadata.imageUrl)) {
+                const mediaBody = new URLSearchParams();
+                mediaBody.append('media_urls[]', content.metadata.imageUrl);
+                const mediaRes = await fetch(
+                  `https://public-api.wordpress.com/rest/v1.1/sites/${siteId}/media/new`,
+                  {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${wordpressIntegration.access_token}`,
+                      'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: mediaBody.toString(),
+                  }
+                );
+                if (mediaRes.ok) {
+                  const mediaData = await mediaRes.json();
+                  const media = Array.isArray(mediaData.media) ? mediaData.media : (mediaData.media ? [mediaData.media] : []);
+                  if (media.length > 0 && media[0].ID) {
+                    postPayload.featured_image = String(media[0].ID);
+                  }
+                }
               }
               // WordPress-specific: Add categories
               if (content.metadata?.categories) {

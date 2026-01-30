@@ -1,8 +1,6 @@
 /**
  * WordPress Integration Service
- * Supports both:
- * 1. WordPress.com (OAuth authentication)
- * 2. Self-hosted WordPress (Application Passwords authentication)
+ * WordPress.com (OAuth authentication) only.
  */
 
 // ============================================================================
@@ -15,29 +13,6 @@
 export interface WordPressConfig {
   accessToken: string;
   siteId: string; // WordPress.com site ID or domain
-}
-
-/**
- * Self-hosted WordPress configuration (Application Passwords)
- */
-export interface SelfHostedWordPressConfig {
-  siteUrl: string;      // e.g., "https://example.com"
-  username: string;     // WordPress username
-  applicationPassword: string; // Application password (not regular password)
-}
-
-/**
- * Unified WordPress configuration that works with both types
- */
-export interface UnifiedWordPressConfig {
-  type: 'wordpress_com' | 'self_hosted';
-  // WordPress.com specific
-  accessToken?: string;
-  siteId?: string;
-  // Self-hosted specific
-  siteUrl?: string;
-  username?: string;
-  applicationPassword?: string;
 }
 
 export interface WordPressSite {
@@ -64,7 +39,8 @@ export interface WordPressPost {
   date?: string;
   categories?: string[];
   tags?: string[];
-  featured_image?: string;
+  /** URL (will be uploaded) or attachment ID */
+  featured_image?: string | number;
   format?: 'standard' | 'aside' | 'chat' | 'gallery' | 'link' | 'image' | 'quote' | 'status' | 'video' | 'audio';
   slug?: string;
   author?: number;
@@ -226,22 +202,221 @@ export async function getWordPressPosts(
 }
 
 /**
- * Publish a post to WordPress.com
+ * Upload media from URLs to WordPress.com (sideload).
+ * Returns array of uploaded media objects with ID and URL.
+ */
+export async function uploadWordPressMediaFromUrls(
+  config: WordPressConfig,
+  urls: string[]
+): Promise<{ success: boolean; media?: Array<{ ID: number; URL: string }>; error?: string }> {
+  if (!urls.length) {
+    return { success: true, media: [] };
+  }
+  try {
+    const mediaUrl = getApiUrl(`/sites/${config.siteId}/media/new`);
+    // WordPress.com API accepts form-urlencoded media_urls (array)
+    const body = new URLSearchParams();
+    urls.forEach((u) => body.append('media_urls[]', u));
+
+    const response = await fetch(mediaUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString(),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('WordPress media upload error:', response.status, errorData);
+      return {
+        success: false,
+        error: errorData.message || `Failed to upload media (${response.status})`,
+      };
+    }
+
+    const data = await response.json();
+    const media = Array.isArray(data.media) ? data.media : (data.media ? [data.media] : []);
+    const mediaErrors = data.media_errors || data.errors;
+    if (mediaErrors && mediaErrors.length > 0) {
+      console.warn('WordPress media upload partial errors:', mediaErrors);
+    }
+    return {
+      success: true,
+      media: media.map((m: any) => ({ ID: m.ID, URL: m.URL || m.guid || '' })),
+    };
+  } catch (error: any) {
+    console.error('WordPress media upload error:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to upload media to WordPress.com',
+    };
+  }
+}
+
+/** One image source extracted from HTML (exact string + type for upload). */
+type ExtractedImage = { raw: string; type: 'http' | 'data' };
+
+/**
+ * Extract all img src values from HTML in document order (both http(s) and data URLs).
+ * Editor-inserted images are often data URLs (base64); WordPress needs them uploaded.
+ */
+function extractImageSourcesFromHtml(html: string): ExtractedImage[] {
+  const items: ExtractedImage[] = [];
+  const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = imgRegex.exec(html)) !== null) {
+    const raw = m[1];
+    if (!raw || raw.trim().length === 0) continue;
+    if (/^https?:\/\//i.test(raw)) {
+      items.push({ raw, type: 'http' });
+    } else if (/^data:image\/[^;]+;base64,/i.test(raw)) {
+      items.push({ raw, type: 'data' });
+    }
+  }
+  return items;
+}
+
+/** Replace the first occurrence of `search` in `str` with `replace`. */
+function replaceFirst(str: string, search: string, replace: string): string {
+  const i = str.indexOf(search);
+  return i === -1 ? str : str.slice(0, i) + replace + str.slice(i + search.length);
+}
+
+/**
+ * Upload image buffers (e.g. from data URLs) to WordPress.com via multipart/form-data.
+ */
+async function uploadWordPressMediaFromBuffers(
+  config: WordPressConfig,
+  files: Array<{ buffer: Buffer; filename: string; mimeType: string }>
+): Promise<{ success: boolean; media?: Array<{ ID: number; URL: string }>; error?: string }> {
+  if (!files.length) {
+    return { success: true, media: [] };
+  }
+  try {
+    const mediaUrl = getApiUrl(`/sites/${config.siteId}/media/new`);
+    const form = new FormData();
+    files.forEach((f) => {
+      const blobPart = new Uint8Array(f.buffer);
+      form.append('media[]', new Blob([blobPart], { type: f.mimeType }), f.filename);
+    });
+
+    const response = await fetch(mediaUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+      },
+      body: form,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('WordPress media upload (buffers) error:', response.status, errorData);
+      return {
+        success: false,
+        error: errorData.message || `Failed to upload media (${response.status})`,
+      };
+    }
+
+    const data = await response.json();
+    const media = Array.isArray(data.media) ? data.media : (data.media ? [data.media] : []);
+    return {
+      success: true,
+      media: media.map((m: any) => ({ ID: m.ID, URL: m.URL || m.guid || '' })),
+    };
+  } catch (error: any) {
+    console.error('WordPress media upload (buffers) error:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to upload media to WordPress.com',
+    };
+  }
+}
+
+/**
+ * Publish a post to WordPress.com.
+ * featured_image can be a URL (will be uploaded and set as featured image) or an attachment ID (number).
+ * Content img src (both http URLs and data URLs from the editor) are uploaded and replaced so images display.
  */
 export async function publishToWordPress(
   config: WordPressConfig,
   post: WordPressPost
 ): Promise<WordPressPublishResult> {
   try {
+    let content = post.content || '';
+    let featuredImageId: number | string | undefined;
+
+    // Resolve featured_image: if it's a URL, upload and get attachment ID
+    if (post.featured_image) {
+      if (typeof post.featured_image === 'number') {
+        featuredImageId = post.featured_image;
+      } else if (typeof post.featured_image === 'string' && /^https?:\/\//i.test(post.featured_image)) {
+        const upload = await uploadWordPressMediaFromUrls(config, [post.featured_image]);
+        if (upload.success && upload.media && upload.media.length > 0) {
+          featuredImageId = upload.media[0].ID;
+        } else {
+          console.warn('WordPress featured image upload failed:', upload.error);
+        }
+      } else {
+        featuredImageId = post.featured_image;
+      }
+    }
+
+    // Upload in-content images (editor-inserted: both http URLs and data URLs) and replace so they display
+    const extracted = extractImageSourcesFromHtml(content);
+    if (extracted.length > 0) {
+      const httpItems = extracted.filter((x) => x.type === 'http');
+      const dataItems = extracted.filter((x) => x.type === 'data');
+
+      const httpUrls = httpItems.map((x) => x.raw);
+      let mediaHttp: Array<{ ID: number; URL: string }> = [];
+      if (httpUrls.length > 0) {
+        const upload = await uploadWordPressMediaFromUrls(config, httpUrls);
+        if (upload.success && upload.media) mediaHttp = upload.media;
+      }
+
+      let mediaData: Array<{ ID: number; URL: string }> = [];
+      if (dataItems.length > 0) {
+        const files: Array<{ buffer: Buffer; filename: string; mimeType: string }> = [];
+        for (const item of dataItems) {
+          const match = item.raw.match(/^data:image\/(\w+);base64,(.+)$/i);
+          if (match) {
+            const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+            const mimeType = `image/${match[1]}`;
+            const buffer = Buffer.from(match[2], 'base64');
+            files.push({
+              buffer,
+              filename: `inline-${Date.now()}-${files.length}.${ext}`,
+              mimeType,
+            });
+          }
+        }
+        if (files.length > 0) {
+          const upload = await uploadWordPressMediaFromBuffers(config, files);
+          if (upload.success && upload.media) mediaData = upload.media;
+        }
+      }
+
+      let httpIdx = 0;
+      let dataIdx = 0;
+      for (const item of extracted) {
+        const newUrl = item.type === 'http'
+          ? (mediaHttp[httpIdx++]?.URL)
+          : (mediaData[dataIdx++]?.URL);
+        if (newUrl) {
+          content = replaceFirst(content, item.raw, newUrl);
+        }
+      }
+    }
+
     const url = getApiUrl(`/sites/${config.siteId}/posts/new`);
-    
     const postPayload: any = {
       title: post.title,
-      content: post.content,
+      content,
       status: post.status || 'publish',
     };
 
-    // Add optional fields
     if (post.excerpt) postPayload.excerpt = post.excerpt;
     if (post.date) postPayload.date = post.date;
     if (post.categories && post.categories.length > 0) {
@@ -250,7 +425,7 @@ export async function publishToWordPress(
     if (post.tags && post.tags.length > 0) {
       postPayload.tags = post.tags.join(',');
     }
-    if (post.featured_image) postPayload.featured_image = post.featured_image;
+    if (featuredImageId !== undefined) postPayload.featured_image = String(featuredImageId);
     if (post.format) postPayload.format = post.format;
     if (post.slug) postPayload.slug = post.slug;
     if (post.publicize !== undefined) postPayload.publicize = post.publicize;
@@ -259,6 +434,7 @@ export async function publishToWordPress(
       siteId: config.siteId,
       title: post.title,
       status: post.status,
+      hasFeaturedImage: !!featuredImageId,
     });
 
     const response = await fetch(url, {
@@ -273,7 +449,7 @@ export async function publishToWordPress(
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       console.error('WordPress publish error:', response.status, errorData);
-      
+
       return {
         success: false,
         error: errorData.message || `Failed to publish post (${response.status})`,
@@ -638,501 +814,3 @@ export async function uploadWordPressMedia(
   }
 }
 
-// ============================================================================
-// Self-Hosted WordPress Functions (Application Passwords)
-// ============================================================================
-
-/**
- * Get Basic Auth header for self-hosted WordPress
- */
-function getSelfHostedAuthHeader(username: string, applicationPassword: string): string {
-  const credentials = Buffer.from(`${username}:${applicationPassword}`).toString('base64');
-  return `Basic ${credentials}`;
-}
-
-/**
- * Normalize site URL (ensure it has protocol and no trailing slash)
- */
-function normalizeSiteUrl(url: string): string {
-  let normalized = url.trim();
-  
-  // Add https:// if no protocol
-  if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
-    normalized = `https://${normalized}`;
-  }
-  
-  // Remove trailing slash
-  normalized = normalized.replace(/\/+$/, '');
-  
-  return normalized;
-}
-
-/**
- * Verify self-hosted WordPress connection using Application Password
- */
-export async function verifySelfHostedWordPressConnection(config: SelfHostedWordPressConfig): Promise<{
-  success: boolean;
-  user?: {
-    id: number;
-    name: string;
-    username: string;
-    email?: string;
-    avatar_urls?: { [key: string]: string };
-  };
-  siteInfo?: {
-    name: string;
-    description: string;
-    url: string;
-    home: string;
-  };
-  error?: string;
-}> {
-  try {
-    const siteUrl = normalizeSiteUrl(config.siteUrl);
-    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
-
-    // First, verify the connection by getting current user info
-    const userResponse = await fetch(`${siteUrl}/wp-json/wp/v2/users/me`, {
-      method: 'GET',
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!userResponse.ok) {
-      const errorData = await userResponse.json().catch(() => ({}));
-      console.error('Self-hosted WordPress auth error:', userResponse.status, errorData);
-      
-      if (userResponse.status === 401) {
-        return {
-          success: false,
-          error: 'Invalid username or application password. Please check your credentials.',
-        };
-      }
-      
-      if (userResponse.status === 403) {
-        return {
-          success: false,
-          error: 'Access forbidden. Make sure the Application Password has the correct permissions.',
-        };
-      }
-      
-      if (userResponse.status === 404) {
-        return {
-          success: false,
-          error: 'WordPress REST API not found. Make sure the site URL is correct and REST API is enabled.',
-        };
-      }
-      
-      return {
-        success: false,
-        error: errorData.message || `Connection failed (${userResponse.status})`,
-      };
-    }
-
-    const userData = await userResponse.json();
-
-    // Get site info
-    let siteInfo = null;
-    try {
-      const siteResponse = await fetch(`${siteUrl}/wp-json`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (siteResponse.ok) {
-        siteInfo = await siteResponse.json();
-      }
-    } catch (e) {
-      // Site info is optional, continue without it
-      console.warn('Could not fetch site info:', e);
-    }
-
-    return {
-      success: true,
-      user: {
-        id: userData.id,
-        name: userData.name,
-        username: userData.slug,
-        email: userData.email,
-        avatar_urls: userData.avatar_urls,
-      },
-      siteInfo: siteInfo ? {
-        name: siteInfo.name,
-        description: siteInfo.description,
-        url: siteInfo.url,
-        home: siteInfo.home,
-      } : undefined,
-    };
-  } catch (error: any) {
-    console.error('Self-hosted WordPress verification error:', error);
-    
-    // Check for common network errors
-    if (error.code === 'ENOTFOUND' || error.message?.includes('ENOTFOUND')) {
-      return {
-        success: false,
-        error: 'Site not found. Please check the URL is correct.',
-      };
-    }
-    
-    if (error.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED')) {
-      return {
-        success: false,
-        error: 'Connection refused. The site may be down or blocking connections.',
-      };
-    }
-    
-    return {
-      success: false,
-      error: error.message || 'Failed to verify self-hosted WordPress connection',
-    };
-  }
-}
-
-/**
- * Publish a post to self-hosted WordPress using Application Password
- */
-export async function publishToSelfHostedWordPress(
-  config: SelfHostedWordPressConfig,
-  post: WordPressPost
-): Promise<WordPressPublishResult> {
-  try {
-    const siteUrl = normalizeSiteUrl(config.siteUrl);
-    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
-
-    // Build the post payload for WordPress REST API
-    const postPayload: any = {
-      title: post.title,
-      content: post.content,
-      status: post.status || 'publish',
-    };
-
-    // Add optional fields
-    if (post.excerpt) postPayload.excerpt = post.excerpt;
-    if (post.date) postPayload.date = post.date;
-    if (post.slug) postPayload.slug = post.slug;
-    
-    // Tags need to be tag IDs in self-hosted WP, but we can pass names and let WP create them
-    if (post.tags && post.tags.length > 0) {
-      // For self-hosted WP, we need to get/create tag IDs or use tag names if REST API supports it
-      postPayload.tags = []; // We'll handle tags separately
-    }
-    
-    // Categories need to be category IDs
-    if (post.categories && post.categories.length > 0) {
-      postPayload.categories = []; // We'll handle categories separately
-    }
-
-    console.log('Publishing post to self-hosted WordPress:', {
-      siteUrl,
-      title: post.title,
-      status: post.status,
-    });
-
-    const response = await fetch(`${siteUrl}/wp-json/wp/v2/posts`, {
-      method: 'POST',
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(postPayload),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('Self-hosted WordPress publish error:', response.status, errorData);
-      
-      if (response.status === 401) {
-        return {
-          success: false,
-          error: 'Authentication failed. Please check your Application Password.',
-        };
-      }
-      
-      if (response.status === 403) {
-        return {
-          success: false,
-          error: 'Permission denied. Your user may not have permission to create posts.',
-        };
-      }
-      
-      return {
-        success: false,
-        error: errorData.message || `Failed to publish post (${response.status})`,
-      };
-    }
-
-    const data = await response.json();
-
-    console.log('Successfully published to self-hosted WordPress:', {
-      postId: data.id,
-      url: data.link,
-    });
-
-    // Handle tags after post creation (if any)
-    if (post.tags && post.tags.length > 0) {
-      try {
-        await addTagsToSelfHostedPost(config, data.id, post.tags);
-      } catch (tagError) {
-        console.warn('Failed to add tags to post:', tagError);
-      }
-    }
-
-    return {
-      success: true,
-      url: data.link,
-      postId: data.id,
-      siteId: siteUrl,
-    };
-  } catch (error: any) {
-    console.error('Self-hosted WordPress publish error:', error);
-    return {
-      success: false,
-      error: error.message || 'Unknown error publishing to self-hosted WordPress',
-    };
-  }
-}
-
-/**
- * Add tags to a self-hosted WordPress post
- */
-async function addTagsToSelfHostedPost(
-  config: SelfHostedWordPressConfig,
-  postId: number,
-  tagNames: string[]
-): Promise<void> {
-  const siteUrl = normalizeSiteUrl(config.siteUrl);
-  const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
-  
-  const tagIds: number[] = [];
-  
-  for (const tagName of tagNames) {
-    // First, try to find existing tag
-    const searchResponse = await fetch(
-      `${siteUrl}/wp-json/wp/v2/tags?search=${encodeURIComponent(tagName)}`,
-      {
-        headers: {
-          'Authorization': authHeader,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-    
-    if (searchResponse.ok) {
-      const existingTags = await searchResponse.json();
-      const exactMatch = existingTags.find((t: any) => 
-        t.name.toLowerCase() === tagName.toLowerCase()
-      );
-      
-      if (exactMatch) {
-        tagIds.push(exactMatch.id);
-        continue;
-      }
-    }
-    
-    // Create new tag if not found
-    const createResponse = await fetch(`${siteUrl}/wp-json/wp/v2/tags`, {
-      method: 'POST',
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ name: tagName }),
-    });
-    
-    if (createResponse.ok) {
-      const newTag = await createResponse.json();
-      tagIds.push(newTag.id);
-    }
-  }
-  
-  // Update post with tag IDs
-  if (tagIds.length > 0) {
-    await fetch(`${siteUrl}/wp-json/wp/v2/posts/${postId}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ tags: tagIds }),
-    });
-  }
-}
-
-/**
- * Get posts from self-hosted WordPress
- */
-export async function getSelfHostedWordPressPosts(
-  config: SelfHostedWordPressConfig,
-  options: { per_page?: number; status?: string } = {}
-): Promise<{
-  success: boolean;
-  posts?: any[];
-  error?: string;
-}> {
-  try {
-    const siteUrl = normalizeSiteUrl(config.siteUrl);
-    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
-    
-    const params = new URLSearchParams();
-    if (options.per_page) params.append('per_page', options.per_page.toString());
-    if (options.status) params.append('status', options.status);
-    
-    const response = await fetch(`${siteUrl}/wp-json/wp/v2/posts?${params.toString()}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return {
-        success: false,
-        error: errorData.message || `Failed to fetch posts (${response.status})`,
-      };
-    }
-
-    const posts = await response.json();
-    return {
-      success: true,
-      posts,
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.message || 'Failed to fetch self-hosted WordPress posts',
-    };
-  }
-}
-
-/**
- * Update a post on self-hosted WordPress
- */
-export async function updateSelfHostedWordPressPost(
-  config: SelfHostedWordPressConfig,
-  postId: number,
-  updates: Partial<WordPressPost>
-): Promise<WordPressPublishResult> {
-  try {
-    const siteUrl = normalizeSiteUrl(config.siteUrl);
-    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
-    
-    const updatePayload: any = {};
-    if (updates.title) updatePayload.title = updates.title;
-    if (updates.content) updatePayload.content = updates.content;
-    if (updates.excerpt) updatePayload.excerpt = updates.excerpt;
-    if (updates.status) updatePayload.status = updates.status;
-    if (updates.slug) updatePayload.slug = updates.slug;
-    
-    const response = await fetch(`${siteUrl}/wp-json/wp/v2/posts/${postId}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(updatePayload),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return {
-        success: false,
-        error: errorData.message || `Failed to update post (${response.status})`,
-      };
-    }
-
-    const data = await response.json();
-    return {
-      success: true,
-      url: data.link,
-      postId: data.id,
-      siteId: siteUrl,
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.message || 'Failed to update self-hosted WordPress post',
-    };
-  }
-}
-
-/**
- * Delete a post from self-hosted WordPress
- */
-export async function deleteSelfHostedWordPressPost(
-  config: SelfHostedWordPressConfig,
-  postId: number
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const siteUrl = normalizeSiteUrl(config.siteUrl);
-    const authHeader = getSelfHostedAuthHeader(config.username, config.applicationPassword);
-    
-    const response = await fetch(`${siteUrl}/wp-json/wp/v2/posts/${postId}?force=true`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': authHeader,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return {
-        success: false,
-        error: errorData.message || `Failed to delete post (${response.status})`,
-      };
-    }
-
-    return { success: true };
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.message || 'Failed to delete self-hosted WordPress post',
-    };
-  }
-}
-
-// ============================================================================
-// Unified Publishing Function (Works with both WordPress.com and Self-Hosted)
-// ============================================================================
-
-/**
- * Publish to WordPress - automatically detects type and uses appropriate method
- */
-export async function publishToWordPressUnified(
-  config: UnifiedWordPressConfig,
-  post: WordPressPost
-): Promise<WordPressPublishResult> {
-  if (config.type === 'self_hosted') {
-    if (!config.siteUrl || !config.username || !config.applicationPassword) {
-      return {
-        success: false,
-        error: 'Missing self-hosted WordPress credentials (siteUrl, username, or applicationPassword)',
-      };
-    }
-    
-    return publishToSelfHostedWordPress({
-      siteUrl: config.siteUrl,
-      username: config.username,
-      applicationPassword: config.applicationPassword,
-    }, post);
-  } else {
-    // WordPress.com
-    if (!config.accessToken || !config.siteId) {
-      return {
-        success: false,
-        error: 'Missing WordPress.com credentials (accessToken or siteId)',
-      };
-    }
-    
-    return publishToWordPress({
-      accessToken: config.accessToken,
-      siteId: config.siteId,
-    }, post);
-  }
-}
