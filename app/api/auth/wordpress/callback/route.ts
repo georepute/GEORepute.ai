@@ -16,9 +16,13 @@ export async function GET(request: NextRequest) {
     const error = searchParams.get("error");
     const errorDescription = searchParams.get("error_description");
 
-    // Get base URL for redirects
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
-      `${request.headers.get('x-forwarded-proto') || 'https'}://${request.headers.get('host')}`;
+    // Get base URL (must match what was used when initiating OAuth)
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+    const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
+    const baseUrlRaw = isLocalhost
+      ? `http://${host}`
+      : (process.env.NEXT_PUBLIC_APP_URL || `${request.headers.get('x-forwarded-proto') || 'https'}://${host}`);
+    const baseUrl = baseUrlRaw.replace(/\/+$/, '');
 
     // Handle error from WordPress.com
     if (error) {
@@ -180,9 +184,13 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error("WordPress.com OAuth callback error:", error);
     
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
-      `${request.headers.get('x-forwarded-proto') || 'https'}://${request.headers.get('host')}`;
-    
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+    const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
+    const baseUrlRaw = isLocalhost
+      ? `http://${host}`
+      : (process.env.NEXT_PUBLIC_APP_URL || `${request.headers.get('x-forwarded-proto') || 'https'}://${host}`);
+    const baseUrl = baseUrlRaw.replace(/\/+$/, '');
+
     return NextResponse.redirect(
       `${baseUrl}/dashboard/settings?tab=integrations&error=${encodeURIComponent(error.message || "An unexpected error occurred")}`
     );

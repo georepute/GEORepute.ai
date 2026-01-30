@@ -141,9 +141,14 @@ export async function POST(request: NextRequest) {
       
       console.log("Stored OAuth state for WordPress.com:", { state: state.substring(0, 20) + "..." });
 
-      // Get base URL from request
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 
-        `${request.headers.get('x-forwarded-proto') || 'https'}://${request.headers.get('host')}`;
+      // Build redirect_uri to match exactly what's registered in WordPress.com app
+      // Production (Vercel): set NEXT_PUBLIC_APP_URL=https://geo-repute-ai.vercel.app (no trailing slash)
+      const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+      const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
+      const baseUrlRaw = isLocalhost
+        ? `http://${host}`
+        : (process.env.NEXT_PUBLIC_APP_URL || `${request.headers.get('x-forwarded-proto') || 'https'}://${host}`);
+      const baseUrl = baseUrlRaw.replace(/\/+$/, ''); // strip trailing slash
       const redirectUri = `${baseUrl}/api/auth/wordpress/callback`;
 
       // Request scopes for auth (user info), posts, media, and sites
