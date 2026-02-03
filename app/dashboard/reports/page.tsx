@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { 
   FileText,
@@ -28,6 +28,8 @@ import {
   Sheet,
   Clock,
   AlertCircle,
+  Brain,
+  Quote,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useLanguage } from "@/lib/language-context";
@@ -56,6 +58,7 @@ import {
 } from "recharts";
 import { supabase } from "@/lib/supabase/client";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
+import { classifyIntent } from "@/lib/intent/classifyIntent";
 
 // Color palette for charts
 const COLORS = {
@@ -148,6 +151,48 @@ interface ReportData {
     count: number;
   }>;
 
+  // AI Search Presence (Report #2 – full)
+  aiSearchPresenceEngines: Array<{
+    platform: string;
+    displayName: string;
+    presenceScore: number;
+    totalQueries: number;
+    mentionCount: number;
+    mentionRatePct: number;
+    shareOfVoicePct: number;
+    avgSentiment: number | null;
+  }>;
+  aiEngineDescriptions: Array<{
+    platform: string;
+    displayName: string;
+    snippets: string[];
+  }>;
+  /** Number of brand analysis projects used for AI Search Presence (for empty-state messaging) */
+  aiPresenceProjectCount: number;
+  /** List of brand analysis projects for AI Search Presence project selector */
+  brandAnalysisProjects: Array<{ id: string; brand_name: string }>;
+  /** Per-project AI Search Presence data (engines + descriptions) keyed by project id */
+  aiPresenceByProject: Record<
+    string,
+    {
+      engines: Array<{
+        platform: string;
+        displayName: string;
+        presenceScore: number;
+        totalQueries: number;
+        mentionCount: number;
+        mentionRatePct: number;
+        shareOfVoicePct: number;
+        avgSentiment: number | null;
+      }>;
+      descriptions: Array<{
+        platform: string;
+        displayName: string;
+        snippets: string[];
+      }>;
+    }
+  >;
+
   // Performance Summary
   performanceSummary: Array<{
     metric: string;
@@ -210,6 +255,74 @@ interface ReportData {
     totalDaysToPublish: number;
     oldestDraft: string;
   };
+
+  // Brand Narrative & Perception (Report #3)
+  brandNarrativeDesired: {
+    brand_name: string;
+    description: string | null;
+    tone: string;
+    preferred_words: string[];
+    avoid_words: string[];
+    signature_phrases: string[];
+  } | null;
+  brandNarrativeTableRows: Array<{
+    dimension: string;
+    desired: string;
+    observed: string;
+    alignment: "match" | "partial" | "gap";
+  }>;
+  /** List of brand voices for narrative selector */
+  brandVoiceProfiles: Array<{ id: string; brand_name: string }>;
+  /** Per–brand-voice narrative (desired + table rows) */
+  brandNarrativeByVoice: Record<
+    string,
+    {
+      desired: ReportData["brandNarrativeDesired"];
+      tableRows: ReportData["brandNarrativeTableRows"];
+    }
+  >;
+
+  // Search Intent Intelligence (Report #4) – GSC + Keywords + NLP
+  searchIntentTableRows: Array<{
+    intent: string;
+    queryCount: number;
+    withPresence: number;
+    gap: number;
+    coveragePct: number;
+  }>;
+  /** Query sources used for intent (for UI) */
+  searchIntentSources: { keywords: number; gsc: number };
+  // GA4 (for Search Intent / performance context)
+  ga4Summary: {
+    sessions: number;
+    users: number;
+    newUsers: number;
+    pageviews: number;
+    avgSessionDuration: number;
+    bounceRate: number;
+  } | null;
+  ga4TopPages: Array<{
+    page: string;
+    pageviews: number;
+    sessions: number;
+    avgDuration: number;
+  }>;
+
+  // AI vs Google Gap (Report #5) – same-query comparison, GSC + AI engines, original data only
+  aiVsGoogleGapTableRows: Array<{
+    query: string;
+    googlePosition: number | null;
+    googlePresent: boolean;
+    googleInData: boolean;
+    aiMentioned: boolean;
+    aiEngines: string[];
+    gap: "Both" | "Google only" | "AI only" | "Neither";
+    suggestion: string;
+  }>;
+  /** Per-project gap rows for project selector */
+  aiVsGoogleGapByProject: Record<string, ReportData["aiVsGoogleGapTableRows"]>;
+  /** Queries that already have a stored gap_suggestion in ai_platform_responses (per project) */
+  storedGapSuggestionQueriesByProject: Record<string, Set<string>>;
 }
 
 export default function Reports() {
@@ -227,11 +340,102 @@ export default function Reports() {
   const [shareLink, setShareLink] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [activeReportTab, setActiveReportTab] = useState<
+    "core" | "global" | "competitive" | "advanced"
+  >("core");
+  const [selectedAIPresenceProjectId, setSelectedAIPresenceProjectId] = useState<
+    string | "all"
+  >("all");
+  const [selectedGapProjectId, setSelectedGapProjectId] = useState<string>("");
+  const [gapFilter, setGapFilter] = useState<"all" | "mentioned" | "gaps">("gaps");
+  const [gapSuggestionsByQuery, setGapSuggestionsByQuery] = useState<Record<string, string>>({});
+  const gapSuggestionsFetchedRef = useRef<string | null>(null);
+  const [selectedNarrativeVoiceId, setSelectedNarrativeVoiceId] = useState<string>("");
+
+  const REPORT_TABS = [
+    { id: "core" as const, label: "Core Visibility & Representation" },
+    { id: "global" as const, label: "Global Markets & Distribution" },
+    { id: "competitive" as const, label: "Competitive, Pricing & Trust" },
+    { id: "advanced" as const, label: "Advanced BI, Risk, Funnel & Executive" },
+  ];
 
   useEffect(() => {
     loadReportData();
     loadUserInfo();
   }, [dateRange]);
+
+  useEffect(() => {
+    gapSuggestionsFetchedRef.current = null;
+    setGapSuggestionsByQuery({});
+  }, [dateRange]);
+
+  // Reset AI Presence project selection if selected project is no longer in the list
+  useEffect(() => {
+    if (
+      reportData &&
+      selectedAIPresenceProjectId !== "all" &&
+      !(reportData.brandAnalysisProjects ?? []).some((p) => p.id === selectedAIPresenceProjectId)
+    ) {
+      setSelectedAIPresenceProjectId("all");
+    }
+  }, [reportData?.brandAnalysisProjects, selectedAIPresenceProjectId]);
+
+  useEffect(() => {
+    if (
+      reportData &&
+      selectedGapProjectId &&
+      !(reportData.brandAnalysisProjects ?? []).some((p) => p.id === selectedGapProjectId)
+    ) {
+      setSelectedGapProjectId("");
+    }
+  }, [reportData?.brandAnalysisProjects, selectedGapProjectId]);
+
+  useEffect(() => {
+    if (
+      reportData?.brandVoiceProfiles?.length &&
+      selectedNarrativeVoiceId &&
+      !reportData.brandVoiceProfiles.some((p) => p.id === selectedNarrativeVoiceId)
+    ) {
+      setSelectedNarrativeVoiceId("");
+    }
+  }, [reportData?.brandVoiceProfiles, selectedNarrativeVoiceId]);
+
+  // Auto-fetch AI suggestions only for gap rows that don't already have a stored suggestion; persist to DB
+  useEffect(() => {
+    if (!reportData || !selectedGapProjectId) return;
+    const rawRows = reportData.aiVsGoogleGapByProject?.[selectedGapProjectId] ?? [];
+    const storedSet = reportData.storedGapSuggestionQueriesByProject?.[selectedGapProjectId];
+    const gapRows = rawRows.filter((r) => r.gap !== "Both" && !storedSet?.has(r.query));
+    if (gapRows.length === 0) return;
+    const key = selectedGapProjectId;
+    if (gapSuggestionsFetchedRef.current === key) return;
+    gapSuggestionsFetchedRef.current = key;
+    const BATCH = 20;
+    (async () => {
+      for (let i = 0; i < gapRows.length; i += BATCH) {
+        const batch = gapRows.slice(i, i + BATCH);
+        try {
+          const res = await fetch("/api/reports/gap-suggestions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: selectedGapProjectId,
+              items: batch.map((r) => ({ query: r.query, gap: r.gap })),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) continue;
+          const suggestions: string[] = data.suggestions || [];
+          setGapSuggestionsByQuery((prev) => ({
+            ...prev,
+            ...Object.fromEntries(batch.map((r, j) => [r.query, (suggestions[j] || prev[r.query] || r.suggestion).slice(0, 200)])),
+          }));
+        } catch (_) {
+          break;
+        }
+      }
+    })();
+  }, [reportData, selectedGapProjectId]);
 
   const loadUserInfo = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -312,11 +516,63 @@ export default function Reports() {
         .in("project_id", projects?.map((p) => p.id) || [])
         .eq("status", "running");
 
-      const { data: responses } = await supabase
-        .from("ai_platform_responses")
-        .select("*")
-        .in("project_id", projects?.map((p) => p.id) || [])
-        .gte("created_at", startDate.toISOString());
+      const projectIds = (projects ?? []).map((p: any) => p.id).filter(Boolean) as string[];
+
+      // GSC keywords for Search Intent and AI vs Google Gap (include project_id for per-project gap)
+      let gscKeywords: Array<{ keyword: string; position: number }> = [];
+      const gscKeywordsByProject: Record<string, Array<{ keyword: string; position: number }>> = {};
+      if (projectIds.length > 0) {
+        const { data: gscRows } = await supabase
+          .from("gsc_keywords")
+          .select("keyword, position, project_id")
+          .in("project_id", projectIds)
+          .gte("date", format(startDate, "yyyy-MM-dd"))
+          .order("impressions", { ascending: false });
+        const byQuery = new Map<string, number>();
+        const byProject = new Map<string, Map<string, number>>();
+        (gscRows ?? []).forEach((r: any) => {
+          const q = (r.keyword || "").trim().toLowerCase();
+          if (!q) return;
+          const pos = Number(r.position) || 0;
+          const existing = byQuery.get(q);
+          if (existing === undefined || pos < existing) byQuery.set(q, pos);
+          const pid = r.project_id as string;
+          if (pid) {
+            if (!byProject.has(pid)) byProject.set(pid, new Map());
+            const projMap = byProject.get(pid)!;
+            const ex = projMap.get(q);
+            if (ex === undefined || pos < ex) projMap.set(q, pos);
+          }
+        });
+        gscKeywords = Array.from(byQuery.entries()).map(([keyword, position]) => ({ keyword, position }));
+        byProject.forEach((map, pid) => {
+          gscKeywordsByProject[pid] = Array.from(map.entries()).map(([keyword, position]) => ({ keyword, position }));
+        });
+      }
+
+      const { data: responses } = projectIds.length > 0
+        ? await supabase
+            .from("ai_platform_responses")
+            .select("*")
+            .in("project_id", projectIds)
+            .gte("created_at", startDate.toISOString())
+        : { data: [] as any[] };
+
+      // For AI Search Presence: fetch ALL responses for user's projects (no date filter) so any past analyses show
+      let responsesForAIPresence: any[] | null = null;
+      if (projectIds.length > 0) {
+        const { data, error } = await supabase
+          .from("ai_platform_responses")
+          .select("*")
+          .in("project_id", projectIds)
+          .order("created_at", { ascending: false });
+        if (error) {
+          console.warn("AI Search Presence: failed to fetch responses", error);
+        }
+        responsesForAIPresence = data ?? [];
+      } else {
+        responsesForAIPresence = [];
+      }
 
       // Fetch Published Content for engagement metrics
       const { data: publishedContentRecords } = await supabase
@@ -330,6 +586,16 @@ export default function Reports() {
         .from("performance_snapshots")
         .select("*")
         .in("content_strategy_id", content?.map((c) => c.id) || []);
+
+      // Fetch all Brand Voices for Brand Narrative & Perception (selector + per-voice narrative)
+      const { data: brandVoices } = await supabase
+        .from("brand_voice_profiles")
+        .select("id, brand_name, description, tone, preferred_words, avoid_words, signature_phrases")
+        .eq("user_id", user.id)
+        .order("is_default", { ascending: false })
+        .order("created_at", { ascending: false });
+      const brandVoiceList = Array.isArray(brandVoices) ? brandVoices : [];
+      const defaultBrandVoice = brandVoiceList.length > 0 ? brandVoiceList[0] : null;
 
       // Process Keywords Data
       const totalKeywords = keywords?.length || 0;
@@ -507,6 +773,408 @@ export default function Reports() {
           count,
         })
       );
+
+      // AI Search Presence (Report #2) – build for "all" and per-project
+      const aiPresenceResponses = responsesForAIPresence ?? responses ?? [];
+      const AI_ENGINES: { id: string; displayName: string }[] = [
+        { id: "chatgpt", displayName: "ChatGPT" },
+        { id: "claude", displayName: "Claude" },
+        { id: "gemini", displayName: "Gemini" },
+        { id: "perplexity", displayName: "Perplexity" },
+        { id: "groq", displayName: "Groq" },
+      ];
+
+      const buildEnginesAndDescriptions = (responsesList: any[]) => {
+        const totalCount = responsesList.length || 0;
+        const engines = AI_ENGINES.map(({ id, displayName }) => {
+          const engineResponses = responsesList.filter(
+            (r: any) => (r.platform || "").toLowerCase() === id
+          );
+          const totalQueries = engineResponses.length;
+          const mentionCount = engineResponses.filter(
+            (r: any) => r.response_metadata?.brand_mentioned
+          ).length;
+          const mentionRatePct =
+            totalQueries > 0 ? (mentionCount / totalQueries) * 100 : 0;
+          const shareOfVoicePct =
+            totalCount > 0 ? (totalQueries / totalCount) * 100 : 0;
+          const withSentiment = engineResponses.filter(
+            (r: any) =>
+              r.response_metadata?.brand_mentioned &&
+              r.response_metadata?.sentiment_score != null
+          );
+          const avgSentiment =
+            withSentiment.length > 0
+              ? withSentiment.reduce(
+                  (sum: number, r: any) =>
+                    sum + (r.response_metadata?.sentiment_score ?? 0),
+                  0
+                ) / withSentiment.length
+              : null;
+          return {
+            platform: id,
+            displayName,
+            presenceScore: mentionRatePct,
+            totalQueries,
+            mentionCount,
+            mentionRatePct,
+            shareOfVoicePct,
+            avgSentiment,
+          };
+        });
+        const descriptions = AI_ENGINES.map(({ id, displayName }) => {
+          const engineResponses = responsesList.filter(
+            (r: any) => (r.platform || "").toLowerCase() === id
+          );
+          const withMention = engineResponses.filter(
+            (r: any) => r.response_metadata?.brand_mentioned && r.response
+          );
+          const source = withMention.length > 0 ? withMention : engineResponses;
+          const snippets = source
+            .slice(0, 2)
+            .map((r: any) => {
+              const text = (r.response || "").trim();
+              return text.length > 220 ? text.slice(0, 220) + "…" : text;
+            })
+            .filter(Boolean);
+          return { platform: id, displayName, snippets };
+        });
+        return { engines, descriptions };
+      };
+
+      const { engines: aiSearchPresenceEngines, descriptions: aiEngineDescriptions } =
+        buildEnginesAndDescriptions(aiPresenceResponses);
+
+      const brandAnalysisProjects = (projects ?? []).map((p: any) => ({
+        id: p.id,
+        brand_name: p.brand_name || "Unnamed project",
+      }));
+
+      const aiPresenceByProject: Record<
+        string,
+        { engines: typeof aiSearchPresenceEngines; descriptions: typeof aiEngineDescriptions }
+      > = {};
+      (projects ?? []).forEach((p: any) => {
+        const projResponses = aiPresenceResponses.filter(
+          (r: any) => r.project_id === p.id
+        );
+        aiPresenceByProject[p.id] = buildEnginesAndDescriptions(projResponses);
+      });
+
+      // Brand Narrative & Perception (Report #3) – desired vs observed
+      const observedAiText = (aiPresenceResponses ?? [])
+        .map((r: any) => (r.response || "").trim())
+        .filter(Boolean)
+        .join(" ");
+      const observedContentText = (content ?? [])
+        .map((c: any) => (c.generated_content || "").trim())
+        .filter(Boolean)
+        .join(" ");
+      const observedText = (observedAiText + " " + observedContentText).trim().toLowerCase();
+
+      let brandNarrativeDesired: ReportData["brandNarrativeDesired"] = null;
+      const brandNarrativeTableRows: ReportData["brandNarrativeTableRows"] = [];
+      const brandVoiceProfiles: ReportData["brandVoiceProfiles"] = brandVoiceList.map((v: any) => ({
+        id: v.id,
+        brand_name: v.brand_name || "Unnamed",
+      }));
+      const brandNarrativeByVoice: ReportData["brandNarrativeByVoice"] = {};
+
+      const buildNarrativeForVoice = (voice: any) => {
+        const desired: ReportData["brandNarrativeDesired"] = {
+          brand_name: voice.brand_name || "Brand",
+          description: voice.description ?? null,
+          tone: voice.tone || "neutral",
+          preferred_words: Array.isArray(voice.preferred_words) ? voice.preferred_words : [],
+          avoid_words: Array.isArray(voice.avoid_words) ? voice.avoid_words : [],
+          signature_phrases: Array.isArray(voice.signature_phrases) ? voice.signature_phrases : [],
+        };
+        const tableRows: ReportData["brandNarrativeTableRows"] = [];
+        const preferred = desired.preferred_words.filter(Boolean);
+        const avoid = desired.avoid_words.filter(Boolean);
+        const preferredFound = preferred.filter((w) => observedText.includes(String(w).toLowerCase()));
+        const preferredMissing = preferred.filter((w) => !observedText.includes(String(w).toLowerCase()));
+        tableRows.push({
+          dimension: "Preferred words",
+          desired: preferred.length ? preferred.join(", ") : "—",
+          observed:
+            preferred.length > 0
+              ? `Found ${preferredFound.length} of ${preferred.length}${preferredMissing.length > 0 ? ` (missing: ${preferredMissing.slice(0, 5).join(", ")}${preferredMissing.length > 5 ? "…" : ""})` : ""}`
+              : "—",
+          alignment:
+            preferred.length === 0 ? "match" : preferredFound.length === preferred.length ? "match" : preferredFound.length > 0 ? "partial" : "gap",
+        });
+        const avoidPresent = avoid.filter((w) => observedText.includes(String(w).toLowerCase()));
+        tableRows.push({
+          dimension: "Avoid words",
+          desired: avoid.length ? avoid.join(", ") : "—",
+          observed:
+            avoid.length > 0
+              ? avoidPresent.length > 0
+                ? `${avoidPresent.length} present: ${avoidPresent.slice(0, 5).join(", ")}${avoidPresent.length > 5 ? "…" : ""}`
+                : "None found"
+              : "—",
+          alignment: avoid.length === 0 ? "match" : avoidPresent.length === 0 ? "match" : "gap",
+        });
+        tableRows.push({
+          dimension: "Tone",
+          desired: desired.tone,
+          observed: observedText.length > 0 ? "From content & AI (see snippets)" : "—",
+          alignment: observedText.length > 0 ? "partial" : "gap",
+        });
+        const descSnippet = (desired.description || "").slice(0, 120);
+        const observedSnippets: string[] = [];
+        (aiPresenceResponses ?? []).slice(0, 1).forEach((r: any) => {
+          const t = (r.response || "").trim().slice(0, 120);
+          if (t) observedSnippets.push(t + (r.response?.length > 120 ? "…" : ""));
+        });
+        (content ?? []).slice(0, 1).forEach((c: any) => {
+          const t = (c.generated_content || "").trim().slice(0, 120);
+          if (t) observedSnippets.push(t + (c.generated_content?.length > 120 ? "…" : ""));
+        });
+        tableRows.push({
+          dimension: "Key messages / description",
+          desired: descSnippet || (desired.signature_phrases?.slice(0, 2).join("; ") || "—"),
+          observed: observedSnippets.length > 0 ? observedSnippets.join(" | ") : "—",
+          alignment: observedSnippets.length > 0 ? "partial" : "gap",
+        });
+        return { desired, tableRows };
+      };
+
+      brandVoiceList.forEach((voice: any) => {
+        const { desired, tableRows } = buildNarrativeForVoice(voice);
+        brandNarrativeByVoice[voice.id] = { desired, tableRows };
+      });
+      if (defaultBrandVoice) {
+        const defaultData = brandNarrativeByVoice[defaultBrandVoice.id];
+        if (defaultData) {
+          brandNarrativeDesired = defaultData.desired;
+          brandNarrativeTableRows.push(...defaultData.tableRows);
+        }
+      }
+
+      // Search Intent Intelligence (Report #4) – Full GSC + Keywords + NLP pipeline
+      type UnifiedQuery = { text: string; hasPresence: boolean };
+      const unifiedMap = new Map<string, UnifiedQuery>();
+      const addQuery = (text: string, hasPresence: boolean) => {
+        const key = (text || "").trim().toLowerCase();
+        if (!key) return;
+        const existing = unifiedMap.get(key);
+        unifiedMap.set(key, {
+          text: key,
+          hasPresence: existing ? existing.hasPresence || hasPresence : hasPresence,
+        });
+      };
+      (keywords ?? []).forEach((k: any) => {
+        const text = k.keyword_text || "";
+        const rank = Number(k.ranking_score);
+        const hasPresence = rank > 0 && rank <= 100;
+        addQuery(text, hasPresence);
+      });
+      gscKeywords.forEach(({ keyword, position }) => {
+        const hasPresence = position > 0 && position <= 100;
+        addQuery(keyword, hasPresence);
+      });
+      const unifiedQueries = Array.from(unifiedMap.values());
+      const searchIntentSources = {
+        keywords: keywords?.length ?? 0,
+        gsc: gscKeywords.length,
+      };
+      const intentBuckets: Record<string, { total: number; withPresence: number }> = {
+        Informational: { total: 0, withPresence: 0 },
+        Commercial: { total: 0, withPresence: 0 },
+        Transactional: { total: 0, withPresence: 0 },
+        Navigational: { total: 0, withPresence: 0 },
+      };
+      unifiedQueries.forEach(({ text, hasPresence }) => {
+        const intent = classifyIntent(text);
+        if (!intentBuckets[intent]) intentBuckets[intent] = { total: 0, withPresence: 0 };
+        intentBuckets[intent].total += 1;
+        if (hasPresence) intentBuckets[intent].withPresence += 1;
+      });
+      const searchIntentTableRows = Object.entries(intentBuckets)
+        .filter(([, v]) => v.total > 0)
+        .map(([intent, v]) => ({
+          intent,
+          queryCount: v.total,
+          withPresence: v.withPresence,
+          gap: v.total - v.withPresence,
+          coveragePct: v.total > 0 ? (v.withPresence / v.total) * 100 : 0,
+        }))
+        .sort((a, b) => b.queryCount - a.queryCount);
+      if (searchIntentTableRows.length === 0) {
+        Object.entries(intentBuckets).forEach(([intent, v]) => {
+          searchIntentTableRows.push({
+            intent,
+            queryCount: v.total,
+            withPresence: v.withPresence,
+            gap: v.total - v.withPresence,
+            coveragePct: 0,
+          });
+        });
+      }
+
+      // AI vs Google Gap (Report #5) – same-query comparison from GSC + AI responses (original data only)
+      const normalizeQ = (q: string) => (q || "").trim().toLowerCase();
+      const GOOGLE_NO_RANK = 999;
+      const googleQueryToPosition = new Map<string, number>();
+      (keywords ?? []).forEach((k: any) => {
+        const q = normalizeQ(k.keyword_text || "");
+        if (!q) return;
+        const rank = Number(k.ranking_score) || 0;
+        const pos = rank > 0 ? rank : GOOGLE_NO_RANK;
+        const existing = googleQueryToPosition.get(q);
+        if (existing === undefined || pos < existing) googleQueryToPosition.set(q, pos);
+      });
+      gscKeywords.forEach(({ keyword, position }) => {
+        const q = normalizeQ(keyword);
+        if (!q) return;
+        const pos = Number(position) || 0;
+        const usePos = pos > 0 ? pos : GOOGLE_NO_RANK;
+        const existing = googleQueryToPosition.get(q);
+        if (existing === undefined || usePos < existing) googleQueryToPosition.set(q, usePos);
+      });
+      const aiQueryToEngines = new Map<string, { engines: string[] }>();
+      const engineDisplayNames: Record<string, string> = {
+        chatgpt: "ChatGPT",
+        claude: "Claude",
+        gemini: "Gemini",
+        perplexity: "Perplexity",
+        groq: "Groq",
+      };
+      (responsesForAIPresence ?? []).forEach((r: any) => {
+        const q = normalizeQ(r.prompt || "");
+        if (!q) return;
+        const platform = (r.platform || "").toLowerCase();
+        const brandMentioned = r.response_metadata?.brand_mentioned === true;
+        if (!aiQueryToEngines.has(q)) aiQueryToEngines.set(q, { engines: [] });
+        const entry = aiQueryToEngines.get(q)!;
+        if (brandMentioned && platform && engineDisplayNames[platform] && !entry.engines.includes(engineDisplayNames[platform])) {
+          entry.engines.push(engineDisplayNames[platform]);
+        }
+      });
+      const getGapSuggestion = (
+        gap: "Both" | "Google only" | "AI only" | "Neither",
+        _googlePresent: boolean,
+        _aiMentioned: boolean
+      ): string => {
+        if (gap === "Neither" || gap === "Google only") return "";
+        if (gap === "AI only")
+          return "AI mentions your brand. Improve organic visibility: target this query with SEO content to reach Google top 100.";
+        return "Strong presence in both. Maintain content and keep running AI Visibility.";
+      };
+
+      const allQueries = new Set<string>([...googleQueryToPosition.keys(), ...aiQueryToEngines.keys()]);
+      const aiVsGoogleGapTableRows: ReportData["aiVsGoogleGapTableRows"] = Array.from(allQueries)
+        .map((query) => {
+          const rawPosition = googleQueryToPosition.get(query);
+          const googlePosition = rawPosition != null && rawPosition < GOOGLE_NO_RANK ? rawPosition : null;
+          const googlePresent = googlePosition != null && googlePosition >= 1 && googlePosition <= 100;
+          const googleInData = rawPosition != null;
+          const aiEntry = aiQueryToEngines.get(query);
+          const aiEngines = aiEntry?.engines ?? [];
+          const aiMentioned = aiEngines.length > 0;
+          const gap: "Both" | "Google only" | "AI only" | "Neither" =
+            googlePresent && aiMentioned ? "Both" : googlePresent ? "Google only" : aiMentioned ? "AI only" : "Neither";
+          return {
+            query,
+            googlePosition,
+            googlePresent,
+            googleInData,
+            aiMentioned,
+            aiEngines,
+            gap,
+            suggestion: getGapSuggestion(gap, googlePresent, aiMentioned),
+          };
+        })
+        .sort((a, b) => {
+          const order = { Neither: 0, "Google only": 1, "AI only": 2, Both: 3 };
+          return order[a.gap] - order[b.gap] || a.query.localeCompare(b.query);
+        })
+        .slice(0, 100);
+
+      // Stored gap suggestions from ai_platform_responses.gap_suggestion (per project)
+      const storedGapSuggestionsByProject: Record<string, Map<string, string>> = {};
+      const storedGapSuggestionQueriesByProject: Record<string, Set<string>> = {};
+      (responsesForAIPresence ?? []).forEach((r: any) => {
+        const suggestion = r.gap_suggestion;
+        if (typeof suggestion !== "string" || !suggestion.trim()) return;
+        const pid = r.project_id;
+        if (!pid) return;
+        const q = normalizeQ(r.prompt || "");
+        if (!q) return;
+        if (!storedGapSuggestionsByProject[pid]) {
+          storedGapSuggestionsByProject[pid] = new Map();
+          storedGapSuggestionQueriesByProject[pid] = new Set();
+        }
+        if (!storedGapSuggestionsByProject[pid].has(q)) {
+          storedGapSuggestionsByProject[pid].set(q, suggestion.trim());
+          storedGapSuggestionQueriesByProject[pid].add(q);
+        }
+      });
+
+      // Per-project AI vs Google Gap for project selector
+      const aiVsGoogleGapByProject: Record<string, ReportData["aiVsGoogleGapTableRows"]> = {};
+      const buildGapRows = (
+        googleMap: Map<string, number>,
+        aiMap: Map<string, { engines: string[] }>,
+        storedSuggestions?: Map<string, string>
+      ): ReportData["aiVsGoogleGapTableRows"] => {
+        const allQ = new Set<string>([...googleMap.keys(), ...aiMap.keys()]);
+        return Array.from(allQ)
+          .map((query) => {
+            const rawPosition = googleMap.get(query);
+            const googlePosition = rawPosition != null && rawPosition < GOOGLE_NO_RANK ? rawPosition : null;
+            const googlePresent = googlePosition != null && googlePosition >= 1 && googlePosition <= 100;
+            const googleInData = rawPosition != null;
+            const aiEntry = aiMap.get(query);
+            const aiEngines = aiEntry?.engines ?? [];
+            const aiMentioned = aiEngines.length > 0;
+            const gap: "Both" | "Google only" | "AI only" | "Neither" =
+              googlePresent && aiMentioned ? "Both" : googlePresent ? "Google only" : aiMentioned ? "AI only" : "Neither";
+            return {
+              query: query.length > 120 ? query.slice(0, 120) + "…" : query,
+              googlePosition,
+              googlePresent,
+              googleInData,
+              aiMentioned,
+              aiEngines,
+              gap,
+              suggestion: storedSuggestions?.get(query) ?? getGapSuggestion(gap, googlePresent, aiMentioned),
+            };
+          })
+          .sort((a, b) => {
+            const order = { Neither: 0, "Google only": 1, "AI only": 2, Both: 3 };
+            return order[a.gap] - order[b.gap] || a.query.localeCompare(b.query);
+          })
+          .slice(0, 100);
+      };
+      (projectIds ?? []).forEach((pid) => {
+        const gProj = new Map<string, number>();
+        // Per-project: use only this project's GSC (no global user keywords) so queries are project-specific
+        (gscKeywordsByProject[pid] ?? []).forEach(({ keyword, position }) => {
+          const q = normalizeQ(keyword);
+          if (!q) return;
+          const usePos = position > 0 ? position : GOOGLE_NO_RANK;
+          const existing = gProj.get(q);
+          if (existing === undefined || usePos < existing) gProj.set(q, usePos);
+        });
+        const aProj = new Map<string, { engines: string[] }>();
+        (responsesForAIPresence ?? [])
+          .filter((r: any) => r.project_id === pid)
+          .forEach((r: any) => {
+            const q = normalizeQ(r.prompt || "");
+            if (!q) return;
+            const platform = (r.platform || "").toLowerCase();
+            const brandMentioned = r.response_metadata?.brand_mentioned === true;
+            if (!aProj.has(q)) aProj.set(q, { engines: [] });
+            const entry = aProj.get(q)!;
+            if (brandMentioned && platform && engineDisplayNames[platform] && !entry.engines.includes(engineDisplayNames[platform])) {
+              entry.engines.push(engineDisplayNames[platform]);
+            }
+          });
+        aiVsGoogleGapByProject[pid] = buildGapRows(gProj, aProj, storedGapSuggestionsByProject[pid]);
+      });
 
       // Performance Summary (Radar Chart)
       const performanceSummary = [
@@ -833,6 +1501,21 @@ export default function Reports() {
         oldestDraft: oldestDraft ? format(new Date(oldestDraft.created_at), "MMM dd, yyyy") : "N/A",
       };
 
+      // GA4 summary for Search Intent / performance context
+      const endDateForGa4 = endOfDay(subDays(new Date(), 0));
+      let ga4Summary: ReportData["ga4Summary"] = null;
+      let ga4TopPages: ReportData["ga4TopPages"] = [];
+      try {
+        const ga4Res = await fetch(
+          `/api/integrations/google-analytics/report-summary?start=${format(startDate, "yyyy-MM-dd")}&end=${format(endDateForGa4, "yyyy-MM-dd")}`
+        );
+        const ga4Json = await ga4Res.json();
+        if (ga4Json.summary) ga4Summary = ga4Json.summary;
+        if (Array.isArray(ga4Json.topPages)) ga4TopPages = ga4Json.topPages;
+      } catch (_) {
+        // GA4 optional
+      }
+
       setReportData({
         totalKeywords,
         keywordsChange,
@@ -857,6 +1540,22 @@ export default function Reports() {
         activeSessions: sessions?.length || 0,
         totalResponses: responses?.length || 0,
         responsesByPlatform: responsesByPlatformArray,
+        aiSearchPresenceEngines,
+        aiEngineDescriptions,
+        aiPresenceProjectCount: projectIds.length,
+        brandAnalysisProjects,
+        aiPresenceByProject,
+        brandNarrativeDesired,
+        brandNarrativeTableRows,
+        brandVoiceProfiles,
+        brandNarrativeByVoice,
+        searchIntentTableRows,
+        searchIntentSources,
+        ga4Summary,
+        ga4TopPages,
+        aiVsGoogleGapTableRows,
+        aiVsGoogleGapByProject,
+        storedGapSuggestionQueriesByProject,
         performanceSummary,
         // Competitor Comparison Report
         competitorRankings: competitorRankings || [],
@@ -905,6 +1604,22 @@ export default function Reports() {
         activeSessions: 0,
         totalResponses: 0,
         responsesByPlatform: [],
+        aiSearchPresenceEngines: [],
+        aiEngineDescriptions: [],
+        aiPresenceProjectCount: 0,
+        brandAnalysisProjects: [],
+        aiPresenceByProject: {},
+        brandNarrativeDesired: null,
+        brandNarrativeTableRows: [],
+        brandVoiceProfiles: [],
+        brandNarrativeByVoice: {},
+        searchIntentTableRows: [],
+        searchIntentSources: { keywords: 0, gsc: 0 },
+        ga4Summary: null,
+        ga4TopPages: [],
+        aiVsGoogleGapTableRows: [],
+        aiVsGoogleGapByProject: {},
+        storedGapSuggestionQueriesByProject: {},
         performanceSummary: [],
         // Competitor Comparison Report
         competitorRankings: [],
@@ -1520,6 +2235,28 @@ export default function Reports() {
         </div>
       </div>
 
+      {/* Report Category Tabs */}
+      <div className="mb-6 border-b border-gray-200">
+        <nav className="flex flex-wrap gap-1 -mb-px" aria-label="Report categories">
+          {REPORT_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveReportTab(tab.id)}
+              className={`px-4 py-3 text-sm font-medium rounded-t-lg border-b-2 transition-colors whitespace-nowrap ${
+                activeReportTab === tab.id
+                  ? "border-primary-600 text-primary-600 bg-primary-50/50"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* Core Visibility & Representation - Main report content */}
+      {activeReportTab === "core" && (
+        <>
       {/* Key Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 report-section">
         <MetricCard
@@ -1860,86 +2597,711 @@ export default function Reports() {
         </motion.div>
             </div>
 
-      {/* AI Platform Performance */}
+      {/* AI Search Presence – Report #2 (full) */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.7 }}
-        className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
       >
-        <h2 className="text-xl font-bold text-gray-900 mb-6">
-          Brand Analysis Platform Coverage
-        </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {reportData.visibilityByPlatform.map((platform, index) => (
-                <motion.div
-              key={platform.platform}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.8 + index * 0.1 }}
-              className="p-6 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:shadow-lg transition-all"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-900 capitalize">
-                  {platform.platform}
-                </h3>
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center"
-                  style={{
-                    backgroundColor: `${
-                      PLATFORM_COLORS[platform.platform] || COLORS.secondary
-                    }15`,
-                  }}
-                >
-                  <Globe
-                    className="w-5 h-5"
-                    style={{
-                      color:
-                        PLATFORM_COLORS[platform.platform] || COLORS.secondary,
-                    }}
-                  />
-                </div>
-                      </div>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Project Coverage</p>
-                  <div className="flex items-center gap-3">
-                    <p className="text-3xl font-bold text-gray-900">
-                      {platform.score.toFixed(1)}%
-                    </p>
-                    <div className="flex-1 bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-gradient-to-r from-primary-600 to-accent-600 h-2 rounded-full"
-                        style={{ width: `${platform.score}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Target Keywords:</span>
-                  <span className="font-semibold text-gray-900">
-                    {platform.mentions}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Avg Competitors:</span>
-                  <span
-                    className={`font-semibold ${
-                      platform.sentiment >= 70
-                        ? "text-green-600"
-                        : platform.sentiment >= 40
-                        ? "text-yellow-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {(platform.sentiment / 20).toFixed(1)}
-                  </span>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+        <div className="bg-gradient-to-r from-primary-600 to-accent-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <Brain className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">
+                  {selectedAIPresenceProjectId === "all"
+                    ? "AI Search Presence"
+                    : `AI Search Presence for ${(reportData.brandAnalysisProjects ?? []).find((p) => p.id === selectedAIPresenceProjectId)?.brand_name ?? "this project"}`}
+                </h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {selectedAIPresenceProjectId === "all"
+                    ? "How your brand appears across AI engines and how each describes you"
+                    : "Presence and how AI describes this project's brand"}
+                </p>
+              </div>
             </div>
-          </motion.div>
+          </div>
+        </div>
+
+        {/* Project selector + How this works + empty state */}
+        <div className="px-6 pt-4">
+          {(reportData.brandAnalysisProjects ?? []).length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <label htmlFor="ai-presence-project" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                Show presence for:
+              </label>
+              <select
+                id="ai-presence-project"
+                value={selectedAIPresenceProjectId}
+                onChange={(e) => setSelectedAIPresenceProjectId(e.target.value === "all" ? "all" : e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">Choose project</option>
+                {(reportData.brandAnalysisProjects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="rounded-lg bg-blue-50 border border-blue-100 p-4 text-sm text-blue-900">
+            <p className="font-medium mb-1">How this works</p>
+            <p className="text-blue-800/90">
+              Data comes from <strong>Brand Analysis</strong> runs in <strong>AI Visibility</strong>. We query ChatGPT, Claude, Gemini, Perplexity, and Groq with your brand keywords and store their responses. The cards below show presence (how often your brand is mentioned) and snippets of how each AI describes your brand. Select &quot;Choose project&quot; to see combined data, or select a project to see AI Search Presence for that project only.
+            </p>
+            {((reportData.aiSearchPresenceEngines ?? []).reduce((sum, e) => sum + e.totalQueries, 0)) === 0 && selectedAIPresenceProjectId === "all" && (
+              <p className="mt-3 pt-3 border-t border-blue-200 font-medium">
+                {(reportData.aiPresenceProjectCount ?? 0) === 0
+                  ? "No brand analysis projects yet. Go to "
+                  : "You have projects but no analysis responses yet. Run an analysis (start a session) from "}
+                <a href="/dashboard/ai-visibility" className="underline font-semibold">AI Visibility</a>
+                {(reportData.aiPresenceProjectCount ?? 0) === 0
+                  ? ", create a project, then run an analysis to see presence and how AI describes your brand here."
+                  : " to see presence and how AI describes your brand here."}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* AI engine cards – use data for selected project or all */}
+        {(() => {
+          const currentEngines =
+            selectedAIPresenceProjectId === "all"
+              ? (reportData.aiSearchPresenceEngines ?? [])
+              : (reportData.aiPresenceByProject?.[selectedAIPresenceProjectId]?.engines ?? []);
+          const currentDescriptions =
+            selectedAIPresenceProjectId === "all"
+              ? (reportData.aiEngineDescriptions ?? [])
+              : (reportData.aiPresenceByProject?.[selectedAIPresenceProjectId]?.descriptions ?? []);
+          return (
+        <>
+        <div className="p-6">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">
+            Presence by AI engine
+          </h3>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {currentEngines.map((engine, index) => (
+              <motion.div
+                key={engine.platform}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.75 + index * 0.05 }}
+                className="p-5 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:shadow-md transition-all"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-semibold text-gray-900">
+                    {engine.displayName}
+                  </h4>
+                  <div
+                    className="w-9 h-9 rounded-lg flex items-center justify-center"
+                    style={{
+                      backgroundColor: `${PLATFORM_COLORS[engine.platform] || COLORS.secondary}18`,
+                    }}
+                  >
+                    <Brain
+                      className="w-4 h-4"
+                      style={{
+                        color: PLATFORM_COLORS[engine.platform] || COLORS.secondary,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-0.5">Presence score</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl font-bold text-gray-900">
+                        {engine.presenceScore.toFixed(0)}%
+                      </span>
+                      <div className="flex-1 bg-gray-200 rounded-full h-2 min-w-[60px]">
+                        <div
+                          className="h-2 rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(engine.presenceScore, 100)}%`,
+                            backgroundColor:
+                              PLATFORM_COLORS[engine.platform] || COLORS.primary,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Queries</span>
+                    <span className="font-medium text-gray-900">
+                      {engine.totalQueries}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Brand mentions</span>
+                    <span className="font-medium text-gray-900">
+                      {engine.mentionCount}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">Share of voice</span>
+                    <span className="font-medium text-gray-900">
+                      {engine.shareOfVoicePct.toFixed(1)}%
+                    </span>
+                  </div>
+                  {engine.avgSentiment != null && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">Avg sentiment</span>
+                      <span
+                        className={`font-medium ${
+                          engine.avgSentiment >= 0.3
+                            ? "text-green-600"
+                            : engine.avgSentiment >= -0.3
+                            ? "text-amber-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {(engine.avgSentiment * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        {/* Google vs AI Context – does AI recognize the brand, representation issue */}
+        <div className="px-6 pb-6 pt-2 border-t border-gray-100">
+          <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
+            Google vs AI Context
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Compare how your brand appears in <strong>Google</strong> (organic search) vs how <strong>AI engines</strong> describe you. Below: whether each AI engine recognizes your brand and if there&apos;s an AI representation issue.
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-gray-200 mb-2">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="py-3 px-4 font-semibold text-gray-700">Source</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">Query set</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">Does AI recognize the brand?</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">AI representation issue?</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Google organic search – brand visibility in Google (keywords / GSC) */}
+                {(() => {
+                  const kwCount = reportData.totalKeywords ?? 0;
+                  const gscCount = reportData.searchIntentSources?.gsc ?? 0;
+                  const avgRank = reportData.avgRanking ?? 0;
+                  const hasRanking = avgRank > 0 && avgRank <= 100;
+                  const googleIssue =
+                    kwCount === 0 && gscCount === 0
+                      ? "No data"
+                      : !hasRanking
+                      ? "Low visibility"
+                      : avgRank > 50
+                      ? "Low visibility"
+                      : "None";
+                  return (
+                    <tr className="border-b border-gray-100 bg-amber-50/50 hover:bg-amber-50">
+                      <td className="py-3 px-4 font-medium text-gray-900">Google (organic search)</td>
+                      <td className="py-3 px-4 text-gray-700">
+                        {kwCount > 0 || gscCount > 0
+                          ? `${kwCount} keywords${gscCount > 0 ? `, ${gscCount} GSC queries` : ""}`
+                          : "—"}
+                      </td>
+                      <td className="py-3 px-4">
+                        {kwCount > 0 || gscCount > 0 ? (
+                          <span className={hasRanking ? "text-green-600 font-medium" : "text-amber-600 font-medium"}>
+                            {hasRanking ? "Brand in results" : "No ranking"}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={
+                            googleIssue === "None"
+                              ? "text-green-600"
+                              : googleIssue === "Low visibility"
+                              ? "text-amber-600"
+                              : "text-gray-500"
+                          }
+                        >
+                          {googleIssue}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })()}
+                {currentEngines.map((engine) => {
+                  const recognizes = (engine.mentionCount ?? 0) > 0;
+                  const lowPresence = (engine.presenceScore ?? 0) < 20 && (engine.presenceScore ?? 0) > 0;
+                  const negativeSentiment = engine.avgSentiment != null && engine.avgSentiment < -0.2;
+                  const notMentioned = (engine.mentionCount ?? 0) === 0;
+                  const issue = notMentioned
+                    ? "Not mentioned"
+                    : negativeSentiment
+                    ? "Negative sentiment"
+                    : lowPresence
+                    ? "Low presence"
+                    : "None";
+                  return (
+                    <tr key={engine.platform} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      <td className="py-3 px-4 font-medium text-gray-900">{engine.displayName}</td>
+                      <td className="py-3 px-4 text-gray-700">{engine.totalQueries} queries</td>
+                      <td className="py-3 px-4">
+                        <span className={recognizes ? "text-green-600 font-medium" : "text-amber-600 font-medium"}>
+                          {recognizes ? "Yes" : "No"}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={
+                            issue === "None"
+                              ? "text-green-600"
+                              : issue === "Low presence"
+                              ? "text-amber-600"
+                              : "text-red-600 font-medium"
+                          }
+                        >
+                          {issue}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* How AI describes your brand */}
+        <div className="px-6 pb-6 pt-2 border-t border-gray-100">
+          <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <Quote className="w-5 h-5 text-primary-600" />
+            How AI describes your brand
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Representative snippets from each AI engine based on your brand analysis queries.
+          </p>
+          <div className="space-y-4">
+            {currentDescriptions.map((engine) => (
+              <motion.div
+                key={engine.platform}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="border border-gray-200 rounded-xl p-4 bg-gray-50/50"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center"
+                    style={{
+                      backgroundColor: `${PLATFORM_COLORS[engine.platform] || COLORS.secondary}20`,
+                    }}
+                  >
+                    <Brain
+                      className="w-4 h-4"
+                      style={{
+                        color: PLATFORM_COLORS[engine.platform] || COLORS.secondary,
+                      }}
+                    />
+                  </div>
+                  <span className="font-semibold text-gray-900">
+                    {engine.displayName}
+                  </span>
+                </div>
+                {engine.snippets.length > 0 ? (
+                  <ul className="space-y-2">
+                    {engine.snippets.map((snippet, i) => (
+                      <li
+                        key={i}
+                        className="text-sm text-gray-700 pl-4 border-l-2 border-primary-200 italic"
+                      >
+                        &ldquo;{snippet}&rdquo;
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    No responses yet for this engine. Run a brand analysis to see how {engine.displayName} describes your brand.
+                  </p>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        </div>
+        </>
+        ); })()}
+      </motion.div>
+
+      {/* Brand Narrative & Perception – Report #3 */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.8 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <MessageCircle className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">Brand Narrative & Perception</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  Desired vs observed narrative – how your brand voice compares to AI and content
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {(reportData?.brandVoiceProfiles?.length ?? 0) > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <label htmlFor="narrative-voice" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                Show narrative for:
+              </label>
+              <select
+                id="narrative-voice"
+                value={selectedNarrativeVoiceId || (reportData?.brandVoiceProfiles?.[0]?.id ?? "")}
+                onChange={(e) => setSelectedNarrativeVoiceId(e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                {(reportData?.brandVoiceProfiles ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {(() => {
+            const voiceId = selectedNarrativeVoiceId || reportData?.brandVoiceProfiles?.[0]?.id;
+            const narrative = voiceId ? reportData?.brandNarrativeByVoice?.[voiceId] : null;
+            const desired = narrative?.desired ?? reportData?.brandNarrativeDesired;
+            const tableRows = narrative?.tableRows ?? reportData?.brandNarrativeTableRows ?? [];
+            return desired ? (
+              <>
+                <p className="text-sm text-gray-600 mb-4">
+                  Desired narrative from brand voice <strong>{desired.brand_name}</strong>. Observed from AI platform responses and your content.
+                </p>
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="py-3 px-4 text-sm font-semibold text-gray-700">Dimension</th>
+                        <th className="py-3 px-4 text-sm font-semibold text-gray-700">Desired</th>
+                        <th className="py-3 px-4 text-sm font-semibold text-gray-700">Observed</th>
+                        <th className="py-3 px-4 text-sm font-semibold text-gray-700">Alignment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableRows.map((row, i) => (
+                      <tr
+                        key={i}
+                        className="border-b border-gray-100 hover:bg-gray-50/50"
+                      >
+                        <td className="py-3 px-4 text-sm font-medium text-gray-900">
+                          {row.dimension}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-700 max-w-xs">
+                          {row.desired}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-700 max-w-md">
+                          {row.observed}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                              row.alignment === "match"
+                                ? "bg-green-100 text-green-800"
+                                : row.alignment === "partial"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {row.alignment === "match"
+                              ? "Match"
+                              : row.alignment === "partial"
+                              ? "Partial"
+                              : "Gap"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-600 font-medium mb-1">No brand voice defined</p>
+              <p className="text-sm text-gray-500 mb-4">
+                Create a brand voice in Settings to define your desired narrative and see how it compares to AI and content.
+              </p>
+              <a
+                href="/dashboard/settings?tab=brand-voice"
+                className="text-sm font-medium text-primary-600 hover:text-primary-700 underline"
+              >
+                Go to Settings → Brand Voice
+              </a>
+            </div>
+          );
+          })()}
+        </div>
+      </motion.div>
+
+      {/* Search Intent Intelligence – Report #4 */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.82 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <Search className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">Search Intent Intelligence</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  Intent vs presence – which intents are covered and where you have gaps
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {reportData.ga4Summary != null && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-4">
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">Sessions</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.sessions?.toLocaleString() ?? 0}</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">Users</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.users?.toLocaleString() ?? 0}</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">Pageviews</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.pageviews?.toLocaleString() ?? 0}</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">Bounce rate</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.bounceRate != null ? `${(reportData.ga4Summary.bounceRate * 100).toFixed(1)}%` : "—"}</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">Avg session</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.avgSessionDuration != null ? `${Math.round(reportData.ga4Summary.avgSessionDuration)}s` : "—"}</p>
+              </div>
+            </div>
+          )}
+          {reportData.ga4TopPages != null && reportData.ga4TopPages.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">GA4 top pages (date range)</p>
+              <ul className="text-sm text-gray-700 space-y-1 max-h-24 overflow-y-auto rounded border border-gray-100 p-2 bg-gray-50/50">
+                {reportData.ga4TopPages.slice(0, 5).map((p, i) => (
+                  <li key={i} className="truncate" title={p.page}>
+                    <span className="font-medium">{p.pageviews?.toLocaleString()}</span> views — {p.page || "/"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700">Intent</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700 text-right">Query count</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700 text-right">With presence</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700 text-right">Gap</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700 text-right">Coverage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(reportData.searchIntentTableRows ?? []).map((row, i) => (
+                  <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                    <td className="py-3 px-4 text-sm font-medium text-gray-900">{row.intent}</td>
+                    <td className="py-3 px-4 text-sm text-gray-700 text-right">{row.queryCount}</td>
+                    <td className="py-3 px-4 text-sm text-gray-700 text-right">{row.withPresence}</td>
+                    <td className="py-3 px-4 text-sm text-right">
+                      <span className={row.gap > 0 ? "text-amber-600 font-medium" : "text-gray-600"}>{row.gap}</span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <span
+                        className={`text-sm font-medium ${
+                          row.coveragePct >= 70 ? "text-green-600" : row.coveragePct >= 40 ? "text-amber-600" : "text-red-600"
+                        }`}
+                      >
+                        {row.coveragePct.toFixed(0)}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(reportData.searchIntentTableRows ?? []).reduce((s, r) => s + r.queryCount, 0) === 0 && (
+            <div className="text-center py-6 text-gray-500 text-sm">
+              No query data yet. Add keywords in Settings, or connect GSC and run AI Visibility to sync GSC queries. GA4 data appears above when connected.
+            </div>
+          )}
+        </div>
+      </motion.div>
+
+      {/* AI vs Google Gap – Report #5 (same-query comparison, GSC + AI, original data only) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.85 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-violet-600 to-purple-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <BarChart3 className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">
+                  {selectedGapProjectId
+                    ? `AI vs Google Gap – ${(reportData?.brandAnalysisProjects ?? []).find((p) => p.id === selectedGapProjectId)?.brand_name ?? "Project"}`
+                    : "AI vs Google Gap"}
+                </h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  Same-query comparison: representation gap between Google (organic) and AI engines. Data from GSC + AI responses only (no mock data).
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          <div className="mb-4 flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="gap-project" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                Show gap for:
+              </label>
+              <select
+                id="gap-project"
+                value={selectedGapProjectId}
+                onChange={(e) => setSelectedGapProjectId(e.target.value === "all" ? "all" : e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">Choose project</option>
+                {(reportData?.brandAnalysisProjects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="gap-filter" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                Show queries:
+              </label>
+              <select
+                id="gap-filter"
+                value={gapFilter}
+                onChange={(e) => setGapFilter(e.target.value as "all" | "mentioned" | "gaps")}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">All queries</option>
+                <option value="mentioned">Brand mentioned in AI</option>
+                <option value="gaps">Not mentioned (gaps to fix)</option>
+              </select>
+            </div>
+          </div>
+          {(() => {
+            const rawRows = selectedGapProjectId
+              ? (reportData?.aiVsGoogleGapByProject?.[selectedGapProjectId] ?? [])
+              : [];
+            const filteredRows =
+              gapFilter === "mentioned"
+                ? rawRows.filter((r) => r.aiMentioned)
+                : gapFilter === "gaps"
+                ? rawRows.filter((r) => !r.aiMentioned)
+                : rawRows;
+            const totalQueries = rawRows.length;
+            const mentionedCount = rawRows.filter((r) => r.aiMentioned).length;
+            const googleTop100Count = rawRows.filter((r) => r.googlePresent).length;
+            const showSuggestions = gapFilter !== "mentioned";
+            return (
+              <>
+                {totalQueries > 0 && (
+                  <p className="text-sm text-gray-600 mb-3">
+                    <strong>Summary:</strong> {totalQueries} unique queries (from this project&apos;s GSC + AI Visibility runs). Brand mentioned in AI on <strong>{mentionedCount}</strong>; in Google top 100 on <strong>{googleTop100Count}</strong>. Showing {filteredRows.length} {gapFilter === "mentioned" ? "(brand mentioned)" : gapFilter === "gaps" ? "(not mentioned – gaps to fix)" : ""}.
+                  </p>
+                )}
+                <p className="text-sm text-gray-600 mb-4">
+                  {selectedGapProjectId
+                    ? "Queries from this project&apos;s GSC and AI Visibility only (the ~50 queries per engine run for this brand). Google = ranked in top 100; AI = brand mentioned by at least one engine."
+                    : "Select a project above to see same-query comparison (Google organic vs AI brand mention) and suggestions."}
+                </p>
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="py-3 px-4 font-semibold text-gray-700">Query</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700 text-right">Google (organic)</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">AI (brand mentioned)</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700 min-w-[200px]">Suggestion (how to cover this gap)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((row, i) => (
+                  <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                    <td className="py-3 px-4 font-medium text-gray-900 max-w-[200px] truncate" title={row.query}>
+                      {row.query.length > 120 ? row.query.slice(0, 120) + "…" : row.query}
+                    </td>
+                    <td className="py-3 px-4 text-right text-gray-700">
+                      {row.googlePresent
+                        ? `#${row.googlePosition ?? "—"}`
+                        : row.googleInData
+                        ? "Outside top 100"
+                        : "—"}
+                    </td>
+                    <td className="py-3 px-4 text-gray-700">
+                      {row.aiMentioned ? (
+                        <span className="text-green-600 font-medium">
+                          Yes ({row.aiEngines.join(", ")})
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">No</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-sm text-gray-700 max-w-[280px]" title={showSuggestions ? ((gapSuggestionsByQuery[row.query] ?? row.suggestion) || "—") : undefined}>
+                      {showSuggestions ? ((gapSuggestionsByQuery[row.query] ?? row.suggestion) || "—") : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+                {filteredRows.length === 0 && (
+                  <div className="text-center py-6 text-gray-500 text-sm">
+                    {!selectedGapProjectId
+                      ? "Select a project above to see gap data and suggestions."
+                      : totalQueries === 0
+                      ? "No comparable queries yet. Run Brand Analysis in AI Visibility for this project (and connect GSC for this project) so queries appear here."
+                      : gapFilter === "mentioned"
+                      ? "No queries with brand mentioned in AI. Use “Not mentioned (gaps to fix)” to see where to improve."
+                      : gapFilter === "gaps"
+                      ? "No gaps: brand is mentioned in AI on all queries shown, or no queries in this filter."
+                      : "No queries."}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </motion.div>
 
       {/* Top Keywords Table */}
       <motion.div
@@ -2679,6 +4041,47 @@ export default function Reports() {
           )}
         </div>
       </motion.div>
+        </>
+      )}
+
+      {/* Global Markets & Distribution - Coming soon */}
+      {activeReportTab === "global" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <Globe className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Global Markets & Distribution
+          </h2>
+          <p className="text-gray-500 max-w-md mx-auto">
+            Regional visibility, distributor mapping, sales geography, and market entry reports. Coming soon.
+          </p>
+        </div>
+      )}
+
+      {/* Competitive, Pricing & Trust - Coming soon */}
+      {activeReportTab === "competitive" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Competitive, Pricing & Trust
+          </h2>
+          <p className="text-gray-500 max-w-md mx-auto">
+            Market leadership, pricing perception, trust gaps, and competitive intelligence. Coming soon.
+          </p>
+        </div>
+      )}
+
+      {/* Advanced BI, Risk, Funnel & Executive - Coming soon */}
+      {activeReportTab === "advanced" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <AlertCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Advanced BI, Risk, Funnel & Executive
+          </h2>
+          <p className="text-gray-500 max-w-md mx-auto">
+            Strategic blind spots, funnel analysis, risk monitoring, and executive summaries. Coming soon.
+          </p>
+        </div>
+      )}
 
       {/* Email Modal */}
       {showEmailModal && (
