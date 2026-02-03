@@ -59,6 +59,7 @@ import {
 import { supabase } from "@/lib/supabase/client";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import { classifyIntent } from "@/lib/intent/classifyIntent";
+import { isQuestion } from "@/lib/intent/questions";
 
 // Color palette for charts
 const COLORS = {
@@ -149,6 +150,15 @@ interface ReportData {
   responsesByPlatform: Array<{
     platform: string;
     count: number;
+  }>;
+
+  // GEO Visibility & Market Coverage (Report #1) – Demand vs Organic vs AI, regional table
+  geoVisibilityRegionalTable: Array<{
+    region: string;
+    demand: number;
+    organic: number;
+    aiPct: number;
+    gapNote: string;
   }>;
 
   // AI Search Presence (Report #2 – full)
@@ -292,6 +302,18 @@ interface ReportData {
   }>;
   /** Query sources used for intent (for UI) */
   searchIntentSources: { keywords: number; gsc: number };
+
+  // Query & Question Intelligence (Report #6) – GSC, NLP – Questions vs Coverage
+  questionsTableRows: Array<{
+    query: string;
+    hasPresence: boolean;
+    position: number | null;
+  }>;
+  questionsSummary: { total: number; withPresence: number; coveragePct: number };
+  /** Per-project for project selector */
+  questionsTableRowsByProject: Record<string, ReportData["questionsTableRows"]>;
+  questionsSummaryByProject: Record<string, ReportData["questionsSummary"]>;
+
   // GA4 (for Search Intent / performance context)
   ga4Summary: {
     sessions: number;
@@ -351,6 +373,7 @@ export default function Reports() {
   const [gapSuggestionsByQuery, setGapSuggestionsByQuery] = useState<Record<string, string>>({});
   const gapSuggestionsFetchedRef = useRef<string | null>(null);
   const [selectedNarrativeVoiceId, setSelectedNarrativeVoiceId] = useState<string>("");
+  const [selectedQuestionsProjectId, setSelectedQuestionsProjectId] = useState<string | "all">("all");
 
   const REPORT_TABS = [
     { id: "core" as const, label: "Core Visibility & Representation" },
@@ -389,6 +412,16 @@ export default function Reports() {
       setSelectedGapProjectId("");
     }
   }, [reportData?.brandAnalysisProjects, selectedGapProjectId]);
+
+  useEffect(() => {
+    if (
+      reportData &&
+      selectedQuestionsProjectId !== "all" &&
+      !(reportData.brandAnalysisProjects ?? []).some((p) => p.id === selectedQuestionsProjectId)
+    ) {
+      setSelectedQuestionsProjectId("all");
+    }
+  }, [reportData?.brandAnalysisProjects, selectedQuestionsProjectId]);
 
   useEffect(() => {
     if (
@@ -521,10 +554,11 @@ export default function Reports() {
       // GSC keywords for Search Intent and AI vs Google Gap (include project_id for per-project gap)
       let gscKeywords: Array<{ keyword: string; position: number }> = [];
       const gscKeywordsByProject: Record<string, Array<{ keyword: string; position: number }>> = {};
+      let projectGscStats: Record<string, { impressions: number; clicks: number }> = {};
       if (projectIds.length > 0) {
         const { data: gscRows } = await supabase
           .from("gsc_keywords")
-          .select("keyword, position, project_id")
+          .select("keyword, position, project_id, impressions, clicks")
           .in("project_id", projectIds)
           .gte("date", format(startDate, "yyyy-MM-dd"))
           .order("impressions", { ascending: false });
@@ -542,6 +576,9 @@ export default function Reports() {
             const projMap = byProject.get(pid)!;
             const ex = projMap.get(q);
             if (ex === undefined || pos < ex) projMap.set(q, pos);
+            if (!projectGscStats[pid]) projectGscStats[pid] = { impressions: 0, clicks: 0 };
+            projectGscStats[pid].impressions += Number(r.impressions) || 0;
+            projectGscStats[pid].clicks += Number(r.clicks) || 0;
           }
         });
         gscKeywords = Array.from(byQuery.entries()).map(([keyword, position]) => ({ keyword, position }));
@@ -861,6 +898,63 @@ export default function Reports() {
         aiPresenceByProject[p.id] = buildEnginesAndDescriptions(projResponses);
       });
 
+      // GEO Visibility & Market Coverage (Report #1) – Demand vs Organic vs AI regional table
+      const geoVisibilityRegionalTable: ReportData["geoVisibilityRegionalTable"] = [];
+      const totalGscImpressions = Object.values(projectGscStats).reduce((s, x) => s + x.impressions, 0);
+      const totalGscClicks = Object.values(projectGscStats).reduce((s, x) => s + x.clicks, 0);
+      const overallAiMentionPct =
+        aiSearchPresenceEngines.length > 0
+          ? aiSearchPresenceEngines.reduce(
+              (sum, e) => sum + e.mentionRatePct * e.totalQueries,
+              0
+            ) /
+            Math.max(
+              1,
+              aiSearchPresenceEngines.reduce((s, e) => s + e.totalQueries, 0)
+            )
+          : 0;
+      const gapNoteOverall =
+        totalGscImpressions > 0 && overallAiMentionPct < 50
+          ? "Demand exists; AI visibility low"
+          : totalGscImpressions > 0 && totalGscClicks === 0
+            ? "Demand exists; no organic clicks"
+            : "";
+      geoVisibilityRegionalTable.push({
+        region: "Overall",
+        demand: totalGscImpressions,
+        organic: totalGscClicks,
+        aiPct: Math.round(overallAiMentionPct * 10) / 10,
+        gapNote: gapNoteOverall,
+      });
+      (projects ?? []).forEach((p: any) => {
+        const pid = p.id;
+        const stats = projectGscStats[pid] ?? { impressions: 0, clicks: 0 };
+        const engines = aiPresenceByProject[pid]?.engines ?? [];
+        const aiPct =
+          engines.length > 0
+            ? engines.reduce((s, e) => s + e.mentionRatePct * e.totalQueries, 0) /
+              Math.max(1, engines.reduce((s, e) => s + e.totalQueries, 0))
+            : 0;
+        const regionLabel =
+          (p.brand_name || "Unnamed") +
+          (Array.isArray(p.analysis_countries) && p.analysis_countries.length > 0
+            ? ` (${p.analysis_countries.slice(0, 3).join(", ")}${p.analysis_countries.length > 3 ? "…" : ""})`
+            : "");
+        const gapNote =
+          stats.impressions > 0 && aiPct < 50
+            ? "Demand exists; AI visibility low"
+            : stats.impressions > 0 && stats.clicks === 0
+              ? "Demand exists; no organic clicks"
+              : "";
+        geoVisibilityRegionalTable.push({
+          region: regionLabel,
+          demand: stats.impressions,
+          organic: stats.clicks,
+          aiPct: Math.round(aiPct * 10) / 10,
+          gapNote,
+        });
+      });
+
       // Brand Narrative & Perception (Report #3) – desired vs observed
       const observedAiText = (aiPresenceResponses ?? [])
         .map((r: any) => (r.response || "").trim())
@@ -1013,6 +1107,63 @@ export default function Reports() {
           });
         });
       }
+
+      // Query & Question Intelligence (Report #6) – GSC, NLP – Questions vs Coverage (per project + all)
+      type QuestionRow = { query: string; hasPresence: boolean; position: number | null };
+      const buildQuestionsFromSources = (
+        gscList: Array<{ keyword: string; position: number }>,
+        includeUserKeywords: boolean
+      ): QuestionRow[] => {
+        const questionToBest = new Map<string, { hasPresence: boolean; position: number | null }>();
+        const addQuestion = (text: string, hasPresence: boolean, position: number | null) => {
+          const key = (text || "").trim().toLowerCase();
+          if (!key || !isQuestion(key)) return;
+          const existing = questionToBest.get(key);
+          if (!existing) {
+            questionToBest.set(key, { hasPresence, position });
+          } else {
+            const bestPos = position != null && (existing.position == null || position < existing.position) ? position : existing.position;
+            questionToBest.set(key, { hasPresence: existing.hasPresence || hasPresence, position: bestPos ?? existing.position });
+          }
+        };
+        if (includeUserKeywords) {
+          (keywords ?? []).forEach((k: any) => {
+            const text = k.keyword_text || "";
+            const rank = Number(k.ranking_score);
+            const hasPresence = rank > 0 && rank <= 100;
+            addQuestion(text, hasPresence, rank > 0 ? rank : null);
+          });
+        }
+        gscList.forEach(({ keyword, position }) => {
+          const hasPresence = position > 0 && position <= 100;
+          addQuestion(keyword, hasPresence, position > 0 ? position : null);
+        });
+        return Array.from(questionToBest.entries())
+          .map(([query, { hasPresence, position }]) => ({ query, hasPresence, position }))
+          .sort((a, b) => (b.hasPresence ? 1 : 0) - (a.hasPresence ? 1 : 0) || (a.query.localeCompare(b.query)))
+          .slice(0, 100);
+      };
+      const questionsTableRows = buildQuestionsFromSources(gscKeywords, true);
+      const questionsTotal = questionsTableRows.length;
+      const questionsWithPresence = questionsTableRows.filter((r) => r.hasPresence).length;
+      const questionsSummary = {
+        total: questionsTotal,
+        withPresence: questionsWithPresence,
+        coveragePct: questionsTotal > 0 ? (questionsWithPresence / questionsTotal) * 100 : 0,
+      };
+      const questionsTableRowsByProject: Record<string, QuestionRow[]> = {};
+      const questionsSummaryByProject: Record<string, { total: number; withPresence: number; coveragePct: number }> = {};
+      (projectIds ?? []).forEach((pid) => {
+        const gscForProject = gscKeywordsByProject[pid] ?? [];
+        const rows = buildQuestionsFromSources(gscForProject, true);
+        questionsTableRowsByProject[pid] = rows;
+        const withP = rows.filter((r) => r.hasPresence).length;
+        questionsSummaryByProject[pid] = {
+          total: rows.length,
+          withPresence: withP,
+          coveragePct: rows.length > 0 ? (withP / rows.length) * 100 : 0,
+        };
+      });
 
       // AI vs Google Gap (Report #5) – same-query comparison from GSC + AI responses (original data only)
       const normalizeQ = (q: string) => (q || "").trim().toLowerCase();
@@ -1540,6 +1691,7 @@ export default function Reports() {
         activeSessions: sessions?.length || 0,
         totalResponses: responses?.length || 0,
         responsesByPlatform: responsesByPlatformArray,
+        geoVisibilityRegionalTable,
         aiSearchPresenceEngines,
         aiEngineDescriptions,
         aiPresenceProjectCount: projectIds.length,
@@ -1551,6 +1703,10 @@ export default function Reports() {
         brandNarrativeByVoice,
         searchIntentTableRows,
         searchIntentSources,
+        questionsTableRows,
+        questionsSummary,
+        questionsTableRowsByProject,
+        questionsSummaryByProject,
         ga4Summary,
         ga4TopPages,
         aiVsGoogleGapTableRows,
@@ -1604,6 +1760,7 @@ export default function Reports() {
         activeSessions: 0,
         totalResponses: 0,
         responsesByPlatform: [],
+        geoVisibilityRegionalTable: [],
         aiSearchPresenceEngines: [],
         aiEngineDescriptions: [],
         aiPresenceProjectCount: 0,
@@ -1615,6 +1772,10 @@ export default function Reports() {
         brandNarrativeByVoice: {},
         searchIntentTableRows: [],
         searchIntentSources: { keywords: 0, gsc: 0 },
+        questionsTableRows: [],
+        questionsSummary: { total: 0, withPresence: 0, coveragePct: 0 },
+        questionsTableRowsByProject: {},
+        questionsSummaryByProject: {},
         ga4Summary: null,
         ga4TopPages: [],
         aiVsGoogleGapTableRows: [],
@@ -2597,6 +2758,67 @@ export default function Reports() {
         </motion.div>
             </div>
 
+      {/* GEO Visibility & Market Coverage – Report #1 (Demand vs Organic vs AI) – at top of AI Search Presence */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.68 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <Globe className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">GEO Visibility &amp; Market Coverage</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  Where demand exists but visibility is missing — Demand vs Organic vs AI
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="px-6 py-4">
+          <p className="text-sm text-gray-600 mb-4">
+            Data from <strong>GSC</strong> (impressions/clicks), <strong>GA4</strong>, and <strong>AI Sampling</strong>. Rows = Overall and per project (with countries when set in AI Visibility).
+          </p>
+          {(reportData.geoVisibilityRegionalTable ?? []).length === 0 ? (
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-6 text-center text-gray-600">
+              <Globe className="w-10 h-10 mx-auto mb-2 text-gray-400" />
+              <p>No regional data yet. Connect GSC for your brand analysis projects and run AI Visibility to see demand vs organic vs AI by region/project.</p>
+              <a href="/dashboard/ai-visibility" className="text-primary-600 font-medium mt-2 inline-block">Go to AI Visibility →</a>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">Region / Project</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">Demand (GSC impressions)</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">Organic (GSC clicks)</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">AI visibility %</th>
+                    <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">Gap note</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {(reportData.geoVisibilityRegionalTable ?? []).map((row, i) => (
+                    <tr key={i} className={row.region === "Overall" ? "bg-emerald-50/50" : ""}>
+                      <td className="px-4 py-3 font-medium text-gray-900">{row.region}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{row.demand.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{row.organic.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{row.aiPct}%</td>
+                      <td className="px-4 py-3 text-amber-700">{row.gapNote || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </motion.div>
+
       {/* AI Search Presence – Report #2 (full) */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -3156,6 +3378,109 @@ export default function Reports() {
         </div>
       </motion.div>
 
+      {/* Query & Question Intelligence – Report #6 (How people really ask – GSC, NLP – Questions vs Coverage) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.83 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-teal-600 to-cyan-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <MessageCircle className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">Query & Question Intelligence</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  How people really ask – Questions vs Coverage (GSC, NLP). Choose a project to see that project&apos;s GSC + your keywords.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {(reportData.brandAnalysisProjects ?? []).length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <label htmlFor="questions-project" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                Show questions for:
+              </label>
+              <select
+                id="questions-project"
+                value={selectedQuestionsProjectId}
+                onChange={(e) => setSelectedQuestionsProjectId(e.target.value === "all" ? "all" : e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">Choose project</option>
+                {(reportData.brandAnalysisProjects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <p className="text-sm text-gray-600 mb-3">
+            Question-style queries from this project&apos;s GSC and your keyword data. Coverage = ranking in top 100.
+          </p>
+          {(() => {
+            const currentRows = selectedQuestionsProjectId === "all"
+              ? (reportData.questionsTableRows ?? [])
+              : (reportData.questionsTableRowsByProject?.[selectedQuestionsProjectId] ?? []);
+            const currentSummary = selectedQuestionsProjectId === "all"
+              ? reportData.questionsSummary
+              : reportData.questionsSummaryByProject?.[selectedQuestionsProjectId];
+            return (
+              <>
+                {(currentSummary?.total ?? 0) > 0 && (
+                  <p className="text-sm text-gray-600 mb-4">
+                    <strong>Summary:</strong> {currentSummary!.total} question queries — {currentSummary!.withPresence} with presence in top 100 — <strong>{currentSummary!.coveragePct.toFixed(0)}%</strong> coverage.
+                  </p>
+                )}
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="py-3 px-4 font-semibold text-gray-700">Question</th>
+                        <th className="py-3 px-4 font-semibold text-gray-700 text-right">Position</th>
+                        <th className="py-3 px-4 font-semibold text-gray-700 text-center">Coverage</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentRows.map((row, i) => (
+                        <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                          <td className="py-3 px-4 font-medium text-gray-900 max-w-[320px]" title={row.query}>
+                            {row.query.length > 80 ? row.query.slice(0, 80) + "…" : row.query}
+                          </td>
+                          <td className="py-3 px-4 text-gray-700 text-right">
+                            {row.position != null ? `#${row.position}` : "—"}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {row.hasPresence ? (
+                              <span className="text-green-600 font-medium">Yes</span>
+                            ) : (
+                              <span className="text-gray-500">No</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {currentRows.length === 0 && (
+                  <div className="text-center py-6 text-gray-500 text-sm">
+                    {!selectedQuestionsProjectId || selectedQuestionsProjectId === "all"
+                      ? "No question-style queries yet. Choose a project above, or add keywords / connect GSC for your projects. Queries that look like questions (e.g. starting with what, how, why, can) appear here."
+                      : "No question-style queries for this project. Connect GSC for this project or add keywords; question-style queries (what, how, why, can…) will appear here."}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </motion.div>
+
       {/* AI vs Google Gap – Report #5 (same-query comparison, GSC + AI, original data only) */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -3276,8 +3601,8 @@ export default function Reports() {
                         <span className="text-gray-500">No</span>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-sm text-gray-700 max-w-[280px]" title={showSuggestions ? ((gapSuggestionsByQuery[row.query] ?? row.suggestion) || "—") : undefined}>
-                      {showSuggestions ? ((gapSuggestionsByQuery[row.query] ?? row.suggestion) || "—") : "—"}
+                    <td className="py-3 px-4 text-sm text-gray-700 max-w-[280px]" title={showSuggestions && !row.aiMentioned ? ((gapSuggestionsByQuery[row.query] ?? row.suggestion) || "—") : undefined}>
+                      {showSuggestions && !row.aiMentioned ? ((gapSuggestionsByQuery[row.query] ?? row.suggestion) || "—") : "—"}
                     </td>
                   </tr>
                 ))}

@@ -106,6 +106,8 @@ interface Project {
   gsc_keywords_count?: number;
   last_gsc_sync?: string;
   brand_summary?: any;
+  analysis_languages?: string[];
+  analysis_countries?: string[];
 }
 
 interface Session {
@@ -186,6 +188,8 @@ function AIVisibilityContent() {
   const [fetchGSCKeywords, setFetchGSCKeywords] = useState(false);
   const [gscConnected, setGscConnected] = useState(false);
   const [checkingGSCStatus, setCheckingGSCStatus] = useState(false);
+  const [analysisLanguages, setAnalysisLanguages] = useState<string[]>([]);
+  const [analysisCountries, setAnalysisCountries] = useState<string[]>([]);
 
   // Project details state
   const [projectSessions, setProjectSessions] = useState<Session[]>([]);
@@ -218,6 +222,88 @@ function AIVisibilityContent() {
     "Retail", "Real Estate", "Legal", "Consulting", "Manufacturing",
     "Food & Beverage", "Travel & Hospitality", "Entertainment",
     "Sports & Fitness", "Non-Profit", "Other"
+  ];
+
+  const analysisLanguageOptions = [
+    { value: "en-US", label: "English (US)" },
+    { value: "en-GB", label: "English (UK)" },
+    { value: "he", label: "Hebrew" },
+    { value: "de", label: "German" },
+    { value: "fr", label: "French" },
+    { value: "es", label: "Spanish" },
+    { value: "it", label: "Italian" },
+    { value: "pt", label: "Portuguese" },
+    { value: "nl", label: "Dutch" },
+    { value: "ja", label: "Japanese" },
+    { value: "zh", label: "Chinese" },
+  ];
+  const analysisCountryOptions = [
+    { value: "US", label: "United States" },
+    { value: "GB", label: "United Kingdom" },
+    { value: "CA", label: "Canada" },
+    { value: "AU", label: "Australia" },
+    { value: "IE", label: "Ireland" },
+    { value: "NZ", label: "New Zealand" },
+    { value: "ZA", label: "South Africa" },
+    { value: "IN", label: "India" },
+    { value: "PK", label: "Pakistan" },
+    { value: "BD", label: "Bangladesh" },
+    { value: "SG", label: "Singapore" },
+    { value: "MY", label: "Malaysia" },
+    { value: "PH", label: "Philippines" },
+    { value: "VN", label: "Vietnam" },
+    { value: "TH", label: "Thailand" },
+    { value: "ID", label: "Indonesia" },
+    { value: "HK", label: "Hong Kong" },
+    { value: "TW", label: "Taiwan" },
+    { value: "KR", label: "South Korea" },
+    { value: "JP", label: "Japan" },
+    { value: "CN", label: "China" },
+    { value: "DE", label: "Germany" },
+    { value: "FR", label: "France" },
+    { value: "IT", label: "Italy" },
+    { value: "ES", label: "Spain" },
+    { value: "NL", label: "Netherlands" },
+    { value: "BE", label: "Belgium" },
+    { value: "AT", label: "Austria" },
+    { value: "CH", label: "Switzerland" },
+    { value: "PL", label: "Poland" },
+    { value: "SE", label: "Sweden" },
+    { value: "NO", label: "Norway" },
+    { value: "DK", label: "Denmark" },
+    { value: "FI", label: "Finland" },
+    { value: "PT", label: "Portugal" },
+    { value: "GR", label: "Greece" },
+    { value: "CZ", label: "Czech Republic" },
+    { value: "RO", label: "Romania" },
+    { value: "HU", label: "Hungary" },
+    { value: "RU", label: "Russia" },
+    { value: "UA", label: "Ukraine" },
+    { value: "TR", label: "Turkey" },
+    { value: "IL", label: "Israel" },
+    { value: "AE", label: "United Arab Emirates" },
+    { value: "SA", label: "Saudi Arabia" },
+    { value: "EG", label: "Egypt" },
+    { value: "QA", label: "Qatar" },
+    { value: "KW", label: "Kuwait" },
+    { value: "BH", label: "Bahrain" },
+    { value: "OM", label: "Oman" },
+    { value: "JO", label: "Jordan" },
+    { value: "LB", label: "Lebanon" },
+    { value: "BR", label: "Brazil" },
+    { value: "MX", label: "Mexico" },
+    { value: "AR", label: "Argentina" },
+    { value: "CO", label: "Colombia" },
+    { value: "CL", label: "Chile" },
+    { value: "PE", label: "Peru" },
+    { value: "VE", label: "Venezuela" },
+    { value: "EC", label: "Ecuador" },
+    { value: "NG", label: "Nigeria" },
+    { value: "KE", label: "Kenya" },
+    { value: "GH", label: "Ghana" },
+    { value: "ET", label: "Ethiopia" },
+    { value: "MA", label: "Morocco" },
+    { value: "EU", label: "European Union (general)" },
   ];
 
   const platformOptions = [
@@ -881,12 +967,13 @@ function AIVisibilityContent() {
           websiteUrl,
           industry,
           keywords,
-          // Preserve full competitor objects (with domain) when saving to database
           competitors: competitors.map(c => typeof c === 'string' ? c : { name: c.name, domain: c.domain }),
           platforms: selectedPlatforms,
-          companyDescription: '', // Will be set by brand-analysis-summary
-          companyImageUrl: '', // Will be set by brand-analysis-summary
-          fetchGSCKeywords, // Include GSC checkbox state
+          companyDescription: '',
+          companyImageUrl: '',
+          fetchGSCKeywords,
+          analysisLanguages,
+          analysisCountries,
         }),
       });
 
@@ -962,6 +1049,8 @@ function AIVisibilityContent() {
     setSelectedPlatforms(["perplexity", "chatgpt"]);
     setHasAutoGeneratedAI(false);
     setFetchGSCKeywords(false);
+    setAnalysisLanguages([]);
+    setAnalysisCountries([]);
     } catch (error: any) {
       alert(`Error: ${error.message}`);
     } finally {
@@ -1063,7 +1152,9 @@ function AIVisibilityContent() {
         body: JSON.stringify({
           projectId: project.id,
           platforms: project.active_platforms,
-          language: language || 'en', // Pass current language preference
+          language: language || 'en',
+          languages: project.analysis_languages ?? [],
+          countries: project.analysis_countries ?? [],
         }),
       });
 
@@ -5921,10 +6012,95 @@ function AIVisibilityContent() {
             </div>
           )}
 
-          {/* Step 3: Platform Selection */}
+          {/* Step 3: Platform Selection + Languages & Regions */}
           {currentStep === 3 && (
             <div className="space-y-6">
-              <div>
+              {/* Select Languages for Global Analysis - shown first so visible without scrolling */}
+              <div className="p-4 rounded-xl bg-teal-50 border border-teal-100">
+                <h3 className="text-base font-semibold text-gray-900 mb-1">Select Languages for Global Analysis</h3>
+                <p className="text-sm text-gray-600 mb-3">Track your brand visibility across different languages and regions.</p>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {analysisLanguages.map((code) => {
+                    const opt = analysisLanguageOptions.find((o) => o.value === code);
+                    return (
+                      <span
+                        key={code}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-teal-100 text-teal-800 rounded-lg text-sm"
+                      >
+                        {opt?.label ?? code}
+                        <button
+                          type="button"
+                          onClick={() => setAnalysisLanguages(analysisLanguages.filter((c) => c !== code))}
+                          className="text-teal-600 hover:text-teal-800"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v && !analysisLanguages.includes(v)) setAnalysisLanguages([...analysisLanguages, v]);
+                    e.target.value = "";
+                  }}
+                  className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                >
+                  <option value="">Select languages to monitor</option>
+                  {analysisLanguageOptions.filter((o) => !analysisLanguages.includes(o.value)).map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Select Countries/Regions for Analysis */}
+              <div className="p-4 rounded-xl bg-cyan-50 border border-cyan-100">
+                <h3 className="text-base font-semibold text-gray-900 mb-1">Select Countries/Regions for Analysis</h3>
+                <p className="text-sm text-gray-600 mb-2">Track your brand visibility in specific countries and regions.</p>
+                <p className="text-xs text-gray-500 mb-3">Select countries to generate geography-specific queries. If none selected, queries will be general (not country-specific).</p>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {analysisCountries.map((code) => {
+                    const opt = analysisCountryOptions.find((o) => o.value === code);
+                    return (
+                      <span
+                        key={code}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-cyan-100 text-cyan-800 rounded-lg text-sm"
+                      >
+                        {opt?.label ?? code}
+                        <button
+                          type="button"
+                          onClick={() => setAnalysisCountries(analysisCountries.filter((c) => c !== code))}
+                          className="text-cyan-600 hover:text-cyan-800"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v && !analysisCountries.includes(v)) setAnalysisCountries([...analysisCountries, v]);
+                    e.target.value = "";
+                  }}
+                  className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                >
+                  <option value="">Select countries...</option>
+                  {analysisCountryOptions.filter((o) => !analysisCountries.includes(o.value)).map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-3">
+                  Each platform will have up to 50 queries distributed across {Math.max(1, analysisLanguages.length)} language(s) and {Math.max(1, analysisCountries.length)} region(s). Total: {selectedPlatforms.length} platform(s) × 50 = {selectedPlatforms.length * 50} queries.
+                </p>
+              </div>
+
+              {/* Select AI Platforms */}
+              <div className="border-t border-gray-200 pt-6">
                 <label className="block text-sm font-medium text-gray-900 mb-4">
                   Select AI Platforms
                 </label>
@@ -6018,6 +6194,22 @@ function AIVisibilityContent() {
                 <div>
                   <span className="text-sm font-medium text-gray-600">Platforms:</span>
                   <p className="text-gray-900">{selectedPlatforms.map(p => platformOptions.find(opt => opt.id === p)?.name).join(", ")}</p>
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Languages (for queries):</span>
+                  <p className="text-gray-900">
+                    {analysisLanguages.length > 0
+                      ? analysisLanguages.map((c) => analysisLanguageOptions.find((o) => o.value === c)?.label ?? c).join(", ")
+                      : "Default (general)"}
+                  </p>
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Countries/Regions (for queries):</span>
+                  <p className="text-gray-900">
+                    {analysisCountries.length > 0
+                      ? analysisCountries.map((c) => analysisCountryOptions.find((o) => o.value === c)?.label ?? c).join(", ")
+                      : "General (not country-specific)"}
+                  </p>
                 </div>
               </div>
 

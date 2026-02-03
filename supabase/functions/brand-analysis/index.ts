@@ -1016,14 +1016,15 @@ function extractTextFromHTML(html) {
     return '';
   }
 }
-async function generateRealisticUserQueries(brandName, industry, keywords = [], competitors = [], websiteUrl = '', language = 'en') {
+async function generateRealisticUserQueries(brandName, industry, keywords = [], competitors = [], websiteUrl = '', language = 'en', options = {}) {
+  const { languages: analysisLanguages = [], countries: analysisCountries = [] } = options;
   const openAIApiKey = await getApiKey('openai');
   if (!openAIApiKey) {
     console.log('No OpenAI API key available for query generation, using fallback queries');
-    return generateFallbackQueries(brandName, industry, keywords, competitors, language);
+    return generateFallbackQueries(brandName, industry, keywords, competitors, language, analysisCountries);
   }
   try {
-    console.log(`Generating realistic user queries for ${brandName} in ${industry} (language: ${language})`);
+    console.log(`Generating realistic user queries for ${brandName} in ${industry} (language: ${language}${analysisCountries?.length ? `, countries: ${analysisCountries.join(', ')}` : ''})`);
     // Fetch website content if URL is provided
     let websiteContent = '';
     if (websiteUrl) {
@@ -1043,8 +1044,18 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
 - All 50 queries must be in Hebrew\n`
       : '';
     
+    const countryNamesMap = { US: 'United States', GB: 'UK', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', SG: 'Singapore', MY: 'Malaysia', PH: 'Philippines', VN: 'Vietnam', TH: 'Thailand', ID: 'Indonesia', HK: 'Hong Kong', TW: 'Taiwan', KR: 'South Korea', JP: 'Japan', CN: 'China', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', CH: 'Switzerland', PL: 'Poland', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PT: 'Portugal', GR: 'Greece', CZ: 'Czech Republic', RO: 'Romania', HU: 'Hungary', RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IL: 'Israel', AE: 'United Arab Emirates', SA: 'Saudi Arabia', EG: 'Egypt', QA: 'Qatar', KW: 'Kuwait', BH: 'Bahrain', OM: 'Oman', JO: 'Jordan', LB: 'Lebanon', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CO: 'Colombia', CL: 'Chile', PE: 'Peru', VE: 'Venezuela', EC: 'Ecuador', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', ET: 'Ethiopia', MA: 'Morocco', EU: 'European Union' };
+    const countryNames = (analysisCountries || []).length ? analysisCountries.map((c) => countryNamesMap[c] || c) : [];
+    const geographyInstruction = countryNames.length > 0
+      ? `\n🌍 GEOGRAPHY REQUIREMENT: Generate queries as they would be asked by users in these countries/regions: ${countryNames.join(', ')}.
+- Include region-specific phrasing where natural (e.g. "in the UK", "for the German market", "best X in Germany", "US-based", "available in Australia")
+- Distribute queries across these regions so the set reflects a mix of geographic perspectives
+- Keep the same 50-query total; vary the region angle across the list\n`
+      : '';
+    
     const prompt = `Generate 50 realistic, conversational search queries that real users would type when looking for solutions like ${brandName} offers. These should sound like natural human messages, NOT direct brand mentions.
 ${languageInstruction}
+${geographyInstruction}
 
 Brand context: ${brandName} (${industry})
 ${keywordContext}
@@ -1175,14 +1186,14 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
       }
     } catch (parseError) {
       console.error('Failed to parse generated queries:', parseError, 'Content:', generatedContent);
-      return generateFallbackQueries(brandName, industry, keywords, competitors, language);
+      return generateFallbackQueries(brandName, industry, keywords, competitors, language, analysisCountries);
     }
   } catch (error) {
     console.error('Query generation failed:', error);
-    return generateFallbackQueries(brandName, industry, keywords, competitors, language);
+    return generateFallbackQueries(brandName, industry, keywords, competitors, language, analysisCountries);
   }
 }
-function generateFallbackQueries(brandName, industry, keywords = [], competitors = [], language = 'en') {
+function generateFallbackQueries(brandName, industry, keywords = [], competitors = [], language = 'en', countries = []) {
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
   // Industry-specific base queries
@@ -1324,6 +1335,15 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
     `Which ${industry} software has the highest customer satisfaction?`,
     `How reliable are different ${industry} software options?`
   ];
+  const regionLabels = { US: 'the US', GB: 'the UK', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', SG: 'Singapore', MY: 'Malaysia', PH: 'Philippines', VN: 'Vietnam', TH: 'Thailand', ID: 'Indonesia', HK: 'Hong Kong', TW: 'Taiwan', KR: 'South Korea', JP: 'Japan', CN: 'China', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', CH: 'Switzerland', PL: 'Poland', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PT: 'Portugal', GR: 'Greece', CZ: 'Czech Republic', RO: 'Romania', HU: 'Hungary', RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IL: 'Israel', AE: 'UAE', SA: 'Saudi Arabia', EG: 'Egypt', QA: 'Qatar', KW: 'Kuwait', BH: 'Bahrain', OM: 'Oman', JO: 'Jordan', LB: 'Lebanon', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CO: 'Colombia', CL: 'Chile', PE: 'Peru', VE: 'Venezuela', EC: 'Ecuador', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', ET: 'Ethiopia', MA: 'Morocco', EU: 'the EU' };
+  if (countries && countries.length > 0) {
+    countries.slice(0, 5).forEach((c) => {
+      const label = regionLabels[c] || c;
+      baseQueries.push(`Best ${industry} tools available in ${label}.`);
+      baseQueries.push(`What are good ${industry} options for the ${label} market?`);
+      baseQueries.push(`${industry} software that works well in ${label}.`);
+    });
+  }
   // Ensure we have exactly 50 queries
   if (baseQueries.length > 50) {
     return baseQueries.slice(0, 50);
@@ -1616,8 +1636,10 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
         }
       }
     }
-    // Generate realistic user queries using AI
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '', preferredLanguage);
+    // Generate realistic user queries using AI (with optional geography from project)
+    const analysisLangs = project.analysis_languages || [];
+    const analysisCountriesRun = project.analysis_countries || [];
+    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '', preferredLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
     console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
     // Log some sample queries for debugging
     console.log("Sample queries:", realisticQueries.slice(0, 5));
@@ -2125,7 +2147,7 @@ Deno.serve(async (req) => {
       'gemini',
       'perplexity',
       'groq'
-    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false, language, action } = body;
+    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false, language, action, languages: bodyLanguages, countries: bodyCountries } = body;
     
     // Handle resume action
     if (action === 'resume' && sessionId) {
@@ -2300,6 +2322,8 @@ Deno.serve(async (req) => {
         }
       });
     }
+    const analysisLanguages = Array.isArray(bodyLanguages) && bodyLanguages.length > 0 ? bodyLanguages : (project.analysis_languages || []);
+    const analysisCountries = Array.isArray(bodyCountries) && bodyCountries.length > 0 ? bodyCountries : (project.analysis_countries || []);
     // Use platforms from request first (user's current selection), fallback to database if none provided
     let platformsToAnalyze = platforms && platforms.length > 0 ? platforms : project.active_platforms && Array.isArray(project.active_platforms) && project.active_platforms.length > 0 ? project.active_platforms : [
       'chatgpt',
@@ -2454,8 +2478,8 @@ Deno.serve(async (req) => {
     console.log(`   GSC: ${gscKeywords.length}`);
     console.log(`   Total (merged): ${allKeywords.length}`);
     
-    // Generate realistic user queries using AI with MERGED keywords
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, allKeywords, project.competitors || [], project.website_url || '', preferredLanguage);
+    // Generate realistic user queries using AI with MERGED keywords (and optional geography)
+    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, allKeywords, project.competitors || [], project.website_url || '', preferredLanguage, { languages: analysisLanguages, countries: analysisCountries });
     console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
     // Start the first batch immediately (this will chain to subsequent batches)
     try {
