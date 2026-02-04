@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 
 export async function POST(request: NextRequest) {
   try {
-    const { planName, keywords } = await request.json();
+    const { planName, keywords, keywordIdeas } = await request.json();
 
     if (!planName || !keywords || keywords.length === 0) {
       return NextResponse.json(
@@ -97,16 +97,23 @@ export async function POST(request: NextRequest) {
 
     // Store the plan in database
     // First, check if keyword_plans table exists, if not we'll store in a simple format
+    const insertData: any = {
+      user_id: user.id,
+      organization_id: orgUser.organization_id,
+      name: planName,
+      keywords: keywords,
+      google_ads_plan_id: googleAdsPlanId,
+      created_at: new Date().toISOString(),
+    };
+
+    // Add keyword_ideas if provided
+    if (keywordIdeas && keywordIdeas.length > 0) {
+      insertData.keyword_ideas = keywordIdeas;
+    }
+
     const { data: plan, error: dbError } = await supabase
       .from('keyword_plans')
-      .insert({
-        user_id: user.id,
-        organization_id: orgUser.organization_id,
-        name: planName,
-        keywords: keywords,
-        google_ads_plan_id: googleAdsPlanId,
-        created_at: new Date().toISOString(),
-      })
+      .insert(insertData)
       .select()
       .single();
 
