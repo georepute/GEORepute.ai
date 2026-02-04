@@ -122,30 +122,45 @@ export default function Signup() {
     }
   };
 
+  const getRedirectUrl = () =>
+    process.env.NEXT_PUBLIC_SITE_URL
+      ? `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`
+      : `${window.location.origin}/auth/callback`;
+
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      setError("");
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
+          redirectTo: getRedirectUrl(),
+          queryParams: { access_type: "offline", prompt: "consent" },
         },
       });
-      
-      if (error) {
-        console.error("Google OAuth error:", error);
-        throw error;
-      }
-      
-      // The redirect happens automatically, no need to manually redirect
-      console.log("Google OAuth initiated:", data);
+      if (error) throw error;
     } catch (err: any) {
       console.error("Error:", err);
       setError(err.message || "An error occurred with Google sign-in");
+      setLoading(false);
+    }
+  };
+
+  const handleFacebookSignIn = async () => {
+    try {
+      setLoading(true);
+      setError("");
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "facebook",
+        options: {
+          redirectTo: getRedirectUrl(),
+          scopes: "public_profile,email,pages_show_list",
+        },
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      console.error("Error:", err);
+      setError(err.message || "An error occurred with Facebook sign-in");
       setLoading(false);
     }
   };
@@ -374,7 +389,8 @@ export default function Signup() {
             <button
               type="button"
               onClick={handleGoogleSignIn}
-              className="w-full py-3 border-2 border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-all flex items-center justify-center gap-3"
+              disabled={loading}
+              className="w-full py-3 border-2 border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path
@@ -395,6 +411,19 @@ export default function Signup() {
                 />
               </svg>
               {t.signup.signUpWithGoogle}
+            </button>
+
+            {/* Facebook SSO */}
+            <button
+              type="button"
+              onClick={handleFacebookSignIn}
+              disabled={loading}
+              className="w-full py-3 border-2 border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="#1877F2">
+                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+              </svg>
+              {t.signup.signUpWithFacebook}
             </button>
           </form>
 

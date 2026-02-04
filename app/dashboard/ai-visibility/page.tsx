@@ -1035,9 +1035,21 @@ function AIVisibilityContent() {
         // Continue even if summary generation fails
       }
 
-      // Refresh projects and switch to projects view
+      // Refresh projects and open the new project so user can run analysis immediately
       await fetchProjects();
-      setViewMode('projects');
+      const { data: newProject } = await supabase
+        .from('brand_analysis_projects')
+        .select('*')
+        .eq('id', data.projectId)
+        .single();
+      if (newProject) {
+        setSelectedProject(newProject);
+        setViewMode('details');
+        router.push(`/dashboard/ai-visibility?project=${data.projectId}`, { scroll: false });
+        await fetchProjectDetails(data.projectId);
+      } else {
+        setViewMode('projects');
+      }
       
     // Reset form
     setCurrentStep(1);
@@ -1161,6 +1173,19 @@ function AIVisibilityContent() {
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || "Analysis failed to start");
+      }
+
+      // If analysis already running for this project, show same modal and refresh so UI shows "running"
+      if (data.alreadyRunning) {
+        setAnalysisStartInfo({ ...data, message: data.message || "Analysis already running for this project." });
+        setShowAnalysisStartModal(true);
+        setShowAnalysisStartNotification(true);
+        setTimeout(() => setShowAnalysisStartNotification(false), 5000);
+        await fetchProjects();
+        if (selectedProject?.id === project.id) {
+          await fetchProjectDetails(project.id, true);
+        }
+        return;
       }
 
       // Store analysis info and show modal
@@ -5586,14 +5611,22 @@ function AIVisibilityContent() {
                 </div>
 
                 <div className="space-y-4">
+                  {analysisStartInfo.alreadyRunning && analysisStartInfo.message && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                      <p className="text-sm text-amber-800">{analysisStartInfo.message}</p>
+                    </div>
+                  )}
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <Check className="w-5 h-5 text-blue-600" />
-                      <span className="text-sm font-semibold text-blue-900">Analysis is running in the background</span>
+                      <span className="text-sm font-semibold text-blue-900">
+                        {analysisStartInfo.alreadyRunning ? "Analysis already in progress" : "Analysis is running in the background"}
+                      </span>
                     </div>
                     <p className="text-sm text-blue-700">
-                      Your brand analysis has started successfully. You can close this window and continue working. 
-                      Results will be available when the analysis completes.
+                      {analysisStartInfo.alreadyRunning
+                        ? "You can close this window. Results will update when the current run completes."
+                        : "Your brand analysis has started successfully. You can close this window and continue working. Results will be available when the analysis completes."}
                     </p>
                   </div>
 
@@ -5649,7 +5682,7 @@ function AIVisibilityContent() {
                   <div className="bg-gray-50 rounded-lg p-4">
                     <div className="text-sm font-semibold text-gray-900 mb-2">Session Information</div>
                     <div className="text-xs text-gray-600 space-y-1">
-                      <div>Session ID: <span className="font-mono text-gray-900">{analysisStartInfo.session_id}</span></div>
+                      <div>Session ID: <span className="font-mono text-gray-900">{analysisStartInfo.sessionId ?? analysisStartInfo.session_id ?? "—"}</span></div>
                       <div>Status: <span className="text-blue-600 font-semibold">Running</span></div>
                     </div>
                   </div>

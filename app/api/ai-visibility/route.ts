@@ -173,7 +173,11 @@ export async function POST(request: NextRequest) {
                               gscIntegration.metadata?.site_urls?.[0] || 
                               websiteUrl
 
-          const gscKeywords = await gscService.fetchKeywords(selectedSite, 100)
+          const gscOptions =
+            Array.isArray(analysisCountries) && analysisCountries.length > 0
+              ? { countries: analysisCountries }
+              : undefined
+          const gscKeywords = await gscService.fetchKeywords(selectedSite, 100, gscOptions)
           console.log(`📊 Fetched ${gscKeywords.length} keywords from GSC`)
 
           // Save keywords to database

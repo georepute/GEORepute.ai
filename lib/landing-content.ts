@@ -29,6 +29,7 @@ export const landingContent = {
       signingIn: "Signing in...",
       orContinueWith: "Or continue with",
       signInWithGoogle: "Sign in with Google",
+      signInWithFacebook: "Sign in with Facebook",
       noAccount: "Don't have an account?",
       signUpFree: "Sign up for free",
       features: [
@@ -54,6 +55,7 @@ export const landingContent = {
       creatingAccount: "Creating account...",
       orContinueWith: "Or continue with",
       signUpWithGoogle: "Sign up with Google",
+      signUpWithFacebook: "Sign up with Facebook",
       haveAccount: "Already have an account?",
       signIn: "Sign in",
       accountCreated: "Account Created!",
@@ -1240,6 +1242,7 @@ export const landingContent = {
       signingIn: "מתחבר...",
       orContinueWith: "או המשך עם",
       signInWithGoogle: "התחבר עם גוגל",
+      signInWithFacebook: "התחבר עם פייסבוק",
       noAccount: "אין לך חשבון?",
       signUpFree: "הירשם בחינם",
       features: [
@@ -1264,6 +1267,7 @@ export const landingContent = {
       passwordPlaceholder: "••••••••",
       creatingAccount: "יוצר חשבון...",
       orContinueWith: "או המשך עם",
+      signUpWithFacebook: "הירשם עם פייסבוק",
       signUpWithGoogle: "הירשם עם גוגל",
       haveAccount: "יש לך כבר חשבון?",
       signIn: "התחבר",

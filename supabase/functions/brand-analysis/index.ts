@@ -95,39 +95,110 @@ async function refreshGSCToken(refreshToken: string) {
   };
 }
 
+/** Alpha-2 (UI) → GSC API country code (lowercase alpha-3) for SEO-level segmentation */
+const GSC_COUNTRY_ALPHA2_TO_ALPHA3: Record<string, string> = {
+  US: 'usa', GB: 'gbr', CA: 'can', AU: 'aus', DE: 'deu', FR: 'fra',
+  IN: 'ind', IT: 'ita', ES: 'esp', NL: 'nld', BR: 'bra', MX: 'mex',
+  JP: 'jpn', CN: 'chn', KR: 'kor', PL: 'pol', SE: 'swe', BE: 'bel',
+  CH: 'che', AT: 'aut', IE: 'irl', PT: 'prt', ZA: 'zaf', RU: 'rus',
+  TR: 'tur', ID: 'idn', TH: 'tha', VN: 'vnm', MY: 'mys', SG: 'sgp',
+  PH: 'phl', NZ: 'nzl', AR: 'arg', CL: 'chl', CO: 'col', SA: 'sau',
+  AE: 'are', IL: 'isr', EG: 'egy', NG: 'nga', KE: 'ken',
+};
+function toGscCountryCode(alpha2: string): string {
+  const code = GSC_COUNTRY_ALPHA2_TO_ALPHA3[alpha2.toUpperCase()];
+  if (code) return code;
+  const a = alpha2.toLowerCase();
+  return a.length >= 3 ? a.slice(0, 3) : a.padEnd(3, a[0] || 'x');
+}
+
 /**
  * Fetch keywords from Google Search Console API
+ * @param countries - Optional alpha-2 codes (e.g. ['US','GB']). When set, fetches per country and merges (SEO-level).
  */
-async function fetchFromGSCAPI(accessToken: string, siteUrl: string) {
+async function fetchFromGSCAPI(accessToken: string, siteUrl: string, countries?: string[]) {
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 30);
+  const startStr = startDate.toISOString().split('T')[0];
+  const endStr = endDate.toISOString().split('T')[0];
+  const rowLimit = 100;
 
-  const response = await fetch(
-    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0],
-        dimensions: ['query'],
-        rowLimit: 100,
-      }),
+  const runOne = async (body: Record<string, unknown>) => {
+    const response = await fetch(
+      `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`GSC API error: ${response.status} - ${errorText}`);
     }
-  );
+    return response.json();
+  };
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`GSC API error: ${response.status} - ${errorText}`);
+  const countriesFiltered = Array.isArray(countries) && countries.length > 0
+    ? countries.map((c) => toGscCountryCode(c))
+    : null;
+
+  if (countriesFiltered && countriesFiltered.length > 0) {
+    const mergedByQuery = new Map<string, { impressions: number; clicks: number; positionSum: number; positionWeight: number }>();
+    for (const gscCountry of countriesFiltered) {
+      try {
+        const data = await runOne({
+          startDate: startStr,
+          endDate: endStr,
+          dimensions: ['query'],
+          rowLimit,
+          dimensionFilterGroups: [
+            { groupType: 'and', filters: [{ dimension: 'country', operator: 'equals', expression: gscCountry }] },
+          ],
+        });
+        const rows = data.rows || [];
+        for (const row of rows) {
+          const q = (row.keys && row.keys[0]) ? String(row.keys[0]).trim() : '';
+          if (!q) continue;
+          const imp = Number(row.impressions) || 0;
+          const clk = Number(row.clicks) || 0;
+          const pos = Number(row.position) || 0;
+          const existing = mergedByQuery.get(q);
+          if (existing) {
+            existing.impressions += imp;
+            existing.clicks += clk;
+            existing.positionSum += pos * imp;
+            existing.positionWeight += imp;
+          } else {
+            mergedByQuery.set(q, { impressions: imp, clicks: clk, positionSum: pos * imp, positionWeight: imp });
+          }
+        }
+      } catch (err) {
+        console.warn(`GSC fetch for country ${gscCountry} failed:`, err);
+      }
+    }
+    const merged = Array.from(mergedByQuery.entries()).map(([keyword, agg]) => ({
+      keyword,
+      position: agg.positionWeight > 0 ? Math.round((agg.positionSum / agg.positionWeight) * 10) / 10 : 0,
+      clicks: agg.clicks,
+      impressions: agg.impressions,
+      ctr: agg.impressions > 0 ? agg.clicks / agg.impressions : 0,
+    }));
+    merged.sort((a, b) => b.impressions - a.impressions);
+    return merged.slice(0, rowLimit);
   }
 
-  const data = await response.json();
+  const data = await runOne({
+    startDate: startStr,
+    endDate: endStr,
+    dimensions: ['query'],
+    rowLimit,
+  });
   const rows = data.rows || [];
-
   return rows.map((row: any) => ({
     keyword: row.keys[0],
     position: Math.round(row.position * 10) / 10,
@@ -200,9 +271,16 @@ async function fetchGSCKeywords(project: any): Promise<string[]> {
       console.log('✅ Token refreshed successfully');
     }
 
-    // Fetch keywords from GSC
-    console.log('📊 Fetching keywords from GSC API...');
-    const keywords = await fetchFromGSCAPI(accessToken, selectedSite);
+    // Fetch keywords from GSC (SEO-level: filter by project countries when set)
+    const analysisCountries = Array.isArray(project.analysis_countries) && project.analysis_countries.length > 0
+      ? project.analysis_countries
+      : undefined;
+    if (analysisCountries?.length) {
+      console.log(`📊 Fetching GSC keywords (SEO-level: ${analysisCountries.join(', ')})...`);
+    } else {
+      console.log('📊 Fetching keywords from GSC API...');
+    }
+    const keywords = await fetchFromGSCAPI(accessToken, selectedSite, analysisCountries);
 
     console.log(`✅ Fetched ${keywords.length} keywords from GSC`);
 
@@ -2444,6 +2522,26 @@ Deno.serve(async (req) => {
         }
       });
     }
+    // Prevent duplicate running sessions: one running analysis per project at a time
+    const { data: existingRunningList } = await supabase
+      .from('brand_analysis_sessions')
+      .select('id, status')
+      .eq('project_id', projectId)
+      .in('status', ['running', 'pending'])
+      .limit(1);
+    const existingRunning = existingRunningList?.[0];
+    if (existingRunning) {
+      return new Response(JSON.stringify({
+        success: true,
+        alreadyRunning: true,
+        sessionId: existingRunning.id,
+        message: 'Analysis already running for this project. Wait for it to finish or stop it before starting another.'
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // Create analysis session immediately
     const totalQueries = availablePlatforms.length * 50; // Assuming 50 queries per platform
     const { data: session, error: sessionError } = await supabase.from('brand_analysis_sessions').insert({
