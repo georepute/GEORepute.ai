@@ -267,12 +267,18 @@ export default function KeywordForecastPage() {
 
     setCreatingPlan(true);
     try {
+      // Get the full keyword ideas for selected keywords
+      const selectedKeywordIdeas = keywordIdeas.filter(idea => 
+        selectedKeywords.includes(idea.text)
+      );
+
       const response = await fetch('/api/keyword-forecast/create-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           planName,
           keywords: selectedKeywords,
+          keywordIdeas: selectedKeywordIdeas, // Include full keyword data
         }),
       });
 
