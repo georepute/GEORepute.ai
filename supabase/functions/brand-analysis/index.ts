@@ -1112,16 +1112,75 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
     const competitorContext = competitors.length > 0 ? `Main competitors: ${competitors.join(', ')}` : '';
     const websiteContext = websiteContent ? `Website content summary: ${websiteContent}` : '';
     
-    // Language instruction
-    const languageInstruction = language === 'he' 
-      ? `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in HEBREW (עברית).
+    // Language instruction: default is English; Hebrew and the other 10 UI languages have explicit, proper blocks
+    const langCode = (language || 'en').toLowerCase().split('-')[0];
+    const languageNames: Record<string, string> = { he: 'Hebrew (עברית)', ur: 'Urdu', en: 'English', de: 'German', fr: 'French', es: 'Spanish', it: 'Italian', pt: 'Portuguese', nl: 'Dutch', ja: 'Japanese', zh: 'Chinese', pl: 'Polish', ru: 'Russian', ko: 'Korean', ar: 'Arabic', tr: 'Turkish', hi: 'Hindi', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian', sv: 'Swedish', no: 'Norwegian', da: 'Danish', fi: 'Finnish' };
+    const languageName = languageNames[langCode] || langCode;
+    let languageInstruction = '';
+    if (langCode === 'he') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in HEBREW (עברית).
 - Write queries naturally in Hebrew, as native Hebrew speakers would search
 - Use Hebrew question words: מה, איך, למה, איפה, מתי, מי, איזה
 - Use natural Hebrew expressions and phrasing
 - Maintain conversational Hebrew style
-- All 50 queries must be in Hebrew\n`
-      : '';
-    
+- All 50 queries must be in Hebrew\n`;
+    } else if (langCode === 'ur') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in URDU.
+- Write queries naturally in Urdu, as native Urdu speakers would search (use Urdu script)
+- Use natural Urdu question words and expressions (کیا، کیسے، کہاں، کب، کون، etc.)
+- Maintain conversational Urdu style; use common search phrasing
+- All 50 queries must be in Urdu\n`;
+    } else if (langCode === 'de') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in GERMAN.
+- Write queries naturally in German, as native German speakers would search
+- Use natural German question words: was, wie, warum, wo, wann, wer, welcher
+- Use formal (Sie) or informal (du) phrasing as appropriate for search
+- Maintain conversational German style; all 50 queries must be in German\n`;
+    } else if (langCode === 'fr') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in FRENCH.
+- Write queries naturally in French, as native French speakers would search
+- Use natural French question words: quoi, comment, pourquoi, où, quand, qui, quel(le)
+- Use natural French expressions and phrasing; maintain conversational style
+- All 50 queries must be in French\n`;
+    } else if (langCode === 'es') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in SPANISH.
+- Write queries naturally in Spanish, as native Spanish speakers would search
+- Use natural Spanish question words: qué, cómo, por qué, dónde, cuándo, quién, cuál
+- Maintain conversational Spanish style; all 50 queries must be in Spanish\n`;
+    } else if (langCode === 'it') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ITALIAN.
+- Write queries naturally in Italian, as native Italian speakers would search
+- Use natural Italian question words: cosa, come, perché, dove, quando, chi, quale
+- Maintain conversational Italian style; all 50 queries must be in Italian\n`;
+    } else if (langCode === 'pt') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in PORTUGUESE.
+- Write queries naturally in Portuguese, as native speakers would search
+- Use natural question words: o que, como, por que, onde, quando, quem, qual
+- Maintain conversational Portuguese style; all 50 queries must be in Portuguese\n`;
+    } else if (langCode === 'nl') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in DUTCH.
+- Write queries naturally in Dutch, as native Dutch speakers would search
+- Use natural Dutch question words: wat, hoe, waarom, waar, wanneer, wie, welk
+- Maintain conversational Dutch style; all 50 queries must be in Dutch\n`;
+    } else if (langCode === 'ja') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in JAPANESE.
+- Write queries naturally in Japanese, as native Japanese speakers would search
+- Use natural Japanese question words and phrasing (何、どのように、なぜ、どこ、いつ、誰、どれ)
+- Use appropriate script (Kanji, Hiragana, Katakana) as used in real search queries
+- All 50 queries must be in Japanese\n`;
+    } else if (langCode === 'zh') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in CHINESE.
+- Write queries naturally in Chinese, as native Chinese speakers would search
+- Use natural Chinese question words and phrasing (什么、怎么、为什么、哪里、什么时候、谁、哪个)
+- Use Simplified Chinese (简体) unless the context clearly requires Traditional
+- All 50 queries must be in Chinese\n`;
+    } else if (langCode !== 'en') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ${languageName}.
+- Write queries naturally as native speakers of this language would search
+- Use natural expressions, question words, and phrasing in that language
+- All 50 queries must be in ${languageName}\n`;
+    }
+
     const countryNamesMap = { US: 'United States', GB: 'UK', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', SG: 'Singapore', MY: 'Malaysia', PH: 'Philippines', VN: 'Vietnam', TH: 'Thailand', ID: 'Indonesia', HK: 'Hong Kong', TW: 'Taiwan', KR: 'South Korea', JP: 'Japan', CN: 'China', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', CH: 'Switzerland', PL: 'Poland', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PT: 'Portugal', GR: 'Greece', CZ: 'Czech Republic', RO: 'Romania', HU: 'Hungary', RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IL: 'Israel', AE: 'United Arab Emirates', SA: 'Saudi Arabia', EG: 'Egypt', QA: 'Qatar', KW: 'Kuwait', BH: 'Bahrain', OM: 'Oman', JO: 'Jordan', LB: 'Lebanon', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CO: 'Colombia', CL: 'Chile', PE: 'Peru', VE: 'Venezuela', EC: 'Ecuador', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', ET: 'Ethiopia', MA: 'Morocco', EU: 'European Union' };
     const countryNames = (analysisCountries || []).length ? analysisCountries.map((c) => countryNamesMap[c] || c) : [];
     const geographyInstruction = countryNames.length > 0
@@ -1176,9 +1235,11 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
         messages: [
           {
             role: 'system',
-            content: language === 'he' 
+            content: langCode === 'he'
               ? 'אתה מומחה בהתנהגות חיפוש משתמשים ויצירת שאילתות. צור שאילתות חיפוש מציאותיות ושיחה שהמשתמשים האמיתיים היו מקלידים למנועי חיפוש או עוזרי AI. תמיד עטוף שאילתות כמשפטים או שאלות תקינים עם רישיות וסימני פיסוק מתאימים. תמיד החזר מערכים JSON מעוצבים כראוי ללא עיצוב markdown או הסבר. כל השאילתות חייבות להיות בעברית.'
-              : 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
+              : langCode !== 'en'
+                ? `You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. All queries MUST be in ${languageName}. Write as a native speaker would search. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. Return a valid JSON array of strings only, no markdown or explanation.`
+                : 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
           },
           {
             role: 'user',
@@ -1717,7 +1778,11 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
     // Generate realistic user queries using AI (with optional geography from project)
     const analysisLangs = project.analysis_languages || [];
     const analysisCountriesRun = project.analysis_countries || [];
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '', preferredLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
+    // Use first selected analysis language when set; otherwise default to English (never Hebrew or other)
+    const queryLanguage = analysisLangs.length > 0
+      ? (analysisLangs[0].toLowerCase().startsWith('he') ? 'he' : analysisLangs[0].split('-')[0].toLowerCase() || 'en')
+      : 'en';
+    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '', queryLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
     console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
     // Log some sample queries for debugging
     console.log("Sample queries:", realisticQueries.slice(0, 5));
@@ -2306,7 +2371,7 @@ Deno.serve(async (req) => {
     }
     
     // Get language preference: from request body, or from cookies as fallback
-    let preferredLanguage: "en" | "he" = language || "en";
+    let preferredLanguage: string = language || "en";
     if (!language) {
       // Try to get from cookies
       const cookieHeader = req.headers.get("cookie");
@@ -2402,6 +2467,12 @@ Deno.serve(async (req) => {
     }
     const analysisLanguages = Array.isArray(bodyLanguages) && bodyLanguages.length > 0 ? bodyLanguages : (project.analysis_languages || []);
     const analysisCountries = Array.isArray(bodyCountries) && bodyCountries.length > 0 ? bodyCountries : (project.analysis_countries || []);
+    // For query generation: use first selected analysis language when set; otherwise default to English (never Hebrew or other)
+    if (analysisLanguages.length > 0) {
+      preferredLanguage = analysisLanguages[0].toLowerCase().split('-')[0];
+    } else {
+      preferredLanguage = 'en';
+    }
     // Use platforms from request first (user's current selection), fallback to database if none provided
     let platformsToAnalyze = platforms && platforms.length > 0 ? platforms : project.active_platforms && Array.isArray(project.active_platforms) && project.active_platforms.length > 0 ? project.active_platforms : [
       'chatgpt',

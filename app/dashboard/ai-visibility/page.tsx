@@ -224,10 +224,12 @@ function AIVisibilityContent() {
     "Sports & Fitness", "Non-Profit", "Other"
   ];
 
+  // 12 languages supported for global analysis (query generation in selected language)
   const analysisLanguageOptions = [
     { value: "en-US", label: "English (US)" },
     { value: "en-GB", label: "English (UK)" },
     { value: "he", label: "Hebrew" },
+    { value: "ur", label: "Urdu" },
     { value: "de", label: "German" },
     { value: "fr", label: "French" },
     { value: "es", label: "Spanish" },
@@ -6051,7 +6053,7 @@ function AIVisibilityContent() {
               {/* Select Languages for Global Analysis - shown first so visible without scrolling */}
               <div className="p-4 rounded-xl bg-teal-50 border border-teal-100">
                 <h3 className="text-base font-semibold text-gray-900 mb-1">Select Languages for Global Analysis</h3>
-                <p className="text-sm text-gray-600 mb-3">Track your brand visibility across different languages and regions.</p>
+                <p className="text-sm text-gray-600 mb-3">Track your brand visibility across different languages and regions. {analysisLanguageOptions.length} languages supported (e.g. English, Hebrew, Urdu, German, French, Spanish, and more).</p>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {analysisLanguages.map((code) => {
                     const opt = analysisLanguageOptions.find((o) => o.value === code);
