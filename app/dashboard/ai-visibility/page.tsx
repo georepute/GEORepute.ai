@@ -1320,14 +1320,44 @@ function AIVisibilityContent() {
         }
       };
 
-      // Helper function to add image from URL (with better CORS handling)
+      // Upscale logo to higher resolution so it stays sharp in the PDF (avoids pixelation from small favicons)
+      const LOGO_PDF_SIZE_PX = 240;
+      const upscaleLogoForPdf = (dataUrl: string): Promise<string | null> => {
+        return new Promise((resolve) => {
+          const img = document.createElement('img') as HTMLImageElement;
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = LOGO_PDF_SIZE_PX;
+              canvas.height = LOGO_PDF_SIZE_PX;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) { resolve(dataUrl); return; }
+              ctx.drawImage(img, 0, 0, LOGO_PDF_SIZE_PX, LOGO_PDF_SIZE_PX);
+              resolve(canvas.toDataURL('image/png', 0.95));
+            } catch {
+              resolve(dataUrl);
+            }
+          };
+          img.onerror = () => resolve(dataUrl);
+          img.src = dataUrl;
+        });
+      };
+
+      // Helper function to add image from URL (with better CORS handling and higher resolution)
       const addImageFromUrl = async (url: string, x: number, y: number, width: number, height: number): Promise<boolean> => {
         return new Promise(async (resolve) => {
           try {
-            // Try using a CORS proxy as first attempt
             const corsProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-            let imgData: string;
-            let success = false;
+
+            const addLogoToPdf = async (dataUrl: string) => {
+              const hiRes = await upscaleLogoForPdf(dataUrl);
+              if (hiRes) {
+                doc.addImage(hiRes, 'PNG', x, y, width, height);
+                return true;
+              }
+              return false;
+            };
             
             // Method 1: Try CORS proxy
             try {
@@ -1339,23 +1369,20 @@ function AIVisibilityContent() {
               
               if (proxyResponse.ok) {
                 const blob = await proxyResponse.blob();
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                  imgData = reader.result as string;
-                  try {
-                    doc.addImage(imgData, 'PNG', x, y, width, height);
+                const dataUrl = await new Promise<string>((res, rej) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => res(reader.result as string);
+                  reader.onerror = () => rej(new Error('read failed'));
+                  reader.readAsDataURL(blob);
+                });
+                try {
+                  if (await addLogoToPdf(dataUrl)) {
                     resolve(true);
-                    success = true;
-                  } catch (error) {
-                    console.error('Error adding proxied image to PDF:', error);
+                    return;
                   }
-                };
-                reader.onerror = () => {
-                  console.warn('Error reading proxied image blob');
-                };
-                reader.readAsDataURL(blob);
-                await new Promise(r => setTimeout(r, 1000));
-                if (success) return;
+                } catch (error) {
+                  console.error('Error adding proxied image to PDF:', error);
+                }
               }
             } catch (proxyError) {
               console.warn('CORS proxy failed, trying direct fetch:', proxyError);
@@ -1370,48 +1397,44 @@ function AIVisibilityContent() {
               });
               if (response.ok) {
                 const blob = await response.blob();
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                  imgData = reader.result as string;
-                  try {
-                    doc.addImage(imgData, 'PNG', x, y, width, height);
+                const dataUrl = await new Promise<string>((res, rej) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => res(reader.result as string);
+                  reader.onerror = () => rej(new Error('read failed'));
+                  reader.readAsDataURL(blob);
+                });
+                try {
+                  if (await addLogoToPdf(dataUrl)) {
                     resolve(true);
-                    success = true;
-                  } catch (error) {
-                    console.error('Error adding image to PDF:', error);
+                    return;
                   }
-                };
-                reader.onerror = () => {
-                  console.warn('Error reading image blob');
-                };
-                reader.readAsDataURL(blob);
-                await new Promise(r => setTimeout(r, 1000));
-                if (success) return;
+                } catch (error) {
+                  console.error('Error adding image to PDF:', error);
+                }
               }
             } catch (fetchError) {
               console.warn('Direct fetch failed, trying image element:', fetchError);
             }
             
-            // Method 3: Fallback - Direct image load with canvas (may fail due to CORS)
+            // Method 3: Fallback - Direct image load with canvas, then upscale for resolution
             const img = document.createElement('img') as HTMLImageElement;
             img.crossOrigin = 'anonymous';
-            
             const timeout = setTimeout(() => {
               console.warn('Image load timeout, skipping logo:', url);
               resolve(false);
             }, 5000);
             
-            img.onload = () => {
+            img.onload = async () => {
               clearTimeout(timeout);
               try {
                 const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
+                canvas.width = LOGO_PDF_SIZE_PX;
+                canvas.height = LOGO_PDF_SIZE_PX;
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
-                  ctx.drawImage(img, 0, 0);
-                  imgData = canvas.toDataURL('image/png');
-                  doc.addImage(imgData, 'PNG', x, y, width, height);
+                  ctx.drawImage(img, 0, 0, LOGO_PDF_SIZE_PX, LOGO_PDF_SIZE_PX);
+                  const hiRes = canvas.toDataURL('image/png', 0.95);
+                  doc.addImage(hiRes, 'PNG', x, y, width, height);
                   resolve(true);
                 } else {
                   resolve(false);
@@ -1529,66 +1552,100 @@ function AIVisibilityContent() {
 
           // Helper function to create a chart and return canvas image data
           const createChartImage = async (
-            type: 'pie' | 'bar',
-            data: any[],
+            type: 'pie' | 'bar' | 'stackedBar' | 'horizontalBar',
+            data: any,
             labels: string[],
             title: string,
             width: number = 600,
             height: number = 400
           ): Promise<string | null> => {
             try {
-              // Create a temporary canvas
               const canvas = document.createElement('canvas');
               canvas.width = width;
               canvas.height = height;
               const ctx = canvas.getContext('2d');
               if (!ctx) return null;
 
-              // Create Chart.js chart
-              const chart = new Chart(ctx, {
-                type: type === 'pie' ? 'doughnut' : 'bar',
-                data: {
-                  labels: labels,
-                  datasets: [{
-                    label: title,
-                    data: data.map(d => d.value || d),
-                    backgroundColor: type === 'pie' 
-                      ? data.map((_, i) => {
-                          const colors = ['#10b981', '#6b7280', '#ef4444', '#9333ea', '#3b82f6', '#f59e0b'];
-                          return colors[i % colors.length];
-                        })
-                      : '#9333ea',
-                    borderColor: '#ffffff',
-                    borderWidth: 2,
-                  }],
-                },
-                options: {
-                  responsive: false,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    title: {
-                      display: true,
-                      text: title,
-                      font: { size: 16, weight: 'bold' },
-                    },
-                    legend: {
-                      display: type === 'pie',
-                      position: 'right',
-                    },
+              let chartConfig: any;
+              if (type === 'pie') {
+                const arr = data as { name: string; value: number }[];
+                chartConfig = {
+                  type: 'doughnut',
+                  data: {
+                    labels: labels,
+                    datasets: [{
+                      label: title,
+                      data: arr.map(d => d.value),
+                      backgroundColor: arr.map((_, i) => ['#10b981', '#6b7280', '#ef4444', '#9333ea', '#3b82f6', '#f59e0b'][i % 6]),
+                      borderColor: '#ffffff',
+                      borderWidth: 2,
+                    }],
                   },
-                },
-              });
+                  options: {
+                    responsive: false,
+                    maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: true, position: 'right' } },
+                  },
+                };
+              } else if (type === 'bar') {
+                const values = (data as number[]).map(d => (typeof d === 'object' && d !== null && 'value' in d) ? (d as { value: number }).value : d);
+                chartConfig = {
+                  type: 'bar',
+                  data: {
+                    labels,
+                    datasets: [{ label: title, data: values, backgroundColor: '#9333ea', borderColor: '#ffffff', borderWidth: 2 }],
+                  },
+                  options: {
+                    responsive: false,
+                    maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: false } },
+                  },
+                };
+              } else if (type === 'stackedBar') {
+                const { mentioned, missed } = data as { mentioned: number[]; missed: number[] };
+                chartConfig = {
+                  type: 'bar',
+                  data: {
+                    labels,
+                    datasets: [
+                      { label: 'Mentioned', data: mentioned, backgroundColor: '#10b981', borderColor: '#ffffff', borderWidth: 1 },
+                      { label: 'Not Mentioned', data: missed, backgroundColor: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
+                    ],
+                  },
+                  options: {
+                    responsive: false,
+                    maintainAspectRatio: false,
+                    scales: { x: { stacked: true }, y: { stacked: true } },
+                    plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: true, position: 'top' } },
+                  },
+                };
+              } else if (type === 'horizontalBar') {
+                const items = data as { name: string; value: number; isBrand?: boolean }[];
+                const names = items.map(d => d.name);
+                const values = items.map(d => d.value);
+                const colors = items.map(d => (d.isBrand ? '#9333ea' : '#3b82f6'));
+                chartConfig = {
+                  type: 'bar',
+                  data: {
+                    labels: names,
+                    datasets: [{ label: 'Visibility %', data: values, backgroundColor: colors, borderColor: '#ffffff', borderWidth: 1 }],
+                  },
+                  options: {
+                    indexAxis: 'y' as const,
+                    responsive: false,
+                    maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: false } },
+                  },
+                };
+              } else {
+                return null;
+              }
 
-              // Wait for chart to render
+              const chart = new Chart(ctx, chartConfig);
               await new Promise(resolve => setTimeout(resolve, 500));
-
-              // Get image data
               const imageData = canvas.toDataURL('image/png', 0.95);
-              
-              // Destroy chart
               chart.destroy();
               canvas.remove();
-              
               return imageData;
             } catch (error) {
               console.error('Error creating chart:', error);
@@ -1699,9 +1756,112 @@ function AIVisibilityContent() {
               }
 
               const chartX = (pageWidth - chartWidth) / 2;
-              doc.addImage(chartImage, 'PNG', chartX, yPos, chartWidth, chartHeight);
+                doc.addImage(chartImage, 'PNG', chartX, yPos, chartWidth, chartHeight);
+                yPos += chartHeight + 10;
+                console.log('✓ Added Platform Performance chart');
+            }
+          }
+
+          // Chart 3: Platform Comparison (Stacked Bar - Mentioned vs Not Mentioned)
+          const comparisonData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+            const platformResponses = projectResponses.filter(r => r.platform === platform);
+            const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+            const total = platformResponses.length;
+            const platformOption = platformOptions.find(p => p.id === platform);
+            return {
+              platform: platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1),
+              mentioned: mentions,
+              missed: total - mentions,
+            };
+          });
+          if (comparisonData.length > 0) {
+            checkPageBreak(90);
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Platform Comparison (Mentioned vs Not Mentioned)', margin, yPos);
+            yPos += 6;
+            const stackedImage = await createChartImage(
+              'stackedBar',
+              { mentioned: comparisonData.map(p => p.mentioned), missed: comparisonData.map(p => p.missed) },
+              comparisonData.map(p => p.platform),
+              'Platform Comparison',
+              600,
+              400
+            );
+            if (stackedImage) {
+              const chartHeight = 80;
+              const chartWidth = pageWidth - 2 * margin;
+              if (yPos + chartHeight > pageHeight - margin - 20) {
+                doc.addPage();
+                yPos = margin;
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'bold');
+                doc.text('Platform Comparison (Mentioned vs Not Mentioned)', margin, yPos);
+                yPos += 6;
+              }
+              doc.addImage(stackedImage, 'PNG', margin, yPos, chartWidth, chartHeight);
               yPos += chartHeight + 10;
-              console.log('✓ Added Platform Performance chart');
+              console.log('✓ Added Platform Comparison chart');
+            }
+          }
+
+          // Chart 4: Competitor vs Brand Visibility (Horizontal Bar)
+          const brandMentions = projectResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+          const totalQueries = projectResponses.length;
+          const brandVisibility = totalQueries > 0 ? Math.round((brandMentions / totalQueries) * 100) : 0;
+          const competitorMentionCount: Record<string, number> = {};
+          projectResponses.forEach((response) => {
+            const competitorsRaw = response.response_metadata?.competitors_found || [];
+            const competitorNames = competitorsRaw.map((comp: string | { name: string }) => {
+              if (typeof comp === 'string') {
+                if (comp.startsWith('{') && comp.includes('name')) {
+                  try {
+                    return JSON.parse(comp).name || comp;
+                  } catch { return comp; }
+                }
+                return comp;
+              }
+              return (comp as { name: string })?.name || String(comp);
+            }).filter(Boolean);
+            ([...new Set(competitorNames)] as string[]).forEach((c) => {
+              competitorMentionCount[c] = (competitorMentionCount[c] || 0) + 1;
+            });
+          });
+          const comparisonChartData = [
+            { name: selectedProject?.brand_name || 'Your Brand', value: brandVisibility, isBrand: true },
+            ...Object.entries(competitorMentionCount)
+              .map(([name, mentions]) => ({ name, value: totalQueries > 0 ? Math.round((mentions / totalQueries) * 100) : 0, isBrand: false }))
+              .sort((a, b) => b.value - a.value)
+              .slice(0, 10),
+          ].filter(d => d.value > 0 || d.isBrand);
+          if (comparisonChartData.length > 0) {
+            checkPageBreak(90);
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Competitor vs Brand Visibility', margin, yPos);
+            yPos += 6;
+            const horizImage = await createChartImage(
+              'horizontalBar',
+              comparisonChartData,
+              [],
+              'Competitor vs Brand Visibility (%)',
+              600,
+              400
+            );
+            if (horizImage) {
+              const chartHeight = 80;
+              const chartWidth = pageWidth - 2 * margin;
+              if (yPos + chartHeight > pageHeight - margin - 20) {
+                doc.addPage();
+                yPos = margin;
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'bold');
+                doc.text('Competitor vs Brand Visibility', margin, yPos);
+                yPos += 6;
+              }
+              doc.addImage(horizImage, 'PNG', margin, yPos, chartWidth, chartHeight);
+              yPos += chartHeight + 10;
+              console.log('✓ Added Competitor vs Brand Visibility chart');
             }
           }
         }
@@ -1777,7 +1937,9 @@ function AIVisibilityContent() {
           const col3 = margin + 80; // Domain
           const col4 = margin + 120; // Mentions
           const col5 = margin + 150; // Score
-          const rowHeight = 7;
+          const rowHeight = 8;
+          const lineGap = 5;
+          const gapAfterLine = 4;
           
           // Draw table header
           doc.setFont('helvetica', 'bold');
@@ -1788,17 +1950,18 @@ function AIVisibilityContent() {
           doc.text('Mentions', col4, yPos);
           doc.text('Score', col5, yPos);
           
-          // Draw header underline
-          yPos += 3;
+          // Draw header underline (below text with clear gap)
+          yPos += lineGap;
           doc.setLineWidth(0.5);
+          doc.setDrawColor(0, 0, 0);
           doc.line(col1, yPos, col5 + 30, yPos);
-          yPos += 2;
+          yPos += gapAfterLine;
           
           // Table rows
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(9);
           latestSession.competitor_analysis.rankings.slice(0, 10).forEach((rank: any, idx: number) => {
-            checkPageBreak(rowHeight + 2);
+            checkPageBreak(rowHeight + gapAfterLine);
             
             // Parse competitor name (handle both string and object formats)
             let competitorName = '';
@@ -1842,12 +2005,12 @@ function AIVisibilityContent() {
             doc.text(rank.mentions?.toString() || '0', col4, yPos);
             doc.text(rank.ranking_score?.toFixed(2) || '0.00', col5, yPos);
             
-            // Draw row separator
-            yPos += rowHeight;
+            // Draw row separator below text with clear gap so line doesn't cut through text
+            yPos += lineGap;
             doc.setLineWidth(0.1);
             doc.setDrawColor(200, 200, 200);
             doc.line(col1, yPos, col5 + 30, yPos);
-            yPos += 2;
+            yPos += gapAfterLine;
           });
           
           yPos += 3;
@@ -1865,7 +2028,9 @@ function AIVisibilityContent() {
           const col2 = margin + 50; // Positioning
           const col3 = margin + 100; // Market Share
           const col4 = margin + 140; // Sentiment
-          const rowHeight = 7;
+          const rowHeight = 8;
+          const lineGapMP = 5;
+          const gapAfterLineMP = 4;
           
           // Draw table header
           doc.setFont('helvetica', 'bold');
@@ -1875,17 +2040,18 @@ function AIVisibilityContent() {
           doc.text('Market Share', col3, yPos);
           doc.text('Sentiment', col4, yPos);
           
-          // Draw header underline
-          yPos += 3;
+          // Draw header underline (below text with clear gap)
+          yPos += lineGapMP;
           doc.setLineWidth(0.5);
+          doc.setDrawColor(0, 0, 0);
           doc.line(col1, yPos, col4 + 30, yPos);
-          yPos += 2;
+          yPos += gapAfterLineMP;
           
           // Table rows
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(9);
           latestSession.competitor_analysis.market_positions.slice(0, 10).forEach((pos: any) => {
-            checkPageBreak(rowHeight + 2);
+            checkPageBreak(rowHeight + gapAfterLineMP);
             
             // Parse brand name
             const { name: brandName } = parseCompetitorNameGlobal(pos.brand);
@@ -1898,12 +2064,12 @@ function AIVisibilityContent() {
             doc.text(marketShare, col3, yPos);
             doc.text(sentiment, col4, yPos);
             
-            // Draw row separator
-            yPos += rowHeight;
+            // Draw row separator below text with clear gap
+            yPos += lineGapMP;
             doc.setLineWidth(0.1);
             doc.setDrawColor(200, 200, 200);
             doc.line(col1, yPos, col4 + 30, yPos);
-            yPos += 2;
+            yPos += gapAfterLineMP;
           });
           
           yPos += 3;
@@ -1920,7 +2086,9 @@ function AIVisibilityContent() {
           const col1 = margin; // Brand
           const col2 = margin + 60; // Mentions
           const col3 = margin + 100; // Share %
-          const rowHeight = 7;
+          const rowHeightSOV = 8;
+          const lineGapSOV = 5;
+          const gapAfterLineSOV = 4;
           
           // Draw table header
           doc.setFont('helvetica', 'bold');
@@ -1929,17 +2097,18 @@ function AIVisibilityContent() {
           doc.text('Mentions', col2, yPos);
           doc.text('Share %', col3, yPos);
           
-          // Draw header underline
-          yPos += 3;
+          // Draw header underline (below text with clear gap)
+          yPos += lineGapSOV;
           doc.setLineWidth(0.5);
+          doc.setDrawColor(0, 0, 0);
           doc.line(col1, yPos, col3 + 30, yPos);
-          yPos += 2;
+          yPos += gapAfterLineSOV;
           
           // Table rows
           doc.setFont('helvetica', 'normal');
           doc.setFontSize(9);
           latestSession.competitor_analysis.share_of_voice.slice(0, 10).forEach((sov: any) => {
-            checkPageBreak(rowHeight + 2);
+            checkPageBreak(rowHeightSOV + gapAfterLineSOV);
             
             // Parse brand name
             const { name: brandName } = parseCompetitorNameGlobal(sov.brand);
@@ -1950,12 +2119,12 @@ function AIVisibilityContent() {
             doc.text(mentions, col2, yPos);
             doc.text(sharePercent, col3, yPos);
             
-            // Draw row separator
-            yPos += rowHeight;
+            // Draw row separator below text with clear gap
+            yPos += lineGapSOV;
             doc.setLineWidth(0.1);
             doc.setDrawColor(200, 200, 200);
             doc.line(col1, yPos, col3 + 30, yPos);
-            yPos += 2;
+            yPos += gapAfterLineSOV;
           });
           
           yPos += 3;
@@ -2018,6 +2187,79 @@ function AIVisibilityContent() {
       csvRows.push(`Total Mentions,${totalMentions}`);
       csvRows.push(`Total Queries,${totalQueries}`);
       csvRows.push('');
+
+      // Analytics / Chart data (same as Analytics tab)
+      if (projectResponses.length > 0) {
+        const sentiments = projectResponses
+          .filter(r => r.response_metadata?.sentiment_score !== null)
+          .map(r => r.response_metadata.sentiment_score);
+        const positive = sentiments.filter(s => s > 0.3).length;
+        const negative = sentiments.filter(s => s < -0.3).length;
+        const neutral = sentiments.filter(s => s >= -0.3 && s <= 0.3).length;
+        csvRows.push('Sentiment Distribution');
+        csvRows.push('Sentiment,Count,Percentage');
+        const totalSent = sentiments.length;
+        if (totalSent > 0) {
+          csvRows.push(`Positive,${positive},${Math.round((positive / totalSent) * 100)}%`);
+          csvRows.push(`Neutral,${neutral},${Math.round((neutral / totalSent) * 100)}%`);
+          csvRows.push(`Negative,${negative},${Math.round((negative / totalSent) * 100)}%`);
+        }
+        csvRows.push('');
+
+        csvRows.push('Platform Performance');
+        csvRows.push('Platform,Mentions,Total Queries,Mention Rate %');
+        Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+          const platformResponses = projectResponses.filter(r => r.platform === platform);
+          const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+          const total = platformResponses.length;
+          const rate = total > 0 ? Math.round((mentions / total) * 100) : 0;
+          const platformOption = platformOptions.find(p => p.id === platform);
+          const platformName = platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1);
+          csvRows.push(`${platformName},${mentions},${total},${rate}%`);
+        });
+        csvRows.push('');
+
+        csvRows.push('Platform Comparison (Mentioned vs Not Mentioned)');
+        csvRows.push('Platform,Mentioned,Not Mentioned,Total');
+        Array.from(new Set(projectResponses.map(r => r.platform))).forEach((platform) => {
+          const platformResponses = projectResponses.filter(r => r.platform === platform);
+          const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+          const total = platformResponses.length;
+          const platformOption = platformOptions.find(p => p.id === platform);
+          const platformName = platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1);
+          csvRows.push(`${platformName},${mentions},${total - mentions},${total}`);
+        });
+        csvRows.push('');
+
+        const brandMentionsCSV = projectResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+        const totalQueriesCSV = projectResponses.length;
+        const brandVisibilityCSV = totalQueriesCSV > 0 ? Math.round((brandMentionsCSV / totalQueriesCSV) * 100) : 0;
+        const competitorMentionCountCSV: Record<string, number> = {};
+        projectResponses.forEach((response) => {
+          const competitorsRaw = response.response_metadata?.competitors_found || [];
+          const competitorNames = competitorsRaw.map((comp: string | { name: string }) => {
+            if (typeof comp === 'string') {
+              if (comp.startsWith('{') && comp.includes('name')) {
+                try { return JSON.parse(comp).name || comp; } catch { return comp; }
+              }
+              return comp;
+            }
+            return (comp as { name: string })?.name || String(comp);
+          }).filter(Boolean);
+          ([...new Set(competitorNames)] as string[]).forEach((c) => {
+            competitorMentionCountCSV[c] = (competitorMentionCountCSV[c] || 0) + 1;
+          });
+        });
+        csvRows.push('Competitor vs Brand Visibility');
+        csvRows.push('Brand,Visibility %,Mentions,Total Queries');
+        csvRows.push(`${selectedProject?.brand_name || 'Your Brand'},${brandVisibilityCSV}%,${brandMentionsCSV},${totalQueriesCSV}`);
+        Object.entries(competitorMentionCountCSV)
+          .map(([name, mentions]) => ({ name, visibility: totalQueriesCSV > 0 ? Math.round((mentions / totalQueriesCSV) * 100) : 0, mentions, totalQueries: totalQueriesCSV }))
+          .sort((a, b) => b.visibility - a.visibility)
+          .slice(0, 15)
+          .forEach((row) => csvRows.push(`${row.name},${row.visibility}%,${row.mentions},${row.totalQueries}`));
+        csvRows.push('');
+      }
 
       // Results Summary
       if (latestSession.results_summary) {
@@ -2131,13 +2373,14 @@ function AIVisibilityContent() {
             
             img.onload = () => {
               try {
+                const size = 256;
                 const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
+                canvas.width = size;
+                canvas.height = size;
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
-                  ctx.drawImage(img, 0, 0);
-                  const base64 = canvas.toDataURL('image/png');
+                  ctx.drawImage(img, 0, 0, size, size);
+                  const base64 = canvas.toDataURL('image/png', 0.95);
                   resolve(base64);
                 } else {
                   resolve(null);
@@ -2504,68 +2747,75 @@ function AIVisibilityContent() {
 
       // Generate charts using Chart.js (same as PDF)
       if (projectResponses.length > 0) {
-        // Helper function to create a chart and return canvas image data
-        const createChartImage = async (
-          type: 'pie' | 'bar',
-          data: any[],
+        const createChartImagePPT = async (
+          type: 'pie' | 'bar' | 'stackedBar' | 'horizontalBar',
+          data: any,
           labels: string[],
           title: string,
           width: number = 600,
           height: number = 400
         ): Promise<string | null> => {
           try {
-            // Create a temporary canvas
             const canvas = document.createElement('canvas');
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             if (!ctx) return null;
-
-            // Create Chart.js chart
-            const chart = new Chart(ctx, {
-              type: type === 'pie' ? 'doughnut' : 'bar',
-              data: {
-                labels: labels,
-                datasets: [{
-                  label: title,
-                  data: data.map(d => d.value || d),
-                  backgroundColor: type === 'pie' 
-                    ? data.map((_, i) => {
-                        const colors = ['#10b981', '#6b7280', '#ef4444', '#9333ea', '#3b82f6', '#f59e0b'];
-                        return colors[i % colors.length];
-                      })
-                    : '#9333ea',
-                  borderColor: '#ffffff',
-                  borderWidth: 2,
-                }],
-              },
-              options: {
-                responsive: false,
-                maintainAspectRatio: false,
-                plugins: {
-                  title: {
-                    display: true,
-                    text: title,
-                    font: { size: 16, weight: 'bold' },
-                  },
-                  legend: {
-                    display: type === 'pie',
-                    position: 'right',
-                  },
+            let chartConfig: any;
+            if (type === 'pie') {
+              const arr = data as { name: string; value: number }[];
+              chartConfig = {
+                type: 'doughnut',
+                data: {
+                  labels,
+                  datasets: [{
+                    label: title,
+                    data: arr.map(d => d.value),
+                    backgroundColor: arr.map((_, i) => ['#10b981', '#6b7280', '#ef4444', '#9333ea', '#3b82f6', '#f59e0b'][i % 6]),
+                    borderColor: '#ffffff',
+                    borderWidth: 2,
+                  }],
                 },
-              },
-            });
-
-            // Wait for chart to render
+                options: { responsive: false, maintainAspectRatio: false, plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: true, position: 'right' } } },
+              };
+            } else if (type === 'bar') {
+              const values = (data as number[]).map(d => (typeof d === 'object' && d !== null && 'value' in d) ? (d as { value: number }).value : d);
+              chartConfig = {
+                type: 'bar',
+                data: { labels, datasets: [{ label: title, data: values, backgroundColor: '#9333ea', borderColor: '#ffffff', borderWidth: 2 }] },
+                options: { responsive: false, maintainAspectRatio: false, plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: false } } },
+              };
+            } else if (type === 'stackedBar') {
+              const { mentioned, missed } = data as { mentioned: number[]; missed: number[] };
+              chartConfig = {
+                type: 'bar',
+                data: {
+                  labels,
+                  datasets: [
+                    { label: 'Mentioned', data: mentioned, backgroundColor: '#10b981', borderColor: '#ffffff', borderWidth: 1 },
+                    { label: 'Not Mentioned', data: missed, backgroundColor: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
+                  ],
+                },
+                options: { responsive: false, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } }, plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: true, position: 'top' } } },
+              };
+            } else if (type === 'horizontalBar') {
+              const items = data as { name: string; value: number; isBrand?: boolean }[];
+              chartConfig = {
+                type: 'bar',
+                data: {
+                  labels: items.map(d => d.name),
+                  datasets: [{ label: 'Visibility %', data: items.map(d => d.value), backgroundColor: items.map(d => d.isBrand ? '#9333ea' : '#3b82f6'), borderColor: '#ffffff', borderWidth: 1 }],
+                },
+                options: { indexAxis: 'y' as const, responsive: false, maintainAspectRatio: false, plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: false } } },
+              };
+            } else {
+              return null;
+            }
+            const chart = new Chart(ctx, chartConfig);
             await new Promise(resolve => setTimeout(resolve, 500));
-
-            // Get image data
             const imageData = canvas.toDataURL('image/png', 0.95);
-            
-            // Destroy chart
             chart.destroy();
             canvas.remove();
-            
             return imageData;
           } catch (error) {
             console.error('Error creating chart:', error);
@@ -2590,7 +2840,7 @@ function AIVisibilityContent() {
           ].filter(item => item.value > 0);
 
           if (sentimentData.length > 0) {
-            const chartImage = await createChartImage(
+            const chartImage = await createChartImagePPT(
               'pie',
               sentimentData,
               sentimentData.map(d => d.name),
@@ -2623,22 +2873,23 @@ function AIVisibilityContent() {
         }
 
         // Chart 2: Platform Performance (Bar Chart)
-        const platformData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+        const platformDataPPT = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
           const platformResponses = projectResponses.filter(r => r.platform === platform);
           const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
           const total = platformResponses.length;
           const mentionRate = total > 0 ? (mentions / total) * 100 : 0;
+          const platformOption = platformOptions.find(p => p.id === platform);
           return {
-            platform: platform.charAt(0).toUpperCase() + platform.slice(1),
+            platform: platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1),
             mentionRate: Math.round(mentionRate),
           };
         }).sort((a, b) => b.mentionRate - a.mentionRate);
 
-        if (platformData.length > 0) {
-          const chartImage = await createChartImage(
+        if (platformDataPPT.length > 0) {
+          const chartImage = await createChartImagePPT(
             'bar',
-            platformData.map(p => p.mentionRate),
-            platformData.map(p => p.platform),
+            platformDataPPT.map(p => p.mentionRate),
+            platformDataPPT.map(p => p.platform),
             'Platform Performance (Mention Rate %)',
             600,
             400
@@ -2663,6 +2914,95 @@ function AIVisibilityContent() {
               h: 4.5,
             });
             console.log('✓ Added Platform Performance chart to PPT');
+          }
+        }
+
+        // Chart 3: Platform Comparison (Stacked Bar)
+        const comparisonDataPPT = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+          const platformResponses = projectResponses.filter(r => r.platform === platform);
+          const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+          const total = platformResponses.length;
+          const platformOption = platformOptions.find(p => p.id === platform);
+          return {
+            platform: platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1),
+            mentioned: mentions,
+            missed: total - mentions,
+          };
+        });
+        if (comparisonDataPPT.length > 0) {
+          const stackedImage = await createChartImagePPT(
+            'stackedBar',
+            { mentioned: comparisonDataPPT.map(p => p.mentioned), missed: comparisonDataPPT.map(p => p.missed) },
+            comparisonDataPPT.map(p => p.platform),
+            'Platform Comparison (Mentioned vs Not Mentioned)',
+            600,
+            400
+          );
+          if (stackedImage) {
+            const chartSlide = pptx.addSlide();
+            chartSlide.addText('Platform Comparison', {
+              x: 0.5,
+              y: 0.3,
+              w: 9,
+              h: 0.5,
+              fontSize: 24,
+              bold: true,
+              color: '363636',
+            });
+            chartSlide.addImage({ data: stackedImage, x: 1, y: 1.2, w: 8, h: 4.5 });
+            console.log('✓ Added Platform Comparison chart to PPT');
+          }
+        }
+
+        // Chart 4: Competitor vs Brand Visibility (Horizontal Bar)
+        const brandMentionsPPT = projectResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+        const totalQueriesPPT = projectResponses.length;
+        const brandVisibilityPPT = totalQueriesPPT > 0 ? Math.round((brandMentionsPPT / totalQueriesPPT) * 100) : 0;
+        const competitorMentionCountPPT: Record<string, number> = {};
+        projectResponses.forEach((response) => {
+          const competitorsRaw = response.response_metadata?.competitors_found || [];
+          const competitorNames = competitorsRaw.map((comp: string | { name: string }) => {
+            if (typeof comp === 'string') {
+              if (comp.startsWith('{') && comp.includes('name')) {
+                try { return JSON.parse(comp).name || comp; } catch { return comp; }
+              }
+              return comp;
+            }
+            return (comp as { name: string })?.name || String(comp);
+          }).filter(Boolean);
+          ([...new Set(competitorNames)] as string[]).forEach((c) => {
+            competitorMentionCountPPT[c] = (competitorMentionCountPPT[c] || 0) + 1;
+          });
+        });
+        const comparisonChartDataPPT = [
+          { name: selectedProject?.brand_name || 'Your Brand', value: brandVisibilityPPT, isBrand: true },
+          ...Object.entries(competitorMentionCountPPT)
+            .map(([name, mentions]) => ({ name, value: totalQueriesPPT > 0 ? Math.round((mentions / totalQueriesPPT) * 100) : 0, isBrand: false }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 10),
+        ].filter(d => d.value > 0 || d.isBrand);
+        if (comparisonChartDataPPT.length > 0) {
+          const horizImage = await createChartImagePPT(
+            'horizontalBar',
+            comparisonChartDataPPT,
+            [],
+            'Competitor vs Brand Visibility (%)',
+            600,
+            400
+          );
+          if (horizImage) {
+            const chartSlide = pptx.addSlide();
+            chartSlide.addText('Competitor vs Brand Visibility', {
+              x: 0.5,
+              y: 0.3,
+              w: 9,
+              h: 0.5,
+              fontSize: 24,
+              bold: true,
+              color: '363636',
+            });
+            chartSlide.addImage({ data: horizImage, x: 1, y: 1.2, w: 8, h: 4.5 });
+            console.log('✓ Added Competitor vs Brand Visibility chart to PPT');
           }
         }
       }
@@ -3053,12 +3393,12 @@ function AIVisibilityContent() {
                         <div className="flex items-center gap-3 flex-1">
                           {/* Use brand_summary.favicon if available, fallback to company_image_url */}
                           {(project.brand_summary?.favicon || project.company_image_url) ? (
-                            <div className="w-12 h-12 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
+                            <div className="w-14 h-14 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
                               <img 
                                 src={project.brand_summary?.favicon || project.company_image_url} 
                                 alt={project.brand_name}
                                 className="w-full h-full object-contain"
-                                style={{ imageRendering: 'crisp-edges' }}
+                                style={{ imageRendering: 'auto' }}
                                 onError={(e) => {
                                   // Fallback to initial if image fails to load
                                   e.currentTarget.style.display = 'none';
@@ -3068,7 +3408,7 @@ function AIVisibilityContent() {
                               />
                             </div>
                           ) : null}
-                          <div className={`w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center ${(project.brand_summary?.favicon || project.company_image_url) ? 'hidden' : ''}`}>
+                          <div className={`w-14 h-14 bg-purple-100 rounded-lg flex items-center justify-center ${(project.brand_summary?.favicon || project.company_image_url) ? 'hidden' : ''}`}>
                             <span className="text-xl font-bold text-purple-600">
                               {project.brand_name.charAt(0).toUpperCase()}
                             </span>
@@ -3779,12 +4119,12 @@ function AIVisibilityContent() {
                 <div className="flex items-center gap-3 mb-2">
                   {/* Use brand_summary.favicon if available, fallback to company_image_url */}
                   {(brandSummary?.favicon || selectedProject.company_image_url) ? (
-                    <div className="w-12 h-12 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
+                    <div className="w-14 h-14 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
                       <img 
                         src={brandSummary?.favicon || selectedProject.company_image_url} 
                         alt={selectedProject.brand_name}
                         className="w-full h-full object-contain"
-                        style={{ imageRendering: 'crisp-edges' }}
+                        style={{ imageRendering: 'auto' }}
                         onError={(e) => {
                           // Fallback to initial if image fails to load
                           e.currentTarget.style.display = 'none';
@@ -3794,7 +4134,7 @@ function AIVisibilityContent() {
                       />
                     </div>
                   ) : null}
-                  <div className={`w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center ${(brandSummary?.favicon || selectedProject.company_image_url) ? 'hidden' : ''}`}>
+                  <div className={`w-14 h-14 bg-purple-100 rounded-lg flex items-center justify-center ${(brandSummary?.favicon || selectedProject.company_image_url) ? 'hidden' : ''}`}>
                     <span className="text-xl font-bold text-purple-600">
                       {selectedProject.brand_name.charAt(0).toUpperCase()}
                     </span>
@@ -4090,12 +4430,12 @@ function AIVisibilityContent() {
                             <div className="bg-white border border-gray-200 rounded-lg p-6">
                               {brandSummary.favicon && (
                                 <div className="flex items-center gap-3 mb-4">
-                                  <div className="w-10 h-10 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
+                                  <div className="w-12 h-12 rounded-lg bg-white border border-gray-200 flex items-center justify-center p-1.5 flex-shrink-0">
                                     <img 
                                       src={brandSummary.favicon} 
                                       alt="Brand favicon" 
                                       className="w-full h-full object-contain"
-                                      style={{ imageRendering: 'crisp-edges' }}
+                                      style={{ imageRendering: 'auto' }}
                                       onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                     />
                                   </div>
