@@ -56,7 +56,9 @@ export async function POST(request: NextRequest) {
       queryLimit = 10,
       companyDescription = '',
       companyImageUrl = '',
-      fetchGSCKeywords = false
+      fetchGSCKeywords = false,
+      analysisLanguages = [],
+      analysisCountries = []
     } = body
 
     // Validate required fields
@@ -93,18 +95,18 @@ export async function POST(request: NextRequest) {
       if (existingProject) {
         finalProjectId = existingProject.id
         // Update existing project with crawled data if provided
-        if (companyDescription || companyImageUrl) {
-          await supabase
-            .from('brand_analysis_projects')
-            .update({
-              company_description: companyDescription || existingProject.company_description,
-              company_image_url: companyImageUrl || existingProject.company_image_url,
-              active_platforms: platforms,
-              keywords: keywords,
-              competitors: competitors,
-            })
-            .eq('id', finalProjectId)
-        }
+        await supabase
+          .from('brand_analysis_projects')
+          .update({
+            ...(companyDescription && { company_description: companyDescription }),
+            ...(companyImageUrl && { company_image_url: companyImageUrl }),
+            active_platforms: platforms,
+            keywords: keywords,
+            competitors: competitors,
+            ...(Array.isArray(analysisLanguages) && { analysis_languages: analysisLanguages }),
+            ...(Array.isArray(analysisCountries) && { analysis_countries: analysisCountries }),
+          })
+          .eq('id', finalProjectId)
       } else {
         // Create new project
         const { data: newProject, error: projectError } = await supabase
@@ -119,7 +121,9 @@ export async function POST(request: NextRequest) {
             active_platforms: platforms,
             target_keywords: keywords,
             company_description: companyDescription,
-            company_image_url: companyImageUrl
+            company_image_url: companyImageUrl,
+            analysis_languages: Array.isArray(analysisLanguages) ? analysisLanguages : [],
+            analysis_countries: Array.isArray(analysisCountries) ? analysisCountries : [],
           })
           .select('id')
           .single()
@@ -169,7 +173,11 @@ export async function POST(request: NextRequest) {
                               gscIntegration.metadata?.site_urls?.[0] || 
                               websiteUrl
 
-          const gscKeywords = await gscService.fetchKeywords(selectedSite, 100)
+          const gscOptions =
+            Array.isArray(analysisCountries) && analysisCountries.length > 0
+              ? { countries: analysisCountries }
+              : undefined
+          const gscKeywords = await gscService.fetchKeywords(selectedSite, 100, gscOptions)
           console.log(`📊 Fetched ${gscKeywords.length} keywords from GSC`)
 
           // Save keywords to database

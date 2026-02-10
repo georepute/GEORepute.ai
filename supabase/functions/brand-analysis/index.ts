@@ -95,39 +95,110 @@ async function refreshGSCToken(refreshToken: string) {
   };
 }
 
+/** Alpha-2 (UI) → GSC API country code (lowercase alpha-3) for SEO-level segmentation */
+const GSC_COUNTRY_ALPHA2_TO_ALPHA3: Record<string, string> = {
+  US: 'usa', GB: 'gbr', CA: 'can', AU: 'aus', DE: 'deu', FR: 'fra',
+  IN: 'ind', IT: 'ita', ES: 'esp', NL: 'nld', BR: 'bra', MX: 'mex',
+  JP: 'jpn', CN: 'chn', KR: 'kor', PL: 'pol', SE: 'swe', BE: 'bel',
+  CH: 'che', AT: 'aut', IE: 'irl', PT: 'prt', ZA: 'zaf', RU: 'rus',
+  TR: 'tur', ID: 'idn', TH: 'tha', VN: 'vnm', MY: 'mys', SG: 'sgp',
+  PH: 'phl', NZ: 'nzl', AR: 'arg', CL: 'chl', CO: 'col', SA: 'sau',
+  AE: 'are', IL: 'isr', EG: 'egy', NG: 'nga', KE: 'ken',
+};
+function toGscCountryCode(alpha2: string): string {
+  const code = GSC_COUNTRY_ALPHA2_TO_ALPHA3[alpha2.toUpperCase()];
+  if (code) return code;
+  const a = alpha2.toLowerCase();
+  return a.length >= 3 ? a.slice(0, 3) : a.padEnd(3, a[0] || 'x');
+}
+
 /**
  * Fetch keywords from Google Search Console API
+ * @param countries - Optional alpha-2 codes (e.g. ['US','GB']). When set, fetches per country and merges (SEO-level).
  */
-async function fetchFromGSCAPI(accessToken: string, siteUrl: string) {
+async function fetchFromGSCAPI(accessToken: string, siteUrl: string, countries?: string[]) {
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 30);
+  const startStr = startDate.toISOString().split('T')[0];
+  const endStr = endDate.toISOString().split('T')[0];
+  const rowLimit = 100;
 
-  const response = await fetch(
-    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0],
-        dimensions: ['query'],
-        rowLimit: 100,
-      }),
+  const runOne = async (body: Record<string, unknown>) => {
+    const response = await fetch(
+      `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      }
+    );
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`GSC API error: ${response.status} - ${errorText}`);
     }
-  );
+    return response.json();
+  };
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`GSC API error: ${response.status} - ${errorText}`);
+  const countriesFiltered = Array.isArray(countries) && countries.length > 0
+    ? countries.map((c) => toGscCountryCode(c))
+    : null;
+
+  if (countriesFiltered && countriesFiltered.length > 0) {
+    const mergedByQuery = new Map<string, { impressions: number; clicks: number; positionSum: number; positionWeight: number }>();
+    for (const gscCountry of countriesFiltered) {
+      try {
+        const data = await runOne({
+          startDate: startStr,
+          endDate: endStr,
+          dimensions: ['query'],
+          rowLimit,
+          dimensionFilterGroups: [
+            { groupType: 'and', filters: [{ dimension: 'country', operator: 'equals', expression: gscCountry }] },
+          ],
+        });
+        const rows = data.rows || [];
+        for (const row of rows) {
+          const q = (row.keys && row.keys[0]) ? String(row.keys[0]).trim() : '';
+          if (!q) continue;
+          const imp = Number(row.impressions) || 0;
+          const clk = Number(row.clicks) || 0;
+          const pos = Number(row.position) || 0;
+          const existing = mergedByQuery.get(q);
+          if (existing) {
+            existing.impressions += imp;
+            existing.clicks += clk;
+            existing.positionSum += pos * imp;
+            existing.positionWeight += imp;
+          } else {
+            mergedByQuery.set(q, { impressions: imp, clicks: clk, positionSum: pos * imp, positionWeight: imp });
+          }
+        }
+      } catch (err) {
+        console.warn(`GSC fetch for country ${gscCountry} failed:`, err);
+      }
+    }
+    const merged = Array.from(mergedByQuery.entries()).map(([keyword, agg]) => ({
+      keyword,
+      position: agg.positionWeight > 0 ? Math.round((agg.positionSum / agg.positionWeight) * 10) / 10 : 0,
+      clicks: agg.clicks,
+      impressions: agg.impressions,
+      ctr: agg.impressions > 0 ? agg.clicks / agg.impressions : 0,
+    }));
+    merged.sort((a, b) => b.impressions - a.impressions);
+    return merged.slice(0, rowLimit);
   }
 
-  const data = await response.json();
+  const data = await runOne({
+    startDate: startStr,
+    endDate: endStr,
+    dimensions: ['query'],
+    rowLimit,
+  });
   const rows = data.rows || [];
-
   return rows.map((row: any) => ({
     keyword: row.keys[0],
     position: Math.round(row.position * 10) / 10,
@@ -200,9 +271,16 @@ async function fetchGSCKeywords(project: any): Promise<string[]> {
       console.log('✅ Token refreshed successfully');
     }
 
-    // Fetch keywords from GSC
-    console.log('📊 Fetching keywords from GSC API...');
-    const keywords = await fetchFromGSCAPI(accessToken, selectedSite);
+    // Fetch keywords from GSC (SEO-level: filter by project countries when set)
+    const analysisCountries = Array.isArray(project.analysis_countries) && project.analysis_countries.length > 0
+      ? project.analysis_countries
+      : undefined;
+    if (analysisCountries?.length) {
+      console.log(`📊 Fetching GSC keywords (SEO-level: ${analysisCountries.join(', ')})...`);
+    } else {
+      console.log('📊 Fetching keywords from GSC API...');
+    }
+    const keywords = await fetchFromGSCAPI(accessToken, selectedSite, analysisCountries);
 
     console.log(`✅ Fetched ${keywords.length} keywords from GSC`);
 
@@ -1016,14 +1094,15 @@ function extractTextFromHTML(html) {
     return '';
   }
 }
-async function generateRealisticUserQueries(brandName, industry, keywords = [], competitors = [], websiteUrl = '', language = 'en') {
+async function generateRealisticUserQueries(brandName, industry, keywords = [], competitors = [], websiteUrl = '', language = 'en', options = {}) {
+  const { languages: analysisLanguages = [], countries: analysisCountries = [] } = options;
   const openAIApiKey = await getApiKey('openai');
   if (!openAIApiKey) {
     console.log('No OpenAI API key available for query generation, using fallback queries');
-    return generateFallbackQueries(brandName, industry, keywords, competitors, language);
+    return generateFallbackQueries(brandName, industry, keywords, competitors, language, analysisCountries);
   }
   try {
-    console.log(`Generating realistic user queries for ${brandName} in ${industry} (language: ${language})`);
+    console.log(`Generating realistic user queries for ${brandName} in ${industry} (language: ${language}${analysisCountries?.length ? `, countries: ${analysisCountries.join(', ')}` : ''})`);
     // Fetch website content if URL is provided
     let websiteContent = '';
     if (websiteUrl) {
@@ -1033,18 +1112,87 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
     const competitorContext = competitors.length > 0 ? `Main competitors: ${competitors.join(', ')}` : '';
     const websiteContext = websiteContent ? `Website content summary: ${websiteContent}` : '';
     
-    // Language instruction
-    const languageInstruction = language === 'he' 
-      ? `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in HEBREW (עברית).
+    // Language instruction: default is English; Hebrew and the other 10 UI languages have explicit, proper blocks
+    const langCode = (language || 'en').toLowerCase().split('-')[0];
+    const languageNames: Record<string, string> = { he: 'Hebrew (עברית)', ur: 'Urdu', en: 'English', de: 'German', fr: 'French', es: 'Spanish', it: 'Italian', pt: 'Portuguese', nl: 'Dutch', ja: 'Japanese', zh: 'Chinese', pl: 'Polish', ru: 'Russian', ko: 'Korean', ar: 'Arabic', tr: 'Turkish', hi: 'Hindi', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian', sv: 'Swedish', no: 'Norwegian', da: 'Danish', fi: 'Finnish' };
+    const languageName = languageNames[langCode] || langCode;
+    let languageInstruction = '';
+    if (langCode === 'he') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in HEBREW (עברית).
 - Write queries naturally in Hebrew, as native Hebrew speakers would search
 - Use Hebrew question words: מה, איך, למה, איפה, מתי, מי, איזה
 - Use natural Hebrew expressions and phrasing
 - Maintain conversational Hebrew style
-- All 50 queries must be in Hebrew\n`
+- All 50 queries must be in Hebrew\n`;
+    } else if (langCode === 'ur') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in URDU.
+- Write queries naturally in Urdu, as native Urdu speakers would search (use Urdu script)
+- Use natural Urdu question words and expressions (کیا، کیسے، کہاں، کب، کون، etc.)
+- Maintain conversational Urdu style; use common search phrasing
+- All 50 queries must be in Urdu\n`;
+    } else if (langCode === 'de') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in GERMAN.
+- Write queries naturally in German, as native German speakers would search
+- Use natural German question words: was, wie, warum, wo, wann, wer, welcher
+- Use formal (Sie) or informal (du) phrasing as appropriate for search
+- Maintain conversational German style; all 50 queries must be in German\n`;
+    } else if (langCode === 'fr') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in FRENCH.
+- Write queries naturally in French, as native French speakers would search
+- Use natural French question words: quoi, comment, pourquoi, où, quand, qui, quel(le)
+- Use natural French expressions and phrasing; maintain conversational style
+- All 50 queries must be in French\n`;
+    } else if (langCode === 'es') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in SPANISH.
+- Write queries naturally in Spanish, as native Spanish speakers would search
+- Use natural Spanish question words: qué, cómo, por qué, dónde, cuándo, quién, cuál
+- Maintain conversational Spanish style; all 50 queries must be in Spanish\n`;
+    } else if (langCode === 'it') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ITALIAN.
+- Write queries naturally in Italian, as native Italian speakers would search
+- Use natural Italian question words: cosa, come, perché, dove, quando, chi, quale
+- Maintain conversational Italian style; all 50 queries must be in Italian\n`;
+    } else if (langCode === 'pt') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in PORTUGUESE.
+- Write queries naturally in Portuguese, as native speakers would search
+- Use natural question words: o que, como, por que, onde, quando, quem, qual
+- Maintain conversational Portuguese style; all 50 queries must be in Portuguese\n`;
+    } else if (langCode === 'nl') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in DUTCH.
+- Write queries naturally in Dutch, as native Dutch speakers would search
+- Use natural Dutch question words: wat, hoe, waarom, waar, wanneer, wie, welk
+- Maintain conversational Dutch style; all 50 queries must be in Dutch\n`;
+    } else if (langCode === 'ja') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in JAPANESE.
+- Write queries naturally in Japanese, as native Japanese speakers would search
+- Use natural Japanese question words and phrasing (何、どのように、なぜ、どこ、いつ、誰、どれ)
+- Use appropriate script (Kanji, Hiragana, Katakana) as used in real search queries
+- All 50 queries must be in Japanese\n`;
+    } else if (langCode === 'zh') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in CHINESE.
+- Write queries naturally in Chinese, as native Chinese speakers would search
+- Use natural Chinese question words and phrasing (什么、怎么、为什么、哪里、什么时候、谁、哪个)
+- Use Simplified Chinese (简体) unless the context clearly requires Traditional
+- All 50 queries must be in Chinese\n`;
+    } else if (langCode !== 'en') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ${languageName}.
+- Write queries naturally as native speakers of this language would search
+- Use natural expressions, question words, and phrasing in that language
+- All 50 queries must be in ${languageName}\n`;
+    }
+
+    const countryNamesMap = { US: 'United States', GB: 'UK', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', SG: 'Singapore', MY: 'Malaysia', PH: 'Philippines', VN: 'Vietnam', TH: 'Thailand', ID: 'Indonesia', HK: 'Hong Kong', TW: 'Taiwan', KR: 'South Korea', JP: 'Japan', CN: 'China', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', CH: 'Switzerland', PL: 'Poland', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PT: 'Portugal', GR: 'Greece', CZ: 'Czech Republic', RO: 'Romania', HU: 'Hungary', RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IL: 'Israel', AE: 'United Arab Emirates', SA: 'Saudi Arabia', EG: 'Egypt', QA: 'Qatar', KW: 'Kuwait', BH: 'Bahrain', OM: 'Oman', JO: 'Jordan', LB: 'Lebanon', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CO: 'Colombia', CL: 'Chile', PE: 'Peru', VE: 'Venezuela', EC: 'Ecuador', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', ET: 'Ethiopia', MA: 'Morocco', EU: 'European Union' };
+    const countryNames = (analysisCountries || []).length ? analysisCountries.map((c) => countryNamesMap[c] || c) : [];
+    const geographyInstruction = countryNames.length > 0
+      ? `\n🌍 GEOGRAPHY REQUIREMENT: Generate queries as they would be asked by users in these countries/regions: ${countryNames.join(', ')}.
+- Include region-specific phrasing where natural (e.g. "in the UK", "for the German market", "best X in Germany", "US-based", "available in Australia")
+- Distribute queries across these regions so the set reflects a mix of geographic perspectives
+- Keep the same 50-query total; vary the region angle across the list\n`
       : '';
     
     const prompt = `Generate 50 realistic, conversational search queries that real users would type when looking for solutions like ${brandName} offers. These should sound like natural human messages, NOT direct brand mentions.
 ${languageInstruction}
+${geographyInstruction}
 
 Brand context: ${brandName} (${industry})
 ${keywordContext}
@@ -1087,9 +1235,11 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
         messages: [
           {
             role: 'system',
-            content: language === 'he' 
+            content: langCode === 'he'
               ? 'אתה מומחה בהתנהגות חיפוש משתמשים ויצירת שאילתות. צור שאילתות חיפוש מציאותיות ושיחה שהמשתמשים האמיתיים היו מקלידים למנועי חיפוש או עוזרי AI. תמיד עטוף שאילתות כמשפטים או שאלות תקינים עם רישיות וסימני פיסוק מתאימים. תמיד החזר מערכים JSON מעוצבים כראוי ללא עיצוב markdown או הסבר. כל השאילתות חייבות להיות בעברית.'
-              : 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
+              : langCode !== 'en'
+                ? `You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. All queries MUST be in ${languageName}. Write as a native speaker would search. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. Return a valid JSON array of strings only, no markdown or explanation.`
+                : 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
           },
           {
             role: 'user',
@@ -1175,14 +1325,14 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
       }
     } catch (parseError) {
       console.error('Failed to parse generated queries:', parseError, 'Content:', generatedContent);
-      return generateFallbackQueries(brandName, industry, keywords, competitors, language);
+      return generateFallbackQueries(brandName, industry, keywords, competitors, language, analysisCountries);
     }
   } catch (error) {
     console.error('Query generation failed:', error);
-    return generateFallbackQueries(brandName, industry, keywords, competitors, language);
+    return generateFallbackQueries(brandName, industry, keywords, competitors, language, analysisCountries);
   }
 }
-function generateFallbackQueries(brandName, industry, keywords = [], competitors = [], language = 'en') {
+function generateFallbackQueries(brandName, industry, keywords = [], competitors = [], language = 'en', countries = []) {
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
   // Industry-specific base queries
@@ -1324,6 +1474,15 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
     `Which ${industry} software has the highest customer satisfaction?`,
     `How reliable are different ${industry} software options?`
   ];
+  const regionLabels = { US: 'the US', GB: 'the UK', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', SG: 'Singapore', MY: 'Malaysia', PH: 'Philippines', VN: 'Vietnam', TH: 'Thailand', ID: 'Indonesia', HK: 'Hong Kong', TW: 'Taiwan', KR: 'South Korea', JP: 'Japan', CN: 'China', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', CH: 'Switzerland', PL: 'Poland', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PT: 'Portugal', GR: 'Greece', CZ: 'Czech Republic', RO: 'Romania', HU: 'Hungary', RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IL: 'Israel', AE: 'UAE', SA: 'Saudi Arabia', EG: 'Egypt', QA: 'Qatar', KW: 'Kuwait', BH: 'Bahrain', OM: 'Oman', JO: 'Jordan', LB: 'Lebanon', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CO: 'Colombia', CL: 'Chile', PE: 'Peru', VE: 'Venezuela', EC: 'Ecuador', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', ET: 'Ethiopia', MA: 'Morocco', EU: 'the EU' };
+  if (countries && countries.length > 0) {
+    countries.slice(0, 5).forEach((c) => {
+      const label = regionLabels[c] || c;
+      baseQueries.push(`Best ${industry} tools available in ${label}.`);
+      baseQueries.push(`What are good ${industry} options for the ${label} market?`);
+      baseQueries.push(`${industry} software that works well in ${label}.`);
+    });
+  }
   // Ensure we have exactly 50 queries
   if (baseQueries.length > 50) {
     return baseQueries.slice(0, 50);
@@ -1616,8 +1775,14 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
         }
       }
     }
-    // Generate realistic user queries using AI
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '', preferredLanguage);
+    // Generate realistic user queries using AI (with optional geography from project)
+    const analysisLangs = project.analysis_languages || [];
+    const analysisCountriesRun = project.analysis_countries || [];
+    // Use first selected analysis language when set; otherwise default to English (never Hebrew or other)
+    const queryLanguage = analysisLangs.length > 0
+      ? (analysisLangs[0].toLowerCase().startsWith('he') ? 'he' : analysisLangs[0].split('-')[0].toLowerCase() || 'en')
+      : 'en';
+    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '', queryLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
     console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
     // Log some sample queries for debugging
     console.log("Sample queries:", realisticQueries.slice(0, 5));
@@ -2125,7 +2290,7 @@ Deno.serve(async (req) => {
       'gemini',
       'perplexity',
       'groq'
-    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false, language, action } = body;
+    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false, language, action, languages: bodyLanguages, countries: bodyCountries } = body;
     
     // Handle resume action
     if (action === 'resume' && sessionId) {
@@ -2206,7 +2371,7 @@ Deno.serve(async (req) => {
     }
     
     // Get language preference: from request body, or from cookies as fallback
-    let preferredLanguage: "en" | "he" = language || "en";
+    let preferredLanguage: string = language || "en";
     if (!language) {
       // Try to get from cookies
       const cookieHeader = req.headers.get("cookie");
@@ -2299,6 +2464,14 @@ Deno.serve(async (req) => {
           'Content-Type': 'application/json'
         }
       });
+    }
+    const analysisLanguages = Array.isArray(bodyLanguages) && bodyLanguages.length > 0 ? bodyLanguages : (project.analysis_languages || []);
+    const analysisCountries = Array.isArray(bodyCountries) && bodyCountries.length > 0 ? bodyCountries : (project.analysis_countries || []);
+    // For query generation: use first selected analysis language when set; otherwise default to English (never Hebrew or other)
+    if (analysisLanguages.length > 0) {
+      preferredLanguage = analysisLanguages[0].toLowerCase().split('-')[0];
+    } else {
+      preferredLanguage = 'en';
     }
     // Use platforms from request first (user's current selection), fallback to database if none provided
     let platformsToAnalyze = platforms && platforms.length > 0 ? platforms : project.active_platforms && Array.isArray(project.active_platforms) && project.active_platforms.length > 0 ? project.active_platforms : [
@@ -2420,6 +2593,26 @@ Deno.serve(async (req) => {
         }
       });
     }
+    // Prevent duplicate running sessions: one running analysis per project at a time
+    const { data: existingRunningList } = await supabase
+      .from('brand_analysis_sessions')
+      .select('id, status')
+      .eq('project_id', projectId)
+      .in('status', ['running', 'pending'])
+      .limit(1);
+    const existingRunning = existingRunningList?.[0];
+    if (existingRunning) {
+      return new Response(JSON.stringify({
+        success: true,
+        alreadyRunning: true,
+        sessionId: existingRunning.id,
+        message: 'Analysis already running for this project. Wait for it to finish or stop it before starting another.'
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     // Create analysis session immediately
     const totalQueries = availablePlatforms.length * 50; // Assuming 50 queries per platform
     const { data: session, error: sessionError } = await supabase.from('brand_analysis_sessions').insert({
@@ -2454,8 +2647,8 @@ Deno.serve(async (req) => {
     console.log(`   GSC: ${gscKeywords.length}`);
     console.log(`   Total (merged): ${allKeywords.length}`);
     
-    // Generate realistic user queries using AI with MERGED keywords
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, allKeywords, project.competitors || [], project.website_url || '', preferredLanguage);
+    // Generate realistic user queries using AI with MERGED keywords (and optional geography)
+    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, allKeywords, project.competitors || [], project.website_url || '', preferredLanguage, { languages: analysisLanguages, countries: analysisCountries });
     console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
     // Start the first batch immediately (this will chain to subsequent batches)
     try {

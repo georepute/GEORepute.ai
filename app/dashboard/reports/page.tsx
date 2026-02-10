@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { 
   FileText,
@@ -28,6 +28,8 @@ import {
   Sheet,
   Clock,
   AlertCircle,
+  Brain,
+  Quote,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useLanguage } from "@/lib/language-context";
@@ -56,6 +58,8 @@ import {
 } from "recharts";
 import { supabase } from "@/lib/supabase/client";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
+import { classifyIntent } from "@/lib/intent/classifyIntent";
+import { isQuestion } from "@/lib/intent/questions";
 
 // Color palette for charts
 const COLORS = {
@@ -148,6 +152,57 @@ interface ReportData {
     count: number;
   }>;
 
+  // GEO Visibility & Market Coverage (Report #1) – Demand vs Organic vs AI, regional table
+  geoVisibilityRegionalTable: Array<{
+    region: string;
+    demand: number;
+    organic: number;
+    aiPct: number;
+    gapNote: string;
+  }>;
+
+  // AI Search Presence (Report #2 – full)
+  aiSearchPresenceEngines: Array<{
+    platform: string;
+    displayName: string;
+    presenceScore: number;
+    totalQueries: number;
+    mentionCount: number;
+    mentionRatePct: number;
+    shareOfVoicePct: number;
+    avgSentiment: number | null;
+  }>;
+  aiEngineDescriptions: Array<{
+    platform: string;
+    displayName: string;
+    snippets: string[];
+  }>;
+  /** Number of brand analysis projects used for AI Search Presence (for empty-state messaging) */
+  aiPresenceProjectCount: number;
+  /** List of brand analysis projects for AI Search Presence project selector */
+  brandAnalysisProjects: Array<{ id: string; brand_name: string }>;
+  /** Per-project AI Search Presence data (engines + descriptions) keyed by project id */
+  aiPresenceByProject: Record<
+    string,
+    {
+      engines: Array<{
+        platform: string;
+        displayName: string;
+        presenceScore: number;
+        totalQueries: number;
+        mentionCount: number;
+        mentionRatePct: number;
+        shareOfVoicePct: number;
+        avgSentiment: number | null;
+      }>;
+      descriptions: Array<{
+        platform: string;
+        displayName: string;
+        snippets: string[];
+      }>;
+    }
+  >;
+
   // Performance Summary
   performanceSummary: Array<{
     metric: string;
@@ -210,6 +265,107 @@ interface ReportData {
     totalDaysToPublish: number;
     oldestDraft: string;
   };
+
+  // Brand Narrative & Perception (Report #3)
+  brandNarrativeDesired: {
+    brand_name: string;
+    description: string | null;
+    tone: string;
+    preferred_words: string[];
+    avoid_words: string[];
+    signature_phrases: string[];
+  } | null;
+  brandNarrativeTableRows: Array<{
+    dimension: string;
+    desired: string;
+    observed: string;
+    alignment: "match" | "partial" | "gap";
+  }>;
+  /** List of brand voices for narrative selector */
+  brandVoiceProfiles: Array<{ id: string; brand_name: string }>;
+  /** Per–brand-voice narrative (desired + table rows) */
+  brandNarrativeByVoice: Record<
+    string,
+    {
+      desired: ReportData["brandNarrativeDesired"];
+      tableRows: ReportData["brandNarrativeTableRows"];
+    }
+  >;
+
+  // Search Intent Intelligence (Report #4) – GSC + Keywords + NLP
+  searchIntentTableRows: Array<{
+    intent: string;
+    queryCount: number;
+    withPresence: number;
+    gap: number;
+    coveragePct: number;
+  }>;
+  /** Query sources used for intent (for UI) */
+  searchIntentSources: { keywords: number; gsc: number };
+
+  // Query & Question Intelligence (Report #6) – GSC, NLP – Questions vs Coverage
+  questionsTableRows: Array<{
+    query: string;
+    hasPresence: boolean;
+    position: number | null;
+  }>;
+  questionsSummary: { total: number; withPresence: number; coveragePct: number };
+  /** Per-project for project selector */
+  questionsTableRowsByProject: Record<string, ReportData["questionsTableRows"]>;
+  questionsSummaryByProject: Record<string, ReportData["questionsSummary"]>;
+
+  // GA4 (for Search Intent / performance context)
+  ga4Summary: {
+    sessions: number;
+    users: number;
+    newUsers: number;
+    pageviews: number;
+    avgSessionDuration: number;
+    bounceRate: number;
+  } | null;
+  ga4TopPages: Array<{
+    page: string;
+    pageviews: number;
+    sessions: number;
+    avgDuration: number;
+  }>;
+
+  // AI vs Google Gap (Report #5) – same-query comparison, GSC + AI engines, original data only
+  aiVsGoogleGapTableRows: Array<{
+    query: string;
+    googlePosition: number | null;
+    googlePresent: boolean;
+    googleInData: boolean;
+    aiMentioned: boolean;
+    aiEngines: string[];
+    gap: "Both" | "Google only" | "AI only" | "Neither";
+    suggestion: string;
+  }>;
+  /** Per-project gap rows for project selector */
+  aiVsGoogleGapByProject: Record<string, ReportData["aiVsGoogleGapTableRows"]>;
+  /** Queries that already have a stored gap_suggestion in ai_platform_responses (per project) */
+  storedGapSuggestionQueriesByProject: Record<string, Set<string>>;
+
+  // Market Share of Attention (Report #7) – Who controls attention | AI Mentions, Organic Proxy | Share Chart
+  attentionShare: {
+    organicClicks: number;
+    aiMentions: number;
+    organicPct: number;
+    aiPct: number;
+  };
+  attentionShareByProject: Record<string, ReportData["attentionShare"]>;
+  narrativeAlignmentPct: number;
+
+  // Opportunity & Blind Spots (Report #8) – Demand + CPC + Gap | GSC, AI, CPC | Opportunity Table
+  opportunityTableRows: Array<{
+    query: string;
+    demand: number;
+    cpc: number | null;
+    gap: "Both" | "Google only" | "AI only" | "Neither";
+    opportunityNote: string;
+    projectName?: string;
+  }>;
+  opportunityTableRowsByProject: Record<string, ReportData["opportunityTableRows"]>;
 }
 
 export default function Reports() {
@@ -227,11 +383,135 @@ export default function Reports() {
   const [shareLink, setShareLink] = useState("");
   const [linkCopied, setLinkCopied] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [activeReportTab, setActiveReportTab] = useState<
+    "core" | "global" | "competitive" | "advanced"
+  >("core");
+  const [selectedAIPresenceProjectId, setSelectedAIPresenceProjectId] = useState<
+    string | "all"
+  >("all");
+  const [selectedGapProjectId, setSelectedGapProjectId] = useState<string>("");
+  const [gapFilter, setGapFilter] = useState<"all" | "mentioned" | "gaps">("gaps");
+  const [gapSuggestionsByQuery, setGapSuggestionsByQuery] = useState<Record<string, string>>({});
+  const gapSuggestionsFetchedRef = useRef<string | null>(null);
+  const [selectedNarrativeVoiceId, setSelectedNarrativeVoiceId] = useState<string>("");
+  const [selectedQuestionsProjectId, setSelectedQuestionsProjectId] = useState<string | "all">("all");
+  const [selectedAttentionProjectId, setSelectedAttentionProjectId] = useState<string | "all">("all");
+  const [selectedOpportunityProjectId, setSelectedOpportunityProjectId] = useState<string | "all">("all");
+
+  const REPORT_TABS = [
+    { id: "core" as const, labelKey: "tabCore" as const },
+    { id: "global" as const, labelKey: "tabGlobal" as const },
+    { id: "competitive" as const, labelKey: "tabCompetitive" as const },
+    { id: "advanced" as const, labelKey: "tabAdvanced" as const },
+  ];
 
   useEffect(() => {
     loadReportData();
     loadUserInfo();
   }, [dateRange]);
+
+  useEffect(() => {
+    gapSuggestionsFetchedRef.current = null;
+    setGapSuggestionsByQuery({});
+  }, [dateRange]);
+
+  // Reset AI Presence project selection if selected project is no longer in the list
+  useEffect(() => {
+    if (
+      reportData &&
+      selectedAIPresenceProjectId !== "all" &&
+      !(reportData.brandAnalysisProjects ?? []).some((p) => p.id === selectedAIPresenceProjectId)
+    ) {
+      setSelectedAIPresenceProjectId("all");
+    }
+  }, [reportData?.brandAnalysisProjects, selectedAIPresenceProjectId]);
+
+  useEffect(() => {
+    if (
+      reportData &&
+      selectedGapProjectId &&
+      !(reportData.brandAnalysisProjects ?? []).some((p) => p.id === selectedGapProjectId)
+    ) {
+      setSelectedGapProjectId("");
+    }
+  }, [reportData?.brandAnalysisProjects, selectedGapProjectId]);
+
+  useEffect(() => {
+    if (
+      reportData &&
+      selectedQuestionsProjectId !== "all" &&
+      !(reportData.brandAnalysisProjects ?? []).some((p) => p.id === selectedQuestionsProjectId)
+    ) {
+      setSelectedQuestionsProjectId("all");
+    }
+  }, [reportData?.brandAnalysisProjects, selectedQuestionsProjectId]);
+
+  useEffect(() => {
+    if (
+      reportData &&
+      selectedAttentionProjectId !== "all" &&
+      !(reportData.brandAnalysisProjects ?? []).some((p) => p.id === selectedAttentionProjectId)
+    ) {
+      setSelectedAttentionProjectId("all");
+    }
+  }, [reportData?.brandAnalysisProjects, selectedAttentionProjectId]);
+
+  useEffect(() => {
+    if (
+      reportData &&
+      selectedOpportunityProjectId !== "all" &&
+      !(reportData.brandAnalysisProjects ?? []).some((p) => p.id === selectedOpportunityProjectId)
+    ) {
+      setSelectedOpportunityProjectId("all");
+    }
+  }, [reportData?.brandAnalysisProjects, selectedOpportunityProjectId]);
+
+  useEffect(() => {
+    if (
+      reportData?.brandVoiceProfiles?.length &&
+      selectedNarrativeVoiceId &&
+      !reportData.brandVoiceProfiles.some((p) => p.id === selectedNarrativeVoiceId)
+    ) {
+      setSelectedNarrativeVoiceId("");
+    }
+  }, [reportData?.brandVoiceProfiles, selectedNarrativeVoiceId]);
+
+  // Auto-fetch AI suggestions only for gap rows that don't already have a stored suggestion; persist to DB
+  useEffect(() => {
+    if (!reportData || !selectedGapProjectId) return;
+    const rawRows = reportData.aiVsGoogleGapByProject?.[selectedGapProjectId] ?? [];
+    const storedSet = reportData.storedGapSuggestionQueriesByProject?.[selectedGapProjectId];
+    const gapRows = rawRows.filter((r) => r.gap !== "Both" && !storedSet?.has(r.query));
+    if (gapRows.length === 0) return;
+    const key = selectedGapProjectId;
+    if (gapSuggestionsFetchedRef.current === key) return;
+    gapSuggestionsFetchedRef.current = key;
+    const BATCH = 20;
+    (async () => {
+      for (let i = 0; i < gapRows.length; i += BATCH) {
+        const batch = gapRows.slice(i, i + BATCH);
+        try {
+          const res = await fetch("/api/reports/gap-suggestions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              project_id: selectedGapProjectId,
+              items: batch.map((r) => ({ query: r.query, gap: r.gap })),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) continue;
+          const suggestions: string[] = data.suggestions || [];
+          setGapSuggestionsByQuery((prev) => ({
+            ...prev,
+            ...Object.fromEntries(batch.map((r, j) => [r.query, (suggestions[j] || prev[r.query] || r.suggestion).slice(0, 200)])),
+          }));
+        } catch (_) {
+          break;
+        }
+      }
+    })();
+  }, [reportData, selectedGapProjectId]);
 
   const loadUserInfo = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -312,11 +592,71 @@ export default function Reports() {
         .in("project_id", projects?.map((p) => p.id) || [])
         .eq("status", "running");
 
-      const { data: responses } = await supabase
-        .from("ai_platform_responses")
-        .select("*")
-        .in("project_id", projects?.map((p) => p.id) || [])
-        .gte("created_at", startDate.toISOString());
+      const projectIds = (projects ?? []).map((p: any) => p.id).filter(Boolean) as string[];
+
+      // GSC keywords for Search Intent and AI vs Google Gap (include project_id for per-project gap)
+      let gscKeywords: Array<{ keyword: string; position: number }> = [];
+      const gscKeywordsByProject: Record<string, Array<{ keyword: string; position: number }>> = {};
+      let projectGscStats: Record<string, { impressions: number; clicks: number }> = {};
+      const projectImpressionsByQuery: Record<string, Record<string, number>> = {};
+      if (projectIds.length > 0) {
+        const { data: gscRows } = await supabase
+          .from("gsc_keywords")
+          .select("keyword, position, project_id, impressions, clicks")
+          .in("project_id", projectIds)
+          .gte("date", format(startDate, "yyyy-MM-dd"))
+          .order("impressions", { ascending: false });
+        const byQuery = new Map<string, number>();
+        const byProject = new Map<string, Map<string, number>>();
+        (gscRows ?? []).forEach((r: any) => {
+          const q = (r.keyword || "").trim().toLowerCase();
+          if (!q) return;
+          const pos = Number(r.position) || 0;
+          const impressions = Number(r.impressions) || 0;
+          const existing = byQuery.get(q);
+          if (existing === undefined || pos < existing) byQuery.set(q, pos);
+          const pid = r.project_id as string;
+          if (pid) {
+            if (!byProject.has(pid)) byProject.set(pid, new Map());
+            const projMap = byProject.get(pid)!;
+            const ex = projMap.get(q);
+            if (ex === undefined || pos < ex) projMap.set(q, pos);
+            if (!projectGscStats[pid]) projectGscStats[pid] = { impressions: 0, clicks: 0 };
+            projectGscStats[pid].impressions += impressions;
+            projectGscStats[pid].clicks += Number(r.clicks) || 0;
+            if (!projectImpressionsByQuery[pid]) projectImpressionsByQuery[pid] = {};
+            projectImpressionsByQuery[pid][q] = (projectImpressionsByQuery[pid][q] || 0) + impressions;
+          }
+        });
+        gscKeywords = Array.from(byQuery.entries()).map(([keyword, position]) => ({ keyword, position }));
+        byProject.forEach((map, pid) => {
+          gscKeywordsByProject[pid] = Array.from(map.entries()).map(([keyword, position]) => ({ keyword, position }));
+        });
+      }
+
+      const { data: responses } = projectIds.length > 0
+        ? await supabase
+            .from("ai_platform_responses")
+            .select("*")
+            .in("project_id", projectIds)
+            .gte("created_at", startDate.toISOString())
+        : { data: [] as any[] };
+
+      // For AI Search Presence: fetch ALL responses for user's projects (no date filter) so any past analyses show
+      let responsesForAIPresence: any[] | null = null;
+      if (projectIds.length > 0) {
+        const { data, error } = await supabase
+          .from("ai_platform_responses")
+          .select("*")
+          .in("project_id", projectIds)
+          .order("created_at", { ascending: false });
+        if (error) {
+          console.warn("AI Search Presence: failed to fetch responses", error);
+        }
+        responsesForAIPresence = data ?? [];
+      } else {
+        responsesForAIPresence = [];
+      }
 
       // Fetch Published Content for engagement metrics
       const { data: publishedContentRecords } = await supabase
@@ -330,6 +670,16 @@ export default function Reports() {
         .from("performance_snapshots")
         .select("*")
         .in("content_strategy_id", content?.map((c) => c.id) || []);
+
+      // Fetch all Brand Voices for Brand Narrative & Perception (selector + per-voice narrative)
+      const { data: brandVoices } = await supabase
+        .from("brand_voice_profiles")
+        .select("id, brand_name, description, tone, preferred_words, avoid_words, signature_phrases")
+        .eq("user_id", user.id)
+        .order("is_default", { ascending: false })
+        .order("created_at", { ascending: false });
+      const brandVoiceList = Array.isArray(brandVoices) ? brandVoices : [];
+      const defaultBrandVoice = brandVoiceList.length > 0 ? brandVoiceList[0] : null;
 
       // Process Keywords Data
       const totalKeywords = keywords?.length || 0;
@@ -507,6 +857,584 @@ export default function Reports() {
           count,
         })
       );
+
+      // AI Search Presence (Report #2) – build for "all" and per-project
+      const aiPresenceResponses = responsesForAIPresence ?? responses ?? [];
+      const AI_ENGINES: { id: string; displayName: string }[] = [
+        { id: "chatgpt", displayName: "ChatGPT" },
+        { id: "claude", displayName: "Claude" },
+        { id: "gemini", displayName: "Gemini" },
+        { id: "perplexity", displayName: "Perplexity" },
+        { id: "groq", displayName: "Groq" },
+      ];
+
+      const buildEnginesAndDescriptions = (responsesList: any[]) => {
+        const totalCount = responsesList.length || 0;
+        const engines = AI_ENGINES.map(({ id, displayName }) => {
+          const engineResponses = responsesList.filter(
+            (r: any) => (r.platform || "").toLowerCase() === id
+          );
+          const totalQueries = engineResponses.length;
+          const mentionCount = engineResponses.filter(
+            (r: any) => r.response_metadata?.brand_mentioned
+          ).length;
+          const mentionRatePct =
+            totalQueries > 0 ? (mentionCount / totalQueries) * 100 : 0;
+          const shareOfVoicePct =
+            totalCount > 0 ? (totalQueries / totalCount) * 100 : 0;
+          const withSentiment = engineResponses.filter(
+            (r: any) =>
+              r.response_metadata?.brand_mentioned &&
+              r.response_metadata?.sentiment_score != null
+          );
+          const avgSentiment =
+            withSentiment.length > 0
+              ? withSentiment.reduce(
+                  (sum: number, r: any) =>
+                    sum + (r.response_metadata?.sentiment_score ?? 0),
+                  0
+                ) / withSentiment.length
+              : null;
+          return {
+            platform: id,
+            displayName,
+            presenceScore: mentionRatePct,
+            totalQueries,
+            mentionCount,
+            mentionRatePct,
+            shareOfVoicePct,
+            avgSentiment,
+          };
+        });
+        const descriptions = AI_ENGINES.map(({ id, displayName }) => {
+          const engineResponses = responsesList.filter(
+            (r: any) => (r.platform || "").toLowerCase() === id
+          );
+          const withMention = engineResponses.filter(
+            (r: any) => r.response_metadata?.brand_mentioned && r.response
+          );
+          const source = withMention.length > 0 ? withMention : engineResponses;
+          const snippets = source
+            .slice(0, 2)
+            .map((r: any) => {
+              const text = (r.response || "").trim();
+              return text.length > 220 ? text.slice(0, 220) + "…" : text;
+            })
+            .filter(Boolean);
+          return { platform: id, displayName, snippets };
+        });
+        return { engines, descriptions };
+      };
+
+      const { engines: aiSearchPresenceEngines, descriptions: aiEngineDescriptions } =
+        buildEnginesAndDescriptions(aiPresenceResponses);
+
+      const brandAnalysisProjects = (projects ?? []).map((p: any) => ({
+        id: p.id,
+        brand_name: p.brand_name || "Unnamed project",
+      }));
+
+      const aiPresenceByProject: Record<
+        string,
+        { engines: typeof aiSearchPresenceEngines; descriptions: typeof aiEngineDescriptions }
+      > = {};
+      (projects ?? []).forEach((p: any) => {
+        const projResponses = aiPresenceResponses.filter(
+          (r: any) => r.project_id === p.id
+        );
+        aiPresenceByProject[p.id] = buildEnginesAndDescriptions(projResponses);
+      });
+
+      // GEO Visibility & Market Coverage (Report #1) – Demand vs Organic vs AI regional table
+      const geoVisibilityRegionalTable: ReportData["geoVisibilityRegionalTable"] = [];
+      const totalGscImpressions = Object.values(projectGscStats).reduce((s, x) => s + x.impressions, 0);
+      const totalGscClicks = Object.values(projectGscStats).reduce((s, x) => s + x.clicks, 0);
+      const overallAiMentionPct =
+        aiSearchPresenceEngines.length > 0
+          ? aiSearchPresenceEngines.reduce(
+              (sum, e) => sum + e.mentionRatePct * e.totalQueries,
+              0
+            ) /
+            Math.max(
+              1,
+              aiSearchPresenceEngines.reduce((s, e) => s + e.totalQueries, 0)
+            )
+          : 0;
+      const gapNoteOverall =
+        totalGscImpressions > 0 && overallAiMentionPct < 50
+          ? "Demand exists; AI visibility low"
+          : totalGscImpressions > 0 && totalGscClicks === 0
+            ? "Demand exists; no organic clicks"
+            : "";
+      geoVisibilityRegionalTable.push({
+        region: "Overall",
+        demand: totalGscImpressions,
+        organic: totalGscClicks,
+        aiPct: Math.round(overallAiMentionPct * 10) / 10,
+        gapNote: gapNoteOverall,
+      });
+      (projects ?? []).forEach((p: any) => {
+        const pid = p.id;
+        const stats = projectGscStats[pid] ?? { impressions: 0, clicks: 0 };
+        const engines = aiPresenceByProject[pid]?.engines ?? [];
+        const aiPct =
+          engines.length > 0
+            ? engines.reduce((s, e) => s + e.mentionRatePct * e.totalQueries, 0) /
+              Math.max(1, engines.reduce((s, e) => s + e.totalQueries, 0))
+            : 0;
+        const regionLabel =
+          (p.brand_name || "Unnamed") +
+          (Array.isArray(p.analysis_countries) && p.analysis_countries.length > 0
+            ? ` (${p.analysis_countries.slice(0, 3).join(", ")}${p.analysis_countries.length > 3 ? "…" : ""})`
+            : "");
+        const gapNote =
+          stats.impressions > 0 && aiPct < 50
+            ? "Demand exists; AI visibility low"
+            : stats.impressions > 0 && stats.clicks === 0
+              ? "Demand exists; no organic clicks"
+              : "";
+        geoVisibilityRegionalTable.push({
+          region: regionLabel,
+          demand: stats.impressions,
+          organic: stats.clicks,
+          aiPct: Math.round(aiPct * 10) / 10,
+          gapNote,
+        });
+      });
+
+      // Market Share of Attention (Report #7) – Organic vs AI share, per project + overall
+      const totalAIMentions =
+        aiSearchPresenceEngines.reduce((s, e) => s + (e.mentionCount ?? 0), 0) || 0;
+      const totalOrganicClicks = totalGscClicks || 0;
+      const attentionTotal = totalOrganicClicks + totalAIMentions;
+      const attentionShare: ReportData["attentionShare"] = {
+        organicClicks: totalOrganicClicks,
+        aiMentions: totalAIMentions,
+        organicPct: attentionTotal > 0 ? (totalOrganicClicks / attentionTotal) * 100 : 0,
+        aiPct: attentionTotal > 0 ? (totalAIMentions / attentionTotal) * 100 : 0,
+      };
+      const attentionShareByProject: ReportData["attentionShareByProject"] = {};
+      (projects ?? []).forEach((p: any) => {
+        const pid = p.id;
+        const organic = projectGscStats[pid]?.clicks ?? 0;
+        const engines = aiPresenceByProject[pid]?.engines ?? [];
+        const aiMentions = engines.reduce((s, e) => s + (e.mentionCount ?? 0), 0);
+        const tot = organic + aiMentions;
+        attentionShareByProject[pid] = {
+          organicClicks: organic,
+          aiMentions,
+          organicPct: tot > 0 ? (organic / tot) * 100 : 0,
+          aiPct: tot > 0 ? (aiMentions / tot) * 100 : 0,
+        };
+      });
+
+      // Brand Narrative & Perception (Report #3) – desired vs observed
+      const observedAiText = (aiPresenceResponses ?? [])
+        .map((r: any) => (r.response || "").trim())
+        .filter(Boolean)
+        .join(" ");
+      const observedContentText = (content ?? [])
+        .map((c: any) => (c.generated_content || "").trim())
+        .filter(Boolean)
+        .join(" ");
+      const observedText = (observedAiText + " " + observedContentText).trim().toLowerCase();
+
+      let brandNarrativeDesired: ReportData["brandNarrativeDesired"] = null;
+      const brandNarrativeTableRows: ReportData["brandNarrativeTableRows"] = [];
+      const brandVoiceProfiles: ReportData["brandVoiceProfiles"] = brandVoiceList.map((v: any) => ({
+        id: v.id,
+        brand_name: v.brand_name || "Unnamed",
+      }));
+      const brandNarrativeByVoice: ReportData["brandNarrativeByVoice"] = {};
+
+      const buildNarrativeForVoice = (voice: any) => {
+        const desired: ReportData["brandNarrativeDesired"] = {
+          brand_name: voice.brand_name || "Brand",
+          description: voice.description ?? null,
+          tone: voice.tone || "neutral",
+          preferred_words: Array.isArray(voice.preferred_words) ? voice.preferred_words : [],
+          avoid_words: Array.isArray(voice.avoid_words) ? voice.avoid_words : [],
+          signature_phrases: Array.isArray(voice.signature_phrases) ? voice.signature_phrases : [],
+        };
+        const tableRows: ReportData["brandNarrativeTableRows"] = [];
+        const preferred = desired.preferred_words.filter(Boolean);
+        const avoid = desired.avoid_words.filter(Boolean);
+        const preferredFound = preferred.filter((w) => observedText.includes(String(w).toLowerCase()));
+        const preferredMissing = preferred.filter((w) => !observedText.includes(String(w).toLowerCase()));
+        tableRows.push({
+          dimension: "Preferred words",
+          desired: preferred.length ? preferred.join(", ") : "—",
+          observed:
+            preferred.length > 0
+              ? `Found ${preferredFound.length} of ${preferred.length}${preferredMissing.length > 0 ? ` (missing: ${preferredMissing.slice(0, 5).join(", ")}${preferredMissing.length > 5 ? "…" : ""})` : ""}`
+              : "—",
+          alignment:
+            preferred.length === 0 ? "match" : preferredFound.length === preferred.length ? "match" : preferredFound.length > 0 ? "partial" : "gap",
+        });
+        const avoidPresent = avoid.filter((w) => observedText.includes(String(w).toLowerCase()));
+        tableRows.push({
+          dimension: "Avoid words",
+          desired: avoid.length ? avoid.join(", ") : "—",
+          observed:
+            avoid.length > 0
+              ? avoidPresent.length > 0
+                ? `${avoidPresent.length} present: ${avoidPresent.slice(0, 5).join(", ")}${avoidPresent.length > 5 ? "…" : ""}`
+                : "None found"
+              : "—",
+          alignment: avoid.length === 0 ? "match" : avoidPresent.length === 0 ? "match" : "gap",
+        });
+        tableRows.push({
+          dimension: "Tone",
+          desired: desired.tone,
+          observed: observedText.length > 0 ? "From content & AI (see snippets)" : "—",
+          alignment: observedText.length > 0 ? "partial" : "gap",
+        });
+        const descSnippet = (desired.description || "").slice(0, 120);
+        const observedSnippets: string[] = [];
+        (aiPresenceResponses ?? []).slice(0, 1).forEach((r: any) => {
+          const t = (r.response || "").trim().slice(0, 120);
+          if (t) observedSnippets.push(t + (r.response?.length > 120 ? "…" : ""));
+        });
+        (content ?? []).slice(0, 1).forEach((c: any) => {
+          const t = (c.generated_content || "").trim().slice(0, 120);
+          if (t) observedSnippets.push(t + (c.generated_content?.length > 120 ? "…" : ""));
+        });
+        tableRows.push({
+          dimension: "Key messages / description",
+          desired: descSnippet || (desired.signature_phrases?.slice(0, 2).join("; ") || "—"),
+          observed: observedSnippets.length > 0 ? observedSnippets.join(" | ") : "—",
+          alignment: observedSnippets.length > 0 ? "partial" : "gap",
+        });
+        return { desired, tableRows };
+      };
+
+      brandVoiceList.forEach((voice: any) => {
+        const { desired, tableRows } = buildNarrativeForVoice(voice);
+        brandNarrativeByVoice[voice.id] = { desired, tableRows };
+      });
+      if (defaultBrandVoice) {
+        const defaultData = brandNarrativeByVoice[defaultBrandVoice.id];
+        if (defaultData) {
+          brandNarrativeDesired = defaultData.desired;
+          brandNarrativeTableRows.push(...defaultData.tableRows);
+        }
+      }
+
+      // Search Intent Intelligence (Report #4) – Full GSC + Keywords + NLP pipeline
+      type UnifiedQuery = { text: string; hasPresence: boolean };
+      const unifiedMap = new Map<string, UnifiedQuery>();
+      const addQuery = (text: string, hasPresence: boolean) => {
+        const key = (text || "").trim().toLowerCase();
+        if (!key) return;
+        const existing = unifiedMap.get(key);
+        unifiedMap.set(key, {
+          text: key,
+          hasPresence: existing ? existing.hasPresence || hasPresence : hasPresence,
+        });
+      };
+      (keywords ?? []).forEach((k: any) => {
+        const text = k.keyword_text || "";
+        const rank = Number(k.ranking_score);
+        const hasPresence = rank > 0 && rank <= 100;
+        addQuery(text, hasPresence);
+      });
+      gscKeywords.forEach(({ keyword, position }) => {
+        const hasPresence = position > 0 && position <= 100;
+        addQuery(keyword, hasPresence);
+      });
+      const unifiedQueries = Array.from(unifiedMap.values());
+      const searchIntentSources = {
+        keywords: keywords?.length ?? 0,
+        gsc: gscKeywords.length,
+      };
+      const intentBuckets: Record<string, { total: number; withPresence: number }> = {
+        Informational: { total: 0, withPresence: 0 },
+        Commercial: { total: 0, withPresence: 0 },
+        Transactional: { total: 0, withPresence: 0 },
+        Navigational: { total: 0, withPresence: 0 },
+      };
+      unifiedQueries.forEach(({ text, hasPresence }) => {
+        const intent = classifyIntent(text);
+        if (!intentBuckets[intent]) intentBuckets[intent] = { total: 0, withPresence: 0 };
+        intentBuckets[intent].total += 1;
+        if (hasPresence) intentBuckets[intent].withPresence += 1;
+      });
+      const searchIntentTableRows = Object.entries(intentBuckets)
+        .filter(([, v]) => v.total > 0)
+        .map(([intent, v]) => ({
+          intent,
+          queryCount: v.total,
+          withPresence: v.withPresence,
+          gap: v.total - v.withPresence,
+          coveragePct: v.total > 0 ? (v.withPresence / v.total) * 100 : 0,
+        }))
+        .sort((a, b) => b.queryCount - a.queryCount);
+      if (searchIntentTableRows.length === 0) {
+        Object.entries(intentBuckets).forEach(([intent, v]) => {
+          searchIntentTableRows.push({
+            intent,
+            queryCount: v.total,
+            withPresence: v.withPresence,
+            gap: v.total - v.withPresence,
+            coveragePct: 0,
+          });
+        });
+      }
+
+      // Query & Question Intelligence (Report #6) – GSC, NLP – Questions vs Coverage (per project + all)
+      type QuestionRow = { query: string; hasPresence: boolean; position: number | null };
+      const buildQuestionsFromSources = (
+        gscList: Array<{ keyword: string; position: number }>,
+        includeUserKeywords: boolean
+      ): QuestionRow[] => {
+        const questionToBest = new Map<string, { hasPresence: boolean; position: number | null }>();
+        const addQuestion = (text: string, hasPresence: boolean, position: number | null) => {
+          const key = (text || "").trim().toLowerCase();
+          if (!key || !isQuestion(key)) return;
+          const existing = questionToBest.get(key);
+          if (!existing) {
+            questionToBest.set(key, { hasPresence, position });
+          } else {
+            const bestPos = position != null && (existing.position == null || position < existing.position) ? position : existing.position;
+            questionToBest.set(key, { hasPresence: existing.hasPresence || hasPresence, position: bestPos ?? existing.position });
+          }
+        };
+        if (includeUserKeywords) {
+          (keywords ?? []).forEach((k: any) => {
+            const text = k.keyword_text || "";
+            const rank = Number(k.ranking_score);
+            const hasPresence = rank > 0 && rank <= 100;
+            addQuestion(text, hasPresence, rank > 0 ? rank : null);
+          });
+        }
+        gscList.forEach(({ keyword, position }) => {
+          const hasPresence = position > 0 && position <= 100;
+          addQuestion(keyword, hasPresence, position > 0 ? position : null);
+        });
+        return Array.from(questionToBest.entries())
+          .map(([query, { hasPresence, position }]) => ({ query, hasPresence, position }))
+          .sort((a, b) => (b.hasPresence ? 1 : 0) - (a.hasPresence ? 1 : 0) || (a.query.localeCompare(b.query)))
+          .slice(0, 100);
+      };
+      const questionsTableRows = buildQuestionsFromSources(gscKeywords, true);
+      const questionsTotal = questionsTableRows.length;
+      const questionsWithPresence = questionsTableRows.filter((r) => r.hasPresence).length;
+      const questionsSummary = {
+        total: questionsTotal,
+        withPresence: questionsWithPresence,
+        coveragePct: questionsTotal > 0 ? (questionsWithPresence / questionsTotal) * 100 : 0,
+      };
+      const questionsTableRowsByProject: Record<string, QuestionRow[]> = {};
+      const questionsSummaryByProject: Record<string, { total: number; withPresence: number; coveragePct: number }> = {};
+      (projectIds ?? []).forEach((pid) => {
+        const gscForProject = gscKeywordsByProject[pid] ?? [];
+        const rows = buildQuestionsFromSources(gscForProject, true);
+        questionsTableRowsByProject[pid] = rows;
+        const withP = rows.filter((r) => r.hasPresence).length;
+        questionsSummaryByProject[pid] = {
+          total: rows.length,
+          withPresence: withP,
+          coveragePct: rows.length > 0 ? (withP / rows.length) * 100 : 0,
+        };
+      });
+
+      // AI vs Google Gap (Report #5) – same-query comparison from GSC + AI responses (original data only)
+      const normalizeQ = (q: string) => (q || "").trim().toLowerCase();
+      const GOOGLE_NO_RANK = 999;
+      const googleQueryToPosition = new Map<string, number>();
+      (keywords ?? []).forEach((k: any) => {
+        const q = normalizeQ(k.keyword_text || "");
+        if (!q) return;
+        const rank = Number(k.ranking_score) || 0;
+        const pos = rank > 0 ? rank : GOOGLE_NO_RANK;
+        const existing = googleQueryToPosition.get(q);
+        if (existing === undefined || pos < existing) googleQueryToPosition.set(q, pos);
+      });
+      gscKeywords.forEach(({ keyword, position }) => {
+        const q = normalizeQ(keyword);
+        if (!q) return;
+        const pos = Number(position) || 0;
+        const usePos = pos > 0 ? pos : GOOGLE_NO_RANK;
+        const existing = googleQueryToPosition.get(q);
+        if (existing === undefined || usePos < existing) googleQueryToPosition.set(q, usePos);
+      });
+      const aiQueryToEngines = new Map<string, { engines: string[] }>();
+      const engineDisplayNames: Record<string, string> = {
+        chatgpt: "ChatGPT",
+        claude: "Claude",
+        gemini: "Gemini",
+        perplexity: "Perplexity",
+        groq: "Groq",
+      };
+      (responsesForAIPresence ?? []).forEach((r: any) => {
+        const q = normalizeQ(r.prompt || "");
+        if (!q) return;
+        const platform = (r.platform || "").toLowerCase();
+        const brandMentioned = r.response_metadata?.brand_mentioned === true;
+        if (!aiQueryToEngines.has(q)) aiQueryToEngines.set(q, { engines: [] });
+        const entry = aiQueryToEngines.get(q)!;
+        if (brandMentioned && platform && engineDisplayNames[platform] && !entry.engines.includes(engineDisplayNames[platform])) {
+          entry.engines.push(engineDisplayNames[platform]);
+        }
+      });
+      const getGapSuggestion = (
+        gap: "Both" | "Google only" | "AI only" | "Neither",
+        _googlePresent: boolean,
+        _aiMentioned: boolean
+      ): string => {
+        if (gap === "Neither" || gap === "Google only") return "";
+        if (gap === "AI only")
+          return "AI mentions your brand. Improve organic visibility: target this query with SEO content to reach Google top 100.";
+        return "Strong presence in both. Maintain content and keep running AI Visibility.";
+      };
+
+      const allQueries = new Set<string>([...googleQueryToPosition.keys(), ...aiQueryToEngines.keys()]);
+      const aiVsGoogleGapTableRows: ReportData["aiVsGoogleGapTableRows"] = Array.from(allQueries)
+        .map((query) => {
+          const rawPosition = googleQueryToPosition.get(query);
+          const googlePosition = rawPosition != null && rawPosition < GOOGLE_NO_RANK ? rawPosition : null;
+          const googlePresent = googlePosition != null && googlePosition >= 1 && googlePosition <= 100;
+          const googleInData = rawPosition != null;
+          const aiEntry = aiQueryToEngines.get(query);
+          const aiEngines = aiEntry?.engines ?? [];
+          const aiMentioned = aiEngines.length > 0;
+          const gap: "Both" | "Google only" | "AI only" | "Neither" =
+            googlePresent && aiMentioned ? "Both" : googlePresent ? "Google only" : aiMentioned ? "AI only" : "Neither";
+          return {
+            query,
+            googlePosition,
+            googlePresent,
+            googleInData,
+            aiMentioned,
+            aiEngines,
+            gap,
+            suggestion: getGapSuggestion(gap, googlePresent, aiMentioned),
+          };
+        })
+        .sort((a, b) => {
+          const order = { Neither: 0, "Google only": 1, "AI only": 2, Both: 3 };
+          return order[a.gap] - order[b.gap] || a.query.localeCompare(b.query);
+        })
+        .slice(0, 100);
+
+      // Stored gap suggestions from ai_platform_responses.gap_suggestion (per project)
+      const storedGapSuggestionsByProject: Record<string, Map<string, string>> = {};
+      const storedGapSuggestionQueriesByProject: Record<string, Set<string>> = {};
+      (responsesForAIPresence ?? []).forEach((r: any) => {
+        const suggestion = r.gap_suggestion;
+        if (typeof suggestion !== "string" || !suggestion.trim()) return;
+        const pid = r.project_id;
+        if (!pid) return;
+        const q = normalizeQ(r.prompt || "");
+        if (!q) return;
+        if (!storedGapSuggestionsByProject[pid]) {
+          storedGapSuggestionsByProject[pid] = new Map();
+          storedGapSuggestionQueriesByProject[pid] = new Set();
+        }
+        if (!storedGapSuggestionsByProject[pid].has(q)) {
+          storedGapSuggestionsByProject[pid].set(q, suggestion.trim());
+          storedGapSuggestionQueriesByProject[pid].add(q);
+        }
+      });
+
+      // Per-project AI vs Google Gap for project selector
+      const aiVsGoogleGapByProject: Record<string, ReportData["aiVsGoogleGapTableRows"]> = {};
+      const buildGapRows = (
+        googleMap: Map<string, number>,
+        aiMap: Map<string, { engines: string[] }>,
+        storedSuggestions?: Map<string, string>
+      ): ReportData["aiVsGoogleGapTableRows"] => {
+        const allQ = new Set<string>([...googleMap.keys(), ...aiMap.keys()]);
+        return Array.from(allQ)
+          .map((query) => {
+            const rawPosition = googleMap.get(query);
+            const googlePosition = rawPosition != null && rawPosition < GOOGLE_NO_RANK ? rawPosition : null;
+            const googlePresent = googlePosition != null && googlePosition >= 1 && googlePosition <= 100;
+            const googleInData = rawPosition != null;
+            const aiEntry = aiMap.get(query);
+            const aiEngines = aiEntry?.engines ?? [];
+            const aiMentioned = aiEngines.length > 0;
+            const gap: "Both" | "Google only" | "AI only" | "Neither" =
+              googlePresent && aiMentioned ? "Both" : googlePresent ? "Google only" : aiMentioned ? "AI only" : "Neither";
+            return {
+              query: query.length > 120 ? query.slice(0, 120) + "…" : query,
+              googlePosition,
+              googlePresent,
+              googleInData,
+              aiMentioned,
+              aiEngines,
+              gap,
+              suggestion: storedSuggestions?.get(query) ?? getGapSuggestion(gap, googlePresent, aiMentioned),
+            };
+          })
+          .sort((a, b) => {
+            const order = { Neither: 0, "Google only": 1, "AI only": 2, Both: 3 };
+            return order[a.gap] - order[b.gap] || a.query.localeCompare(b.query);
+          })
+          .slice(0, 100);
+      };
+      (projectIds ?? []).forEach((pid) => {
+        const gProj = new Map<string, number>();
+        // Per-project: use only this project's GSC (no global user keywords) so queries are project-specific
+        (gscKeywordsByProject[pid] ?? []).forEach(({ keyword, position }) => {
+          const q = normalizeQ(keyword);
+          if (!q) return;
+          const usePos = position > 0 ? position : GOOGLE_NO_RANK;
+          const existing = gProj.get(q);
+          if (existing === undefined || usePos < existing) gProj.set(q, usePos);
+        });
+        const aProj = new Map<string, { engines: string[] }>();
+        (responsesForAIPresence ?? [])
+          .filter((r: any) => r.project_id === pid)
+          .forEach((r: any) => {
+            const q = normalizeQ(r.prompt || "");
+            if (!q) return;
+            const platform = (r.platform || "").toLowerCase();
+            const brandMentioned = r.response_metadata?.brand_mentioned === true;
+            if (!aProj.has(q)) aProj.set(q, { engines: [] });
+            const entry = aProj.get(q)!;
+            if (brandMentioned && platform && engineDisplayNames[platform] && !entry.engines.includes(engineDisplayNames[platform])) {
+              entry.engines.push(engineDisplayNames[platform]);
+            }
+          });
+        aiVsGoogleGapByProject[pid] = buildGapRows(gProj, aProj, storedGapSuggestionsByProject[pid]);
+      });
+
+      // Opportunity & Blind Spots (Report #8) – Demand + CPC vs Gap | GSC, AI, CPC
+      const getOpportunityNote = (
+        demand: number,
+        gap: "Both" | "Google only" | "AI only" | "Neither"
+      ): string => {
+        if (demand === 0) return "No demand data";
+        if (gap === "Neither") return "High demand; no organic, no AI — priority opportunity";
+        if (gap === "Google only") return "Demand + organic; improve AI visibility";
+        if (gap === "AI only") return "Demand + AI; improve organic visibility";
+        return "Strong: demand, organic, and AI";
+      };
+      const opportunityTableRowsByProject: ReportData["opportunityTableRowsByProject"] = {};
+      (projectIds ?? []).forEach((pid) => {
+        const gapRows = aiVsGoogleGapByProject[pid] ?? [];
+        const impMap = projectImpressionsByQuery[pid] ?? {};
+        const rows: ReportData["opportunityTableRows"] = gapRows.map((row) => {
+          const demand = impMap[normalizeQ(row.query)] ?? 0;
+          return {
+            query: row.query,
+            demand,
+            cpc: null,
+            gap: row.gap,
+            opportunityNote: getOpportunityNote(demand, row.gap),
+          };
+        });
+        opportunityTableRowsByProject[pid] = rows.sort((a, b) => b.demand - a.demand);
+      });
+      const projectIdToName = new Map<string, string>();
+      (projects ?? []).forEach((p: any) => projectIdToName.set(p.id, p.brand_name || "Unnamed"));
+      const opportunityTableRows: ReportData["opportunityTableRows"] = (projectIds ?? []).flatMap((pid) =>
+        (opportunityTableRowsByProject[pid] ?? []).map((row) => ({
+          ...row,
+          projectName: projectIdToName.get(pid),
+        }))
+      ).sort((a, b) => b.demand - a.demand);
 
       // Performance Summary (Radar Chart)
       const performanceSummary = [
@@ -833,6 +1761,21 @@ export default function Reports() {
         oldestDraft: oldestDraft ? format(new Date(oldestDraft.created_at), "MMM dd, yyyy") : "N/A",
       };
 
+      // GA4 summary for Search Intent / performance context
+      const endDateForGa4 = endOfDay(subDays(new Date(), 0));
+      let ga4Summary: ReportData["ga4Summary"] = null;
+      let ga4TopPages: ReportData["ga4TopPages"] = [];
+      try {
+        const ga4Res = await fetch(
+          `/api/integrations/google-analytics/report-summary?start=${format(startDate, "yyyy-MM-dd")}&end=${format(endDateForGa4, "yyyy-MM-dd")}`
+        );
+        const ga4Json = await ga4Res.json();
+        if (ga4Json.summary) ga4Summary = ga4Json.summary;
+        if (Array.isArray(ga4Json.topPages)) ga4TopPages = ga4Json.topPages;
+      } catch (_) {
+        // GA4 optional
+      }
+
       setReportData({
         totalKeywords,
         keywordsChange,
@@ -857,6 +1800,37 @@ export default function Reports() {
         activeSessions: sessions?.length || 0,
         totalResponses: responses?.length || 0,
         responsesByPlatform: responsesByPlatformArray,
+        geoVisibilityRegionalTable,
+        aiSearchPresenceEngines,
+        aiEngineDescriptions,
+        aiPresenceProjectCount: projectIds.length,
+        brandAnalysisProjects,
+        aiPresenceByProject,
+        brandNarrativeDesired,
+        brandNarrativeTableRows,
+        brandVoiceProfiles,
+        brandNarrativeByVoice,
+        searchIntentTableRows,
+        searchIntentSources,
+        questionsTableRows,
+        questionsSummary,
+        questionsTableRowsByProject,
+        questionsSummaryByProject,
+        ga4Summary,
+        ga4TopPages,
+        aiVsGoogleGapTableRows,
+        aiVsGoogleGapByProject,
+        storedGapSuggestionQueriesByProject,
+        attentionShare,
+        attentionShareByProject,
+        narrativeAlignmentPct:
+          brandNarrativeTableRows.length > 0
+            ? (brandNarrativeTableRows.filter((r) => r.alignment === "match").length /
+                brandNarrativeTableRows.length) *
+              100
+            : 0,
+        opportunityTableRows,
+        opportunityTableRowsByProject,
         performanceSummary,
         // Competitor Comparison Report
         competitorRankings: competitorRankings || [],
@@ -905,6 +1879,32 @@ export default function Reports() {
         activeSessions: 0,
         totalResponses: 0,
         responsesByPlatform: [],
+        geoVisibilityRegionalTable: [],
+        aiSearchPresenceEngines: [],
+        aiEngineDescriptions: [],
+        aiPresenceProjectCount: 0,
+        brandAnalysisProjects: [],
+        aiPresenceByProject: {},
+        brandNarrativeDesired: null,
+        brandNarrativeTableRows: [],
+        brandVoiceProfiles: [],
+        brandNarrativeByVoice: {},
+        searchIntentTableRows: [],
+        searchIntentSources: { keywords: 0, gsc: 0 },
+        questionsTableRows: [],
+        questionsSummary: { total: 0, withPresence: 0, coveragePct: 0 },
+        questionsTableRowsByProject: {},
+        questionsSummaryByProject: {},
+        ga4Summary: null,
+        ga4TopPages: [],
+        aiVsGoogleGapTableRows: [],
+        aiVsGoogleGapByProject: {},
+        storedGapSuggestionQueriesByProject: {},
+        attentionShare: { organicClicks: 0, aiMentions: 0, organicPct: 0, aiPct: 0 },
+        attentionShareByProject: {},
+        narrativeAlignmentPct: 0,
+        opportunityTableRows: [],
+        opportunityTableRowsByProject: {},
         performanceSummary: [],
         // Competitor Comparison Report
         competitorRankings: [],
@@ -1500,51 +2500,73 @@ export default function Reports() {
               <RefreshCw
                 className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
               />
-              Refresh
+              {t.dashboard.reports.refresh}
             </button>
             <button
               onClick={handleShareClick}
               className="px-4 py-2 border border-green-600 text-green-600 rounded-lg hover:bg-green-50 transition-all flex items-center gap-2"
             >
               <Share2 className="w-4 h-4" />
-              Share
+              {t.dashboard.reports.share}
             </button>
             <button
               onClick={() => setShowExportModal(true)}
               className="px-4 py-2 bg-gradient-to-r from-primary-600 to-accent-600 text-white rounded-lg hover:shadow-lg transition-all flex items-center gap-2"
             >
               <Download className="w-4 h-4" />
-              Export
+              {t.dashboard.reports.export}
             </button>
           </div>
         </div>
       </div>
 
+      {/* Report Category Tabs */}
+      <div className="mb-6 border-b border-gray-200">
+        <nav className="flex flex-wrap gap-1 -mb-px" aria-label="Report categories">
+          {REPORT_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveReportTab(tab.id)}
+              className={`px-4 py-3 text-sm font-medium rounded-t-lg border-b-2 transition-colors whitespace-nowrap ${
+                activeReportTab === tab.id
+                  ? "border-primary-600 text-primary-600 bg-primary-50/50"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
+            >
+              {t.dashboard.reports[tab.labelKey]}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* Core Visibility & Representation - Main report content */}
+      {activeReportTab === "core" && (
+        <>
       {/* Key Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 report-section">
         <MetricCard
-          label="Total Keywords"
+          label={t.dashboard.reports.totalKeywords}
           value={reportData.totalKeywords.toString()}
           change={reportData.keywordsChange}
           icon={Target}
           color="blue"
         />
         <MetricCard
-          label="Content Created"
+          label={t.dashboard.reports.contentCreated}
           value={reportData.totalContent.toString()}
           change={reportData.contentChange}
           icon={FileText}
           color="purple"
         />
         <MetricCard
-          label="Brand Projects"
+          label={t.dashboard.reports.brandProjects}
           value={`${reportData.avgVisibilityScore.toFixed(0)}`}
           change={reportData.visibilityChange}
           icon={Eye}
           color="green"
         />
         <MetricCard
-          label="Active Platforms"
+          label={t.dashboard.reports.activePlatforms}
           value={reportData.totalMentions.toString()}
           change={reportData.mentionsChange}
           icon={Zap}
@@ -1560,7 +2582,7 @@ export default function Reports() {
         className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
       >
         <h2 className="text-xl font-bold text-gray-900 mb-6">
-          Performance Overview
+          {t.dashboard.reports.performanceOverview}
         </h2>
         <ResponsiveContainer width="100%" height={400}>
           <RadarChart data={reportData.performanceSummary}>
@@ -1568,14 +2590,14 @@ export default function Reports() {
             <PolarAngleAxis dataKey="metric" tick={{ fill: "#6b7280" }} />
             <PolarRadiusAxis angle={90} domain={[0, 100]} />
             <Radar
-              name="Current"
+              name={t.dashboard.reports.current}
               dataKey="value"
               stroke={COLORS.primary}
               fill={COLORS.primary}
               fillOpacity={0.6}
             />
             <Radar
-              name="Target"
+              name={t.dashboard.reports.target}
               dataKey="target"
               stroke={COLORS.success}
               fill={COLORS.success}
@@ -1597,16 +2619,16 @@ export default function Reports() {
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">
-              Ranking Performance Trend
+              {t.dashboard.reports.rankingPerformanceTrend}
             </h2>
             <div className="flex items-center gap-4 text-sm">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-blue-500" />
-                <span className="text-gray-600">Performance</span>
+                <span className="text-gray-600">{t.dashboard.reports.performance}</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-purple-500" />
-                <span className="text-gray-600">Keywords</span>
+                <span className="text-gray-600">{t.dashboard.reports.keywords}</span>
               </div>
             </div>
           </div>
@@ -1633,9 +2655,9 @@ export default function Reports() {
                 yAxisId="left"
                 stroke="#6b7280"
                 tick={{ fontSize: 12 }}
-                label={{ 
-                  value: 'Performance Score (%)', 
-                  angle: -90, 
+label={{
+                  value: t.dashboard.reports.performanceScorePct,
+                  angle: -90,
                   position: 'insideLeft',
                   style: { fontSize: 12, fill: '#6b7280' }
                 }}
@@ -1645,8 +2667,8 @@ export default function Reports() {
                 orientation="right"
                 stroke="#6b7280"
                 tick={{ fontSize: 12 }}
-                label={{ 
-                  value: 'Keywords Tracked', 
+                label={{
+                  value: t.dashboard.reports.keywordsTracked,
                   angle: 90, 
                   position: 'insideRight',
                   style: { fontSize: 12, fill: '#6b7280' }
@@ -1706,21 +2728,21 @@ export default function Reports() {
           </ResponsiveContainer>
           <div className="mt-4 grid grid-cols-2 gap-4">
             <div className="p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">Average Rank</p>
+              <p className="text-sm text-gray-600 mb-1">{t.dashboard.reports.averageRank}</p>
               <p className="text-2xl font-bold text-blue-600">
                 #{reportData.avgRanking.toFixed(1)}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                Lower is better
+                {t.dashboard.reports.lowerIsBetter}
               </p>
             </div>
             <div className="p-4 bg-purple-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">Performance Score</p>
+              <p className="text-sm text-gray-600 mb-1">{t.dashboard.reports.performanceScore}</p>
               <p className="text-2xl font-bold text-purple-600">
                 {(Math.max(0, 100 - reportData.avgRanking)).toFixed(1)}%
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                Higher is better
+                {t.dashboard.reports.higherIsBetter}
               </p>
             </div>
           </div>
@@ -1735,11 +2757,11 @@ export default function Reports() {
         >
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">
-              Brand Projects Activity Trend
+              {t.dashboard.reports.brandProjectsActivityTrend}
             </h2>
             <div className="flex items-center gap-2 text-sm">
               <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span className="text-gray-600">Activity Score</span>
+              <span className="text-gray-600">{t.dashboard.reports.activityScore}</span>
           </div>
         </div>
           <ResponsiveContainer width="100%" height={300}>
@@ -1780,7 +2802,7 @@ export default function Reports() {
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <h2 className="text-xl font-bold text-gray-900 mb-6">
-            Content by Platform
+            {t.dashboard.reports.contentByPlatform}
           </h2>
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
@@ -1832,7 +2854,7 @@ export default function Reports() {
           className="bg-white rounded-xl p-6 border border-gray-200"
         >
           <h2 className="text-xl font-bold text-gray-900 mb-6">
-            Content Status Distribution
+            {t.dashboard.reports.contentStatusDistribution}
           </h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={reportData.contentByStatus}>
@@ -1845,13 +2867,13 @@ export default function Reports() {
           </ResponsiveContainer>
           <div className="mt-4 grid grid-cols-2 gap-4">
             <div className="p-4 bg-green-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">Published</p>
+              <p className="text-sm text-gray-600 mb-1">{t.dashboard.reports.published}</p>
               <p className="text-2xl font-bold text-green-600">
                 {reportData.publishedContent}
               </p>
             </div>
             <div className="p-4 bg-gray-50 rounded-lg">
-              <p className="text-sm text-gray-600 mb-1">Draft</p>
+              <p className="text-sm text-gray-600 mb-1">{t.dashboard.reports.draft}</p>
               <p className="text-2xl font-bold text-gray-600">
                 {reportData.draftContent}
               </p>
@@ -1860,86 +2882,1102 @@ export default function Reports() {
         </motion.div>
             </div>
 
-      {/* AI Platform Performance */}
+      {/* GEO Visibility & Market Coverage – Report #1 (Demand vs Organic vs AI) – at top of AI Search Presence */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.68 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <Globe className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">{t.dashboard.reports.geoVisibilityMarketCoverage}</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {t.dashboard.reports.geoVisibilitySubtitle}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="px-6 py-4">
+          <p className="text-sm text-gray-600 mb-4">
+            {t.dashboard.reports.geoDataNote}
+          </p>
+          {(reportData.geoVisibilityRegionalTable ?? []).length === 0 ? (
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-6 text-center text-gray-600">
+              <Globe className="w-10 h-10 mx-auto mb-2 text-gray-400" />
+              <p>{t.dashboard.reports.noRegionalData}</p>
+              <a href="/dashboard/ai-visibility" className="text-primary-600 font-medium mt-2 inline-block">{t.dashboard.reports.goToAIVisibility}</a>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">{t.dashboard.reports.regionProject}</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">{t.dashboard.reports.demandGscImpressions}</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">{t.dashboard.reports.organicGscClicks}</th>
+                    <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">{t.dashboard.reports.aiVisibilityPct}</th>
+                    <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">{t.dashboard.reports.gapNote}</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {(reportData.geoVisibilityRegionalTable ?? []).map((row, i) => (
+                    <tr key={i} className={row.region === "Overall" ? "bg-emerald-50/50" : ""}>
+                      <td className="px-4 py-3 font-medium text-gray-900">{row.region}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{row.demand.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{row.organic.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{row.aiPct}%</td>
+                      <td className="px-4 py-3 text-amber-700">{row.gapNote || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </motion.div>
+
+      {/* AI Search Presence – Report #2 (full) */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.7 }}
-        className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
       >
-        <h2 className="text-xl font-bold text-gray-900 mb-6">
-          Brand Analysis Platform Coverage
-        </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {reportData.visibilityByPlatform.map((platform, index) => (
-                <motion.div
-              key={platform.platform}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.8 + index * 0.1 }}
-              className="p-6 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:shadow-lg transition-all"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-900 capitalize">
-                  {platform.platform}
-                </h3>
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center"
-                  style={{
-                    backgroundColor: `${
-                      PLATFORM_COLORS[platform.platform] || COLORS.secondary
-                    }15`,
-                  }}
-                >
-                  <Globe
-                    className="w-5 h-5"
-                    style={{
-                      color:
-                        PLATFORM_COLORS[platform.platform] || COLORS.secondary,
-                    }}
-                  />
-                </div>
-                      </div>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Project Coverage</p>
-                  <div className="flex items-center gap-3">
-                    <p className="text-3xl font-bold text-gray-900">
-                      {platform.score.toFixed(1)}%
-                    </p>
-                    <div className="flex-1 bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-gradient-to-r from-primary-600 to-accent-600 h-2 rounded-full"
-                        style={{ width: `${platform.score}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Target Keywords:</span>
-                  <span className="font-semibold text-gray-900">
-                    {platform.mentions}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-600">Avg Competitors:</span>
-                  <span
-                    className={`font-semibold ${
-                      platform.sentiment >= 70
-                        ? "text-green-600"
-                        : platform.sentiment >= 40
-                        ? "text-yellow-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {(platform.sentiment / 20).toFixed(1)}
-                  </span>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
+        <div className="bg-gradient-to-r from-primary-600 to-accent-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <Brain className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">
+                  {selectedAIPresenceProjectId === "all"
+                    ? t.dashboard.reports.aiSearchPresence
+                    : t.dashboard.reports.aiSearchPresenceForProject.replace("{project}", (reportData.brandAnalysisProjects ?? []).find((p) => p.id === selectedAIPresenceProjectId)?.brand_name ?? t.dashboard.reports.thisProject)}
+                </h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {selectedAIPresenceProjectId === "all"
+                    ? t.dashboard.reports.aiSearchPresenceSubtitle
+                    : t.dashboard.reports.aiSearchPresenceSubtitle}
+                </p>
+              </div>
             </div>
-          </motion.div>
+          </div>
+        </div>
+
+        {/* Project selector + How this works + empty state */}
+        <div className="px-6 pt-4">
+          {(reportData.brandAnalysisProjects ?? []).length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <label htmlFor="ai-presence-project" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                {t.dashboard.reports.showPresenceFor}
+              </label>
+              <select
+                id="ai-presence-project"
+                value={selectedAIPresenceProjectId}
+                onChange={(e) => setSelectedAIPresenceProjectId(e.target.value === "all" ? "all" : e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">{t.dashboard.reports.chooseProject}</option>
+                {(reportData.brandAnalysisProjects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="rounded-lg bg-blue-50 border border-blue-100 p-4 text-sm text-blue-900">
+            <p className="font-medium mb-1">{t.dashboard.reports.howThisWorks}</p>
+            <p className="text-blue-800/90">
+              {t.dashboard.reports.aiSearchPresenceHelp}
+            </p>
+            {((reportData.aiSearchPresenceEngines ?? []).reduce((sum, e) => sum + e.totalQueries, 0)) === 0 && selectedAIPresenceProjectId === "all" && (
+              <p className="mt-3 pt-3 border-t border-blue-200 font-medium">
+                {(reportData.aiPresenceProjectCount ?? 0) === 0
+                  ? t.dashboard.reports.noProjectsYet
+                  : t.dashboard.reports.noResponsesYet}
+                <a href="/dashboard/ai-visibility" className="underline font-semibold">{t.dashboard.reports.aiVisibility}</a>
+                {(reportData.aiPresenceProjectCount ?? 0) === 0
+                  ? t.dashboard.reports.noProjectsYetSuffix
+                  : t.dashboard.reports.noResponsesYetSuffix}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* AI engine cards – use data for selected project or all */}
+        {(() => {
+          const currentEngines =
+            selectedAIPresenceProjectId === "all"
+              ? (reportData.aiSearchPresenceEngines ?? [])
+              : (reportData.aiPresenceByProject?.[selectedAIPresenceProjectId]?.engines ?? []);
+          const currentDescriptions =
+            selectedAIPresenceProjectId === "all"
+              ? (reportData.aiEngineDescriptions ?? [])
+              : (reportData.aiPresenceByProject?.[selectedAIPresenceProjectId]?.descriptions ?? []);
+          return (
+        <>
+        <div className="p-6">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">
+            {t.dashboard.reports.presenceByAIEngine}
+          </h3>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {currentEngines.map((engine, index) => (
+              <motion.div
+                key={engine.platform}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.75 + index * 0.05 }}
+                className="p-5 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:shadow-md transition-all"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-semibold text-gray-900">
+                    {engine.displayName}
+                  </h4>
+                  <div
+                    className="w-9 h-9 rounded-lg flex items-center justify-center"
+                    style={{
+                      backgroundColor: `${PLATFORM_COLORS[engine.platform] || COLORS.secondary}18`,
+                    }}
+                  >
+                    <Brain
+                      className="w-4 h-4"
+                      style={{
+                        color: PLATFORM_COLORS[engine.platform] || COLORS.secondary,
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-0.5">{t.dashboard.reports.presenceScore}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl font-bold text-gray-900">
+                        {engine.presenceScore.toFixed(0)}%
+                      </span>
+                      <div className="flex-1 bg-gray-200 rounded-full h-2 min-w-[60px]">
+                        <div
+                          className="h-2 rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(engine.presenceScore, 100)}%`,
+                            backgroundColor:
+                              PLATFORM_COLORS[engine.platform] || COLORS.primary,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">{t.dashboard.reports.queriesLabel}</span>
+                    <span className="font-medium text-gray-900">
+                      {engine.totalQueries}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">{t.dashboard.reports.brandMentions}</span>
+                    <span className="font-medium text-gray-900">
+                      {engine.mentionCount}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-500">{t.dashboard.reports.shareOfVoice}</span>
+                    <span className="font-medium text-gray-900">
+                      {engine.shareOfVoicePct.toFixed(1)}%
+                    </span>
+                  </div>
+                  {engine.avgSentiment != null && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-500">{t.dashboard.reports.avgSentiment}</span>
+                      <span
+                        className={`font-medium ${
+                          engine.avgSentiment >= 0.3
+                            ? "text-green-600"
+                            : engine.avgSentiment >= -0.3
+                            ? "text-amber-600"
+                            : "text-red-600"
+                        }`}
+                      >
+                        {(engine.avgSentiment * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        {/* Google vs AI Context – does AI recognize the brand, representation issue */}
+        <div className="px-6 pb-6 pt-2 border-t border-gray-100">
+          <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
+            {t.dashboard.reports.googleVsAIContext}
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            {t.dashboard.reports.googleVsAIContextHelp}
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-gray-200 mb-2">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.source}</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.querySet}</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.doesAIRecognizeBrand}</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.aiRepresentationIssue}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Google organic search – brand visibility in Google (keywords / GSC) */}
+                {(() => {
+                  const kwCount = reportData.totalKeywords ?? 0;
+                  const gscCount = reportData.searchIntentSources?.gsc ?? 0;
+                  const avgRank = reportData.avgRanking ?? 0;
+                  const hasRanking = avgRank > 0 && avgRank <= 100;
+                  const googleIssue =
+                    kwCount === 0 && gscCount === 0
+                      ? t.dashboard.reports.noData
+                      : !hasRanking
+                      ? t.dashboard.reports.lowVisibility
+                      : avgRank > 50
+                      ? t.dashboard.reports.lowVisibility
+                      : t.dashboard.reports.statusNone;
+                  return (
+                    <tr className="border-b border-gray-100 bg-amber-50/50 hover:bg-amber-50">
+                      <td className="py-3 px-4 font-medium text-gray-900">{t.dashboard.reports.googleOrganicSearch}</td>
+                      <td className="py-3 px-4 text-gray-700">
+                        {kwCount > 0 || gscCount > 0
+                          ? `${kwCount} keywords${gscCount > 0 ? `, ${gscCount} GSC queries` : ""}`
+                          : "—"}
+                      </td>
+                      <td className="py-3 px-4">
+                        {kwCount > 0 || gscCount > 0 ? (
+                          <span className={hasRanking ? "text-green-600 font-medium" : "text-amber-600 font-medium"}>
+                            {hasRanking ? t.dashboard.reports.brandInResults : t.dashboard.reports.noRanking}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={
+                            googleIssue === t.dashboard.reports.statusNone
+                              ? "text-green-600"
+                              : googleIssue === t.dashboard.reports.lowVisibility
+                              ? "text-amber-600"
+                              : "text-gray-500"
+                          }
+                        >
+                          {googleIssue}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })()}
+                {currentEngines.map((engine) => {
+                  const recognizes = (engine.mentionCount ?? 0) > 0;
+                  const lowPresence = (engine.presenceScore ?? 0) < 20 && (engine.presenceScore ?? 0) > 0;
+                  const negativeSentiment = engine.avgSentiment != null && engine.avgSentiment < -0.2;
+                  const notMentioned = (engine.mentionCount ?? 0) === 0;
+                  const issue = notMentioned
+                    ? t.dashboard.reports.notMentioned
+                    : negativeSentiment
+                    ? t.dashboard.reports.negativeSentiment
+                    : lowPresence
+                    ? t.dashboard.reports.lowPresence
+                    : t.dashboard.reports.statusNone;
+                  return (
+                    <tr key={engine.platform} className="border-b border-gray-100 hover:bg-gray-50/50">
+                      <td className="py-3 px-4 font-medium text-gray-900">{engine.displayName}</td>
+                      <td className="py-3 px-4 text-gray-700">{engine.totalQueries} {t.dashboard.reports.queriesSuffix}</td>
+                      <td className="py-3 px-4">
+                        <span className={recognizes ? "text-green-600 font-medium" : "text-amber-600 font-medium"}>
+                          {recognizes ? t.dashboard.reports.yes : t.dashboard.reports.no}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span
+                          className={
+                            issue === t.dashboard.reports.statusNone
+                              ? "text-green-600"
+                              : issue === t.dashboard.reports.lowPresence
+                              ? "text-amber-600"
+                              : "text-red-600 font-medium"
+                          }
+                        >
+                          {issue}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* How AI describes your brand */}
+        <div className="px-6 pb-6 pt-2 border-t border-gray-100">
+          <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <Quote className="w-5 h-5 text-primary-600" />
+            {t.dashboard.reports.howAIDescribesYourBrand}
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">
+            {t.dashboard.reports.representativeSnippetsHelp}
+          </p>
+          <div className="space-y-4">
+            {currentDescriptions.map((engine) => (
+              <motion.div
+                key={engine.platform}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="border border-gray-200 rounded-xl p-4 bg-gray-50/50"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div
+                    className="w-8 h-8 rounded-lg flex items-center justify-center"
+                    style={{
+                      backgroundColor: `${PLATFORM_COLORS[engine.platform] || COLORS.secondary}20`,
+                    }}
+                  >
+                    <Brain
+                      className="w-4 h-4"
+                      style={{
+                        color: PLATFORM_COLORS[engine.platform] || COLORS.secondary,
+                      }}
+                    />
+                  </div>
+                  <span className="font-semibold text-gray-900">
+                    {engine.displayName}
+                  </span>
+                </div>
+                {engine.snippets.length > 0 ? (
+                  <ul className="space-y-2">
+                    {engine.snippets.map((snippet, i) => (
+                      <li
+                        key={i}
+                        className="text-sm text-gray-700 pl-4 border-l-2 border-primary-200 italic"
+                      >
+                        &ldquo;{snippet}&rdquo;
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-gray-500 italic">
+                    {t.dashboard.reports.noResponsesForEngine.replace("{engine}", engine.displayName)}
+                  </p>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        </div>
+        </>
+        ); })()}
+      </motion.div>
+
+      {/* Brand Narrative & Perception – Report #3 */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.8 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <MessageCircle className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">{t.dashboard.reports.brandNarrativePerception}</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {t.dashboard.reports.brandNarrativeSubtitle}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {(reportData?.brandVoiceProfiles?.length ?? 0) > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <label htmlFor="narrative-voice" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                {t.dashboard.reports.showNarrativeFor}
+              </label>
+              <select
+                id="narrative-voice"
+                value={selectedNarrativeVoiceId || (reportData?.brandVoiceProfiles?.[0]?.id ?? "")}
+                onChange={(e) => setSelectedNarrativeVoiceId(e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                {(reportData?.brandVoiceProfiles ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {(() => {
+            const voiceId = selectedNarrativeVoiceId || reportData?.brandVoiceProfiles?.[0]?.id;
+            const narrative = voiceId ? reportData?.brandNarrativeByVoice?.[voiceId] : null;
+            const desired = narrative?.desired ?? reportData?.brandNarrativeDesired;
+            const tableRows = narrative?.tableRows ?? reportData?.brandNarrativeTableRows ?? [];
+            return desired ? (
+              <>
+                <p className="text-sm text-gray-600 mb-4">
+                  {t.dashboard.reports.desiredNarrativeFrom.replace("{name}", desired.brand_name)}
+                </p>
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="py-3 px-4 text-sm font-semibold text-gray-700">{t.dashboard.reports.dimension}</th>
+                        <th className="py-3 px-4 text-sm font-semibold text-gray-700">{t.dashboard.reports.desired}</th>
+                        <th className="py-3 px-4 text-sm font-semibold text-gray-700">{t.dashboard.reports.observed}</th>
+                        <th className="py-3 px-4 text-sm font-semibold text-gray-700">{t.dashboard.reports.alignment}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableRows.map((row, i) => (
+                      <tr
+                        key={i}
+                        className="border-b border-gray-100 hover:bg-gray-50/50"
+                      >
+                        <td className="py-3 px-4 text-sm font-medium text-gray-900">
+                          {row.dimension}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-700 max-w-xs">
+                          {row.desired}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-gray-700 max-w-md">
+                          {row.observed}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                              row.alignment === "match"
+                                ? "bg-green-100 text-green-800"
+                                : row.alignment === "partial"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {row.alignment === "match"
+                              ? t.dashboard.reports.alignmentMatch
+                              : row.alignment === "partial"
+                              ? t.dashboard.reports.alignmentPartial
+                              : t.dashboard.reports.alignmentGap}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+              <p className="text-gray-600 font-medium mb-1">{t.dashboard.reports.noBrandVoiceDefined}</p>
+              <p className="text-sm text-gray-500 mb-4">
+                {t.dashboard.reports.createBrandVoiceInSettings}
+              </p>
+              <a
+                href="/dashboard/settings?tab=brand-voice"
+                className="text-sm font-medium text-primary-600 hover:text-primary-700 underline"
+              >
+                {t.dashboard.reports.goToSettingsBrandVoice}
+              </a>
+            </div>
+          );
+          })()}
+        </div>
+      </motion.div>
+
+      {/* Search Intent Intelligence – Report #4 */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.82 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <Search className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">{t.dashboard.reports.searchIntentIntelligence}</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {t.dashboard.reports.searchIntentSubtitle}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {reportData.ga4Summary != null && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-4">
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">{t.dashboard.reports.sessions}</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.sessions?.toLocaleString() ?? 0}</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">{t.dashboard.reports.users}</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.users?.toLocaleString() ?? 0}</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">Pageviews</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.pageviews?.toLocaleString() ?? 0}</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">Bounce rate</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.bounceRate != null ? `${(reportData.ga4Summary.bounceRate * 100).toFixed(1)}%` : "—"}</p>
+              </div>
+              <div className="bg-sky-50 rounded-lg p-3 border border-sky-100">
+                <p className="text-xs text-sky-600 font-medium">Avg session</p>
+                <p className="text-lg font-bold text-sky-900">{reportData.ga4Summary.avgSessionDuration != null ? `${Math.round(reportData.ga4Summary.avgSessionDuration)}s` : "—"}</p>
+              </div>
+            </div>
+          )}
+          {reportData.ga4TopPages != null && reportData.ga4TopPages.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">GA4 top pages (date range)</p>
+              <ul className="text-sm text-gray-700 space-y-1 max-h-24 overflow-y-auto rounded border border-gray-100 p-2 bg-gray-50/50">
+                {reportData.ga4TopPages.slice(0, 5).map((p, i) => (
+                  <li key={i} className="truncate" title={p.page}>
+                    <span className="font-medium">{p.pageviews?.toLocaleString()}</span> views — {p.page || "/"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700">Intent</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700 text-right">Query count</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700 text-right">With presence</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700 text-right">Gap</th>
+                  <th className="py-3 px-4 text-sm font-semibold text-gray-700 text-right">Coverage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(reportData.searchIntentTableRows ?? []).map((row, i) => (
+                  <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                    <td className="py-3 px-4 text-sm font-medium text-gray-900">{row.intent}</td>
+                    <td className="py-3 px-4 text-sm text-gray-700 text-right">{row.queryCount}</td>
+                    <td className="py-3 px-4 text-sm text-gray-700 text-right">{row.withPresence}</td>
+                    <td className="py-3 px-4 text-sm text-right">
+                      <span className={row.gap > 0 ? "text-amber-600 font-medium" : "text-gray-600"}>{row.gap}</span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <span
+                        className={`text-sm font-medium ${
+                          row.coveragePct >= 70 ? "text-green-600" : row.coveragePct >= 40 ? "text-amber-600" : "text-red-600"
+                        }`}
+                      >
+                        {row.coveragePct.toFixed(0)}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(reportData.searchIntentTableRows ?? []).reduce((s, r) => s + r.queryCount, 0) === 0 && (
+            <div className="text-center py-6 text-gray-500 text-sm">
+              No query data yet. Add keywords in Settings, or connect GSC and run AI Visibility to sync GSC queries. GA4 data appears above when connected.
+            </div>
+          )}
+        </div>
+      </motion.div>
+
+      {/* Query & Question Intelligence – Report #6 (How people really ask – GSC, NLP – Questions vs Coverage) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.83 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-teal-600 to-cyan-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <MessageCircle className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">{t.dashboard.reports.queryQuestionIntelligence}</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {t.dashboard.reports.queryQuestionSubtitle}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {(reportData.brandAnalysisProjects ?? []).length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <label htmlFor="questions-project" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                {t.dashboard.reports.showQuestionsFor}
+              </label>
+              <select
+                id="questions-project"
+                value={selectedQuestionsProjectId}
+                onChange={(e) => setSelectedQuestionsProjectId(e.target.value === "all" ? "all" : e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">{t.dashboard.reports.chooseProject}</option>
+                {(reportData.brandAnalysisProjects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <p className="text-sm text-gray-600 mb-3">
+            Question-style queries from this project&apos;s GSC and your keyword data. Coverage = ranking in top 100.
+          </p>
+          {(() => {
+            const currentRows = selectedQuestionsProjectId === "all"
+              ? (reportData.questionsTableRows ?? [])
+              : (reportData.questionsTableRowsByProject?.[selectedQuestionsProjectId] ?? []);
+            const currentSummary = selectedQuestionsProjectId === "all"
+              ? reportData.questionsSummary
+              : reportData.questionsSummaryByProject?.[selectedQuestionsProjectId];
+            return (
+              <>
+                {(currentSummary?.total ?? 0) > 0 && (
+                  <p className="text-sm text-gray-600 mb-4">
+                    {t.dashboard.reports.summaryQuestions.replace("{total}", String(currentSummary!.total)).replace("{withPresence}", String(currentSummary!.withPresence)).replace("{coveragePct}", currentSummary!.coveragePct.toFixed(0))}
+                  </p>
+                )}
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.question}</th>
+                        <th className="py-3 px-4 font-semibold text-gray-700 text-right">{t.dashboard.reports.position}</th>
+                        <th className="py-3 px-4 font-semibold text-gray-700 text-center">{t.dashboard.reports.coverage}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentRows.map((row, i) => (
+                        <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                          <td className="py-3 px-4 font-medium text-gray-900 max-w-[320px]" title={row.query}>
+                            {row.query.length > 80 ? row.query.slice(0, 80) + "…" : row.query}
+                          </td>
+                          <td className="py-3 px-4 text-gray-700 text-right">
+                            {row.position != null ? `#${row.position}` : "—"}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {row.hasPresence ? (
+                              <span className="text-green-600 font-medium">{t.dashboard.reports.yes}</span>
+                            ) : (
+                              <span className="text-gray-500">{t.dashboard.reports.no}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {currentRows.length === 0 && (
+                  <div className="text-center py-6 text-gray-500 text-sm">
+                    {!selectedQuestionsProjectId || selectedQuestionsProjectId === "all"
+                      ? t.dashboard.reports.noQuestionQueries
+                      : t.dashboard.reports.noQuestionQueriesProject}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </motion.div>
+
+      {/* Market Share of Attention – Report #7 (Who controls attention | AI Mentions, Organic Proxy | Share Chart) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.84 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-amber-500 to-orange-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <Eye className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">{t.dashboard.reports.marketShareOfAttention}</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {t.dashboard.reports.marketShareSubtitle}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {(reportData.brandAnalysisProjects ?? []).length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <label htmlFor="attention-project" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                {t.dashboard.reports.showAttentionFor}
+              </label>
+              <select
+                id="attention-project"
+                value={selectedAttentionProjectId}
+                onChange={(e) => setSelectedAttentionProjectId(e.target.value === "all" ? "all" : e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">{t.dashboard.reports.chooseProject}</option>
+                {(reportData.brandAnalysisProjects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {(() => {
+            const attention =
+              selectedAttentionProjectId === "all"
+                ? reportData.attentionShare
+                : reportData.attentionShareByProject?.[selectedAttentionProjectId];
+            const hasData = attention && (attention.organicClicks > 0 || attention.aiMentions > 0);
+            const chartData = hasData
+              ? [
+                  { name: "Organic (GSC clicks)", value: attention!.organicClicks, pct: attention!.organicPct, color: COLORS.primary },
+                  { name: "AI (brand mentions)", value: attention!.aiMentions, pct: attention!.aiPct, color: COLORS.secondary },
+                ].filter((d) => d.value > 0)
+              : [];
+            return (
+              <>
+                {hasData && chartData.length > 0 && (
+                  <div className="flex flex-col gap-6">
+                    <div className="flex justify-center">
+                      <div className="w-64 h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={chartData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={50}
+                              outerRadius={80}
+                              paddingAngle={2}
+                              label={({ name, pct }) => `${name} ${pct.toFixed(0)}%`}
+                            >
+                              {chartData.map((entry, index) => (
+                                <Cell key={index} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(value: number, name: string, props: { payload?: { pct?: number } }) => [
+                                `${value}${props.payload?.pct != null ? ` (${props.payload.pct.toFixed(1)}%)` : ""}`,
+                                name,
+                              ]}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-gray-600 mb-1">
+                        <strong>{t.dashboard.reports.organic}:</strong> {attention!.organicClicks} GSC clicks · <strong>AI:</strong> {attention!.aiMentions} {t.dashboard.reports.brandMentions}
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        <strong>{t.dashboard.reports.attentionVsNarrative}:</strong> {t.dashboard.reports.narrativeAlignment}{ " "}
+                        <strong>{reportData.narrativeAlignmentPct.toFixed(0)}%</strong> {t.dashboard.reports.fromBrandNarrative}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {(!hasData || chartData.length === 0) && (
+                  <div className="text-center py-6 text-gray-500 text-sm">
+                    {!selectedAttentionProjectId || selectedAttentionProjectId === "all"
+                      ? t.dashboard.reports.noAttentionData
+                      : t.dashboard.reports.noAttentionDataProject}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </motion.div>
+
+      {/* Opportunity & Blind Spots – Report #8 (Demand + CPC + Gap | GSC, AI, CPC | Opportunity Table) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.845 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <Target className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">{t.dashboard.reports.opportunityBlindSpots}</h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {t.dashboard.reports.opportunitySubtitle}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          {(reportData.brandAnalysisProjects ?? []).length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <label htmlFor="opportunity-project" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                {t.dashboard.reports.showOpportunityFor}
+              </label>
+              <select
+                id="opportunity-project"
+                value={selectedOpportunityProjectId}
+                onChange={(e) => setSelectedOpportunityProjectId(e.target.value === "all" ? "all" : e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">{t.dashboard.reports.chooseProject}</option>
+                {(reportData.brandAnalysisProjects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <p className="text-sm text-gray-600 mb-3">
+            {t.dashboard.reports.opportunityTableNote}
+          </p>
+          {(() => {
+            const rows =
+              selectedOpportunityProjectId === "all"
+                ? (reportData.opportunityTableRows ?? [])
+                : (reportData.opportunityTableRowsByProject?.[selectedOpportunityProjectId] ?? []);
+            return (
+              <>
+                {rows.length > 0 ? (
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          {selectedOpportunityProjectId === "all" && (
+                            <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.project}</th>
+                          )}
+                          <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.queryColumn}</th>
+                          <th className="py-3 px-4 font-semibold text-gray-700 text-right">{t.dashboard.reports.demandImpressions}</th>
+                          <th className="py-3 px-4 font-semibold text-gray-700 text-right">{t.dashboard.reports.cpc}</th>
+                          <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.gap}</th>
+                          <th className="py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.opportunity}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.slice(0, 100).map((row, i) => (
+                          <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                            {selectedOpportunityProjectId === "all" && (
+                              <td className="py-3 px-4 text-gray-700">{row.projectName ?? "—"}</td>
+                            )}
+                            <td className="py-3 px-4 font-medium text-gray-900 max-w-[240px]" title={row.query}>
+                              {row.query.length > 60 ? row.query.slice(0, 60) + "…" : row.query}
+                            </td>
+                            <td className="py-3 px-4 text-gray-700 text-right">{row.demand.toLocaleString()}</td>
+                            <td className="py-3 px-4 text-gray-700 text-right">{row.cpc != null ? `$${row.cpc.toFixed(2)}` : "—"}</td>
+                            <td className="py-3 px-4">
+                              <span
+                                className={
+                                  row.gap === "Neither"
+                                    ? "text-amber-600 font-medium"
+                                    : row.gap === "Google only"
+                                      ? "text-orange-600"
+                                      : row.gap === "AI only"
+                                        ? "text-blue-600"
+                                        : "text-green-600"
+                                }
+                              >
+                                {row.gap}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-gray-600 max-w-[280px]" title={row.opportunityNote}>
+                              {row.opportunityNote.length > 50 ? row.opportunityNote.slice(0, 50) + "…" : row.opportunityNote}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-6 text-gray-500 text-sm">
+                    {!selectedOpportunityProjectId || selectedOpportunityProjectId === "all"
+                      ? t.dashboard.reports.noOpportunityData
+                      : t.dashboard.reports.noOpportunityDataProject}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </motion.div>
+
+      {/* AI vs Google Gap – Report #5 (same-query comparison, GSC + AI, original data only) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.85 }}
+        className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-8 report-section"
+      >
+        <div className="bg-gradient-to-r from-violet-600 to-purple-600 p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                <BarChart3 className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">
+                  {selectedGapProjectId
+                    ? `${t.dashboard.reports.aiVsGoogleGap} – ${(reportData?.brandAnalysisProjects ?? []).find((p) => p.id === selectedGapProjectId)?.brand_name ?? "Project"}`
+                    : t.dashboard.reports.aiVsGoogleGap}
+                </h2>
+                <p className="text-white/90 text-sm mt-0.5">
+                  {t.dashboard.reports.aiVsGoogleGapSubtitle}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="p-6">
+          <div className="mb-4 flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="gap-project" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                {t.dashboard.reports.showGapFor}
+              </label>
+              <select
+                id="gap-project"
+                value={selectedGapProjectId}
+                onChange={(e) => setSelectedGapProjectId(e.target.value === "all" ? "all" : e.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">{t.dashboard.reports.chooseProject}</option>
+                {(reportData?.brandAnalysisProjects ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.brand_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="gap-filter" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                Show queries:
+              </label>
+              <select
+                id="gap-filter"
+                value={gapFilter}
+                onChange={(e) => setGapFilter(e.target.value as "all" | "mentioned" | "gaps")}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
+              >
+                <option value="all">{t.dashboard.reports.allQueries}</option>
+                <option value="mentioned">{t.dashboard.reports.filterMentioned}</option>
+                <option value="gaps">{t.dashboard.reports.filterGaps}</option>
+              </select>
+            </div>
+          </div>
+          {(() => {
+            const rawRows = selectedGapProjectId
+              ? (reportData?.aiVsGoogleGapByProject?.[selectedGapProjectId] ?? [])
+              : [];
+            const filteredRows =
+              gapFilter === "mentioned"
+                ? rawRows.filter((r) => r.aiMentioned)
+                : gapFilter === "gaps"
+                ? rawRows.filter((r) => !r.aiMentioned)
+                : rawRows;
+            const totalQueries = rawRows.length;
+            const mentionedCount = rawRows.filter((r) => r.aiMentioned).length;
+            const googleTop100Count = rawRows.filter((r) => r.googlePresent).length;
+            const showSuggestions = gapFilter !== "mentioned";
+            return (
+              <>
+                {totalQueries > 0 && (
+                  <p className="text-sm text-gray-600 mb-3">
+                    {t.dashboard.reports.gapSummary.replace("{total}", String(totalQueries)).replace("{mentionedCount}", String(mentionedCount)).replace("{googleTop100Count}", String(googleTop100Count)).replace("{filteredCount}", String(filteredRows.length))}
+                  </p>
+                )}
+                <p className="text-sm text-gray-600 mb-4">
+                  {selectedGapProjectId
+                    ? t.dashboard.reports.gapHelpProjectSelected
+                    : t.dashboard.reports.selectProjectForGap}
+                </p>
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="py-3 px-4 font-semibold text-gray-700">Query</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700 text-right">Google (organic)</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">AI (brand mentioned)</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700 min-w-[200px]">Suggestion (how to cover this gap)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((row, i) => (
+                  <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                    <td className="py-3 px-4 font-medium text-gray-900 max-w-[200px] truncate" title={row.query}>
+                      {row.query.length > 120 ? row.query.slice(0, 120) + "…" : row.query}
+                    </td>
+                    <td className="py-3 px-4 text-right text-gray-700">
+                      {row.googlePresent
+                        ? `#${row.googlePosition ?? "—"}`
+                        : row.googleInData
+                        ? "Outside top 100"
+                        : "—"}
+                    </td>
+                    <td className="py-3 px-4 text-gray-700">
+                      {row.aiMentioned ? (
+                        <span className="text-green-600 font-medium">
+                          Yes ({row.aiEngines.join(", ")})
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">No</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-sm text-gray-700 max-w-[280px]" title={showSuggestions && !row.aiMentioned ? ((gapSuggestionsByQuery[row.query] ?? row.suggestion) || "—") : undefined}>
+                      {showSuggestions && !row.aiMentioned ? ((gapSuggestionsByQuery[row.query] ?? row.suggestion) || "—") : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+                {filteredRows.length === 0 && (
+                  <div className="text-center py-6 text-gray-500 text-sm">
+                    {!selectedGapProjectId
+                      ? "Select a project above to see gap data and suggestions."
+                      : totalQueries === 0
+                      ? "No comparable queries yet. Run Brand Analysis in AI Visibility for this project (and connect GSC for this project) so queries appear here."
+                      : gapFilter === "mentioned"
+                      ? "No queries with brand mentioned in AI. Use “Not mentioned (gaps to fix)” to see where to improve."
+                      : gapFilter === "gaps"
+                      ? "No gaps: brand is mentioned in AI on all queries shown, or no queries in this filter."
+                      : "No queries."}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      </motion.div>
 
       {/* Top Keywords Table */}
       <motion.div
@@ -1949,23 +3987,23 @@ export default function Reports() {
         className="bg-white rounded-xl p-6 border border-gray-200 mb-8 report-section"
       >
         <h2 className="text-xl font-bold text-gray-900 mb-6">
-          Top 10 Keywords Performance
+          {t.dashboard.reports.top10KeywordsPerformance}
         </h2>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
                 <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">
-                  Keyword
+                  {t.dashboard.reports.queryColumn}
                 </th>
                 <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">
-                  Ranking
+                  {t.dashboard.reports.ranking}
                 </th>
                 <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">
-                  Search Volume
+                  {t.dashboard.reports.volume}
                 </th>
                 <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">
-                  Change
+                  {t.dashboard.reports.change}
                 </th>
               </tr>
             </thead>
@@ -2074,9 +4112,9 @@ export default function Reports() {
         <div className="bg-gradient-to-r from-orange-600 to-red-600 p-6 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold mb-2">Competitor Comparison Report</h2>
+              <h2 className="text-2xl font-bold mb-2">{t.dashboard.reports.competitorComparisonReport}</h2>
               <p className="text-white/90 text-sm">
-                Compare your rankings, content, and engagement against competitors
+                {t.dashboard.reports.competitorComparisonSubtitle}
               </p>
             </div>
             <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
@@ -2089,15 +4127,15 @@ export default function Reports() {
           {/* Ranking Comparison */}
           {reportData.competitorRankings.length > 0 && (
             <div className="mb-8">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Ranking Comparison</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">{t.dashboard.reports.rankingComparison}</h3>
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b-2 border-gray-200">
-                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Keyword</th>
-                      <th className="text-center py-3 px-4 font-semibold text-gray-700">Your Rank</th>
-                      <th className="text-center py-3 px-4 font-semibold text-gray-700">Competitors</th>
-                      <th className="text-center py-3 px-4 font-semibold text-gray-700">Volume</th>
+                      <th className="text-left py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.queryColumn}</th>
+                      <th className="text-center py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.yourRank}</th>
+                      <th className="text-center py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.competitors}</th>
+                      <th className="text-center py-3 px-4 font-semibold text-gray-700">{t.dashboard.reports.volume}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2144,7 +4182,7 @@ export default function Reports() {
           {/* Content Volume & Engagement Comparison */}
           {reportData.competitorContentVolume.length > 0 && (
             <div className="mb-8">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Content Volume & Engagement</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">{t.dashboard.reports.contentVolumeEngagement}</h3>
               <div className="grid md:grid-cols-2 gap-6">
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
@@ -2162,7 +4200,7 @@ export default function Reports() {
                       <Bar dataKey="contentCount" fill="#f97316" radius={[8, 8, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
-                  <p className="text-center text-sm text-gray-600 mt-2">Content Count</p>
+                  <p className="text-center text-sm text-gray-600 mt-2">{t.dashboard.reports.contentCount}</p>
                 </div>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
@@ -2180,7 +4218,7 @@ export default function Reports() {
                       <Bar dataKey="engagementRate" fill="#ef4444" radius={[8, 8, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
-                  <p className="text-center text-sm text-gray-600 mt-2">Engagement Rate (%)</p>
+                  <p className="text-center text-sm text-gray-600 mt-2">{t.dashboard.reports.engagementRatePct}</p>
                 </div>
               </div>
               <div className="mt-6 grid md:grid-cols-3 gap-4">
@@ -2195,19 +4233,19 @@ export default function Reports() {
                     <h4 className="font-semibold text-gray-900 mb-3">{comp.competitor}</h4>
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Content:</span>
+                        <span className="text-gray-600">{t.dashboard.reports.contentLabel}</span>
                         <span className="font-medium">{comp.contentCount}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Avg Likes:</span>
+                        <span className="text-gray-600">{t.dashboard.reports.avgLikes}</span>
                         <span className="font-medium">{comp.avgLikes.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Avg Comments:</span>
+                        <span className="text-gray-600">{t.dashboard.reports.avgComments}</span>
                         <span className="font-medium">{comp.avgComments.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Engagement:</span>
+                        <span className="text-gray-600">{t.dashboard.reports.engagementLabel}</span>
                         <span className="font-medium text-orange-600">{comp.engagementRate.toFixed(1)}%</span>
                       </div>
                     </div>
@@ -2220,7 +4258,7 @@ export default function Reports() {
           {/* Competitor Gap Analysis */}
           {reportData.competitorGapAnalysis.length > 0 && (
             <div>
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Content Gap Analysis</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">{t.dashboard.reports.contentGapAnalysis}</h3>
               <div className="grid md:grid-cols-2 gap-6">
                 {reportData.competitorGapAnalysis.map((compAnalysis, index) => (
                   <motion.div
@@ -2251,8 +4289,8 @@ export default function Reports() {
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-xs text-gray-600">
-                            <span>They rank #{gap.theirRank}</span>
-                            <span>You rank #{gap.yourRank}</span>
+                            <span>{t.dashboard.reports.theyRank} #{gap.theirRank}</span>
+                            <span>{t.dashboard.reports.youRank} #{gap.yourRank}</span>
                             <span className="text-red-600">Gap: {gap.yourRank - gap.theirRank}</span>
                           </div>
                         </div>
@@ -2273,10 +4311,10 @@ export default function Reports() {
                 <Users className="w-8 h-8 text-gray-400" />
               </div>
               <p className="text-gray-600 font-medium mb-2">
-                No competitor data available yet
+                {t.dashboard.reports.noCompetitorData}
               </p>
               <p className="text-sm text-gray-500">
-                Add competitors to your brand analysis projects to see comparisons
+                {t.dashboard.reports.addCompetitorsToSee}
               </p>
             </div>
           )}
@@ -2293,9 +4331,9 @@ export default function Reports() {
         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold mb-2">Content Calendar Forecast</h2>
+              <h2 className="text-2xl font-bold mb-2">{t.dashboard.reports.contentCalendarForecast}</h2>
               <p className="text-white/90 text-sm">
-                Optimize your content publishing schedule and identify gaps
+                {t.dashboard.reports.contentCalendarSubtitle}
               </p>
             </div>
             <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
@@ -2312,35 +4350,35 @@ export default function Reports() {
                 <Clock className="w-5 h-5 text-blue-600" />
                 <span className="text-2xl font-bold text-blue-600">{reportData.contentBacklog.draft}</span>
               </div>
-              <p className="text-sm text-gray-700 font-medium">Draft Content</p>
+              <p className="text-sm text-gray-700 font-medium">{t.dashboard.reports.draftContentLabel}</p>
             </div>
             <div className="p-4 bg-gradient-to-br from-purple-50 to-white border border-purple-200 rounded-xl">
               <div className="flex items-center justify-between mb-2">
                 <Calendar className="w-5 h-5 text-purple-600" />
                 <span className="text-2xl font-bold text-purple-600">{reportData.contentBacklog.scheduled}</span>
               </div>
-              <p className="text-sm text-gray-700 font-medium">Scheduled</p>
+              <p className="text-sm text-gray-700 font-medium">{t.dashboard.reports.scheduledLabel}</p>
             </div>
             <div className="p-4 bg-gradient-to-br from-indigo-50 to-white border border-indigo-200 rounded-xl">
               <div className="flex items-center justify-between mb-2">
                 <Clock className="w-5 h-5 text-indigo-600" />
                 <span className="text-2xl font-bold text-indigo-600">{reportData.contentBacklog.totalDaysToPublish}</span>
               </div>
-              <p className="text-sm text-gray-700 font-medium">Days to Publish</p>
+              <p className="text-sm text-gray-700 font-medium">{t.dashboard.reports.daysToPublish}</p>
             </div>
             <div className="p-4 bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-xl">
               <div className="flex items-center justify-between mb-2">
                 <AlertCircle className="w-5 h-5 text-gray-600" />
                 <span className="text-lg font-bold text-gray-600">{reportData.contentBacklog.oldestDraft}</span>
               </div>
-              <p className="text-sm text-gray-700 font-medium">Oldest Draft</p>
+              <p className="text-sm text-gray-700 font-medium">{t.dashboard.reports.oldestDraft}</p>
             </div>
           </div>
 
           {/* Upcoming Content */}
           {reportData.upcomingContent.length > 0 && (
             <div className="mb-8">
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Upcoming Scheduled Content</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">{t.dashboard.reports.upcomingScheduledContent}</h3>
               <div className="space-y-3">
                 {reportData.upcomingContent.map((content, index) => (
                   <motion.div
@@ -2368,7 +4406,7 @@ export default function Reports() {
                         }`}>
                           {content.daysUntil}
                         </p>
-                        <p className="text-xs text-gray-600">days</p>
+                        <p className="text-xs text-gray-600">{t.dashboard.reports.days}</p>
                       </div>
                     </div>
                   </motion.div>
@@ -2382,7 +4420,7 @@ export default function Reports() {
             <div className="mb-8">
               <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-red-600" />
-                Content Gaps (Need Attention)
+                {t.dashboard.reports.contentGapsNeedAttention}
               </h3>
               <div className="grid md:grid-cols-2 gap-4">
                 {reportData.contentGaps.map((gap, index) => (
@@ -2397,8 +4435,8 @@ export default function Reports() {
                       <h4 className="font-semibold text-gray-900 capitalize">{gap.platform}</h4>
                       <span className="text-2xl font-bold text-red-600">{gap.gapDays}</span>
                     </div>
-                    <p className="text-sm text-gray-600 mb-1">Last published: {gap.lastPublished}</p>
-                    <p className="text-sm font-medium text-indigo-600">Recommended: {gap.recommendedDate}</p>
+                    <p className="text-sm text-gray-600 mb-1">{t.dashboard.reports.lastPublished} {gap.lastPublished}</p>
+                    <p className="text-sm font-medium text-indigo-600">{t.dashboard.reports.recommendedLabel} {gap.recommendedDate}</p>
                   </motion.div>
                 ))}
               </div>
@@ -2408,7 +4446,7 @@ export default function Reports() {
           {/* Publishing Cadence */}
           {reportData.publishingCadence.length > 0 && (
             <div>
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Optimal Publishing Cadence</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">{t.dashboard.reports.optimalPublishingCadence}</h3>
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {reportData.publishingCadence.map((cadence, index) => (
                   <motion.div
@@ -2421,29 +4459,29 @@ export default function Reports() {
                     <div className="flex items-center justify-between mb-3">
                       <h4 className="font-semibold text-gray-900 capitalize">{cadence.platform}</h4>
                       <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded text-xs font-medium">
-                        {cadence.totalPublished} published
+                        {cadence.totalPublished} {t.dashboard.reports.publishedCount}
                       </span>
                     </div>
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Current Avg:</span>
-                        <span className="font-medium">{cadence.avgDaysBetween} days</span>
+                        <span className="text-gray-600">{t.dashboard.reports.currentAvg}</span>
+                        <span className="font-medium">{cadence.avgDaysBetween} {t.dashboard.reports.days}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Recommended:</span>
-                        <span className="font-medium text-indigo-600">{cadence.recommendedCadence} days</span>
+                        <span className="text-gray-600">{t.dashboard.reports.recommended}</span>
+                        <span className="font-medium text-indigo-600">{cadence.recommendedCadence} {t.dashboard.reports.days}</span>
                       </div>
                       <div className="mt-2 pt-2 border-t border-gray-200">
                         <div className="flex items-center gap-2">
                           {cadence.recommendedCadence < cadence.avgDaysBetween ? (
                             <>
                               <TrendingUp className="w-4 h-4 text-green-600" />
-                              <span className="text-xs text-green-600">Optimize: Publish more frequently</span>
+                              <span className="text-xs text-green-600">{t.dashboard.reports.optimizePublishMore}</span>
                             </>
                           ) : (
                             <>
                               <Check className="w-4 h-4 text-blue-600" />
-                              <span className="text-xs text-blue-600">On track</span>
+                              <span className="text-xs text-blue-600">{t.dashboard.reports.onTrack}</span>
                             </>
                           )}
                         </div>
@@ -2464,10 +4502,10 @@ export default function Reports() {
                 <Calendar className="w-8 h-8 text-gray-400" />
               </div>
               <p className="text-gray-600 font-medium mb-2">
-                No content calendar data available yet
+                {t.dashboard.reports.noContentCalendarData}
               </p>
               <p className="text-sm text-gray-500">
-                Create and schedule content to see calendar insights
+                {t.dashboard.reports.createScheduleContentToSee}
               </p>
             </div>
           )}
@@ -2485,9 +4523,9 @@ export default function Reports() {
         <div className="bg-gradient-to-r from-primary-600 to-accent-600 p-6 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold mb-2">Brand Analysis Summary</h2>
+              <h2 className="text-2xl font-bold mb-2">{t.dashboard.reports.brandAnalysisSummary}</h2>
               <p className="text-white/90 text-sm">
-                Comprehensive AI platform analysis and brand monitoring
+                {t.dashboard.reports.brandAnalysisSummarySubtitle}
               </p>
             </div>
             <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
@@ -2513,9 +4551,9 @@ export default function Reports() {
                     </p>
                   </div>
                 </div>
-                <p className="text-sm font-semibold text-gray-700">Total Projects</p>
+                <p className="text-sm font-semibold text-gray-700">{t.dashboard.reports.totalProjects}</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Active brand monitoring projects
+                  {t.dashboard.reports.activeBrandMonitoringProjects}
                 </p>
               </div>
             </div>
@@ -2534,9 +4572,9 @@ export default function Reports() {
                     </p>
                   </div>
                 </div>
-                <p className="text-sm font-semibold text-gray-700">Active Sessions</p>
+                <p className="text-sm font-semibold text-gray-700">{t.dashboard.reports.activeSessionsLabel}</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Currently running analysis sessions
+                  {t.dashboard.reports.currentlyRunningSessions}
                 </p>
               </div>
             </div>
@@ -2555,9 +4593,9 @@ export default function Reports() {
                     </p>
                   </div>
                 </div>
-                <p className="text-sm font-semibold text-gray-700">AI Responses</p>
+                <p className="text-sm font-semibold text-gray-700">{t.dashboard.reports.aiResponses}</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  Total responses collected from AI platforms
+                  {t.dashboard.reports.totalResponsesFromAI}
                 </p>
               </div>
             </div>
@@ -2568,10 +4606,10 @@ export default function Reports() {
             <div className="pt-6 border-t border-gray-200">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-gray-900">
-                  Response Distribution by Platform
+                  {t.dashboard.reports.responseDistributionByPlatform}
                 </h3>
                 <span className="text-sm text-gray-500">
-                  {reportData.responsesByPlatform.length} platforms active
+                  {reportData.responsesByPlatform.length} {t.dashboard.reports.platformsActive}
                 </span>
               </div>
               
@@ -2607,7 +4645,7 @@ export default function Reports() {
                               {platform.platform}
                             </p>
                             <p className="text-xs text-gray-500">
-                              {percentage}% of total
+                              {percentage}% {t.dashboard.reports.ofTotal}
                             </p>
                           </div>
                         </div>
@@ -2615,7 +4653,7 @@ export default function Reports() {
                           <p className="text-2xl font-bold text-gray-900">
                             {platform.count}
                           </p>
-                          <p className="text-xs text-gray-500">responses</p>
+                          <p className="text-xs text-gray-500">{t.dashboard.reports.responses}</p>
                         </div>
                       </div>
                       
@@ -2643,15 +4681,15 @@ export default function Reports() {
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-gray-900">
-                        Analysis Coverage
+                        {t.dashboard.reports.analysisCoverage}
                       </p>
                       <p className="text-xs text-gray-600">
-                        Comprehensive monitoring across {reportData.responsesByPlatform.length} AI platforms
+                        {t.dashboard.reports.comprehensiveMonitoringAcross.replace("{count}", String(reportData.responsesByPlatform.length))}
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm text-gray-600">Average per platform</p>
+                    <p className="text-sm text-gray-600">{t.dashboard.reports.averagePerPlatform}</p>
                     <p className="text-xl font-bold text-primary-600">
                       {(reportData.totalResponses / Math.max(reportData.responsesByPlatform.length, 1)).toFixed(1)}
                     </p>
@@ -2669,16 +4707,57 @@ export default function Reports() {
                   <Globe className="w-8 h-8 text-gray-400" />
                 </div>
                 <p className="text-gray-600 font-medium mb-2">
-                  No platform responses yet
+                  {t.dashboard.reports.noPlatformResponsesYet}
                 </p>
                 <p className="text-sm text-gray-500">
-                  Start a brand analysis session to collect AI platform responses
+                  {t.dashboard.reports.startBrandAnalysisToCollect}
                 </p>
               </div>
             </div>
           )}
         </div>
       </motion.div>
+        </>
+      )}
+
+      {/* Global Markets & Distribution - Coming soon */}
+      {activeReportTab === "global" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <Globe className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Global Markets & Distribution
+          </h2>
+          <p className="text-gray-500 max-w-md mx-auto">
+            Regional visibility, distributor mapping, sales geography, and market entry reports. Coming soon.
+          </p>
+        </div>
+      )}
+
+      {/* Competitive, Pricing & Trust - Coming soon */}
+      {activeReportTab === "competitive" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Competitive, Pricing & Trust
+          </h2>
+          <p className="text-gray-500 max-w-md mx-auto">
+            Market leadership, pricing perception, trust gaps, and competitive intelligence. Coming soon.
+          </p>
+        </div>
+      )}
+
+      {/* Advanced BI, Risk, Funnel & Executive - Coming soon */}
+      {activeReportTab === "advanced" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <AlertCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            Advanced BI, Risk, Funnel & Executive
+          </h2>
+          <p className="text-gray-500 max-w-md mx-auto">
+            Strategic blind spots, funnel analysis, risk monitoring, and executive summaries. Coming soon.
+          </p>
+        </div>
+      )}
 
       {/* Email Modal */}
       {showEmailModal && (

@@ -552,9 +552,16 @@ ${input.targetPlatform === 'twitter' ? `- Twitter style: ${input.brandVoice ? "F
 - Thread-like thinking, stream of consciousness
 ${input.brandVoice ? `- IGNORE "casual punchy" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
 ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
-- 📝 SHOPIFY BLOG ARTICLE FORMAT (COMPREHENSIVE LONG-FORM):
+- 📝 BLOG ARTICLE FORMAT (WordPress / Shopify – HUMANISED LONG-FORM):
+
+**HUMANISED CONTENT FRAMEWORK (apply throughout):**
+- ROLE: Write like you're explaining something to a smart friend over coffee. You genuinely care about helping the reader and want to engage authentically. Show a high degree of emotional intelligence.
+- VOICE: Use contractions (you're, don't, can't, we'll). Vary sentence length dramatically—short punchy ones, then longer sentences that take their time. Add natural pauses... like this. Include occasional tangents (that's how real people think). Keep language simple. Use relatable metaphors instead of jargon.
+- CONNECTION: Show you understand what the reader's going through. Include unique connections with ideas, secondary thoughts, and light observations like a human would. Make content slightly "messy"—a perfect structure feels inauthentic. Connect emotionally first, then provide value. Write like you've actually lived through what you're discussing.
+- AVOID: Don't start every paragraph the same way. No hedging with "it's important to note that". Never use "delve" or "rich tapestry". Avoid three-item lists when one or two would do. Don't end with vague optimism ("the future looks bright").
+
 - LENGTH: 1200-2000 words - this is a FULL blog article, NOT a short post
-- STRUCTURE: Use proper HTML formatting for Shopify:
+- STRUCTURE: Use proper HTML formatting for WordPress/Shopify:
   * <h2> for main section headings (4-6 sections minimum)
   * <h3> for subsections
   * <p> for paragraphs
@@ -569,14 +576,11 @@ ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
   * Include practical tips and examples
   * Add actionable advice readers can implement
   * Use subheadings to break up content
-- CONCLUSION: Summary with clear call-to-action
-- SEO: Include target keywords in:
-  * At least 2 headings
-  * First paragraph
-  * Throughout content naturally (2-3% density)
-- TONE: Professional, informative, engaging, helpful
+- CONCLUSION: Summary with clear call-to-action (concrete, not vague optimism)
+- SEO: Include target keywords in at least 2 headings, first paragraph, and throughout naturally (2-3% density)
+- TONE: Professional, informative, engaging, helpful—but human and conversational
 - NO EMOJIS in blog content
-- Write like a professional blogger, not a casual social post
+- Write like a professional blogger who sounds like a real person, not a generic content machine
 ${input.brandVoice ? `- Maintain your ${input.brandVoice.tone} brand voice tone throughout` : ""}` : ''}
 
 5️⃣ **KEYWORD INTEGRATION (NATURAL, NOT FORCED)**

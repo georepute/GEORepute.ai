@@ -22,6 +22,24 @@ export interface GSCConfig {
 // Type alias for backward compatibility
 export type GSCTokens = GSCConfig;
 
+/** ISO 3166-1 alpha-2 (UI) → GSC API country code (lowercase alpha-3) for SEO-level segmentation */
+const COUNTRY_ALPHA2_TO_GSC: Record<string, string> = {
+  US: 'usa', GB: 'gbr', CA: 'can', AU: 'aus', DE: 'deu', FR: 'fra',
+  IN: 'ind', IT: 'ita', ES: 'esp', NL: 'nld', BR: 'bra', MX: 'mex',
+  JP: 'jpn', CN: 'chn', KR: 'kor', PL: 'pol', SE: 'swe', BE: 'bel',
+  CH: 'che', AT: 'aut', IE: 'irl', PT: 'prt', ZA: 'zaf', RU: 'rus',
+  TR: 'tur', ID: 'idn', TH: 'tha', VN: 'vnm', MY: 'mys', SG: 'sgp',
+  PH: 'phl', NZ: 'nzl', AR: 'arg', CL: 'chl', CO: 'col', SA: 'sau',
+  AE: 'are', IL: 'isr', EG: 'egy', NG: 'nga', KE: 'ken',
+};
+
+function toGscCountryCode(alpha2: string): string {
+  const code = COUNTRY_ALPHA2_TO_GSC[alpha2.toUpperCase()];
+  if (code) return code;
+  const a = alpha2.toLowerCase();
+  return a.length >= 3 ? a.slice(0, 3) : a.padEnd(3, a[0] || 'x');
+}
+
 export class GoogleSearchConsoleService {
   private oauth2Client;
 
@@ -43,11 +61,12 @@ export class GoogleSearchConsoleService {
    * Fetch keywords from Google Search Console
    * @param siteUrl - The verified GSC property URL
    * @param limit - Number of keywords to fetch (default 100)
-   * @returns Array of keywords with metrics
+   * @param options - Optional: { countries: string[] } for SEO-level segmentation (alpha-2, e.g. US, GB). When set, only data for these countries is fetched and merged.
    */
   async fetchKeywords(
     siteUrl: string,
-    limit: number = 100
+    limit: number = 100,
+    options?: { countries?: string[] }
   ): Promise<GSCKeyword[]> {
     try {
       const searchconsole = google.searchconsole({
@@ -55,19 +74,84 @@ export class GoogleSearchConsoleService {
         auth: this.oauth2Client,
       });
 
-      // Get data from last 30 days
       const endDate = new Date();
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - 30);
+      const startStr = startDate.toISOString().split('T')[0];
+      const endStr = endDate.toISOString().split('T')[0];
+
+      const countries = options?.countries?.filter(Boolean) ?? [];
+      if (countries.length > 0) {
+        const gscCodes = countries.map((c) => toGscCountryCode(c));
+        const mergedByQuery = new Map<string, { impressions: number; clicks: number; positionSum: number; positionWeight: number }>();
+
+        for (const gscCountry of gscCodes) {
+          try {
+            const response = await searchconsole.searchanalytics.query({
+              siteUrl,
+              requestBody: {
+                startDate: startStr,
+                endDate: endStr,
+                dimensions: ['query'],
+                rowLimit: limit,
+                dimensionFilterGroups: [
+                  {
+                    groupType: 'and',
+                    filters: [
+                      { dimension: 'country', operator: 'equals', expression: gscCountry },
+                    ],
+                  },
+                ],
+              },
+            });
+            const rows = response.data.rows || [];
+            for (const row of rows) {
+              const q = (row.keys && row.keys[0]) ? String(row.keys[0]).trim() : '';
+              if (!q) continue;
+              const imp = Number(row.impressions) || 0;
+              const clk = Number(row.clicks) || 0;
+              const pos = Number(row.position) || 0;
+              const existing = mergedByQuery.get(q);
+              if (existing) {
+                existing.impressions += imp;
+                existing.clicks += clk;
+                existing.positionSum += pos * imp;
+                existing.positionWeight += imp;
+              } else {
+                mergedByQuery.set(q, {
+                  impressions: imp,
+                  clicks: clk,
+                  positionSum: pos * imp,
+                  positionWeight: imp,
+                });
+              }
+            }
+          } catch (err) {
+            console.warn(`GSC fetch for country ${gscCountry} failed:`, err);
+          }
+        }
+
+        const merged: GSCKeyword[] = Array.from(mergedByQuery.entries()).map(([keyword, agg]) => ({
+          keyword,
+          impressions: agg.impressions,
+          clicks: agg.clicks,
+          position: agg.positionWeight > 0 ? Math.round((agg.positionSum / agg.positionWeight) * 10) / 10 : 0,
+          ctr: agg.impressions > 0 ? agg.clicks / agg.impressions : 0,
+        }));
+        merged.sort((a, b) => b.impressions - a.impressions);
+        const out = merged.slice(0, limit);
+        console.log(`✅ Fetched ${out.length} GSC keywords (SEO-level: ${countries.join(', ')})`);
+        return out;
+      }
 
       console.log(`📊 Fetching GSC keywords for ${siteUrl}`);
-      console.log(`📅 Date range: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`);
+      console.log(`📅 Date range: ${startStr} to ${endStr}`);
 
       const response = await searchconsole.searchanalytics.query({
         siteUrl: siteUrl,
         requestBody: {
-          startDate: startDate.toISOString().split('T')[0],
-          endDate: endDate.toISOString().split('T')[0],
+          startDate: startStr,
+          endDate: endStr,
           dimensions: ['query'],
           rowLimit: limit,
         },
@@ -78,7 +162,7 @@ export class GoogleSearchConsoleService {
 
       return rows.map((row: any) => ({
         keyword: row.keys[0],
-        position: Math.round(row.position * 10) / 10, // Round to 1 decimal
+        position: Math.round(row.position * 10) / 10,
         clicks: row.clicks || 0,
         impressions: row.impressions || 0,
         ctr: row.ctr || 0,
