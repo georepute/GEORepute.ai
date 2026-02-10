@@ -311,9 +311,9 @@ function AIVisibilityContent() {
   const platformOptions = [
     { id: "perplexity", name: "Perplexity", icon: "/images/perplexity.png" },
     { id: "chatgpt", name: "ChatGPT", icon: "/images/chatgpt.png" },
-    { id: "gemini", name: "Gemini", icon: "/images/gemini 1.png", iconClass: "object-contain brightness-110 contrast-110" },
+    { id: "gemini", name: "Gemini", icon: "/images/Gemini.png" },
     { id: "claude", name: "Claude", icon: "/images/claude.png" },
-    { id: "groq", name: "Grok", icon: "/images/groq.png" },
+    { id: "groq", name: "Grok", icon: "/images/groq%20(1).png" },
   ];
   
   // Helper function to extract name and domain from competitor string/object
@@ -3268,11 +3268,10 @@ function AIVisibilityContent() {
                                   <Image 
                                     src={platformOption.icon} 
                                     alt={platformOption.name} 
-                                    width={platformOption.id === 'gemini' ? 32 : 16} 
-                                    height={platformOption.id === 'gemini' ? 32 : 16} 
-                                    className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
-                                    quality={platformOption.id === 'gemini' ? 100 : 75}
-                                    unoptimized={platformOption.id === 'gemini'}
+                                    width={16} 
+                                    height={16} 
+                                    className="w-4 h-4 object-contain"
+                                    quality={75}
                                   />
                                 ) : (
                                   platform
@@ -3922,11 +3921,10 @@ function AIVisibilityContent() {
                           <Image 
                             src={platformOption.icon} 
                             alt={platformOption.name} 
-                            width={platformOption.id === 'gemini' ? 36 : 20} 
-                            height={platformOption.id === 'gemini' ? 36 : 20} 
-                            className={`${platformOption.id === 'gemini' ? 'w-9 h-9' : 'w-5 h-5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
-                            quality={platformOption.id === 'gemini' ? 100 : 75}
-                            unoptimized={platformOption.id === 'gemini'}
+                            width={20} 
+                            height={20} 
+                            className="w-5 h-5 object-contain"
+                            quality={75}
                           />
                         ) : (
                           <span className="text-lg">🤖</span>
@@ -3963,11 +3961,10 @@ function AIVisibilityContent() {
                               <Image 
                                 src={platformOption.icon} 
                                 alt={platformOption.name} 
-                                width={platformOption.id === 'gemini' ? 32 : 16} 
-                                height={platformOption.id === 'gemini' ? 32 : 16} 
-                                className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
-                                quality={platformOption.id === 'gemini' ? 100 : 75}
-                                unoptimized={platformOption.id === 'gemini'}
+                                width={16} 
+                                height={16} 
+                                className="w-4 h-4 object-contain"
+                                quality={75}
                               />
                             ) : (
                               platform
@@ -4756,11 +4753,10 @@ function AIVisibilityContent() {
                                             <Image 
                                               src={platformOption.icon} 
                                               alt={platformOption.name} 
-                                              width={platformOption.id === 'gemini' ? 28 : 14} 
-                                              height={platformOption.id === 'gemini' ? 28 : 14} 
-                                              className={`${platformOption.id === 'gemini' ? 'w-7 h-7' : 'w-3.5 h-3.5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
-                                              quality={platformOption.id === 'gemini' ? 100 : 75}
-                                              unoptimized={platformOption.id === 'gemini'}
+                                              width={14} 
+                                              height={14} 
+                                              className="w-3.5 h-3.5 object-contain"
+                                              quality={75}
                                             />
                                           ) : null}
                                           {platform}
@@ -4863,11 +4859,10 @@ function AIVisibilityContent() {
                                             <Image 
                                               src={platformOption.icon} 
                                               alt={platformOption.name} 
-                                              width={platformOption.id === 'gemini' ? 28 : 14} 
-                                              height={platformOption.id === 'gemini' ? 28 : 14} 
-                                              className={`${platformOption.id === 'gemini' ? 'w-7 h-7' : 'w-3.5 h-3.5'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
-                                              quality={platformOption.id === 'gemini' ? 100 : 75}
-                                              unoptimized={platformOption.id === 'gemini'}
+                                              width={14} 
+                                              height={14} 
+                                              className="w-3.5 h-3.5 object-contain"
+                                              quality={75}
                                             />
                                           ) : null}
                                           {platform}
@@ -5647,11 +5642,10 @@ function AIVisibilityContent() {
                                 <Image 
                                   src={platformOption.icon} 
                                   alt={platformOption.name} 
-                                  width={platformOption.id === 'gemini' ? 32 : 16} 
-                                  height={platformOption.id === 'gemini' ? 32 : 16} 
-                                  className={`${platformOption.id === 'gemini' ? 'w-8 h-8' : 'w-4 h-4'} object-contain ${platformOption.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
-                                  quality={platformOption.id === 'gemini' ? 100 : 75}
-                                  unoptimized={platformOption.id === 'gemini'}
+                                  width={16} 
+                                  height={16} 
+                                  className="w-4 h-4 object-contain"
+                                  quality={75}
                                 />
                               ) : null}
                               {platformOption?.name || platform}
@@ -6165,11 +6159,10 @@ function AIVisibilityContent() {
                         <Image 
                           src={platform.icon} 
                           alt={platform.name} 
-                          width={platform.id === 'gemini' ? 40 : 24} 
-                          height={platform.id === 'gemini' ? 40 : 24} 
-                          className={`${platform.id === 'gemini' ? 'w-10 h-10' : 'w-6 h-6'} object-contain ${platform.id === 'gemini' ? 'brightness-110 contrast-110' : ''}`}
-                          quality={platform.id === 'gemini' ? 100 : 75}
-                          unoptimized={platform.id === 'gemini'}
+                          width={24} 
+                          height={24} 
+                          className="w-6 h-6 object-contain"
+                          quality={75}
                         />
                       ) : null}
                       <span className={`font-medium ${
