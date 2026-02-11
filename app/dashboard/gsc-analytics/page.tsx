@@ -187,8 +187,9 @@ export default function GSCAnalyticsPage() {
       const startDate = getDateDaysAgo(dateRange);
       const endDate = getDateDaysAgo(0);
       
+      // Fetch all queries without limit
       const response = await fetch(
-        `/api/integrations/google-search-console/analytics/queries?domainId=${selectedDomain}&startDate=${startDate}&endDate=${endDate}&limit=20`
+        `/api/integrations/google-search-console/analytics/queries?domainId=${selectedDomain}&startDate=${startDate}&endDate=${endDate}`
       );
       const data = await response.json();
       
@@ -205,8 +206,9 @@ export default function GSCAnalyticsPage() {
       const startDate = getDateDaysAgo(dateRange);
       const endDate = getDateDaysAgo(0);
       
+      // Fetch all pages without limit
       const response = await fetch(
-        `/api/integrations/google-search-console/analytics/pages?domainId=${selectedDomain}&startDate=${startDate}&endDate=${endDate}&limit=20`
+        `/api/integrations/google-search-console/analytics/pages?domainId=${selectedDomain}&startDate=${startDate}&endDate=${endDate}`
       );
       const data = await response.json();
       
@@ -229,7 +231,32 @@ export default function GSCAnalyticsPage() {
       const data = await response.json();
       
       if (data.success) {
-        setCountries(data.analytics || []);
+        // Aggregate country data by grouping records
+        const countryMap = new Map<string, Country>();
+        (data.analytics || []).forEach((item: any) => {
+          const countryCode = item.country || 'UNKNOWN';
+          if (countryMap.has(countryCode)) {
+            const existing = countryMap.get(countryCode)!;
+            existing.clicks += item.clicks || 0;
+            existing.impressions += item.impressions || 0;
+            // Recalculate CTR based on aggregated clicks/impressions
+            existing.ctr = existing.impressions > 0 ? existing.clicks / existing.impressions : 0;
+            // Average the position (weighted by impressions would be better but simple average works)
+            existing.position = (existing.position + (item.position || 0)) / 2;
+          } else {
+            countryMap.set(countryCode, {
+              id: countryCode,
+              country: countryCode,
+              clicks: item.clicks || 0,
+              impressions: item.impressions || 0,
+              ctr: item.ctr || 0,
+              position: item.position || 0,
+            });
+          }
+        });
+        // Sort by clicks descending
+        const aggregatedCountries = Array.from(countryMap.values()).sort((a, b) => b.clicks - a.clicks);
+        setCountries(aggregatedCountries);
       }
     } catch (error) {
       console.error('Load countries error:', error);
@@ -274,54 +301,54 @@ export default function GSCAnalyticsPage() {
   const syncData = async () => {
     setSyncing(true);
     try {
-      // Sync summary data
+      // Sync summary data (use the selected date range for consistency)
       const summaryResponse = await fetch('/api/integrations/google-search-console/analytics/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           domainId: selectedDomain,
-          startDate: getDateDaysAgo(30),
+          startDate: getDateDaysAgo(dateRange),
           endDate: getDateDaysAgo(0),
           dimensions: ['date'],
         }),
       });
 
-      // Sync query data
+      // Sync query data - fetch maximum allowed by GSC API (25,000 rows)
       const queryResponse = await fetch('/api/integrations/google-search-console/analytics/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           domainId: selectedDomain,
-          startDate: getDateDaysAgo(7),
+          startDate: getDateDaysAgo(dateRange),
           endDate: getDateDaysAgo(0),
           dimensions: ['date', 'query'],
-          rowLimit: 100,
+          rowLimit: 25000,
         }),
       });
 
-      // Sync page data
+      // Sync page data - fetch maximum allowed by GSC API (25,000 rows)
       const pageResponse = await fetch('/api/integrations/google-search-console/analytics/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           domainId: selectedDomain,
-          startDate: getDateDaysAgo(7),
+          startDate: getDateDaysAgo(dateRange),
           endDate: getDateDaysAgo(0),
           dimensions: ['date', 'page'],
-          rowLimit: 100,
+          rowLimit: 25000,
         }),
       });
 
-      // Sync country data
+      // Sync country data - fetch maximum allowed by GSC API (25,000 rows)
       const countryResponse = await fetch('/api/integrations/google-search-console/analytics/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           domainId: selectedDomain,
-          startDate: getDateDaysAgo(7),
+          startDate: getDateDaysAgo(dateRange),
           endDate: getDateDaysAgo(0),
           dimensions: ['date', 'country'],
-          rowLimit: 50,
+          rowLimit: 25000,
         }),
       });
 
@@ -332,9 +359,10 @@ export default function GSCAnalyticsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           domainId: selectedDomain,
-          startDate: getDateDaysAgo(7),
+          startDate: getDateDaysAgo(dateRange),
           endDate: getDateDaysAgo(0),
           dimensions: ['searchAppearance'],
+          rowLimit: 25000,
         }),
       });
 
@@ -369,12 +397,220 @@ export default function GSCAnalyticsPage() {
   };
 
   const getCountryName = (code: string) => {
-    const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+    if (!code || code === 'UNKNOWN') return 'Unknown';
+    
+    const upperCode = code.toUpperCase();
+    
+    // Comprehensive mapping for 3-letter ISO country codes (ISO 3166-1 alpha-3)
+    const countryMapping: { [key: string]: string } = {
+      // A
+      'AFG': 'Afghanistan', 'ALA': 'Åland Islands', 'ALB': 'Albania', 'DZA': 'Algeria',
+      'ASM': 'American Samoa', 'AND': 'Andorra', 'AGO': 'Angola', 'AIA': 'Anguilla',
+      'ATA': 'Antarctica', 'ATG': 'Antigua and Barbuda', 'ARG': 'Argentina', 'ARM': 'Armenia',
+      'ABW': 'Aruba', 'AUS': 'Australia', 'AUT': 'Austria', 'AZE': 'Azerbaijan',
+      
+      // B
+      'BHS': 'Bahamas', 'BHR': 'Bahrain', 'BGD': 'Bangladesh', 'BRB': 'Barbados',
+      'BLR': 'Belarus', 'BEL': 'Belgium', 'BLZ': 'Belize', 'BEN': 'Benin',
+      'BMU': 'Bermuda', 'BTN': 'Bhutan', 'BOL': 'Bolivia', 'BES': 'Bonaire, Sint Eustatius and Saba',
+      'BIH': 'Bosnia and Herzegovina', 'BWA': 'Botswana', 'BVT': 'Bouvet Island', 'BRA': 'Brazil',
+      'IOT': 'British Indian Ocean Territory', 'BRN': 'Brunei', 'BGR': 'Bulgaria', 'BFA': 'Burkina Faso',
+      'BDI': 'Burundi',
+      
+      // C
+      'CPV': 'Cabo Verde', 'KHM': 'Cambodia', 'CMR': 'Cameroon', 'CAN': 'Canada',
+      'CYM': 'Cayman Islands', 'CAF': 'Central African Republic', 'TCD': 'Chad', 'CHL': 'Chile',
+      'CHN': 'China', 'CXR': 'Christmas Island', 'CCK': 'Cocos (Keeling) Islands', 'COL': 'Colombia',
+      'COM': 'Comoros', 'COG': 'Congo', 'COD': 'Congo (Democratic Republic)', 'COK': 'Cook Islands',
+      'CRI': 'Costa Rica', 'CIV': 'Côte d\'Ivoire', 'HRV': 'Croatia', 'CUB': 'Cuba',
+      'CUW': 'Curaçao', 'CYP': 'Cyprus', 'CZE': 'Czech Republic',
+      
+      // D
+      'DNK': 'Denmark', 'DJI': 'Djibouti', 'DMA': 'Dominica', 'DOM': 'Dominican Republic',
+      
+      // E
+      'ECU': 'Ecuador', 'EGY': 'Egypt', 'SLV': 'El Salvador', 'GNQ': 'Equatorial Guinea',
+      'ERI': 'Eritrea', 'EST': 'Estonia', 'SWZ': 'Eswatini', 'ETH': 'Ethiopia',
+      
+      // F
+      'FLK': 'Falkland Islands', 'FRO': 'Faroe Islands', 'FJI': 'Fiji', 'FIN': 'Finland',
+      'FRA': 'France', 'GUF': 'French Guiana', 'PYF': 'French Polynesia', 'ATF': 'French Southern Territories',
+      
+      // G
+      'GAB': 'Gabon', 'GMB': 'Gambia', 'GEO': 'Georgia', 'DEU': 'Germany',
+      'GHA': 'Ghana', 'GIB': 'Gibraltar', 'GRC': 'Greece', 'GRL': 'Greenland',
+      'GRD': 'Grenada', 'GLP': 'Guadeloupe', 'GUM': 'Guam', 'GTM': 'Guatemala',
+      'GGY': 'Guernsey', 'GIN': 'Guinea', 'GNB': 'Guinea-Bissau', 'GUY': 'Guyana',
+      
+      // H
+      'HTI': 'Haiti', 'HMD': 'Heard Island and McDonald Islands', 'VAT': 'Holy See', 'HND': 'Honduras',
+      'HKG': 'Hong Kong', 'HUN': 'Hungary',
+      
+      // I
+      'ISL': 'Iceland', 'IND': 'India', 'IDN': 'Indonesia', 'IRN': 'Iran',
+      'IRQ': 'Iraq', 'IRL': 'Ireland', 'IMN': 'Isle of Man', 'ISR': 'Israel',
+      'ITA': 'Italy',
+      
+      // J
+      'JAM': 'Jamaica', 'JPN': 'Japan', 'JEY': 'Jersey', 'JOR': 'Jordan',
+      
+      // K
+      'KAZ': 'Kazakhstan', 'KEN': 'Kenya', 'KIR': 'Kiribati', 'PRK': 'North Korea',
+      'KOR': 'South Korea', 'KWT': 'Kuwait', 'KGZ': 'Kyrgyzstan',
+      
+      // L
+      'LAO': 'Laos', 'LVA': 'Latvia', 'LBN': 'Lebanon', 'LSO': 'Lesotho',
+      'LBR': 'Liberia', 'LBY': 'Libya', 'LIE': 'Liechtenstein', 'LTU': 'Lithuania',
+      'LUX': 'Luxembourg',
+      
+      // M
+      'MAC': 'Macao', 'MDG': 'Madagascar', 'MWI': 'Malawi', 'MYS': 'Malaysia',
+      'MDV': 'Maldives', 'MLI': 'Mali', 'MLT': 'Malta', 'MHL': 'Marshall Islands',
+      'MTQ': 'Martinique', 'MRT': 'Mauritania', 'MUS': 'Mauritius', 'MYT': 'Mayotte',
+      'MEX': 'Mexico', 'FSM': 'Micronesia', 'MDA': 'Moldova', 'MCO': 'Monaco',
+      'MNG': 'Mongolia', 'MNE': 'Montenegro', 'MSR': 'Montserrat', 'MAR': 'Morocco',
+      'MOZ': 'Mozambique', 'MMR': 'Myanmar',
+      
+      // N
+      'NAM': 'Namibia', 'NRU': 'Nauru', 'NPL': 'Nepal', 'NLD': 'Netherlands',
+      'NCL': 'New Caledonia', 'NZL': 'New Zealand', 'NIC': 'Nicaragua', 'NER': 'Niger',
+      'NGA': 'Nigeria', 'NIU': 'Niue', 'NFK': 'Norfolk Island', 'MKD': 'North Macedonia',
+      'MNP': 'Northern Mariana Islands', 'NOR': 'Norway',
+      
+      // O
+      'OMN': 'Oman',
+      
+      // P
+      'PAK': 'Pakistan', 'PLW': 'Palau', 'PSE': 'Palestine', 'PAN': 'Panama',
+      'PNG': 'Papua New Guinea', 'PRY': 'Paraguay', 'PER': 'Peru', 'PHL': 'Philippines',
+      'PCN': 'Pitcairn', 'POL': 'Poland', 'PRT': 'Portugal', 'PRI': 'Puerto Rico',
+      
+      // Q
+      'QAT': 'Qatar',
+      
+      // R
+      'REU': 'Réunion', 'ROU': 'Romania', 'RUS': 'Russia', 'RWA': 'Rwanda',
+      
+      // S
+      'BLM': 'Saint Barthélemy', 'SHN': 'Saint Helena', 'KNA': 'Saint Kitts and Nevis',
+      'LCA': 'Saint Lucia', 'MAF': 'Saint Martin', 'SPM': 'Saint Pierre and Miquelon',
+      'VCT': 'Saint Vincent and the Grenadines', 'WSM': 'Samoa', 'SMR': 'San Marino',
+      'STP': 'Sao Tome and Principe', 'SAU': 'Saudi Arabia', 'SEN': 'Senegal', 'SRB': 'Serbia',
+      'SYC': 'Seychelles', 'SLE': 'Sierra Leone', 'SGP': 'Singapore', 'SXM': 'Sint Maarten',
+      'SVK': 'Slovakia', 'SVN': 'Slovenia', 'SLB': 'Solomon Islands', 'SOM': 'Somalia',
+      'ZAF': 'South Africa', 'SGS': 'South Georgia and the South Sandwich Islands', 'SSD': 'South Sudan',
+      'ESP': 'Spain', 'LKA': 'Sri Lanka', 'SDN': 'Sudan', 'SUR': 'Suriname',
+      'SJM': 'Svalbard and Jan Mayen', 'SWE': 'Sweden', 'CHE': 'Switzerland', 'SYR': 'Syria',
+      
+      // T
+      'TWN': 'Taiwan', 'TJK': 'Tajikistan', 'TZA': 'Tanzania', 'THA': 'Thailand',
+      'TLS': 'Timor-Leste', 'TGO': 'Togo', 'TKL': 'Tokelau', 'TON': 'Tonga',
+      'TTO': 'Trinidad and Tobago', 'TUN': 'Tunisia', 'TUR': 'Turkey', 'TKM': 'Turkmenistan',
+      'TCA': 'Turks and Caicos Islands', 'TUV': 'Tuvalu',
+      
+      // U
+      'UGA': 'Uganda', 'UKR': 'Ukraine', 'ARE': 'United Arab Emirates', 'GBR': 'United Kingdom',
+      'USA': 'United States', 'UMI': 'United States Minor Outlying Islands', 'URY': 'Uruguay',
+      'UZB': 'Uzbekistan',
+      
+      // V
+      'VUT': 'Vanuatu', 'VEN': 'Venezuela', 'VNM': 'Vietnam', 'VGB': 'Virgin Islands (British)',
+      'VIR': 'Virgin Islands (U.S.)',
+      
+      // W
+      'WLF': 'Wallis and Futuna', 'ESH': 'Western Sahara',
+      
+      // Y
+      'YEM': 'Yemen',
+      
+      // Z
+      'ZMB': 'Zambia', 'ZWE': 'Zimbabwe',
+      
+      // 2-letter codes (ISO 3166-1 alpha-2) - for backward compatibility
+      'AF': 'Afghanistan', 'AX': 'Åland Islands', 'AL': 'Albania', 'DZ': 'Algeria',
+      'AS': 'American Samoa', 'AD': 'Andorra', 'AO': 'Angola', 'AI': 'Anguilla',
+      'AQ': 'Antarctica', 'AG': 'Antigua and Barbuda', 'AR': 'Argentina', 'AM': 'Armenia',
+      'AW': 'Aruba', 'AU': 'Australia', 'AT': 'Austria', 'AZ': 'Azerbaijan',
+      'BS': 'Bahamas', 'BH': 'Bahrain', 'BD': 'Bangladesh', 'BB': 'Barbados',
+      'BY': 'Belarus', 'BE': 'Belgium', 'BZ': 'Belize', 'BJ': 'Benin',
+      'BM': 'Bermuda', 'BT': 'Bhutan', 'BO': 'Bolivia', 'BQ': 'Bonaire, Sint Eustatius and Saba',
+      'BA': 'Bosnia and Herzegovina', 'BW': 'Botswana', 'BV': 'Bouvet Island', 'BR': 'Brazil',
+      'IO': 'British Indian Ocean Territory', 'BN': 'Brunei', 'BG': 'Bulgaria', 'BF': 'Burkina Faso',
+      'BI': 'Burundi', 'CV': 'Cabo Verde', 'KH': 'Cambodia', 'CM': 'Cameroon',
+      'CA': 'Canada', 'KY': 'Cayman Islands', 'CF': 'Central African Republic', 'TD': 'Chad',
+      'CL': 'Chile', 'CN': 'China', 'CX': 'Christmas Island', 'CC': 'Cocos (Keeling) Islands',
+      'CO': 'Colombia', 'KM': 'Comoros', 'CG': 'Congo', 'CD': 'Congo (Democratic Republic)',
+      'CK': 'Cook Islands', 'CR': 'Costa Rica', 'CI': 'Côte d\'Ivoire', 'HR': 'Croatia',
+      'CU': 'Cuba', 'CW': 'Curaçao', 'CY': 'Cyprus', 'CZ': 'Czech Republic',
+      'DK': 'Denmark', 'DJ': 'Djibouti', 'DM': 'Dominica', 'DO': 'Dominican Republic',
+      'EC': 'Ecuador', 'EG': 'Egypt', 'SV': 'El Salvador', 'GQ': 'Equatorial Guinea',
+      'ER': 'Eritrea', 'EE': 'Estonia', 'SZ': 'Eswatini', 'ET': 'Ethiopia',
+      'FK': 'Falkland Islands', 'FO': 'Faroe Islands', 'FJ': 'Fiji', 'FI': 'Finland',
+      'FR': 'France', 'GF': 'French Guiana', 'PF': 'French Polynesia', 'TF': 'French Southern Territories',
+      'GA': 'Gabon', 'GM': 'Gambia', 'GE': 'Georgia', 'DE': 'Germany',
+      'GH': 'Ghana', 'GI': 'Gibraltar', 'GR': 'Greece', 'GL': 'Greenland',
+      'GD': 'Grenada', 'GP': 'Guadeloupe', 'GU': 'Guam', 'GT': 'Guatemala',
+      'GG': 'Guernsey', 'GN': 'Guinea', 'GW': 'Guinea-Bissau', 'GY': 'Guyana',
+      'HT': 'Haiti', 'HM': 'Heard Island and McDonald Islands', 'VA': 'Holy See',
+      'HN': 'Honduras', 'HK': 'Hong Kong', 'HU': 'Hungary', 'IS': 'Iceland',
+      'IN': 'India', 'ID': 'Indonesia', 'IR': 'Iran', 'IQ': 'Iraq',
+      'IE': 'Ireland', 'IM': 'Isle of Man', 'IL': 'Israel', 'IT': 'Italy',
+      'JM': 'Jamaica', 'JP': 'Japan', 'JE': 'Jersey', 'JO': 'Jordan',
+      'KZ': 'Kazakhstan', 'KE': 'Kenya', 'KI': 'Kiribati', 'KP': 'North Korea',
+      'KR': 'South Korea', 'KW': 'Kuwait', 'KG': 'Kyrgyzstan', 'LA': 'Laos',
+      'LV': 'Latvia', 'LB': 'Lebanon', 'LS': 'Lesotho', 'LR': 'Liberia',
+      'LY': 'Libya', 'LI': 'Liechtenstein', 'LT': 'Lithuania', 'LU': 'Luxembourg',
+      'MO': 'Macao', 'MG': 'Madagascar', 'MW': 'Malawi', 'MY': 'Malaysia',
+      'MV': 'Maldives', 'ML': 'Mali', 'MT': 'Malta', 'MH': 'Marshall Islands',
+      'MQ': 'Martinique', 'MR': 'Mauritania', 'MU': 'Mauritius', 'YT': 'Mayotte',
+      'MX': 'Mexico', 'FM': 'Micronesia', 'MD': 'Moldova', 'MC': 'Monaco',
+      'MN': 'Mongolia', 'ME': 'Montenegro', 'MS': 'Montserrat', 'MA': 'Morocco',
+      'MZ': 'Mozambique', 'MM': 'Myanmar', 'NA': 'Namibia', 'NR': 'Nauru',
+      'NP': 'Nepal', 'NL': 'Netherlands', 'NC': 'New Caledonia', 'NZ': 'New Zealand',
+      'NI': 'Nicaragua', 'NE': 'Niger', 'NG': 'Nigeria', 'NU': 'Niue',
+      'NF': 'Norfolk Island', 'MK': 'North Macedonia', 'MP': 'Northern Mariana Islands',
+      'NO': 'Norway', 'OM': 'Oman', 'PK': 'Pakistan', 'PW': 'Palau',
+      'PS': 'Palestine', 'PA': 'Panama', 'PG': 'Papua New Guinea', 'PY': 'Paraguay',
+      'PE': 'Peru', 'PH': 'Philippines', 'PN': 'Pitcairn', 'PL': 'Poland',
+      'PT': 'Portugal', 'PR': 'Puerto Rico', 'QA': 'Qatar', 'RE': 'Réunion',
+      'RO': 'Romania', 'RU': 'Russia', 'RW': 'Rwanda', 'BL': 'Saint Barthélemy',
+      'SH': 'Saint Helena', 'KN': 'Saint Kitts and Nevis', 'LC': 'Saint Lucia',
+      'MF': 'Saint Martin', 'PM': 'Saint Pierre and Miquelon', 'VC': 'Saint Vincent and the Grenadines',
+      'WS': 'Samoa', 'SM': 'San Marino', 'ST': 'Sao Tome and Principe', 'SA': 'Saudi Arabia',
+      'SN': 'Senegal', 'RS': 'Serbia', 'SC': 'Seychelles', 'SL': 'Sierra Leone',
+      'SG': 'Singapore', 'SX': 'Sint Maarten', 'SK': 'Slovakia', 'SI': 'Slovenia',
+      'SB': 'Solomon Islands', 'SO': 'Somalia', 'ZA': 'South Africa',
+      'GS': 'South Georgia and the South Sandwich Islands', 'SS': 'South Sudan',
+      'ES': 'Spain', 'LK': 'Sri Lanka', 'SD': 'Sudan', 'SR': 'Suriname',
+      'SJ': 'Svalbard and Jan Mayen', 'SE': 'Sweden', 'CH': 'Switzerland', 'SY': 'Syria',
+      'TW': 'Taiwan', 'TJ': 'Tajikistan', 'TZ': 'Tanzania', 'TH': 'Thailand',
+      'TL': 'Timor-Leste', 'TG': 'Togo', 'TK': 'Tokelau', 'TO': 'Tonga',
+      'TT': 'Trinidad and Tobago', 'TN': 'Tunisia', 'TR': 'Turkey', 'TM': 'Turkmenistan',
+      'TC': 'Turks and Caicos Islands', 'TV': 'Tuvalu', 'UG': 'Uganda', 'UA': 'Ukraine',
+      'AE': 'United Arab Emirates', 'GB': 'United Kingdom', 'US': 'United States',
+      'UM': 'United States Minor Outlying Islands', 'UY': 'Uruguay', 'UZ': 'Uzbekistan',
+      'VU': 'Vanuatu', 'VE': 'Venezuela', 'VN': 'Vietnam', 'VG': 'Virgin Islands (British)',
+      'VI': 'Virgin Islands (U.S.)', 'WF': 'Wallis and Futuna', 'EH': 'Western Sahara',
+      'YE': 'Yemen', 'ZM': 'Zambia', 'ZW': 'Zimbabwe'
+    };
+    
+    // Check if we have a direct mapping
+    if (countryMapping[upperCode]) {
+      return countryMapping[upperCode];
+    }
+    
+    // Fallback: Try Intl.DisplayNames for any codes we might have missed
     try {
-      return regionNames.of(code.toUpperCase()) || code;
+      const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+      if (upperCode.length === 2) {
+        return regionNames.of(upperCode) || code;
+      }
     } catch {
+      // If all fails, return the code itself
       return code;
     }
+    
+    return code;
   };
 
   const selectedDomainData = domains.find(d => d.id === selectedDomain);
@@ -680,7 +916,14 @@ export default function GSCAnalyticsPage() {
 
                 {activeTab === 'queries' && (
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Performing Queries</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Top Performing Queries
+                      {topQueries.length > 0 && (
+                        <span className="text-sm font-normal text-gray-500 ml-2">
+                          ({topQueries.length} {topQueries.length === 1 ? 'query' : 'queries'})
+                        </span>
+                      )}
+                    </h3>
                     {topQueries.length === 0 ? (
                       <p className="text-center text-gray-500 py-8">No query data available. Click "Sync Data" to fetch latest data.</p>
                     ) : (
@@ -714,7 +957,14 @@ export default function GSCAnalyticsPage() {
 
                 {activeTab === 'pages' && (
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Performing Pages</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Top Performing Pages
+                      {topPages.length > 0 && (
+                        <span className="text-sm font-normal text-gray-500 ml-2">
+                          ({topPages.length} {topPages.length === 1 ? 'page' : 'pages'})
+                        </span>
+                      )}
+                    </h3>
                     {topPages.length === 0 ? (
                       <p className="text-center text-gray-500 py-8">No page data available. Click "Sync Data" to fetch latest data.</p>
                     ) : (
@@ -750,7 +1000,14 @@ export default function GSCAnalyticsPage() {
 
                 {activeTab === 'countries' && (
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance by Country</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Performance by Country
+                      {countries.length > 0 && (
+                        <span className="text-sm font-normal text-gray-500 ml-2">
+                          ({countries.length} {countries.length === 1 ? 'country' : 'countries'})
+                        </span>
+                      )}
+                    </h3>
                     {countries.length === 0 ? (
                       <p className="text-center text-gray-500 py-8">No country data available. Click "Sync Data" to fetch latest data.</p>
                     ) : (
@@ -766,7 +1023,7 @@ export default function GSCAnalyticsPage() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
-                            {countries.slice(0, 20).map((country, index) => (
+                            {countries.map((country, index) => (
                               <tr key={country.id || index} className="hover:bg-gray-50">
                                 <td className="px-4 py-3 text-sm text-gray-900">
                                   <span className="flex items-center gap-2">

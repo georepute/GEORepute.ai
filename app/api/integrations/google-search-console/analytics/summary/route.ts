@@ -47,15 +47,18 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
-    // Calculate totals and averages
+    // Calculate totals and averages (matching GSC calculation method)
     const totalClicks = data?.reduce((sum, item) => sum + (item.clicks || 0), 0) || 0;
     const totalImpressions = data?.reduce((sum, item) => sum + (item.impressions || 0), 0) || 0;
-    const avgCTR = data && data.length > 0
-      ? data.reduce((sum, item) => sum + (item.ctr || 0), 0) / data.length
-      : 0;
-    const avgPosition = data && data.length > 0
-      ? data.reduce((sum, item) => sum + (item.position || 0), 0) / data.length
-      : 0;
+    
+    // Average CTR = total clicks / total impressions (NOT average of daily CTRs)
+    const avgCTR = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
+    
+    // Average Position = weighted average by impressions (NOT simple average of daily positions)
+    const weightedPositionSum = data?.reduce((sum, item) => {
+      return sum + ((item.position || 0) * (item.impressions || 0));
+    }, 0) || 0;
+    const avgPosition = totalImpressions > 0 ? weightedPositionSum / totalImpressions : 0;
 
     // Calculate trends (compare first half to second half)
     const midpoint = Math.floor((data?.length || 0) / 2);
@@ -74,7 +77,7 @@ export async function GET(request: NextRequest) {
       ? ((secondHalfImpressions - firstHalfImpressions) / firstHalfImpressions) * 100 
       : 0;
 
-    return NextResponse.json({
+    return NextResponse.json({  
       success: true,
       summary: {
         totalClicks,
