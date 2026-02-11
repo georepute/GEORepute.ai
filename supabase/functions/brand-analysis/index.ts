@@ -1508,6 +1508,32 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
   }
   return queries.slice(0, 50);
 }
+const MAX_QUERIES = 50;
+async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, analysisCountriesRun, mergedKeywords = null) {
+  const keywords = mergedKeywords != null ? mergedKeywords : (project.target_keywords || []);
+  const mode = project.query_mode || 'auto';
+  const manualList = Array.isArray(project.manual_queries) ? project.manual_queries : [];
+  const manualTexts = manualList.map((q) => (q && typeof q.text === 'string' ? q.text.trim() : '')).filter(Boolean);
+  if (mode === 'manual') {
+    if (manualTexts.length === 0) {
+      console.log('Manual mode but no manual queries; using fallback generated queries (max 50)');
+      return generateFallbackQueries(project.brand_name, project.industry, keywords, project.competitors || [], queryLanguage, analysisCountriesRun).slice(0, MAX_QUERIES);
+    }
+    return manualTexts.slice(0, MAX_QUERIES);
+  }
+  if (mode === 'auto_manual') {
+    const generated = await generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', queryLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
+    const combined = [...manualTexts];
+    for (const q of generated) {
+      if (combined.length >= MAX_QUERIES) break;
+      if (!combined.includes(q)) combined.push(q);
+    }
+    console.log(`Auto+manual: ${manualTexts.length} manual + generated, total ${combined.length} (cap ${MAX_QUERIES})`);
+    return combined.slice(0, MAX_QUERIES);
+  }
+  const generated = await generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', queryLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
+  return generated.slice(0, MAX_QUERIES);
+}
 function analyzeCrossPlatformResults(platformResults, brandName, competitors) {
   // Skip analysis if we have less than 2 platforms
   const platforms = Object.keys(platformResults);
@@ -1775,20 +1801,15 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
         }
       }
     }
-    // Generate realistic user queries using AI (with optional geography from project)
+    // Build query list from project query_mode and optional manual_queries (cap 50)
     const analysisLangs = project.analysis_languages || [];
     const analysisCountriesRun = project.analysis_countries || [];
-    // Use first selected analysis language when set; otherwise default to English (never Hebrew or other)
     const queryLanguage = analysisLangs.length > 0
       ? (analysisLangs[0].toLowerCase().startsWith('he') ? 'he' : analysisLangs[0].split('-')[0].toLowerCase() || 'en')
       : 'en';
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, project.target_keywords || [], project.competitors || [], project.website_url || '', queryLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
-    console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
-    // Log some sample queries for debugging
-    console.log("Sample queries:", realisticQueries.slice(0, 5));
-    // Use all generated queries for each platform
-    const selectedQueries = realisticQueries;
-    console.log(`Using all ${selectedQueries.length} queries for analysis across each platform`);
+    const selectedQueries = await getQueriesForAnalysis(project, queryLanguage, analysisLangs, analysisCountriesRun);
+    console.log(`Using ${selectedQueries.length} queries for analysis across each platform (mode: ${project.query_mode || 'auto'})`);
+    console.log("Sample queries:", selectedQueries.slice(0, 5));
     // Use existing session or create a new one
     let session;
     const totalQueries = availablePlatforms.length * selectedQueries.length;
@@ -2613,8 +2634,25 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Create analysis session immediately
-    const totalQueries = availablePlatforms.length * 50; // Assuming 50 queries per platform
+    // ════════════════════════════════════════════════════════════════════════
+    // MERGE KEYWORDS: Manual + GSC
+    // ════════════════════════════════════════════════════════════════════════
+    
+    const manualKeywords = project.target_keywords || [];
+    const allKeywords = [...new Set([...manualKeywords, ...gscKeywords])]; // Remove duplicates
+    
+    console.log(`📊 Keyword Summary:`);
+    console.log(`   Manual: ${manualKeywords.length}`);
+    console.log(`   GSC: ${gscKeywords.length}`);
+    console.log(`   Total (merged): ${allKeywords.length}`);
+    
+    // Build query list from project query_mode and optional manual_queries (cap 50)
+    const preferredLangForQueries = analysisLanguages.length > 0
+      ? (analysisLanguages[0].toLowerCase().startsWith('he') ? 'he' : analysisLanguages[0].split('-')[0].toLowerCase() || 'en')
+      : 'en';
+    const selectedQueriesForRun = await getQueriesForAnalysis(project, preferredLangForQueries, analysisLanguages, analysisCountries, allKeywords);
+    const totalQueries = availablePlatforms.length * selectedQueriesForRun.length;
+    console.log(`Query mode: ${project.query_mode || 'auto'}, ${selectedQueriesForRun.length} queries, ${availablePlatforms.length} platforms, ${totalQueries} total runs`);
     const { data: session, error: sessionError } = await supabase.from('brand_analysis_sessions').insert({
       project_id: projectId,
       session_name: `AI-Generated Queries Analysis ${new Date().toLocaleDateString()}`,
@@ -2635,22 +2673,7 @@ Deno.serve(async (req) => {
       });
     }
     
-    // ════════════════════════════════════════════════════════════════════════
-    // MERGE KEYWORDS: Manual + GSC
-    // ════════════════════════════════════════════════════════════════════════
-    
-    const manualKeywords = project.target_keywords || [];
-    const allKeywords = [...new Set([...manualKeywords, ...gscKeywords])]; // Remove duplicates
-    
-    console.log(`📊 Keyword Summary:`);
-    console.log(`   Manual: ${manualKeywords.length}`);
-    console.log(`   GSC: ${gscKeywords.length}`);
-    console.log(`   Total (merged): ${allKeywords.length}`);
-    
-    // Generate realistic user queries using AI with MERGED keywords (and optional geography)
-    const realisticQueries = await generateRealisticUserQueries(project.brand_name, project.industry, allKeywords, project.competitors || [], project.website_url || '', preferredLanguage, { languages: analysisLanguages, countries: analysisCountries });
-    console.log(`Generated ${realisticQueries.length} realistic user queries for analysis`);
-    // Start the first batch immediately (this will chain to subsequent batches)
+    // Start the first batch immediately
     try {
       console.log(`Starting first batch with ${availablePlatforms.length} platforms: ${availablePlatforms.join(', ')}`);
       // Ensure we're using all available platforms
@@ -2665,7 +2688,7 @@ Deno.serve(async (req) => {
       // Do NOT overwrite user's selected active_platforms; keep user's selection intact
       // Use a very small initial batch size (2 queries) to ensure the first batch completes quickly
       // Subsequent batches will use the default batch size defined in the function (3)
-      await processBatchOfQueries(projectId, platformsToUse, session.id, realisticQueries, 0, 2, preferredLanguage);
+      await processBatchOfQueries(projectId, platformsToUse, session.id, selectedQueriesForRun, 0, 2, preferredLanguage);
       // Return immediately with session info
       return new Response(JSON.stringify({
         success: true,

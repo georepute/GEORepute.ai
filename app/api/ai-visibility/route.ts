@@ -58,7 +58,9 @@ export async function POST(request: NextRequest) {
       companyImageUrl = '',
       fetchGSCKeywords = false,
       analysisLanguages = [],
-      analysisCountries = []
+      analysisCountries = [],
+      queryMode = 'auto',
+      manualQueries = []
     } = body
 
     // Validate required fields
@@ -105,6 +107,8 @@ export async function POST(request: NextRequest) {
             competitors: competitors,
             ...(Array.isArray(analysisLanguages) && { analysis_languages: analysisLanguages }),
             ...(Array.isArray(analysisCountries) && { analysis_countries: analysisCountries }),
+            ...(queryMode && { query_mode: queryMode }),
+            ...(Array.isArray(manualQueries) && { manual_queries: manualQueries }),
           })
           .eq('id', finalProjectId)
       } else {
@@ -124,6 +128,8 @@ export async function POST(request: NextRequest) {
             company_image_url: companyImageUrl,
             analysis_languages: Array.isArray(analysisLanguages) ? analysisLanguages : [],
             analysis_countries: Array.isArray(analysisCountries) ? analysisCountries : [],
+            query_mode: queryMode === 'manual' || queryMode === 'auto_manual' ? queryMode : 'auto',
+            manual_queries: Array.isArray(manualQueries) ? manualQueries : [],
           })
           .select('id')
           .single()
