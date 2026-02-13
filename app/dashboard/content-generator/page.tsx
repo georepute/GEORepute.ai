@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { motion } from "framer-motion";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
@@ -24,7 +24,9 @@ import {
   CheckCircle,
   X,
   Search,
-  ImageIcon
+  ImageIcon,
+  Code,
+  Globe
 } from "lucide-react";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
@@ -43,7 +45,8 @@ function ContentGeneratorPageInner() {
   // Step 1: User Input
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
-  const [targetPlatform, setTargetPlatform] = useState("reddit");
+  const [targetPlatforms, setTargetPlatforms] = useState<string[]>([]); // No pre-selected platform
+  const targetPlatform = targetPlatforms[0]; // Primary for generation (first selected), undefined when none selected
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
   const [imageUrl, setImageUrl] = useState(""); // For platforms that support image upload (not Facebook, Instagram, LinkedIn, Medium)
   const [linkedinContentType, setLinkedinContentType] = useState<"linkedin_article" | "linkedin_post">("linkedin_post"); // LinkedIn content type
@@ -69,6 +72,26 @@ function ContentGeneratorPageInner() {
   const [contentId, setContentId] = useState<string | null>(null); // Store content ID from generation
   const [isCreatingSchema, setIsCreatingSchema] = useState(false);
 
+  // Publish: multi-platform selection and schema creation (same as content page / missed prompts – one schema per platform)
+  const [showPublishPlatformModal, setShowPublishPlatformModal] = useState(false);
+  const [publishPlatforms, setPublishPlatforms] = useState<string[]>([]);
+  const [creatingSchemas, setCreatingSchemas] = useState(false);
+  const [schemaProgress, setSchemaProgress] = useState(0);
+  const [currentSchemaPlatform, setCurrentSchemaPlatform] = useState("");
+  const [platformSchemas, setPlatformSchemas] = useState<{ [key: string]: any }>({});
+  const [platformsBeingCreated, setPlatformsBeingCreated] = useState<string[]>([]);
+  const PUBLISHING_PLATFORMS = [
+    { id: "reddit", name: "Reddit", icon: "/reddit-icon.svg" },
+    { id: "medium", name: "Medium", icon: "/medium-square.svg" },
+    { id: "quora", name: "Quora", icon: "/quora.svg" },
+    { id: "facebook", name: "Facebook", icon: "/facebook-color.svg" },
+    { id: "linkedin", name: "LinkedIn", icon: "/linkedin.svg" },
+    { id: "instagram", name: "Instagram", icon: "/instagram-1-svgrepo-com.svg" },
+    { id: "github", name: "GitHub", icon: "/github-142.svg" },
+    { id: "shopify", name: "Shopify", icon: "/shopify.svg" },
+    { id: "wordpress", name: "WordPress.com", icon: "/wordpress.svg" },
+  ];
+
   // Image Selection State
   const [showImageModal, setShowImageModal] = useState(false);
   const [imageSearchQuery, setImageSearchQuery] = useState<string>('');
@@ -77,7 +100,10 @@ function ContentGeneratorPageInner() {
   const [selectedImage, setSelectedImage] = useState<any | null>(null);
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingManualImageInModal, setUploadingManualImageInModal] = useState(false);
   const [imageModalShown, setImageModalShown] = useState(false); // Track if image modal has been shown
+  const [imageModalView, setImageModalView] = useState<'search' | 'upload'>('search'); // search = Pixabay + upload section, upload = manual upload only
+  const modalFileInputRef = useRef<HTMLInputElement>(null);
 
   // AI Detection & Humanization State
   const [isDetectingAI, setIsDetectingAI] = useState(false);
@@ -143,7 +169,7 @@ function ContentGeneratorPageInner() {
       setTopic(urlTopic);
     }
     if (urlPlatform) {
-      setTargetPlatform(urlPlatform);
+      setTargetPlatforms([urlPlatform]);
     }
     if (urlKeywords) {
       setTargetKeywords(urlKeywords);
@@ -207,6 +233,11 @@ function ContentGeneratorPageInner() {
       return;
     }
 
+    if (targetPlatforms.length === 0) {
+      toast.error("Please select at least one platform");
+      return;
+    }
+
     setGeneratingContent(true);
     try {
 
@@ -241,7 +272,7 @@ function ContentGeneratorPageInner() {
 
       setGeneratedContent(data.content);
       setOriginalContent(data.content); // Store original for comparison
-      setContentId(data.contentId || null); // Store content ID if available
+      setContentId(data.contentId || null); // May be null when skipGeneration: true
       setContentMetadata({
         neutralityScore: data.metadata.neutralityScore,
         tone: data.metadata.tone,
@@ -462,6 +493,7 @@ function ContentGeneratorPageInner() {
           const keywords = targetKeywords.split(",").map(k => k.trim()).filter(Boolean);
           setImageSearchQuery(topic || keywords[0] || '');
           setImageModalShown(true); // Mark as shown
+          setImageModalView("search");
           setTimeout(() => setShowImageModal(true), 500);
         }
       } else {
@@ -570,9 +602,60 @@ function ContentGeneratorPageInner() {
     }
   };
 
+  // Manual upload from computer inside the image modal (saved to Supabase, user choice vs Pixabay)
+  const handleManualImageUploadInModal = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+      toast.error("Please choose a JPEG, PNG, or WebP image.");
+      e.target.value = "";
+      return;
+    }
+    const maxSize = 20 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error("Image must be under 20MB.");
+      e.target.value = "";
+      return;
+    }
+    setUploadingManualImageInModal(true);
+    toast.loading("Uploading image...", { id: "modal-image-upload" });
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/upload-image", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Upload failed");
+      }
+      if (data.url) {
+        setImageUrl(data.url);
+        setUploadedImageUrl(data.url);
+        setSelectedImage({ id: "manual", tags: topic, user: "Uploaded by user" });
+        toast.success("Image uploaded. Click Continue to use it.", { id: "modal-image-upload" });
+      }
+    } catch (err) {
+      console.error("Manual image upload in modal:", err);
+      toast.error(err instanceof Error ? err.message : "Upload failed", { id: "modal-image-upload" });
+    } finally {
+      setUploadingManualImageInModal(false);
+      e.target.value = "";
+    }
+  };
+
+  const clearModalImage = () => {
+    setUploadedImageUrl(null);
+    setImageUrl("");
+    setSelectedImage(null);
+    if (modalFileInputRef.current) modalFileInputRef.current.value = "";
+  };
+
   // Confirm image selection and close modal
   const handleConfirmImage = async () => {
-    if (!selectedImage || !uploadedImageUrl || !contentId) {
+    if (!uploadedImageUrl || !contentId) {
       setShowImageModal(false);
       return;
     }
@@ -591,8 +674,8 @@ function ContentGeneratorPageInner() {
           imageUrl: uploadedImageUrl,
           imageData: {
             url: uploadedImageUrl,
-            alt: selectedImage.tags || topic,
-            photographer: selectedImage.user,
+            alt: selectedImage?.tags || topic,
+            photographer: selectedImage?.user || "Uploaded by user",
           },
         };
 
@@ -617,96 +700,125 @@ function ContentGeneratorPageInner() {
     toast.success('Image selected! You can proceed to publish.');
   };
 
-  // Handle "Ready to Publish?" button click - Generate schema and navigate
-  const handleReadyToPublish = async () => {
+  // Open platform selection modal (same as missed prompts: one schema + one publication row per platform)
+  const handleReadyToPublish = () => {
     if (!generatedContent || !topic || !targetKeywords) {
       toast.error("Please generate content first");
       return;
     }
+    setShowPublishPlatformModal(true);
+    setPublishPlatforms((prev) => (prev.length > 0 ? prev : [...targetPlatforms]));
+    setPlatformSchemas({});
+  };
 
-    setIsCreatingSchema(true);
-    try {
-      const keywords = targetKeywords.split(",").map(k => k.trim()).filter(Boolean);
-      
-      toast.loading("Generating schema for publication...", { id: "schema-generation" });
+  const handlePublishPlatformToggle = (platformId: string) => {
+    setPublishPlatforms((prev) =>
+      prev.includes(platformId) ? prev.filter((p) => p !== platformId) : [...prev, platformId]
+    );
+  };
 
-      // Only include imageUrl for platforms that support it (all except GitHub)
-      const includeImage = targetPlatform !== 'github' && uploadedImageUrl;
+  const PLATFORMS_WITH_IMAGE_SUPPORT = ["reddit", "medium", "quora", "facebook", "linkedin", "instagram"];
 
-      // Generate schema for the current content (without creating duplicate DB entry)
-      const response = await fetch('/api/geo-core/content-generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          topic,
-          targetKeywords: keywords,
-          targetPlatform,
-          influenceLevel,
-          brandVoiceId: selectedVoiceId,
-          language: language || 'en',
-          generatedContent: humanizedContent || generatedContent, // Use humanized content if available
-          skipGeneration: true, // Skip AI generation AND database insertion, just create schema
-          contentType: targetPlatform === "github" ? "documentation" : "article",
-          tone: contentMetadata?.tone || "informative",
-          // Include imageUrl for all platforms except GitHub
-          ...(includeImage ? { 
-            imageUrl: uploadedImageUrl,
-            imageData: selectedImage ? {
-              url: uploadedImageUrl,
-              alt: selectedImage.tags || topic,
-              photographer: selectedImage.user,
-            } : null,
-          } : {}),
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to generate schema');
-      }
-
-      const data = await response.json();
-
-      // Store schema data and content info in sessionStorage for the content page
-      // Use existing contentId from initial generation (not from schema generation, which won't create a new entry)
-      const publishData = {
-        contentId: contentId, // Use the original contentId from when content was first generated
-        content: humanizedContent || generatedContent,
-        topic,
-        targetPlatform,
-        targetKeywords: keywords,
-        schema: data.schema,
-        structuredSEO: data.structuredSEO,
-        metadata: {
-          ...contentMetadata,
-          ...data.metadata,
-          // Include image data if available
-          ...(includeImage && uploadedImageUrl ? {
-            imageUrl: uploadedImageUrl,
-            imageData: selectedImage ? {
-              url: uploadedImageUrl,
-              alt: selectedImage.tags || topic,
-              photographer: selectedImage.user,
-            } : null,
-          } : {}),
-        },
-        generatedAt: new Date().toISOString(),
-      };
-
-      sessionStorage.setItem('contentToPublish', JSON.stringify(publishData));
-
-      toast.success("Schema generated! Redirecting to publication page...", { id: "schema-generation" });
-      
-      // Navigate to publication page
-      router.push('/dashboard/content');
-    } catch (error: any) {
-      console.error('Schema generation error:', error);
-      toast.error(`Failed to generate schema: ${error.message || 'Unknown error'}`, { id: "schema-generation" });
-    } finally {
-      setIsCreatingSchema(false);
+  // Create one schema and one content_strategy row per selected platform (different schema per platform, like missed prompts)
+  // Skip the platform we already have a row for (from initial generation) to avoid duplicate
+  const handleCreateSchemasForPublish = async () => {
+    if (publishPlatforms.length === 0) {
+      toast.error("Please select at least one platform");
+      return;
     }
+    const keywords = targetKeywords.split(",").map((k) => k.trim()).filter(Boolean);
+    const content = humanizedContent || generatedContent;
+    const primaryPlatform = targetPlatforms[0];
+    const platformsToCreate = contentId
+      ? publishPlatforms.filter((p) => p !== primaryPlatform)
+      : [...publishPlatforms];
+    if (platformsToCreate.length === 0) {
+      sessionStorage.setItem(
+        "contentToPublish",
+        JSON.stringify({ contentId, topic, targetKeywords: keywords, generatedAt: new Date().toISOString() })
+      );
+      router.push("/dashboard/content");
+      return;
+    }
+    setPlatformsBeingCreated(platformsToCreate);
+    setCreatingSchemas(true);
+    setSchemaProgress(0);
+    setCurrentSchemaPlatform("");
+    const schemas: { [key: string]: any } = {};
+    const totalPlatforms = platformsToCreate.length;
+    let firstContentId: string | null = contentId;
+
+    for (let i = 0; i < platformsToCreate.length; i++) {
+      const platformId = platformsToCreate[i];
+      const platformName = PUBLISHING_PLATFORMS.find((p) => p.id === platformId)?.name || platformId;
+      setCurrentSchemaPlatform(platformName);
+      setSchemaProgress(Math.round((i / totalPlatforms) * 100));
+      try {
+        toast.loading(`Creating schema for ${platformName}...`, { id: `schema-${platformId}` });
+        const includeImage = PLATFORMS_WITH_IMAGE_SUPPORT.includes(platformId) && uploadedImageUrl;
+        const response = await fetch("/api/geo-core/content-generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic,
+            targetKeywords: keywords,
+            targetPlatform: platformId,
+            tone: contentMetadata?.tone || "informative",
+            contentType: platformId === "github" ? "documentation" : "article",
+            generatedContent: content,
+            skipGeneration: false,
+            imageUrl: includeImage ? uploadedImageUrl : null,
+            imageData:
+              includeImage && selectedImage
+                ? {
+                    url: uploadedImageUrl,
+                    alt: selectedImage.tags || topic,
+                    photographer: selectedImage.user,
+                  }
+                : null,
+            language: language || "en",
+            brandVoiceId: selectedVoiceId || undefined,
+            actionPlanId: actionPlanId || undefined,
+            actionPlanStepId: actionPlanStepId || undefined,
+          }),
+        });
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          toast.error(`Failed: ${platformId} - ${errorData.error || "Unknown"}`, { id: `schema-${platformId}` });
+          continue;
+        }
+        const data = await response.json();
+        if (!firstContentId && data.contentId) firstContentId = data.contentId;
+        schemas[platformId] = {
+          schemaData: { ...data.structuredSEO, jsonLd: data.schema?.jsonLd, scriptTags: data.schema?.scriptTags },
+          contentId: data.contentId,
+          hasImage: includeImage,
+        };
+        setPlatformSchemas((prev) => ({ ...prev, [platformId]: schemas[platformId] }));
+        setSchemaProgress(Math.round(((i + 1) / totalPlatforms) * 100));
+        toast.success(`Schema created for ${platformName}!`, { id: `schema-${platformId}` });
+      } catch (err: any) {
+        console.error(`Schema error for ${platformId}:`, err);
+        toast.error(`${platformId}: ${err.message}`, { id: `schema-${platformId}` });
+      }
+    }
+
+    setSchemaProgress(100);
+    setCurrentSchemaPlatform("Complete!");
+    await new Promise((r) => setTimeout(r, 500));
+    setCreatingSchemas(false);
+    setShowPublishPlatformModal(false);
+    toast.success(`Schemas created for ${Object.keys(schemas).length} platform(s)!`);
+    sessionStorage.setItem(
+      "contentToPublish",
+      JSON.stringify({
+        contentId: firstContentId,
+        topic,
+        targetKeywords: keywords,
+        generatedAt: new Date().toISOString(),
+      })
+    );
+    router.push("/dashboard/content");
   };
 
   // Auto-humanize function (runs once after generation)
@@ -1038,38 +1150,61 @@ function ContentGeneratorPageInner() {
                   />
                 </div>
 
-                {/* Platform Selection */}
+                {/* Platform Selection (multi-select) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Target Platform
+                    Target Platforms
                   </label>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Select one or more. Content is generated for the first selected; you can publish to all selected when ready.
+                  </p>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {platforms.map((platform) => (
-                      <button
-                        key={platform.value}
-                        onClick={() => setTargetPlatform(platform.value)}
-                        className={`p-4 rounded-lg border-2 transition-all ${
-                          targetPlatform === platform.value
-                            ? "border-primary-500 bg-primary-50"
-                            : "border-gray-200 hover:border-gray-300"
-                        }`}
-                      >
-                        <div className="flex items-center justify-center mb-2 h-10">
-                          <Image 
-                            src={platform.icon} 
-                            alt={platform.label} 
-                            width={40} 
-                            height={40} 
-                            className="w-10 h-10"
-                          />
-                        </div>
-                        <div className="font-semibold text-sm text-gray-900">
-                          {platform.label}
-                        </div>
-                        <div className="text-xs text-gray-600">{platform.desc}</div>
-                      </button>
-                    ))}
+                    {platforms.map((platform) => {
+                      const isSelected = targetPlatforms.includes(platform.value);
+                      return (
+                        <button
+                          key={platform.value}
+                          type="button"
+                          onClick={() => {
+                            setTargetPlatforms((prev) =>
+                              prev.includes(platform.value)
+                                ? prev.filter((p) => p !== platform.value)
+                                : [...prev, platform.value]
+                            );
+                          }}
+                          className={`p-4 rounded-lg border-2 transition-all text-left ${
+                            isSelected
+                              ? "border-primary-500 bg-primary-50"
+                              : "border-gray-200 hover:border-gray-300"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center justify-center mb-2 h-10 w-10 flex-shrink-0">
+                              <Image
+                                src={platform.icon}
+                                alt={platform.label}
+                                width={40}
+                                height={40}
+                                className="w-10 h-10"
+                              />
+                            </div>
+                            {isSelected && (
+                              <CheckCircle className="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" />
+                            )}
+                          </div>
+                          <div className="font-semibold text-sm text-gray-900">
+                            {platform.label}
+                          </div>
+                          <div className="text-xs text-gray-600">{platform.desc}</div>
+                        </button>
+                      );
+                    })}
                   </div>
+                  {targetPlatforms.length > 1 && (
+                    <p className="mt-2 text-xs text-primary-600">
+                      {targetPlatforms.length} platforms selected. Generation uses <strong>{platforms.find((p) => p.value === targetPlatform)?.label ?? targetPlatform}</strong> style.
+                    </p>
+                  )}
                 </div>
 
                 {/* LinkedIn Content Type Selection */}
@@ -1208,7 +1343,7 @@ function ContentGeneratorPageInner() {
 
                 <Button
                   onClick={generateContent}
-                  disabled={generatingContent || !topic.trim() || !targetKeywords.trim()}
+                  disabled={generatingContent || !topic.trim() || !targetKeywords.trim() || targetPlatforms.length === 0}
                   className="w-full"
                   variant="primary"
                 >
@@ -1558,13 +1693,13 @@ function ContentGeneratorPageInner() {
                   >
                     <button
                       onClick={handleReadyToPublish}
-                      disabled={!generatedContent || isCreatingSchema}
+                      disabled={!generatedContent || creatingSchemas}
                       className="w-full bg-gradient-to-r from-primary-500 to-accent-500 rounded-lg p-4 border border-primary-300 hover:shadow-lg transition-all cursor-pointer group disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center group-hover:bg-white/30 transition-colors">
-                            {isCreatingSchema ? (
+                            {creatingSchemas ? (
                               <Loader2 className="w-5 h-5 text-white animate-spin" />
                             ) : (
                               <Send className="w-5 h-5 text-white" />
@@ -1572,16 +1707,16 @@ function ContentGeneratorPageInner() {
                           </div>
                           <div>
                             <h4 className="font-semibold text-white text-sm mb-0.5">
-                              {isCreatingSchema ? "Generating Schema..." : "Ready to Publish?"}
+                              {creatingSchemas ? "Creating Schemas..." : "Ready to Publish?"}
                             </h4>
                             <p className="text-xs text-white/90">
-                              {isCreatingSchema 
-                                ? "Creating schema for publication..." 
-                                : "Go to Publication page to review and publish your content"}
+                              {creatingSchemas
+                                ? "Creating platform-specific schema for each selected platform..."
+                                : "Select platforms and create schema for each, then publish"}
                             </p>
                           </div>
                         </div>
-                        {!isCreatingSchema && (
+                        {!creatingSchemas && (
                           <ArrowRight className="w-6 h-6 text-white group-hover:translate-x-1 transition-transform" />
                         )}
                       </div>
@@ -1680,6 +1815,178 @@ function ContentGeneratorPageInner() {
         </div>
       )}
 
+      {/* Platform Selection Modal – select which platforms to create schema for (one row per platform on publication page) */}
+      {showPublishPlatformModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
+                  <Globe className="w-5 h-5 text-blue-600" />
+                  Select Publishing Platforms
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  One schema and one draft will be created per platform (same as missed prompts). Each platform gets its own schema.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowPublishPlatformModal(false)}
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+                {PUBLISHING_PLATFORMS.map((platform) => (
+                  <button
+                    key={platform.id}
+                    type="button"
+                    onClick={() => handlePublishPlatformToggle(platform.id)}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                      publishPlatforms.includes(platform.id)
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300 bg-white"
+                    }`}
+                  >
+                    <div className="relative w-5 h-5 flex-shrink-0">
+                      <Image
+                        src={platform.icon}
+                        alt={platform.name}
+                        width={20}
+                        height={20}
+                        className="object-contain"
+                      />
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">{platform.name}</span>
+                    {publishPlatforms.includes(platform.id) && (
+                      <CheckCircle className="w-4 h-4 text-blue-600 ml-auto" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div className="text-sm text-gray-600">
+                {publishPlatforms.length} platform{publishPlatforms.length !== 1 ? "s" : ""} selected
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowPublishPlatformModal(false)}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateSchemasForPublish}
+                  disabled={publishPlatforms.length === 0 || creatingSchemas}
+                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-medium rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {creatingSchemas ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Creating Schemas...
+                    </>
+                  ) : (
+                    <>
+                      <Code className="w-4 h-4" />
+                      Approve & Generate Schemas
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Schema Creation Progress Modal (same as content page when creating schema) */}
+      {creatingSchemas && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+            <div className="text-center mb-6">
+              <div className="relative w-20 h-20 mx-auto mb-4">
+                <svg className="w-20 h-20 transform -rotate-90">
+                  <circle cx="40" cy="40" r="36" stroke="#E5E7EB" strokeWidth="6" fill="none" />
+                  <circle
+                    cx="40"
+                    cy="40"
+                    r="36"
+                    stroke="url(#progressGradientCg)"
+                    strokeWidth="6"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeDasharray={`${2 * Math.PI * 36}`}
+                    strokeDashoffset={`${2 * Math.PI * 36 * (1 - schemaProgress / 100)}`}
+                    className="transition-all duration-500 ease-out"
+                  />
+                  <defs>
+                    <linearGradient id="progressGradientCg" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#3B82F6" />
+                      <stop offset="100%" stopColor="#8B5CF6" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-xl font-bold text-gray-900">{schemaProgress}%</span>
+                </div>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">Creating Platform Schemas</h3>
+              <p className="text-sm text-gray-500">
+                {currentSchemaPlatform ? (
+                  <>
+                    Processing: <span className="font-medium text-blue-600">{currentSchemaPlatform}</span>
+                  </>
+                ) : (
+                  "Initializing..."
+                )}
+              </p>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden mb-4">
+              <div
+                className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${schemaProgress}%` }}
+              />
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              {platformsBeingCreated.map((platformId) => {
+                const platform = PUBLISHING_PLATFORMS.find((p) => p.id === platformId);
+                const isComplete = Object.keys(platformSchemas).includes(platformId);
+                const isCurrent =
+                  PUBLISHING_PLATFORMS.find((p) => p.id === platformId)?.name === currentSchemaPlatform;
+                return (
+                  <div
+                    key={platformId}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                      isComplete
+                        ? "bg-green-100 text-green-700"
+                        : isCurrent
+                          ? "bg-blue-100 text-blue-700 animate-pulse"
+                          : "bg-gray-100 text-gray-400"
+                    }`}
+                  >
+                    {platform && (
+                      <div className="relative w-3.5 h-3.5">
+                        <Image
+                          src={platform.icon}
+                          alt={platform.name}
+                          width={14}
+                          height={14}
+                          className="object-contain"
+                        />
+                      </div>
+                    )}
+                    <span>{platform?.name}</span>
+                    {isComplete && <CheckCircle className="w-3 h-3" />}
+                    {isCurrent && <Loader2 className="w-3 h-3 animate-spin" />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Image Selection Modal */}
       {showImageModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -1699,6 +2006,8 @@ function ContentGeneratorPageInner() {
                   setShowImageModal(false);
                   setSelectedImage(null);
                   setUploadedImageUrl(null);
+                  setImageUrl("");
+                  setImageModalView("search");
                 }}
                 className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
@@ -1707,6 +2016,62 @@ function ContentGeneratorPageInner() {
             </div>
             
             <div className="p-6 overflow-y-auto flex-1">
+              {imageModalView === "upload" ? (
+                /* Manual upload only view */
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setImageModalView("search")}
+                      className="text-sm text-cyan-600 hover:text-cyan-700 font-medium flex items-center gap-1"
+                    >
+                      ← Back
+                    </button>
+                  </div>
+                  <h4 className="text-base font-semibold text-gray-900">Upload from your computer</h4>
+                  <p className="text-sm text-gray-500">JPEG, PNG, or WebP, max 20MB.</p>
+                  <input
+                    ref={modalFileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
+                    onChange={handleManualImageUploadInModal}
+                    disabled={uploadingManualImageInModal}
+                    className="hidden"
+                  />
+                  {!uploadedImageUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => modalFileInputRef.current?.click()}
+                      disabled={uploadingManualImageInModal}
+                      className="flex items-center justify-center gap-2 w-full py-8 rounded-xl border-2 border-dashed border-gray-300 hover:border-cyan-400 hover:bg-cyan-50/50 text-gray-600 hover:text-cyan-700 transition-colors disabled:opacity-50 font-medium"
+                    >
+                      {uploadingManualImageInModal ? (
+                        <Loader2 className="w-8 h-8 animate-spin" />
+                      ) : (
+                        <ImageIcon className="w-8 h-8" />
+                      )}
+                      {uploadingManualImageInModal ? "Uploading..." : "Choose image (JPEG, PNG, WebP, max 20MB)"}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50">
+                      <img src={uploadedImageUrl} alt="Uploaded" className="w-24 h-24 object-cover rounded-lg" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900">Image ready</p>
+                        <p className="text-xs text-gray-500">Uploaded from your computer · Click Continue below to use it</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={clearModalImage}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Remove image"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
               {/* Search Query */}
               <div className="space-y-2 mb-4">
                 <label className="text-sm font-medium text-gray-700">Search Query</label>
@@ -1820,18 +2185,32 @@ function ContentGeneratorPageInner() {
                   <p className="text-gray-500">Search for images to get started</p>
                 </div>
               )}
+
+              {/* Upload option — switch modal to manual upload view */}
+              <div className="mt-6 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setImageModalView("upload")}
+                  className="flex items-center gap-2 w-full justify-center px-4 py-3 rounded-lg border-2 border-dashed border-gray-300 hover:border-cyan-400 hover:bg-cyan-50/50 text-gray-600 hover:text-cyan-700 transition-colors font-medium text-sm"
+                >
+                  <ImageIcon className="w-5 h-5" />
+                  Upload option
+                </button>
+              </div>
+            </>
+              )}
             </div>
 
             {/* Footer with Confirm Button */}
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
               <div className="text-sm text-gray-600">
-                {selectedImage ? (
+                {uploadedImageUrl ? (
                   <span className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-500" />
-                    Image selected {uploadingImage && '(uploading...)'}
+                    Image selected {(uploadingImage || uploadingManualImageInModal) && "(uploading...)"}
                   </span>
                 ) : (
-                  'Select an image or skip to continue'
+                  "Select an image (Pixabay or upload) or skip to continue"
                 )}
               </div>
               <div className="flex gap-3">
@@ -1840,6 +2219,8 @@ function ContentGeneratorPageInner() {
                     setShowImageModal(false);
                     setSelectedImage(null);
                     setUploadedImageUrl(null);
+                    setImageUrl("");
+                    setImageModalView("search");
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
                 >
@@ -1847,10 +2228,10 @@ function ContentGeneratorPageInner() {
                 </button>
                 <button
                   onClick={handleConfirmImage}
-                  disabled={uploadingImage}
+                  disabled={uploadingImage || uploadingManualImageInModal}
                   className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-600 hover:to-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {uploadingImage ? (
+                  {(uploadingImage || uploadingManualImageInModal) ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
                       Uploading...

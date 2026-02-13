@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useLanguage } from "@/lib/language-context";
@@ -105,6 +105,9 @@ function ContentInner() {
   const [selectedImage, setSelectedImage] = useState<any | null>(null);
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingManualImageInModal, setUploadingManualImageInModal] = useState(false);
+  const [imageModalView, setImageModalView] = useState<'search' | 'upload'>('search');
+  const modalFileInputRef = useRef<HTMLInputElement>(null);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [creatingSchemas, setCreatingSchemas] = useState(false);
   const [schemaProgress, setSchemaProgress] = useState(0);
@@ -406,6 +409,11 @@ function ContentInner() {
       }
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset image modal to search view when opening
+  useEffect(() => {
+    if (showImageModal) setImageModalView('search');
+  }, [showImageModal]);
 
   // Also check for action plan context when content items change
   useEffect(() => {
@@ -1633,12 +1641,58 @@ function ContentInner() {
 
   // Confirm image selection and move to platform selection
   const handleConfirmImage = () => {
-    if (!selectedImage) {
-      toast.error('Please select an image');
+    if (!selectedImage && !uploadedImageUrl) {
+      toast.error('Please select an image or upload one');
       return;
     }
     setShowImageModal(false);
+    setImageModalView('search');
     setShowPlatformModal(true);
+  };
+
+  // Manual upload from computer in image modal (same as content-generator: saved via /api/upload-image)
+  const handleManualImageUploadInModal = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      toast.error('Please choose a JPEG, PNG, or WebP image.');
+      e.target.value = '';
+      return;
+    }
+    const maxSize = 20 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error('Image must be under 20MB.');
+      e.target.value = '';
+      return;
+    }
+    setUploadingManualImageInModal(true);
+    toast.loading('Uploading image...', { id: 'modal-image-upload' });
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch('/api/upload-image', { method: 'POST', body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Upload failed');
+      if (data.url) {
+        setUploadedImageUrl(data.url);
+        const promptText = aiVisibilityData?.responses?.[0]?.prompt || imageSearchQuery || '';
+        setSelectedImage({ id: 'manual', tags: promptText, user: 'Uploaded by user' });
+        toast.success('Image uploaded. Click Confirm to continue.', { id: 'modal-image-upload' });
+      }
+    } catch (err) {
+      console.error('Manual image upload in modal:', err);
+      toast.error(err instanceof Error ? err.message : 'Upload failed', { id: 'modal-image-upload' });
+    } finally {
+      setUploadingManualImageInModal(false);
+      e.target.value = '';
+    }
+  };
+
+  const clearModalImage = () => {
+    setUploadedImageUrl(null);
+    setSelectedImage(null);
+    if (modalFileInputRef.current) modalFileInputRef.current.value = '';
   };
 
   // Platform selection functions
@@ -1772,8 +1826,9 @@ function ContentInner() {
     
     toast.success(`Schemas created for ${Object.keys(schemas).length} platform(s)!`);
     
-    // Reload content to show the new items
+    // Reload content to show the new items, switch to draft tab so user sees content ready to publish
     await loadContent();
+    setActiveTab('draft');
   };
 
   const getStatusColor = (status: string) => {
@@ -3949,6 +4004,7 @@ function ContentInner() {
               <button
                 onClick={() => {
                   setShowImageModal(false);
+                  setImageModalView('search');
                   router.push('/dashboard/content');
                 }}
                 className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
@@ -3958,6 +4014,62 @@ function ContentInner() {
             </div>
             
             <div className="p-6 overflow-y-auto flex-1">
+              {imageModalView === 'upload' ? (
+                /* Manual upload only view */
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setImageModalView('search')}
+                      className="text-sm text-cyan-600 hover:text-cyan-700 font-medium flex items-center gap-1"
+                    >
+                      ← Back
+                    </button>
+                  </div>
+                  <h4 className="text-base font-semibold text-gray-900">Upload from your computer</h4>
+                  <p className="text-sm text-gray-500">JPEG, PNG, or WebP, max 20MB.</p>
+                  <input
+                    ref={modalFileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
+                    onChange={handleManualImageUploadInModal}
+                    disabled={uploadingManualImageInModal}
+                    className="hidden"
+                  />
+                  {!uploadedImageUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => modalFileInputRef.current?.click()}
+                      disabled={uploadingManualImageInModal}
+                      className="flex items-center justify-center gap-2 w-full py-8 rounded-xl border-2 border-dashed border-gray-300 hover:border-cyan-400 hover:bg-cyan-50/50 text-gray-600 hover:text-cyan-700 transition-colors disabled:opacity-50 font-medium"
+                    >
+                      {uploadingManualImageInModal ? (
+                        <Loader2 className="w-8 h-8 animate-spin" />
+                      ) : (
+                        <ImageIcon className="w-8 h-8" />
+                      )}
+                      {uploadingManualImageInModal ? 'Uploading...' : 'Choose image (JPEG, PNG, WebP, max 20MB)'}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50">
+                      <img src={uploadedImageUrl} alt="Uploaded" className="w-24 h-24 object-cover rounded-lg" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900">Image ready</p>
+                        <p className="text-xs text-gray-500">Uploaded from your computer · Click Confirm below to continue</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={clearModalImage}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Remove image"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
               {/* Search Query */}
               <div className="space-y-2 mb-4">
                 <label className="text-sm font-medium text-gray-700">Search Query</label>
@@ -4067,24 +4179,39 @@ function ContentInner() {
                   <p className="text-gray-500">Search for images to get started</p>
                 </div>
               )}
+
+              {/* Upload option — switch to manual upload view */}
+              <div className="mt-6 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setImageModalView('upload')}
+                  className="flex items-center gap-2 w-full justify-center px-4 py-3 rounded-lg border-2 border-dashed border-gray-300 hover:border-cyan-400 hover:bg-cyan-50/50 text-gray-600 hover:text-cyan-700 transition-colors font-medium text-sm"
+                >
+                  <ImageIcon className="w-5 h-5" />
+                  Upload option
+                </button>
+              </div>
+            </>
+              )}
             </div>
 
             {/* Footer with Confirm Button */}
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
               <div className="text-sm text-gray-600">
-                {selectedImage ? (
+                {(selectedImage || uploadedImageUrl) ? (
                   <span className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-500" />
-                    Image selected
+                    Image selected {(uploadingImage || uploadingManualImageInModal) && '(uploading...)'}
                   </span>
                 ) : (
-                  'Select an image to continue'
+                  'Select an image (Pixabay or upload) or cancel'
                 )}
               </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => {
                     setShowImageModal(false);
+                    setImageModalView('search');
                     router.push('/dashboard/content');
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
@@ -4093,10 +4220,10 @@ function ContentInner() {
                 </button>
                 <button
                   onClick={handleConfirmImage}
-                  disabled={!selectedImage || uploadingImage}
+                  disabled={(!selectedImage && !uploadedImageUrl) || uploadingImage || uploadingManualImageInModal}
                   className="px-6 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium rounded-lg hover:from-cyan-600 hover:to-blue-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {uploadingImage ? (
+                  {(uploadingImage || uploadingManualImageInModal) ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
                       Uploading...

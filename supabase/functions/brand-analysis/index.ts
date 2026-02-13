@@ -125,21 +125,21 @@ async function fetchFromGSCAPI(accessToken: string, siteUrl: string, countries?:
   const rowLimit = 100;
 
   const runOne = async (body: Record<string, unknown>) => {
-    const response = await fetch(
-      `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
+  const response = await fetch(
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
         body: JSON.stringify(body),
       }
     );
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`GSC API error: ${response.status} - ${errorText}`);
-    }
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`GSC API error: ${response.status} - ${errorText}`);
+  }
     return response.json();
   };
 
@@ -160,7 +160,7 @@ async function fetchFromGSCAPI(accessToken: string, siteUrl: string, countries?:
             { groupType: 'and', filters: [{ dimension: 'country', operator: 'equals', expression: gscCountry }] },
           ],
         });
-        const rows = data.rows || [];
+  const rows = data.rows || [];
         for (const row of rows) {
           const q = (row.keys && row.keys[0]) ? String(row.keys[0]).trim() : '';
           if (!q) continue;
@@ -278,7 +278,7 @@ async function fetchGSCKeywords(project: any): Promise<string[]> {
     if (analysisCountries?.length) {
       console.log(`📊 Fetching GSC keywords (SEO-level: ${analysisCountries.join(', ')})...`);
     } else {
-      console.log('📊 Fetching keywords from GSC API...');
+    console.log('📊 Fetching keywords from GSC API...');
     }
     const keywords = await fetchFromGSCAPI(accessToken, selectedSite, analysisCountries);
 
@@ -1239,7 +1239,7 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
               ? 'אתה מומחה בהתנהגות חיפוש משתמשים ויצירת שאילתות. צור שאילתות חיפוש מציאותיות ושיחה שהמשתמשים האמיתיים היו מקלידים למנועי חיפוש או עוזרי AI. תמיד עטוף שאילתות כמשפטים או שאלות תקינים עם רישיות וסימני פיסוק מתאימים. תמיד החזר מערכים JSON מעוצבים כראוי ללא עיצוב markdown או הסבר. כל השאילתות חייבות להיות בעברית.'
               : langCode !== 'en'
                 ? `You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. All queries MUST be in ${languageName}. Write as a native speaker would search. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. Return a valid JSON array of strings only, no markdown or explanation.`
-                : 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
+              : 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
           },
           {
             role: 'user',
@@ -2258,7 +2258,7 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
           // If competitor analysis fails, mark session as completed anyway
           await supabase.from('brand_analysis_sessions').update({
             status: 'completed',
-            completed_at: new Date().toISOString()
+          completed_at: new Date().toISOString()
           }).eq('id', sessionId);
           await supabase.from('brand_analysis_projects').update({
             last_analysis_at: new Date().toISOString()
@@ -2270,10 +2270,10 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
         await supabase.from('brand_analysis_sessions').update({
           status: 'completed',
           completed_at: new Date().toISOString()
-        }).eq('id', sessionId);
-        await supabase.from('brand_analysis_projects').update({
-          last_analysis_at: new Date().toISOString()
-        }).eq('id', projectId);
+      }).eq('id', sessionId);
+      await supabase.from('brand_analysis_projects').update({
+        last_analysis_at: new Date().toISOString()
+      }).eq('id', projectId);
       }
     }
     return {
