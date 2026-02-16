@@ -145,6 +145,7 @@ export default function DashboardLayout({
       requiredCapability: "canViewReports",
       children: [
         { name: "Regional Strength Comparison", href: "/dashboard/regional-strength-comparison", icon: Map, requiredCapability: "canViewReports" },
+        { name: "Global Visibility Matrix", href: "/dashboard/global-visibility-matrix", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
     // { name: t.dashboard.sidebar.learning, href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },

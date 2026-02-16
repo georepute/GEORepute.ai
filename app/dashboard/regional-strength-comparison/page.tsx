@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Globe, TrendingUp, TrendingDown, MousePointerClick, Eye, Target, Map as MapIcon } from 'lucide-react';
+import { Globe, TrendingUp, TrendingDown, MousePointerClick, Eye, Target, Map as MapIcon, Brain, RefreshCw, Check, X, AlertCircle, CheckCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface GSCIntegrationData {
@@ -30,6 +30,18 @@ interface Country {
   position: number;
 }
 
+interface AIMatrixCountry {
+  id: string;
+  country_code: string;
+  ai_visibility_score: number;
+  ai_domain_found?: boolean;
+  ai_best_position?: number | null;
+  ai_platforms_present?: string[];
+  ai_mentioned_competitors?: string[];
+  organic_score: number;
+  overall_visibility_score: number;
+}
+
 export default function RegionalStrengthComparisonPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState('');
@@ -37,6 +49,10 @@ export default function RegionalStrengthComparisonPage() {
   const [loading, setLoading] = useState(false);
   const [loadingDomains, setLoadingDomains] = useState(true);
   const [dateRange, setDateRange] = useState(30);
+  const [aiMatrixData, setAiMatrixData] = useState<AIMatrixCountry[]>([]);
+  const [loadingAiMatrix, setLoadingAiMatrix] = useState(false);
+  const [calculating, setCalculating] = useState(false);
+  const [activeTab, setActiveTab] = useState<'ai' | 'google'>('ai');
 
   useEffect(() => {
     loadDomains();
@@ -45,6 +61,7 @@ export default function RegionalStrengthComparisonPage() {
   useEffect(() => {
     if (selectedDomain) {
       loadCountries();
+      loadAIMatrixData();
     }
   }, [selectedDomain, dateRange]);
 
@@ -117,6 +134,69 @@ export default function RegionalStrengthComparisonPage() {
       toast.error('Failed to load country data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAIMatrixData = async () => {
+    try {
+      setLoadingAiMatrix(true);
+      const response = await fetch(`/api/global-visibility-matrix?domainId=${selectedDomain}`);
+      const data = await response.json();
+      
+      if (data.success && data.data) {
+        setAiMatrixData(data.data);
+      } else {
+        setAiMatrixData([]);
+      }
+    } catch (error) {
+      console.error('Load AI matrix error:', error);
+      setAiMatrixData([]);
+    } finally {
+      setLoadingAiMatrix(false);
+    }
+  };
+
+  const calculateMatrix = async () => {
+    if (!selectedDomain) {
+      toast.error('Please select a domain');
+      return;
+    }
+
+    const selectedDomainData = domains.find(d => d.id === selectedDomain);
+    if (!selectedDomainData) {
+      toast.error('Domain not found');
+      return;
+    }
+
+    try {
+      setCalculating(true);
+      toast.loading('Calculating matrix with AI insights (this may take 2-3 minutes)...', { id: 'calculate' });
+      
+      const domainUrl = selectedDomainData.gsc_integration?.domain_url || selectedDomainData.domain;
+      
+      const response = await fetch('/api/global-visibility-matrix/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domainId: selectedDomain,
+          domainUrl,
+          aiCheckEnabled: true,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success(data.message || 'Matrix calculated successfully!', { id: 'calculate' });
+        await loadAIMatrixData();
+      } else {
+        toast.error(data.error || 'Failed to calculate matrix', { id: 'calculate' });
+      }
+    } catch (error) {
+      console.error('Calculate matrix error:', error);
+      toast.error('Failed to calculate matrix', { id: 'calculate' });
+    } finally {
+      setCalculating(false);
     }
   };
 
@@ -446,7 +526,7 @@ export default function RegionalStrengthComparisonPage() {
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Regional Strength Comparison</h1>
-            <p className="text-gray-600">Analyze your website's performance across different regions and countries</p>
+            <p className="text-gray-600">Identify weak regions and underperforming countries to prioritize improvement efforts</p>
           </div>
         </div>
 
@@ -489,17 +569,442 @@ export default function RegionalStrengthComparisonPage() {
           )}
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-              <p className="text-gray-600">Loading regional data...</p>
-            </div>
+        {/* Tabs */}
+        <div className="mb-6">
+          <div className="border-b border-gray-200">
+            <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+              <button
+                onClick={() => setActiveTab('ai')}
+                className={`
+                  flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors
+                  ${activeTab === 'ai'
+                    ? 'border-purple-500 text-purple-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }
+                `}
+              >
+                <Brain className="w-5 h-5" />
+                Region VS AI
+              </button>
+              <button
+                onClick={() => setActiveTab('google')}
+                className={`
+                  flex items-center gap-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors
+                  ${activeTab === 'google'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }
+                `}
+              >
+                <Globe className="w-5 h-5" />
+                Region VS Google Search
+              </button>
+            </nav>
           </div>
-        ) : (
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'ai' ? (
+          // Region VS AI Tab
           <>
-            {/* Summary Stats */}
-            {countries.length > 0 && (
+            {loadingAiMatrix ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4" />
+                  <p className="text-gray-600">Loading AI insights...</p>
+                </div>
+              </div>
+            ) : aiMatrixData.length > 0 ? (
+              <>
+                {/* AI Summary Stats - Focus on Weak Regions */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                  <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg shadow-sm border border-red-200 p-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-red-700">Weak AI Regions</h3>
+                      <TrendingDown className="w-5 h-5 text-red-600" />
+                    </div>
+                    <p className="text-3xl font-bold text-red-900">
+                      {aiMatrixData.filter(c => c.ai_visibility_score < 60).length}
+                    </p>
+                    <p className="text-sm text-red-600 mt-1">AI score &lt; 60</p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg shadow-sm border border-orange-200 p-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-orange-700">Low Performance</h3>
+                      <AlertCircle className="w-5 h-5 text-orange-600" />
+                    </div>
+
+                    <p className="text-3xl font-bold text-orange-900">
+                      {aiMatrixData.filter(c => c.overall_visibility_score < (aiMatrixData.reduce((sum, c) => sum + c.overall_visibility_score, 0) / aiMatrixData.length)).length}
+                    </p>
+                    <p className="text-sm text-orange-600 mt-1">Below average</p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg shadow-sm border border-yellow-200 p-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-yellow-700">Limited Platform</h3>
+                      <Target className="w-5 h-5 text-yellow-600" />
+                    </div>
+                    <p className="text-3xl font-bold text-yellow-900">
+                      {aiMatrixData.filter(c => (c.ai_platforms_present?.length || 0) < 3).length}
+                    </p>
+                    <p className="text-sm text-yellow-600 mt-1">&lt; 3 platforms</p>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg shadow-sm border border-green-200 p-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-medium text-green-700">Strong Regions</h3>
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                    </div>
+                    <p className="text-3xl font-bold text-green-900">
+                      {aiMatrixData.filter(c => c.overall_visibility_score >= 70).length}
+                    </p>
+                    <p className="text-sm text-green-600 mt-1">Overall score ≥ 70</p>
+                  </div>
+                </div>
+
+                {/* AI Charts Section */}
+                <div className="space-y-6 mb-6">
+                  {/* Top row: Weakest Regions */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Weakest Countries by AI Score */}
+                    <div className="bg-white rounded-lg shadow-sm border border-red-100 p-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">Bottom 10 Countries by AI Score</h3>
+                      <p className="text-sm text-gray-600 mb-4">Regions with weakest AI presence - Priority targets</p>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={aiMatrixData.slice().sort((a, b) => a.ai_visibility_score - b.ai_visibility_score).slice(0, 10).map(c => ({
+                          name: getCountryName(c.country_code).length > 15 
+                            ? getCountryName(c.country_code).substring(0, 12) + '...' 
+                            : getCountryName(c.country_code),
+                          fullName: getCountryName(c.country_code),
+                          score: c.ai_visibility_score,
+                        }))}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis 
+                            dataKey="name" 
+                            angle={-45} 
+                            textAnchor="end" 
+                            height={100} 
+                            style={{ fontSize: '11px' }}
+                          />
+                          <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                            formatter={(value: any) => [Number(value).toFixed(1), 'AI Score']}
+                          />
+                          <Legend />
+                          <Bar dataKey="score" fill="#ef4444" name="AI Score" radius={[8, 8, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Weakest Countries by Overall Score */}
+                    <div className="bg-white rounded-lg shadow-sm border border-orange-100 p-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">Bottom 10 Countries by Overall Performance</h3>
+                      <p className="text-sm text-gray-600 mb-4">Regions needing immediate attention</p>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={aiMatrixData.slice().sort((a, b) => a.overall_visibility_score - b.overall_visibility_score).slice(0, 10).map(c => ({
+                          name: getCountryName(c.country_code).length > 15 
+                            ? getCountryName(c.country_code).substring(0, 12) + '...' 
+                            : getCountryName(c.country_code),
+                          fullName: getCountryName(c.country_code),
+                          score: c.overall_visibility_score,
+                        }))}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis 
+                            dataKey="name" 
+                            angle={-45} 
+                            textAnchor="end" 
+                            height={100} 
+                            style={{ fontSize: '11px' }}
+                          />
+                          <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                            formatter={(value: any) => [Number(value).toFixed(1), 'Overall Score']}
+                          />
+                          <Legend />
+                          <Bar dataKey="score" fill="#f97316" name="Overall Score" radius={[8, 8, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Second row: Weakest Platform Coverage */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Lowest Platform Coverage Chart */}
+                    <div className="bg-white rounded-lg shadow-sm border border-yellow-100 p-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">Bottom 10 - Limited Platform Coverage</h3>
+                      <p className="text-sm text-gray-600 mb-4">Regions with fewest AI platforms</p>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={aiMatrixData.slice().sort((a, b) => (a.ai_platforms_present?.length || 0) - (b.ai_platforms_present?.length || 0)).slice(0, 10).map(c => ({
+                          name: getCountryName(c.country_code).length > 15 
+                            ? getCountryName(c.country_code).substring(0, 12) + '...' 
+                            : getCountryName(c.country_code),
+                          fullName: getCountryName(c.country_code),
+                          platforms: c.ai_platforms_present?.length || 0,
+                        }))}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis 
+                            dataKey="name" 
+                            angle={-45} 
+                            textAnchor="end" 
+                            height={100} 
+                            style={{ fontSize: '11px' }}
+                          />
+                          <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} domain={[0, 5]} />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                            formatter={(value: any) => [`${value}/5 platforms`, 'Coverage']}
+                          />
+                          <Legend />
+                          <Bar dataKey="platforms" fill="#eab308" name="Platforms" radius={[8, 8, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Performance Gap Chart */}
+                    <div className="bg-white rounded-lg shadow-sm border border-purple-100 p-6">
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">Bottom 10 - Biggest Performance Gaps</h3>
+                      <p className="text-sm text-gray-600 mb-4">Organic vs AI score gap</p>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={aiMatrixData.slice().sort((a, b) => (b.organic_score - b.ai_visibility_score) - (a.organic_score - a.ai_visibility_score)).slice(0, 10).map(c => ({
+                          name: getCountryName(c.country_code).length > 15 
+                            ? getCountryName(c.country_code).substring(0, 12) + '...' 
+                            : getCountryName(c.country_code),
+                          fullName: getCountryName(c.country_code),
+                          gap: c.organic_score - c.ai_visibility_score,
+                        }))}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis 
+                            dataKey="name" 
+                            angle={-45} 
+                            textAnchor="end" 
+                            height={100} 
+                            style={{ fontSize: '11px' }}
+                          />
+                          <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                            formatter={(value: any) => [Number(value).toFixed(1), 'Gap']}
+                          />
+                          <Legend />
+                          <Bar dataKey="gap" fill="#a855f7" name="Performance Gap" radius={[8, 8, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Third row: Weakest Regions Comparison */}
+                  <div className="bg-white rounded-lg shadow-sm border border-red-100 p-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Bottom 15 Regions - AI vs Organic Comparison</h3>
+                    <p className="text-sm text-gray-600 mb-4">Weakest performing regions requiring improvement</p>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <BarChart data={aiMatrixData.slice().sort((a, b) => a.overall_visibility_score - b.overall_visibility_score).slice(0, 15).map(c => ({
+                        name: getCountryName(c.country_code).length > 15 
+                          ? getCountryName(c.country_code).substring(0, 12) + '...' 
+                          : getCountryName(c.country_code),
+                        fullName: getCountryName(c.country_code),
+                        organic: c.organic_score,
+                        ai: c.ai_visibility_score,
+                      }))}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis 
+                          dataKey="name" 
+                          angle={-45} 
+                          textAnchor="end" 
+                          height={120} 
+                          style={{ fontSize: '11px' }}
+                        />
+                        <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} domain={[0, 100]} />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                          formatter={(value: any) => Number(value).toFixed(1)}
+                        />
+                        <Legend />
+                        <Bar dataKey="organic" fill="#10b981" radius={[4, 4, 0, 0]} name="Organic Score" />
+                        <Bar dataKey="ai" fill="#3b82f6" radius={[4, 4, 0, 0]} name="AI Score" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* AI Data Table */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-blue-50">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                          <Brain className="w-6 h-6 text-purple-600" />
+                          Region vs AI Insights - Detailed Data
+                        </h2>
+                        <p className="text-sm text-gray-600 mt-2">
+                          AI visibility analysis across {aiMatrixData.length} {aiMatrixData.length === 1 ? 'region' : 'regions'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gradient-to-r from-gray-50 to-gray-100 border-b-2 border-gray-200">
+                        <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                          Country / Region
+                        </th>
+                        <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
+                          Organic Score
+                        </th>
+                        <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
+                          <div className="flex items-center justify-end gap-1">
+                            <Brain className="w-4 h-4" />
+                            AI Score
+                          </div>
+                        </th>
+                        <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase tracking-wider">
+                          AI Platforms (5)
+                        </th>
+                        <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
+                          Overall Score
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-100">
+                      {aiMatrixData.map((country, index) => (
+                        <tr 
+                          key={country.id || index} 
+                          className="transition-all duration-150 hover:bg-purple-50 hover:shadow-sm"
+                        >
+                          <td className="px-6 py-4">
+                            <div className="font-semibold text-gray-900 text-sm">
+                              {getCountryName(country.country_code)}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <div className="w-20 bg-gray-200 rounded-full h-2">
+                                <div 
+                                  className="bg-green-600 h-2 rounded-full" 
+                                  style={{ width: `${Math.min(100, country.organic_score)}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-sm font-medium text-gray-900 w-12 text-right">
+                                {country.organic_score.toFixed(1)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <div className="w-20 bg-gray-200 rounded-full h-2">
+                                <div 
+                                  className={`h-2 rounded-full ${
+                                    country.ai_visibility_score === 0 ? 'bg-red-500' :
+                                    country.ai_visibility_score < 30 ? 'bg-orange-500' :
+                                    country.ai_visibility_score < 70 ? 'bg-yellow-500' :
+                                    'bg-blue-500'
+                                  }`}
+                                  style={{ width: `${Math.min(100, country.ai_visibility_score)}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-sm font-medium text-gray-900 w-12 text-right">
+                                {country.ai_visibility_score.toFixed(1)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-wrap items-center justify-center gap-1.5">
+                              {[
+                                { key: 'chatgpt', name: 'GPT' },
+                                { key: 'claude', name: 'Claude' },
+                                { key: 'gemini', name: 'Gemini' },
+                                { key: 'perplexity', name: 'Perplx' },
+                                { key: 'groq', name: 'Groq' }
+                              ].map(({ key, name }) => {
+                                const isPresent = country.ai_platforms_present?.includes(key);
+                                return (
+                                  <span
+                                    key={key}
+                                    className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${
+                                      isPresent
+                                        ? 'bg-green-100 text-green-800 border border-green-300'
+                                        : 'bg-gray-100 text-gray-500 border border-gray-300'
+                                    }`}
+                                    title={isPresent ? 'Domain found' : 'Domain not found'}
+                                  >
+                                    {name}
+                                    {isPresent ? (
+                                      <Check className="w-3 h-3 text-green-600" strokeWidth={3} />
+                                    ) : (
+                                      <X className="w-3 h-3 text-gray-400" strokeWidth={3} />
+                                    )}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                            <div className="text-center mt-1">
+                              <span className="text-xs font-semibold text-gray-700">
+                                {country.ai_platforms_present?.length || 0}/5
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-bold bg-purple-100 text-purple-700">
+                              {country.overall_visibility_score.toFixed(1)}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                
+                <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">
+                      Showing <span className="font-semibold text-gray-900">{aiMatrixData.length}</span> {aiMatrixData.length === 1 ? 'region' : 'regions'}
+                    </span>
+                    <a href="/dashboard/global-visibility-matrix" className="text-purple-600 hover:text-purple-700 font-medium">
+                      View full matrix →
+                    </a>
+                  </div>
+                </div>
+                </div>
+              </>
+            ) : (
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+                <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Brain className="w-8 h-8 text-purple-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No AI Insights Available</h3>
+                <p className="text-gray-600 mb-4">
+                  Calculate the Global Visibility Matrix to see AI platform insights for this domain.
+                </p>
+                <button
+                  onClick={calculateMatrix}
+                  disabled={calculating || !selectedDomain}
+                  className="inline-flex items-center gap-2 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-5 h-5 ${calculating ? 'animate-spin' : ''}`} />
+                  {calculating ? 'Calculating...' : 'Calculate Matrix'}
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          // Region VS Google Search Tab
+          <>
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
+                  <p className="text-gray-600">Loading regional data...</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Summary Stats */}
+                {countries.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                   <div className="flex items-center justify-between mb-2">
@@ -946,6 +1451,8 @@ export default function RegionalStrengthComparisonPage() {
                  </div>
                )}
              </div>
+              </>
+            )}
           </>
         )}
       </div>
