@@ -108,6 +108,9 @@ interface Project {
   brand_summary?: any;
   analysis_languages?: string[];
   analysis_countries?: string[];
+  queries_per_platform?: number;
+  query_mode?: 'auto' | 'manual' | 'auto_manual';
+  manual_queries?: Array<{ text: string; language?: string; country?: string }>;
 }
 
 interface Session {
@@ -194,6 +197,7 @@ function AIVisibilityContent() {
   const [checkingGSCStatus, setCheckingGSCStatus] = useState(false);
   const [analysisLanguages, setAnalysisLanguages] = useState<string[]>([]);
   const [analysisCountries, setAnalysisCountries] = useState<string[]>([]);
+  const [queriesPerPlatform, setQueriesPerPlatform] = useState<number>(50);
   const [queryMode, setQueryMode] = useState<'auto' | 'manual' | 'auto_manual'>('auto');
   const [manualQueries, setManualQueries] = useState<Array<{ text: string; language?: string; country?: string }>>([]);
   const [newManualQueryText, setNewManualQueryText] = useState('');
@@ -221,6 +225,11 @@ function AIVisibilityContent() {
   const [viewResponseModal, setViewResponseModal] = useState<{ open: boolean; response: any; prompt: string } | null>(null);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const exportDropdownRef = useRef<HTMLDivElement>(null);
+  const [showConfigureModal, setShowConfigureModal] = useState(false);
+  const [configQueryMode, setConfigQueryMode] = useState<'auto' | 'manual' | 'auto_manual'>('auto');
+  const [configManualQueries, setConfigManualQueries] = useState<Array<{ text: string; language?: string; country?: string; isManual?: boolean }>>([]);
+  const [configPlatforms, setConfigPlatforms] = useState<string[]>([]);
+  const [configSaving, setConfigSaving] = useState(false);
   
   // Domain Intelligence state
   const [domainIntelligenceJobs, setDomainIntelligenceJobs] = useState<any[]>([]);
@@ -668,6 +677,9 @@ function AIVisibilityContent() {
 
       if (projectError) throw projectError;
       setSelectedProject(project);
+      if (project.queries_per_platform != null) {
+        setQueriesPerPlatform(Math.min(50, Math.max(1, project.queries_per_platform)));
+      }
       
       // Fetch sessions
       const { data: sessions, error: sessionsError } = await supabase
@@ -985,6 +997,7 @@ function AIVisibilityContent() {
           fetchGSCKeywords,
           analysisLanguages,
           analysisCountries,
+          queriesPerPlatform: Math.min(50, Math.max(1, queriesPerPlatform)),
           queryMode,
           manualQueries,
         }),
@@ -1078,6 +1091,7 @@ function AIVisibilityContent() {
     setFetchGSCKeywords(false);
     setAnalysisLanguages([]);
     setAnalysisCountries([]);
+    setQueriesPerPlatform(50);
     setQueryMode('auto');
     setManualQueries([]);
     setNewManualQueryText('');
@@ -1230,6 +1244,92 @@ function AIVisibilityContent() {
       alert(`Error: ${error.message}`);
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const openConfigureModal = async (project: Project, responsesFromState?: any[]) => {
+    setSelectedProject(project);
+    let responses = responsesFromState ?? [];
+    if (responses.length === 0) {
+      const { data: sessions } = await supabase
+        .from('brand_analysis_sessions')
+        .select('id')
+        .eq('project_id', project.id)
+        .order('started_at', { ascending: false })
+        .limit(1);
+      const sessionId = sessions?.[0]?.id;
+      if (sessionId) {
+        const { data: res } = await supabase
+          .from('ai_platform_responses')
+          .select('*')
+          .eq('session_id', sessionId);
+        responses = res || [];
+      }
+    }
+    const manualList = Array.isArray(project.manual_queries)
+      ? project.manual_queries.map((q: any) => ({
+          text: (typeof q === 'string' ? q : q?.text ?? '').trim(),
+          language: typeof q === 'object' && q?.language ? q.language : undefined,
+          country: typeof q === 'object' && q?.country ? q.country : undefined,
+        }))
+      : [];
+    const manualTextSet = new Set(manualList.map((m) => m.text));
+    let initialQueries: Array<{ text: string; language?: string; country?: string; isManual?: boolean }> = [];
+    if (responses.length > 0) {
+      const seen = new Set<string>();
+      responses.forEach((r: any) => {
+        const p = r.prompt?.trim?.();
+        if (p && !seen.has(p)) {
+          seen.add(p);
+          const manualEntry = manualList.find((m) => m.text === p);
+          const isManual = manualTextSet.has(p);
+          initialQueries.push({
+            text: p,
+            language: manualEntry?.language,
+            country: manualEntry?.country,
+            isManual,
+          });
+        }
+      });
+    }
+    if (initialQueries.length === 0) {
+      initialQueries = manualList.map((m) => ({ ...m, isManual: true }));
+    }
+    setConfigQueryMode((project.query_mode as 'auto' | 'manual' | 'auto_manual') || 'auto');
+    setConfigManualQueries(initialQueries);
+    setConfigPlatforms(project.active_platforms?.length ? [...project.active_platforms] : ['perplexity', 'chatgpt']);
+    if (responses.length > 0 && initialQueries.length > 0) {
+      setConfigQueryMode('manual');
+    }
+    setShowConfigureModal(true);
+  };
+
+  const handleSaveConfigure = async () => {
+    if (!selectedProject?.id) return;
+    setConfigSaving(true);
+    try {
+      const res = await fetch('/api/ai-visibility', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: selectedProject.id,
+          queryMode: 'manual',
+          manualQueries: configManualQueries
+            .filter((q) => q.text.trim())
+            .map(({ text, language, country }) => ({ text, language, country })),
+          platforms: configPlatforms.length > 0 ? configPlatforms : selectedProject.active_platforms,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save');
+      await fetchProjectDetails(selectedProject.id, true);
+      await fetchProjects();
+      setShowConfigureModal(false);
+    } catch (e: any) {
+      console.error('Save configure error:', e);
+      alert(e?.message || 'Failed to save project');
+    } finally {
+      setConfigSaving(false);
     }
   };
 
@@ -3516,6 +3616,18 @@ function AIVisibilityContent() {
                                     <span>Resume Analysis</span>
                                   </button>
                                 )}
+                                {/* Edit / Configure Project */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenDropdown(null);
+                                    openConfigureModal(project);
+                                  }}
+                                  className={`w-full flex items-center gap-2 px-4 py-2 ${isRtl ? 'text-right' : 'text-left'} text-gray-700 hover:bg-gray-50 transition-colors`}
+                                >
+                                  <Settings className="w-4 h-4" />
+                                  <span>Edit</span>
+                                </button>
                                 {/* Delete Project */}
                                 <button
                                   onClick={(e) => {
@@ -5759,7 +5871,10 @@ function AIVisibilityContent() {
 
               {/* Action Buttons */}
               <div className="space-y-3">
-                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                <button
+                  onClick={() => selectedProject && openConfigureModal(selectedProject, projectResponses)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                >
                   <Settings className="w-4 h-4" />
                   Configure Project
                 </button>
@@ -5866,6 +5981,144 @@ function AIVisibilityContent() {
                     <div>
                       <div className="text-sm font-semibold text-green-900">Analysis Complete!</div>
                       <div className="text-xs text-green-700">Results are now available</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Configure Project modal – show prompts from last analysis, edit, save, then run again */}
+              {showConfigureModal && selectedProject && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => !configSaving && setShowConfigureModal(false)}>
+                  <div className="bg-white rounded-xl shadow-xl max-w-5xl w-full max-h-[95vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                    <div className="px-6 py-4 border-b border-gray-200">
+                      <h2 className="text-lg font-semibold text-gray-900">Configure Project</h2>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Prompts used in your last analysis are shown below. Edit them, then Save. When you click Run Analysis, these prompts will be used again.
+                      </p>
+                    </div>
+                    <div className="px-6 py-4 overflow-y-auto flex-1 space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-900 mb-2">AI platforms for re-analysis</label>
+                        <p className="text-xs text-gray-500 mb-2">Choose which LLMs to run when you click Run Analysis.</p>
+                        <div className="flex flex-wrap gap-3">
+                          {platformOptions.map((platform) => (
+                            <label
+                              key={platform.id}
+                              className={`flex items-center gap-2 px-4 py-3 border-2 rounded-lg cursor-pointer transition-all ${
+                                configPlatforms.includes(platform.id)
+                                  ? 'border-purple-600 bg-purple-50'
+                                  : 'border-gray-300 bg-white hover:border-gray-400'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={configPlatforms.includes(platform.id)}
+                                onChange={() => {
+                                  if (configPlatforms.includes(platform.id)) {
+                                    setConfigPlatforms(configPlatforms.filter((p) => p !== platform.id));
+                                  } else {
+                                    setConfigPlatforms([...configPlatforms, platform.id]);
+                                  }
+                                }}
+                                className="w-5 h-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                              />
+                              {platform.icon ? (
+                                <Image src={platform.icon} alt={platform.name} width={20} height={20} className="w-5 h-5 object-contain" quality={75} />
+                              ) : null}
+                              <span className="font-medium text-gray-900">{platform.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-900 mb-2">Prompts used during analysis</label>
+                        <p className="text-xs text-gray-500 mb-2">Language and region are shown only for prompts that were manually added in the first analysis (not for auto-generated prompts).</p>
+                        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                          {configManualQueries.map((q, i) => (
+                            <div key={i} className="flex gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                              <textarea
+                                value={q.text}
+                                onChange={(e) => setConfigManualQueries((prev) => prev.map((p, j) => (j === i ? { ...p, text: e.target.value } : p)))}
+                                placeholder="Prompt text..."
+                                rows={2}
+                                className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y"
+                              />
+                              {q.isManual ? (
+                                <>
+                                  <div className="flex flex-col gap-1 shrink-0">
+                                    <span className="text-xs text-gray-500">Language</span>
+                                    <select
+                                      value={q.language ?? ''}
+                                      onChange={(e) => setConfigManualQueries((prev) => prev.map((p, j) => (j === i ? { ...p, language: e.target.value || undefined } : p)))}
+                                      className="w-36 px-2 py-2 border border-gray-300 rounded-lg text-sm"
+                                    >
+                                      <option value="">—</option>
+                                      {analysisLanguageOptions.map((o) => (
+                                        <option key={o.value} value={o.value}>{o.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="flex flex-col gap-1 shrink-0">
+                                    <span className="text-xs text-gray-500">Region</span>
+                                    <select
+                                      value={q.country ?? ''}
+                                      onChange={(e) => setConfigManualQueries((prev) => prev.map((p, j) => (j === i ? { ...p, country: e.target.value || undefined } : p)))}
+                                      className="w-36 px-2 py-2 border border-gray-300 rounded-lg text-sm"
+                                    >
+                                      <option value="">—</option>
+                                      {analysisCountryOptions.map((o) => (
+                                        <option key={o.value} value={o.value}>{o.label}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => setConfigManualQueries((prev) => prev.filter((_, j) => j !== i))}
+                                className="self-center p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                                title="Remove prompt"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setConfigManualQueries((prev) => [...prev, { text: '', isManual: true }])}
+                          className="mt-2 flex items-center gap-2 px-3 py-2 text-sm font-medium text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                        >
+                          <Plus className="w-4 h-4" />
+                          Add prompt
+                        </button>
+                      </div>
+                    </div>
+                    <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+                      <button
+                        onClick={() => setShowConfigureModal(false)}
+                        disabled={configSaving}
+                        className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                        <button
+                          onClick={handleSaveConfigure}
+                          disabled={configSaving || configManualQueries.every((q) => !q.text.trim()) || configPlatforms.length === 0}
+                          className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+                        >
+                        {configSaving ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4" />
+                            Save
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -6502,8 +6755,27 @@ function AIVisibilityContent() {
                   ))}
                 </select>
                 <p className="text-xs text-gray-500 mt-3">
-                  Each platform will have up to 50 queries distributed across {Math.max(1, analysisLanguages.length)} language(s) and {Math.max(1, analysisCountries.length)} region(s). Total: {selectedPlatforms.length} platform(s) × 50 = {selectedPlatforms.length * 50} queries.
+                  Each platform will have up to {queriesPerPlatform} queries distributed across {Math.max(1, analysisLanguages.length)} language(s) and {Math.max(1, analysisCountries.length)} region(s). Total: {selectedPlatforms.length} platform(s) × {queriesPerPlatform} = {selectedPlatforms.length * queriesPerPlatform} queries.
                 </p>
+              </div>
+
+              {/* Queries per platform (Step 3) */}
+              <div className="border-t border-gray-200 pt-6">
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Queries per AI platform
+                </label>
+                <p className="text-sm text-gray-500 mb-3">
+                  How many queries to run on each selected platform. Distributed equally across the selected language(s) and region(s). Maximum 50 per platform.
+                </p>
+                <select
+                  value={queriesPerPlatform}
+                  onChange={(e) => setQueriesPerPlatform(Number(e.target.value))}
+                  className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                >
+                  {[5, 10, 15, 20, 25, 30, 35, 40, 45, 50].map((n) => (
+                    <option key={n} value={n}>{n} queries per platform</option>
+                  ))}
+                </select>
               </div>
 
               {/* Select AI Platforms */}
@@ -6561,7 +6833,7 @@ function AIVisibilityContent() {
               <div className="bg-white rounded-lg p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Query Configuration</h3>
                 <p className="text-sm text-gray-600 mb-4">
-                  Choose how queries are built for AI visibility. Total queries are capped at 50 (250 total runs across platforms).
+                  Choose how queries are built for AI visibility. Queries per platform: {queriesPerPlatform} (max 50). Total runs: {selectedPlatforms.length} × {queriesPerPlatform} = {selectedPlatforms.length * queriesPerPlatform}.
                 </p>
                 <div className="space-y-3">
                   <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-purple-300 cursor-pointer">
@@ -6574,7 +6846,7 @@ function AIVisibilityContent() {
                     />
                     <div>
                       <span className="font-medium text-gray-900">Auto-generated queries only</span>
-                      <p className="text-sm text-gray-500">System generates up to 50 queries per run (50 per platform, 250 total max).</p>
+                      <p className="text-sm text-gray-500">System generates up to {queriesPerPlatform} queries per platform, distributed across your selected language(s) and region(s).</p>
                     </div>
                   </label>
                   <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-purple-300 cursor-pointer">
@@ -6587,7 +6859,7 @@ function AIVisibilityContent() {
                     />
                     <div>
                       <span className="font-medium text-gray-900">Manual queries only</span>
-                      <p className="text-sm text-gray-500">You add all queries below (max 50).</p>
+                      <p className="text-sm text-gray-500">You add all queries below (max {queriesPerPlatform} per platform).</p>
                     </div>
                   </label>
                   <label className="flex items-start gap-3 p-3 rounded-lg border border-gray-200 hover:border-purple-300 cursor-pointer">
@@ -6600,7 +6872,7 @@ function AIVisibilityContent() {
                     />
                     <div>
                       <span className="font-medium text-gray-900">Auto + manual</span>
-                      <p className="text-sm text-gray-500">Combine generated and your queries; total max 50.</p>
+                      <p className="text-sm text-gray-500">Combine generated and your queries; total max {queriesPerPlatform} per platform.</p>
                     </div>
                   </label>
                 </div>
@@ -6614,9 +6886,9 @@ function AIVisibilityContent() {
                     <span className="text-gray-700">Manual queries: {manualQueries.length}</span>
                     <span className="text-gray-500">·</span>
                     <span className="text-2xl font-bold text-purple-600">
-                      {queryMode === 'manual' ? Math.min(manualQueries.length, 50) : 50}
+                      {queryMode === 'manual' ? Math.min(manualQueries.length, queriesPerPlatform) : queriesPerPlatform}
                     </span>
-                    <span className="text-gray-600">queries (max 50)</span>
+                    <span className="text-gray-600">queries per platform (max {queriesPerPlatform})</span>
                   </div>
                 </div>
                 <div className="mt-4">
@@ -6653,11 +6925,11 @@ function AIVisibilityContent() {
                       onClick={() => {
                         const text = newManualQueryText.trim();
                         if (!text) return;
-                        if (manualQueries.length >= 50) return;
+                        if (manualQueries.length >= queriesPerPlatform) return;
                         setManualQueries((q) => [...q, { text, language: newManualQueryLanguage, country: newManualQueryCountry || undefined }]);
                         setNewManualQueryText('');
                       }}
-                      disabled={!newManualQueryText.trim() || manualQueries.length >= 50}
+                      disabled={!newManualQueryText.trim() || manualQueries.length >= queriesPerPlatform}
                       className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 text-sm font-medium"
                     >
                       + Add Query

@@ -1095,7 +1095,8 @@ function extractTextFromHTML(html) {
   }
 }
 async function generateRealisticUserQueries(brandName, industry, keywords = [], competitors = [], websiteUrl = '', language = 'en', options = {}) {
-  const { languages: analysisLanguages = [], countries: analysisCountries = [] } = options;
+  const { languages: analysisLanguages = [], countries: analysisCountries = [], maxQueries: requestedMax = 50 } = options;
+  const maxQueries = Math.min(50, Math.max(1, requestedMax));
   const openAIApiKey = await getApiKey('openai');
   if (!openAIApiKey) {
     console.log('No OpenAI API key available for query generation, using fallback queries');
@@ -1123,62 +1124,62 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
 - Use Hebrew question words: מה, איך, למה, איפה, מתי, מי, איזה
 - Use natural Hebrew expressions and phrasing
 - Maintain conversational Hebrew style
-- All 50 queries must be in Hebrew\n`;
+- All ${maxQueries} queries must be in Hebrew\n`;
     } else if (langCode === 'ur') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in URDU.
 - Write queries naturally in Urdu, as native Urdu speakers would search (use Urdu script)
 - Use natural Urdu question words and expressions (کیا، کیسے، کہاں، کب، کون، etc.)
 - Maintain conversational Urdu style; use common search phrasing
-- All 50 queries must be in Urdu\n`;
+- All ${maxQueries} queries must be in Urdu\n`;
     } else if (langCode === 'de') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in GERMAN.
 - Write queries naturally in German, as native German speakers would search
 - Use natural German question words: was, wie, warum, wo, wann, wer, welcher
 - Use formal (Sie) or informal (du) phrasing as appropriate for search
-- Maintain conversational German style; all 50 queries must be in German\n`;
+- Maintain conversational German style; all ${maxQueries} queries must be in German\n`;
     } else if (langCode === 'fr') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in FRENCH.
 - Write queries naturally in French, as native French speakers would search
 - Use natural French question words: quoi, comment, pourquoi, où, quand, qui, quel(le)
 - Use natural French expressions and phrasing; maintain conversational style
-- All 50 queries must be in French\n`;
+- All ${maxQueries} queries must be in French\n`;
     } else if (langCode === 'es') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in SPANISH.
 - Write queries naturally in Spanish, as native Spanish speakers would search
 - Use natural Spanish question words: qué, cómo, por qué, dónde, cuándo, quién, cuál
-- Maintain conversational Spanish style; all 50 queries must be in Spanish\n`;
+- Maintain conversational Spanish style; all ${maxQueries} queries must be in Spanish\n`;
     } else if (langCode === 'it') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ITALIAN.
 - Write queries naturally in Italian, as native Italian speakers would search
 - Use natural Italian question words: cosa, come, perché, dove, quando, chi, quale
-- Maintain conversational Italian style; all 50 queries must be in Italian\n`;
+- Maintain conversational Italian style; all ${maxQueries} queries must be in Italian\n`;
     } else if (langCode === 'pt') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in PORTUGUESE.
 - Write queries naturally in Portuguese, as native speakers would search
 - Use natural question words: o que, como, por que, onde, quando, quem, qual
-- Maintain conversational Portuguese style; all 50 queries must be in Portuguese\n`;
+- Maintain conversational Portuguese style; all ${maxQueries} queries must be in Portuguese\n`;
     } else if (langCode === 'nl') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in DUTCH.
 - Write queries naturally in Dutch, as native Dutch speakers would search
 - Use natural Dutch question words: wat, hoe, waarom, waar, wanneer, wie, welk
-- Maintain conversational Dutch style; all 50 queries must be in Dutch\n`;
+- Maintain conversational Dutch style; all ${maxQueries} queries must be in Dutch\n`;
     } else if (langCode === 'ja') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in JAPANESE.
 - Write queries naturally in Japanese, as native Japanese speakers would search
 - Use natural Japanese question words and phrasing (何、どのように、なぜ、どこ、いつ、誰、どれ)
 - Use appropriate script (Kanji, Hiragana, Katakana) as used in real search queries
-- All 50 queries must be in Japanese\n`;
+- All ${maxQueries} queries must be in Japanese\n`;
     } else if (langCode === 'zh') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in CHINESE.
 - Write queries naturally in Chinese, as native Chinese speakers would search
 - Use natural Chinese question words and phrasing (什么、怎么、为什么、哪里、什么时候、谁、哪个)
 - Use Simplified Chinese (简体) unless the context clearly requires Traditional
-- All 50 queries must be in Chinese\n`;
+- All ${maxQueries} queries must be in Chinese\n`;
     } else if (langCode !== 'en') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ${languageName}.
 - Write queries naturally as native speakers of this language would search
 - Use natural expressions, question words, and phrasing in that language
-- All 50 queries must be in ${languageName}\n`;
+- All ${maxQueries} queries must be in ${languageName}\n`;
     }
 
     const countryNamesMap = { US: 'United States', GB: 'UK', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', SG: 'Singapore', MY: 'Malaysia', PH: 'Philippines', VN: 'Vietnam', TH: 'Thailand', ID: 'Indonesia', HK: 'Hong Kong', TW: 'Taiwan', KR: 'South Korea', JP: 'Japan', CN: 'China', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', CH: 'Switzerland', PL: 'Poland', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PT: 'Portugal', GR: 'Greece', CZ: 'Czech Republic', RO: 'Romania', HU: 'Hungary', RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IL: 'Israel', AE: 'United Arab Emirates', SA: 'Saudi Arabia', EG: 'Egypt', QA: 'Qatar', KW: 'Kuwait', BH: 'Bahrain', OM: 'Oman', JO: 'Jordan', LB: 'Lebanon', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CO: 'Colombia', CL: 'Chile', PE: 'Peru', VE: 'Venezuela', EC: 'Ecuador', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', ET: 'Ethiopia', MA: 'Morocco', EU: 'European Union' };
@@ -1187,10 +1188,10 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
       ? `\n🌍 GEOGRAPHY REQUIREMENT: Generate queries as they would be asked by users in these countries/regions: ${countryNames.join(', ')}.
 - Include region-specific phrasing where natural (e.g. "in the UK", "for the German market", "best X in Germany", "US-based", "available in Australia")
 - Distribute queries across these regions so the set reflects a mix of geographic perspectives
-- Keep the same 50-query total; vary the region angle across the list\n`
+- Keep the same ${maxQueries}-query total; vary the region angle across the list\n`
       : '';
     
-    const prompt = `Generate 50 realistic, conversational search queries that real users would type when looking for solutions like ${brandName} offers. These should sound like natural human messages, NOT direct brand mentions.
+    const prompt = `Generate ${maxQueries} realistic, conversational search queries that real users would type when looking for solutions like ${brandName} offers. These should sound like natural human messages, NOT direct brand mentions.
 ${languageInstruction}
 ${geographyInstruction}
 
@@ -1223,7 +1224,7 @@ Generate queries in these categories around the given brand, and industry, which
 - ENSURE all queries are directly relevant to the brand's actual products/services
 - Use language and terms found on the brand's website when possible
 
-IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown formatting, no backticks, just a clean JSON array of strings.`;
+IMPORTANT: Return EXACTLY ${maxQueries} queries in a valid JSON array format. No markdown formatting, no backticks, just a clean JSON array of strings.`;
     const response = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -1287,9 +1288,9 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
           }
           return formattedQuery;
         });
-        // Ensure we have at least 50 queries by duplicating and modifying if needed
-        if (formattedQueries.length < 50) {
-          console.log(`Only generated ${formattedQueries.length} queries, adding variations to reach 50`);
+        // Ensure we have at least maxQueries by duplicating and modifying if needed
+        if (formattedQueries.length < maxQueries) {
+          console.log(`Only generated ${formattedQueries.length} queries, adding variations to reach ${maxQueries}`);
           // Create variations by adding year or modifiers
           const years = [
             new Date().getFullYear(),
@@ -1302,7 +1303,7 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
             'Recommended',
             'Popular'
           ];
-          while(formattedQueries.length < 50){
+          while(formattedQueries.length < maxQueries){
             const originalQuery = formattedQueries[Math.floor(Math.random() * formattedQueries.length)];
             const year = years[Math.floor(Math.random() * years.length)];
             const modifier = modifiers[Math.floor(Math.random() * modifiers.length)];
@@ -1318,7 +1319,7 @@ IMPORTANT: Return EXACTLY 50 queries in a valid JSON array format. No markdown f
             if (formattedQueries.length >= 95) break;
           }
         }
-        return formattedQueries.slice(0, 50); // Ensure we don't exceed 50 queries
+        return formattedQueries.slice(0, maxQueries); // Ensure we don't exceed requested count
       } else {
         console.error('Generated content is not a valid array:', cleanedContent);
         throw new Error('Generated content is not a valid array');
@@ -1509,30 +1510,69 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
   return queries.slice(0, 50);
 }
 const MAX_QUERIES = 50;
+
+// Option A: equal split across (language × region) buckets. Returns list of (lang, country) with country null for "general".
+function getLanguageRegionBuckets(analysisLangs, analysisCountriesRun, queryLanguage) {
+  const L = (analysisLangs && analysisLangs.length) ? analysisLangs.length : 1;
+  const R = (analysisCountriesRun && analysisCountriesRun.length) ? analysisCountriesRun.length : 1;
+  const langs = (analysisLangs && analysisLangs.length) ? analysisLangs : [queryLanguage || 'en'];
+  const countries = (analysisCountriesRun && analysisCountriesRun.length) ? analysisCountriesRun : [null];
+  const buckets = [];
+  for (const lang of langs) {
+    for (const country of countries) {
+      buckets.push({ lang: lang.split('-')[0].toLowerCase(), country });
+    }
+  }
+  return buckets;
+}
+
 async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, analysisCountriesRun, mergedKeywords = null) {
   const keywords = mergedKeywords != null ? mergedKeywords : (project.target_keywords || []);
   const mode = project.query_mode || 'auto';
   const manualList = Array.isArray(project.manual_queries) ? project.manual_queries : [];
   const manualTexts = manualList.map((q) => (q && typeof q.text === 'string' ? q.text.trim() : '')).filter(Boolean);
+  const N = Math.min(Number(project.queries_per_platform) || MAX_QUERIES, MAX_QUERIES);
+
   if (mode === 'manual') {
     if (manualTexts.length === 0) {
-      console.log('Manual mode but no manual queries; using fallback generated queries (max 50)');
-      return generateFallbackQueries(project.brand_name, project.industry, keywords, project.competitors || [], queryLanguage, analysisCountriesRun).slice(0, MAX_QUERIES);
+      console.log(`Manual mode but no manual queries; using fallback generated queries (max ${N})`);
+      return generateFallbackQueries(project.brand_name, project.industry, keywords, project.competitors || [], queryLanguage, analysisCountriesRun).slice(0, N);
     }
-    return manualTexts.slice(0, MAX_QUERIES);
+    return manualTexts.slice(0, N);
   }
+
+  // Option A: distribute N across (language × region) buckets
+  const buckets = getLanguageRegionBuckets(analysisLangs, analysisCountriesRun, queryLanguage);
+  const bucketCount = buckets.length;
+  const perBucket = Math.floor(N / bucketCount);
+  const remainder = N - perBucket * bucketCount;
+  const allQueries = [];
+
   if (mode === 'auto_manual') {
-    const generated = await generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', queryLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
     const combined = [...manualTexts];
-    for (const q of generated) {
-      if (combined.length >= MAX_QUERIES) break;
-      if (!combined.includes(q)) combined.push(q);
+    for (let i = 0; i < buckets.length; i++) {
+      const count = perBucket + (i < remainder ? 1 : 0);
+      if (count <= 0) continue;
+      const { lang, country } = buckets[i];
+      const generated = await generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', lang, { languages: [lang], countries: country ? [country] : [], maxQueries: count });
+      for (const q of generated) {
+        if (combined.length >= N) break;
+        if (!combined.includes(q)) combined.push(q);
+      }
     }
-    console.log(`Auto+manual: ${manualTexts.length} manual + generated, total ${combined.length} (cap ${MAX_QUERIES})`);
-    return combined.slice(0, MAX_QUERIES);
+    console.log(`Auto+manual: ${manualTexts.length} manual + generated, total ${combined.length} (cap ${N}, ${bucketCount} buckets)`);
+    return combined.slice(0, N);
   }
-  const generated = await generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', queryLanguage, { languages: analysisLangs, countries: analysisCountriesRun });
-  return generated.slice(0, MAX_QUERIES);
+
+  for (let i = 0; i < buckets.length; i++) {
+    const count = perBucket + (i < remainder ? 1 : 0);
+    if (count <= 0) continue;
+    const { lang, country } = buckets[i];
+    const generated = await generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', lang, { languages: [lang], countries: country ? [country] : [], maxQueries: count });
+    allQueries.push(...generated);
+  }
+  console.log(`Option A: ${N} queries across ${bucketCount} (lang×region) buckets`);
+  return allQueries.slice(0, N);
 }
 function analyzeCrossPlatformResults(platformResults, brandName, competitors) {
   // Skip analysis if we have less than 2 platforms

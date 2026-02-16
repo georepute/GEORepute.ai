@@ -1231,6 +1231,7 @@ function ContentInner() {
           keywords: editData.keywords,
           competitors: editData.competitors,
           influenceLevel: influenceLevel,
+          language: language || 'en',
           brandVoice: selectedVoice ? {
             id: selectedVoice.id,
             brand_name: selectedVoice.brand_name,
@@ -1746,18 +1747,20 @@ function ContentInner() {
               tone: "informative",
               contentType: "answer",
             targetKeywords: aiVisibilityData?.keywords || [],
-            generatedContent: responseData.response,
-              skipGeneration: false, // Create database entry so content appears in publication page
+              // When Hebrew: generate new content in Hebrew from prompt; when English: use existing response
+              // When Hebrew: omit generatedContent so API generates content in Hebrew from prompt
+            ...(language !== "he" ? { generatedContent: responseData.response } : {}),
+              skipGeneration: false,
             imageUrl: includeImage ? uploadedImageUrl : null,
             imageData: includeImage && selectedImage ? {
               url: uploadedImageUrl,
               alt: selectedImage.tags || responseData.prompt,
               photographer: selectedImage.user,
             } : null,
-            language: language || 'en', // Pass current language preference
-            actionPlanId: actionPlanContext?.planId || undefined, // Link to action plan if present
-            actionPlanStepId: actionPlanContext?.stepId || undefined, // Link to action plan step if present
-            sourceMissedPrompt: aiVisibilityData?.sourceMissedPrompt || undefined, // Track original missed prompt
+            language: language || "en",
+            actionPlanId: actionPlanContext?.planId || undefined,
+            actionPlanStepId: actionPlanContext?.stepId || undefined,
+            sourceMissedPrompt: aiVisibilityData?.sourceMissedPrompt || undefined,
             }),
           });
 

@@ -24,6 +24,7 @@ import {
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { useLanguage } from "@/lib/language-context";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
 import toast from "react-hot-toast";
@@ -300,6 +301,8 @@ export default function ActionPlansPage() {
     }
   };
 
+  const { language } = useLanguage();
+
   const generateActionPlan = async () => {
     if (!objective.trim()) {
       toast.error("Please enter an objective");
@@ -308,7 +311,7 @@ export default function ActionPlansPage() {
 
     setLoading(true);
     try {
-      // REAL AI Action Plan Generation using OpenAI GPT-4 Turbo
+      // Action plan generation using Claude Sonnet 4.5 (Hebrew when language toggle is HE)
       const response = await fetch('/api/geo-core/action-plan', {
         method: 'POST',
         headers: {
@@ -320,6 +323,7 @@ export default function ActionPlansPage() {
           domain: domain.trim() || undefined,
           channels: ['all'], // Always use all channels
           projectId: selectedProjectId || undefined, // Pass selected project ID to use its crawler data
+          language: language || 'en',
         }),
       });
 
@@ -464,29 +468,28 @@ export default function ActionPlansPage() {
       return;
     }
 
-    // Build URL with step metadata for pre-filling content generation form
+    const execMetadata = step.executionMetadata || {};
+    const platform = (execMetadata.platform || step.platform || "").toLowerCase();
+    const contentType = (execMetadata.contentType || "").toLowerCase();
+    const isBlogStep = platform === "shopify" || platform === "wordpress" || contentType === "blog_article";
+
     const params = new URLSearchParams({
       actionPlanId: planId,
       stepId: stepId,
     });
-
-    // Add step metadata if available to pre-fill the form
-    const execMetadata = step.executionMetadata || {};
-    if (execMetadata.topic) {
-      params.append('topic', execMetadata.topic);
-    }
-    if (execMetadata.platform) {
-      params.append('platform', execMetadata.platform);
-    }
+    if (execMetadata.topic) params.append("topic", execMetadata.topic);
+    if (execMetadata.platform) params.append("platform", execMetadata.platform);
     if (execMetadata.keywords && Array.isArray(execMetadata.keywords)) {
-      params.append('keywords', execMetadata.keywords.join(','));
+      params.append("keywords", execMetadata.keywords.join(","));
     }
-    if (execMetadata.contentType) {
-      params.append('contentType', execMetadata.contentType);
-    }
+    if (execMetadata.contentType) params.append("contentType", execMetadata.contentType);
 
-    // Redirect to content generator page (not content management page)
-    router.push(`/dashboard/content-generator?${params.toString()}`);
+    // Blog/shopify/wordpress steps → Blog page for blog generation; others → Content generator
+    if (isBlogStep) {
+      router.push(`/dashboard/blog?${params.toString()}`);
+    } else {
+      router.push(`/dashboard/content-generator?${params.toString()}`);
+    }
   };
 
   const deletePlan = async (planId: string) => {

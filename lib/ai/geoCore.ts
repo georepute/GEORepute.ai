@@ -65,6 +65,7 @@ export interface ContentGenerationOutput {
   tone: string;
   wordCount: number;
   platform: string;
+  ai_model?: string;
   metadata: {
     keywordsUsed: string[];
     readabilityScore?: number;
@@ -119,6 +120,7 @@ export interface ActionPlanInput {
   domainEnrichment?: DomainEnrichmentData | null; // Enriched domain data from crawler
   region?: string;
   channels?: string[]; // ['all'] or specific channels like ['seo', 'social_media', 'content']
+  language?: "en" | "he";
 }
 
 export interface ActionPlanOutput {
@@ -351,13 +353,12 @@ export async function generateStrategicContent(
 
   // Language instruction
   const languageInstruction = input.language === "he" 
-    ? `\n🌐 LANGUAGE REQUIREMENT: Write ALL content in HEBREW (עברית). 
-- Use Hebrew script (right-to-left)
-- Write naturally in Hebrew, as a native Hebrew speaker would
-- Write clean, structured, professional content in Hebrew
-- Use Hebrew slang and expressions naturally
-- Keywords should be in Hebrew if provided in Hebrew, otherwise translate naturally
-- All content must be in Hebrew\n`
+    ? `\n🌐 HEBREW-ONLY REQUIREMENT (STRICT):
+- Output ONLY valid Hebrew text: Hebrew letters (א-ת), optional niqqud, standard punctuation (. , ? ! " ' - : ;). No other characters.
+- Do NOT use Latin/English letters (e.g. "Israel", "L") or transliterations in parentheses like (Israel haGedolah). Write the concept in Hebrew only (e.g. ישראל, ישראל הגדולה).
+- Do NOT output corrupted text, random symbols, or mixed scripts (e.g. no L†)@)\\|&$^ or similar). If a word is normally written in Hebrew, use only Hebrew.
+- Write naturally in Hebrew, as a native speaker. Every word must be in Hebrew script. No English, no transliterations, no mixed/corrupted characters.
+- Length: minimum 150 words; aim for 200-300. Complete every sentence; never cut off mid-word or with garbage characters.\n`
     : "";
 
   let finalReminder: string;
@@ -410,7 +411,7 @@ This MUST score 100% HUMAN on ALL AI detectors (GPTZero, Turnitin, Copyleaks, Wr
 - Focus on clear communication and value
 ${languageInstruction}
 Topic: "${input.topic}"
-Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force)
+Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force${input.language === "he" ? "; when writing in Hebrew use only Hebrew equivalents—never write English or other language words in the content" : ""})
 Platform: ${input.targetPlatform}
 ${input.brandMention ? `Brand: ${input.brandMention} (${influenceGuidelines[input.influenceLevel]})` : "No brand"}
 ${input.userContext ? `Context: ${input.userContext}` : ""}
@@ -606,7 +607,8 @@ ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
 - Format with proper HTML tags for Shopify: <p>, <h2>, <h3>, <ul>, <li>, <strong>, <em>
 - Make content SEO-optimized with keywords in headings and throughout
 ` : `
-- 150-300 words naturally (don't count, just write)
+- Length: Write 150-300 words minimum. Do not output short or truncated content. Complete every sentence and paragraph. Aim for a full, substantive response.
+${input.language === "he" ? "- Hebrew: minimum 150 words, aim 200-300. End with a complete sentence. Never output garbled characters, Latin letters, or transliterations—only Hebrew letters and punctuation." : ""}
 ${learningRules?.wordCount ? `- Target: ${learningRules.wordCount.min || 150}-${learningRules.wordCount.max || 300} words` : ''}
 `}
 - Paragraphs vary: Sometimes 1 sentence, sometimes 5 sentences
@@ -632,6 +634,7 @@ ${input.targetPlatform === 'reddit' ? `✅ Reddit style: Casual, conversational,
 ${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate` : ''}
 ${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced` : ''}
 ${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal` : ''}
+${input.language === "he" ? `✅ Hebrew only: Content uses only Hebrew script (א-ת) and punctuation; no Latin/transliterations/corrupted chars; 150+ words, complete sentence at end` : ''}
 
 ${learningRules?.tone ? `📚 LEARNED: Use ${learningRules.tone} tone` : ''}
 ${learningRules?.useEmojis ? `📚 LEARNED: Include ${learningRules.emojiCount || 3} emojis naturally` : ''}
@@ -646,7 +649,7 @@ ${finalReminder}
 
   // Build conditional system message based on brand voice
   const languageNote = input.language === "he" 
-    ? `\n🌐 IMPORTANT: Generate ALL content in HEBREW (עברית). Write clean, structured, professional content in Hebrew.\n`
+    ? `\n🌐 HEBREW OUTPUT ONLY: Content must be 100% Hebrew script (א-ת and punctuation). No Latin letters, no transliterations in parentheses, no corrupted or mixed characters. Express any proper nouns (e.g. Israel) in Hebrew (ישראל). Minimum 150 words; write a complete, unabbreviated response.\n`
     : "";
 
   let systemMessage = `You are a REAL HUMAN typing on a phone or laptop RIGHT NOW. You are NOT an AI, NOT a bot, NOT a content writer.
@@ -714,33 +717,112 @@ CRITICAL: Write professional, clean, structured content.
 Respond ONLY in JSON with "content" field containing the text.`;
   }
 
+  const maxTokens = (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : input.language === "he" ? 2500 : 2000;
+  const claudeModel = "claude-sonnet-4-5-20250929";
+  let raw: string = "";
+  let aiModel: string = "gpt-4-turbo";
+
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4-turbo",
-      messages: [
-        {
-          role: "system",
-          content: systemMessage,
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.98,       // Near maximum unpredictability (0.98 is very high)
-      top_p: 0.98,             // Maximum creative token selection
-      frequency_penalty: 0.7,  // Very strong penalty to prevent repetition
-      presence_penalty: 0.7,   // Very strong encouragement for variety
-      // Use higher token limit for blog articles to allow longer content
-      max_tokens: (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : 2000,
-    });
+    // Prefer Claude for content generation (retry on 529 Overloaded / 503)
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    if (anthropicKey) {
+      const claudePayload = {
+        model: claudeModel,
+        max_tokens: maxTokens,
+        temperature: 0.98,
+        system: systemMessage,
+        messages: [{ role: "user", content: prompt }],
+      };
+      const claudeHeaders = {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      };
+      const maxClaudeRetries = 2;
+      let claudeRes: Response | null = null;
+      let lastErrText = "";
+      for (let attempt = 0; attempt <= maxClaudeRetries; attempt++) {
+        claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: claudeHeaders,
+          body: JSON.stringify(claudePayload),
+        });
+        if (claudeRes.ok) {
+          const data = await claudeRes.json();
+          const text = data.content?.[0]?.text?.trim() || "{}";
+          raw = text;
+          aiModel = claudeModel;
+          console.log(`✅ Content generated with Claude (${claudeModel})`);
+          break;
+        }
+        lastErrText = await claudeRes.text();
+        const isRetryable = (claudeRes.status === 529 || claudeRes.status === 503) && attempt < maxClaudeRetries;
+        if (isRetryable) {
+          const delayMs = (attempt + 1) * 2500;
+          console.warn(`⚠️ Claude overloaded (${claudeRes.status}), retrying in ${delayMs / 1000}s...`);
+          await new Promise((r) => setTimeout(r, delayMs));
+        } else {
+          console.warn("⚠️ Claude content generation failed, falling back to GPT:", claudeRes.status, lastErrText.slice(0, 200));
+          const response = await openai.chat.completions.create({
+            model: "gpt-4-turbo",
+            messages: [
+              { role: "system", content: systemMessage },
+              { role: "user", content: prompt },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.98,
+            top_p: 0.98,
+            frequency_penalty: 0.7,
+            presence_penalty: 0.7,
+            max_tokens: maxTokens,
+          });
+          raw = response.choices[0]?.message?.content || "{}";
+          aiModel = "gpt-4-turbo";
+          console.log("✅ Content generated with GPT-4 Turbo (fallback after Claude error)");
+          break;
+        }
+      }
+      if (!raw && anthropicKey) {
+        const response = await openai.chat.completions.create({
+          model: "gpt-4-turbo",
+          messages: [
+            { role: "system", content: systemMessage },
+            { role: "user", content: prompt },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.98,
+          top_p: 0.98,
+          frequency_penalty: 0.7,
+          presence_penalty: 0.7,
+          max_tokens: maxTokens,
+        });
+        raw = response.choices[0]?.message?.content || "{}";
+        aiModel = "gpt-4-turbo";
+        console.log("✅ Content generated with GPT-4 Turbo (fallback after Claude retries)");
+      }
+    } else {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4-turbo",
+        messages: [
+          { role: "system", content: systemMessage },
+          { role: "user", content: prompt },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.98,
+        top_p: 0.98,
+        frequency_penalty: 0.7,
+        presence_penalty: 0.7,
+        max_tokens: maxTokens,
+      });
+      raw = response.choices[0]?.message?.content || "{}";
+      aiModel = "gpt-4-turbo";
+      console.log("✅ Content generated with GPT-4 Turbo (no Claude API key set)");
+    }
 
-    const raw = response.choices[0]?.message?.content || "{}";
-    let result;
-
+    const rawCleaned = raw.replace(/^```json?\s*|\s*```$/g, "").trim();
+    let result: { content?: string; tone?: string; keywordsUsed?: string[]; neutralityScore?: number; readabilityScore?: number; seoScore?: number; humanScore?: number };
     try {
-      result = JSON.parse(raw);
+      result = JSON.parse(rawCleaned || raw || "{}");
     } catch {
       console.warn("⚠️ JSON parse fallback – attempting recovery.");
       result = { content: raw };
@@ -762,17 +844,27 @@ Respond ONLY in JSON with "content" field containing the text.`;
       console.log(`🔧 Removed emojis from ${input.targetPlatform} content (brand voice: ${input.brandVoice.brand_name} disallows emojis)`);
     }
 
+    // Hebrew: remove parenthetical Latin/transliterations and garbled character runs
+    if (input.language === "he" && finalContent) {
+      finalContent = finalContent
+        .replace(/\s*\(\s*[A-Za-z0-9\s']+\s*\)\s*/g, " ") // e.g. (Israel haGedolah)
+        .replace(/[^\u0590-\u05FF\s.,?!;:'"\-—–()\d\n\r]+/g, " ") // strip Latin/symbols, keep Hebrew + punctuation
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
     return {
       content: finalContent,
-      neutralityScore: result.neutralityScore || 90,
+      neutralityScore: result.neutralityScore ?? 90,
       tone: result.tone || "casual",
       wordCount: finalContent.split(/\s+/).length,
       platform: input.targetPlatform,
+      ai_model: aiModel,
       metadata: {
         keywordsUsed: result.keywordsUsed || input.targetKeywords,
-        readabilityScore: result.readabilityScore || 85,
-        seoScore: result.seoScore || 80,
-        humanScore: result.humanScore || 97,
+        readabilityScore: result.readabilityScore ?? 85,
+        seoScore: result.seoScore ?? 80,
+        humanScore: result.humanScore ?? 97,
       },
     };
   } catch (error) {
@@ -986,8 +1078,13 @@ export async function generateActionPlan(
     }
   }
 
-  const prompt = `You are a comprehensive marketing strategist creating multi-channel marketing action plans.
+  const languageInstruction = input.language === "he"
+    ? `\n## CRITICAL - Hebrew output
+You MUST write the ENTIRE action plan in HEBREW (עברית) only: title, objective, all step titles, all step descriptions, context_explanation, reasoning, expectedOutcome, timeline, and any other text. Use Hebrew script (right-to-left). Do not mix English. Keep JSON structure and field names in English; only the human-readable string values must be in Hebrew.\n`
+    : "";
 
+  const prompt = `You are a business-focused growth strategist creating multi-channel action plans that drive revenue, conversions, and reputation. Every step and recommendation MUST be explicitly tied to business outcomes: leads, sales, pipeline, brand trust, and measurable ROI.
+${languageInstruction}
 Objective: "${input.objective}"
 ${input.targetKeywords && input.targetKeywords.length > 0 ? `Target Keywords: ${input.targetKeywords.join(", ")}` : ""}
 ${domainContext ? `${domainContext}` : ""}
@@ -995,21 +1092,27 @@ ${input.region ? `Region: ${input.region}` : ""}
 ${channels ? `Focus Channels: ${channels}` : "All available channels"}
 ${input.currentSituation ? `Current Situation: ${input.currentSituation}` : ""}
 
+🎯 BUSINESS & SALES REQUIREMENTS (MANDATORY):
+- Every step must have a clear business purpose: generate leads, nurture prospects, close deals, or strengthen reputation to support sales.
+- Step titles and descriptions must be sales- and conversion-oriented (e.g. "Lead-capture landing page for [product]", "Nurture email sequence for [audience]", "Trust-building case study to support sales").
+- Avoid generic marketing language. Use outcome-focused wording: revenue, conversion, pipeline, qualified leads, customer acquisition, retention, reputation, and authority.
+- expectedOutcome and context_explanation must reference business goals: e.g. "Increase qualified leads", "Improve conversion on high-intent keywords", "Build reputation so sales conversations convert faster".
+- Prioritize steps by revenue impact and conversion potential, not just "engagement".
+
 ${input.targetKeywords && input.targetKeywords.length > 0 ? `
 🎯 KEYWORD STRATEGY (CRITICAL):
-The target keywords above are the PRIMARY focus of this action plan. You MUST:
-- Create steps that directly target these keywords for SEO and content optimization
-- Include these keywords naturally in content generation steps (use them in the "keywords" field of executionMetadata)
-- Prioritize SEO steps that optimize for these specific keywords
-- Create content topics that incorporate these keywords
-- Use keyword variations and related terms when appropriate
-- Ensure at least 60% of content_generation steps include these target keywords
+The target keywords above are the PRIMARY focus. You MUST:
+- Create steps that directly target these keywords for SEO and content that captures high-intent, commercial traffic (buyers and decision-makers).
+- Include these keywords in content generation steps (use them in the "keywords" field of executionMetadata).
+- Prioritize SEO and content steps that attract revenue-ready audiences (e.g. "best [product] for [use case]", "compare [solution]", "pricing", "demo").
+- Ensure at least 60% of content_generation steps include these target keywords and are framed for conversion or reputation (e.g. comparison content, case studies, product-led content).
 ` : ""}
 
 ${input.domainEnrichment?.hasContent ? `
 DOMAIN-SPECIFIC GUIDANCE:
-Use the website information above to create action plans that are tailored to what this domain actually offers.
-Consider the website's content, purpose, and value proposition when generating marketing steps.
+Use the website information above to create action plans tailored to what this business sells and who they serve.
+Frame steps around their value proposition, offer, and customer journey (awareness → consideration → conversion).
+Prioritize steps that generate leads, support sales conversations, or build reputation that closes deals.
 ` : ""}
 
 Available Channels:
@@ -1021,144 +1124,126 @@ Available Channels:
 - Video Marketing (YouTube, TikTok) - video content, tutorials, vlogs
 - PR & Outreach - press releases, influencer outreach, partnerships
 
-Create a comprehensive, multi-channel action plan with:
-1. Plan-level specifications (REQUIRED):
-   - seo_geo_classification: "SEO" or "GEO" (classify this plan)
-   - target_keyword_phrase: Primary keyword or phrase being targeted (use the most important keyword from target keywords)
-   - expected_timeline_months: Number of months (typically 3-4 months)
-   - safety_buffer_months: Safety buffer (up to 2 months)
-   - first_page_estimate_months: If SEO, when content expected to reach first page (expected_timeline_months + safety_buffer_months). If GEO, set to null.
-   - context_explanation: Detailed explanation of what is planned and why (2-3 sentences explaining the strategy and rationale)
+Create an action plan with 4-6 steps across at least 3 channels. Keep step titles and descriptions to 1-2 sentences each.
 
-2. Steps across multiple marketing channels (include at least 3 different channels)
-3. Each step must specify:
-   - Channel (e.g., "seo", "social_media", "content", "email")
-   - Platform if applicable (e.g., "reddit", "linkedin", "email")
-   - Execution type: "content_generation" (can auto-generate content), "audit" (requires manual tools), "analysis" (data review), or "manual" (requires manual work)
-   - For content_generation steps, include:
-     * platform (specific platform like "reddit", "linkedin", "medium", "email")
-     * topic (specific topic for content - MUST incorporate target keywords if provided)
-     * keywords (MUST include relevant target keywords from the list above - use at least 2-3 target keywords per content step)
-     * contentType ("article", "post", "answer", "newsletter", or "linkedin_article"/"linkedin_post" for LinkedIn)
-     * articles_per_topic: Number of articles required per topic (typically 1-3)
-     * word_count_per_article: Target word count per article (e.g., 500, 800, 1200, 1500)
-     * autoExecute: true (if system can auto-generate) or false
-   - For SEO steps, focus on optimizing for the target keywords provided
-4. Dependencies between steps
-5. Priority levels based on ROI potential and urgency
-6. Expected outcomes per channel
-7. Timeline with channel coordination
+Required JSON structure:
+- Plan: title (MUST be specific, e.g. "Multi-Channel Marketing Plan for [objective or main keyword]" — never use the generic "Action Plan"), objective, channels, seo_geo_classification ("SEO" or "GEO"), target_keyword_phrase, expected_timeline_months (use 4-6 for most plans; this is the expected duration in months), safety_buffer_months (1-2), first_page_estimate_months (or null for GEO), context_explanation (2-3 sentences).
+- Steps: each with id (step-1, step-2...), title, description, estimatedTime, priority (high/medium/low), dependencies (array), channel, platform, executionType ("content_generation"|"audit"|"analysis"|"manual"), executionMetadata. For content_generation: platform, topic, keywords (array), contentType (article|post|answer|newsletter|linkedin_article|linkedin_post|blog_article), articles_per_topic (1-3), word_count_per_article (500-1500), autoExecute (true|false). For audit: autoExecute false, requiresTools array.
+- Root: reasoning, expectedOutcome, timeline (MUST state expected duration in months, e.g. "4-6 months for initial impact" — consistent with expected_timeline_months; not random), priority, category.
 
-Respond in JSON format:
-{
-  "title": "Multi-Channel Marketing Plan for [Objective]",
-  "objective": "Objective",
-  "channels": ["seo", "social_media", "content"],
-  "seo_geo_classification": "SEO" or "GEO",
-  "target_keyword_phrase": "Primary keyword or phrase being targeted",
-  "expected_timeline_months": 3,
-  "safety_buffer_months": 2,
-  "first_page_estimate_months": 5 or null,
-  "context_explanation": "Detailed explanation of what is planned and why (2-3 sentences)",
-  "steps": [
-    {
-      "id": "step-1",
-      "title": "Create Reddit post about [specific topic]",
-      "description": "Detailed description of what to post and why",
-      "estimatedTime": "2-3 hours",
-      "priority": "high",
-      "dependencies": [],
-      "channel": "content",
-      "platform": "reddit",
-      "executionType": "content_generation",
-      "executionMetadata": {
-        "platform": "reddit",
-        "topic": "Local SEO tips for restaurants",
-        "keywords": ["local seo", "restaurant marketing"],
-        "contentType": "post",
-        "articles_per_topic": 1,
-        "word_count_per_article": 500,
-        "autoExecute": true
+Respond with ONLY valid JSON (no markdown). Escape quotes in strings as \\" and newlines as \\n. Example step shape:
+{"id":"step-1","title":"...","description":"...","estimatedTime":"2-3 hours","priority":"high","dependencies":[],"channel":"content","platform":"reddit","executionType":"content_generation","executionMetadata":{"platform":"reddit","topic":"...","keywords":[],"contentType":"post","articles_per_topic":1,"word_count_per_article":500,"autoExecute":true}}`;
+
+  const systemContent =
+    "You are a business growth and revenue strategist. Create action plans that are sales-driven and conversion-focused. Use outcome-focused language (revenue, conversion, qualified leads, trust, authority). Respond with valid JSON only—no markdown, no code fences. Escape double quotes as \\\" and newlines as \\n in string values."
+    + (input.language === "he" ? " Write all user-facing text (title, objective, step titles, descriptions, context_explanation, reasoning, expectedOutcome, timeline) in HEBREW (עברית) only. Keep JSON keys in English." : "");
+
+  const maxTokensClaude = 4096;
+  const maxTokensOpenAI = 3000;
+
+  const parseActionPlanResponse = (rawContent: string): { result: Record<string, any>; parseFailed: boolean } => {
+    let cleaned = rawContent.replace(/^```json?\s*|\s*```$/g, "").trim();
+    let parseFailed = false;
+    let result: Record<string, any>;
+
+    try {
+      result = JSON.parse(cleaned || "{}");
+      return { result, parseFailed: false };
+    } catch (parseErr: any) {
+      parseFailed = true;
+      const positionMatch = parseErr.message?.match(/position (\d+)/);
+      const pos = positionMatch ? parseInt(positionMatch[1], 10) : -1;
+      if (pos > 0 && pos < cleaned.length) {
+        let repaired = cleaned.substring(0, pos);
+        const openDoubleQuotes = (repaired.match(/"/g) || []).length;
+        if (openDoubleQuotes % 2 !== 0) repaired += '"';
+        const stack: string[] = [];
+        let inString = false;
+        let escape = false;
+        for (let i = 0; i < repaired.length; i++) {
+          const c = repaired[i];
+          if (escape) { escape = false; continue; }
+          if (c === '\\' && inString) { escape = true; continue; }
+          if (c === '"' && !inString) { inString = true; continue; }
+          if (c === '"' && inString) { inString = false; continue; }
+          if (!inString) {
+            if (c === '{') stack.push('}');
+            else if (c === '[') stack.push(']');
+            else if (c === '}' || c === ']') stack.pop();
+          }
+        }
+        repaired += stack.reverse().join('');
+        try {
+          result = JSON.parse(repaired);
+          return { result, parseFailed: true };
+        } catch {
+          result = { title: "Action Plan", objective: input.objective, steps: [], reasoning: "", expectedOutcome: "", timeline: "", priority: "medium", category: "Multi-Channel Marketing" };
+          return { result, parseFailed: true };
+        }
       }
-    },
-    {
-      "id": "step-2",
-      "title": "Perform SEO audit of website",
-      "description": "Analyze website structure, content quality, link profile, and rankings",
-      "estimatedTime": "4-6 hours",
-      "priority": "high",
-      "dependencies": [],
-      "channel": "seo",
-      "executionType": "audit",
-      "executionMetadata": {
-        "autoExecute": false,
-        "requiresTools": ["screaming_frog", "google_search_console"]
-      }
-    },
-    {
-      "id": "step-3",
-      "title": "Send email newsletter to subscribers",
-      "description": "Monthly newsletter with SEO updates and tips",
-      "estimatedTime": "3-4 hours",
-      "priority": "medium",
-      "dependencies": ["step-1"],
-      "channel": "email",
-      "platform": "email",
-      "executionType": "content_generation",
-      "executionMetadata": {
-        "platform": "email",
-        "topic": "Monthly SEO updates and insights",
-        "keywords": [],
-        "contentType": "newsletter",
-        "articles_per_topic": 1,
-        "word_count_per_article": 800,
-        "autoExecute": true
+      result = { title: "Action Plan", objective: input.objective, steps: [], reasoning: "", expectedOutcome: "", timeline: "", priority: "medium", category: "Multi-Channel Marketing" };
+      return { result, parseFailed: true };
+    }
+  };
+
+  const runOneAttempt = async (systemContent: string): Promise<string> => {
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    if (anthropicKey) {
+      const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5-20250929",
+          max_tokens: maxTokensClaude,
+          system: systemContent,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (claudeRes.ok) {
+        const data = await claudeRes.json();
+        const text = data.content?.[0]?.text?.trim() || null;
+        if (text) return text;
       }
     }
-  ],
-  "reasoning": "Why this multi-channel approach will work",
-  "expectedOutcome": "Expected results across all channels",
-  "timeline": "2-4 weeks",
-  "priority": "high",
-  "category": "Multi-Channel Marketing"
-}`;
-
-  try {
     const response = await openai.chat.completions.create({
       model: "gpt-4-turbo",
       messages: [
-        {
-          role: "system",
-          content:
-            "You are an expert SEO strategist creating actionable optimization plans. Always respond in JSON format with detailed, practical steps.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
+        { role: "system", content: systemContent },
+        { role: "user", content: prompt },
       ],
       response_format: { type: "json_object" },
       temperature: 0.7,
-      max_tokens: 2000,
+      max_tokens: maxTokensOpenAI,
     });
+    return response.choices[0].message.content?.trim() || "{}";
+  };
 
-    const result = JSON.parse(response.choices[0].message.content || "{}");
+  try {
+    const rawContent = await runOneAttempt(systemContent);
+    const { result } = parseActionPlanResponse(rawContent);
 
+    const expectedMonths = result.expected_timeline_months ?? 4;
+    const bufferMonths = result.safety_buffer_months ?? 2;
+    const timelineFallback = bufferMonths > 0 ? `${expectedMonths}-${expectedMonths + bufferMonths} months for initial impact` : `${expectedMonths} months for initial impact`;
     return {
       planId: `plan-${Date.now()}`,
-      title: result.title || "Action Plan",
+      title: result.title || `Multi-Channel Marketing Plan for ${(input.targetKeywords?.[0] || input.objective || "Growth").toString().slice(0, 50)}`,
       objective: result.objective || input.objective,
       channels: result.channels || [],
       seo_geo_classification: result.seo_geo_classification || undefined,
       target_keyword_phrase: result.target_keyword_phrase || input.targetKeywords?.[0] || undefined,
-      expected_timeline_months: result.expected_timeline_months || undefined,
+      expected_timeline_months: result.expected_timeline_months ?? expectedMonths,
       safety_buffer_months: result.safety_buffer_months || undefined,
       first_page_estimate_months: result.first_page_estimate_months || undefined,
       context_explanation: result.context_explanation || undefined,
       steps: result.steps || [],
       reasoning: result.reasoning || "",
       expectedOutcome: result.expectedOutcome || "",
-      timeline: result.timeline || "Not specified",
+      timeline: (result.timeline && result.timeline !== "Not specified") ? result.timeline : timelineFallback,
       priority: result.priority || "medium",
       category: result.category || "Multi-Channel Marketing",
     };

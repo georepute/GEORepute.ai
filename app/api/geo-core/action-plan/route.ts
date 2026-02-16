@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request
     const body = await request.json();
-    const { objective, targetKeywords, domain, region, channels, projectId } = body;
+    const { objective, targetKeywords, domain, region, channels, projectId, language } = body;
     
     // If projectId is provided, fetch crawler data from brand_analysis_projects
     let projectCrawlerData = null;
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Generate action plan with AI (multi-channel support)
+    // Generate action plan with AI (multi-channel support, Claude Sonnet 4.5)
     const result = await generateActionPlan({
       objective,
       targetKeywords: targetKeywords || [],
@@ -107,6 +107,7 @@ export async function POST(request: NextRequest) {
       domainEnrichment, // Pass enriched data to AI
       region,
       channels: channels || ['all'],
+      language: language || 'en',
     });
 
     // Map AI output steps to frontend format with execution metadata
