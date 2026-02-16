@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useLanguage } from "@/lib/language-context";
 import dynamic from "next/dynamic";
@@ -62,10 +62,11 @@ interface BlogPost {
 
 type PublishPlatform = "shopify" | "wordpress";
 
-export default function BlogPage() {
-  const { isRtl, t } = useLanguage();
+function BlogPageContent() {
+  const { isRtl, t, language } = useLanguage();
   const supabase = createClientComponentClient();
   const router = useRouter();
+  const searchParams = useSearchParams();
   
   const [loading, setLoading] = useState(true);
   
@@ -143,6 +144,18 @@ export default function BlogPage() {
     'blockquote', 'code-block',
     'link', 'image'
   ];
+
+  // Pre-fill from action plan when redirected from action-plans (e.g. blog step)
+  useEffect(() => {
+    const topicParam = searchParams.get("topic");
+    const keywordsParam = searchParams.get("keywords");
+    const platformParam = searchParams.get("platform");
+    if (topicParam) setTopic(topicParam);
+    if (keywordsParam) setTargetKeywords(keywordsParam);
+    if (platformParam === "wordpress" || platformParam === "shopify") {
+      setSelectedPlatform(platformParam);
+    }
+  }, [searchParams]);
 
   // Check platform connections on mount
   useEffect(() => {
@@ -308,6 +321,7 @@ export default function BlogPage() {
           targetKeywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
           influenceLevel: "moderate",
           contentType: "blog_article",
+          language: language || "en",
           skipSchema: true, // Schema will be generated when clicking "Send to Publication"
         }),
       });
@@ -1406,5 +1420,13 @@ export default function BlogPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function BlogPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary-500" /></div>}>
+      <BlogPageContent />
+    </Suspense>
   );
 }

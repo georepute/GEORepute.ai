@@ -298,7 +298,7 @@ export async function POST(request: NextRequest) {
     } // End of if (!skipSchema) for JSON-LD schema
 
     // Save to database - use normalized platform value
-    console.log('💾 Saving to database with platform:', normalizedPlatform);
+    console.log('💾 Saving to database with platform:', normalizedPlatform, '| ai_model:', result.ai_model || 'claude-sonnet-4-5-20250929');
     
     // Merge imageUrl, schema, structured content, contentType, and action plan link into metadata
     const contentMetadata = {
@@ -349,7 +349,7 @@ export async function POST(request: NextRequest) {
           neutrality_score: result.neutralityScore,
           tone: result.tone,
           word_count: result.wordCount, // Use original content word count
-          ai_model: "gpt-4-turbo",
+          ai_model: result.ai_model || "claude-sonnet-4-5-20250929",
           metadata: contentMetadata, // Include imageUrl, schema (with structured elements), and structured SEO in metadata
           status: "draft",
         })

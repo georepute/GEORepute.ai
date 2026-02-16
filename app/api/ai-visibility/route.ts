@@ -54,14 +54,68 @@ export async function POST(request: NextRequest) {
       websiteUrl = '',
       platforms = ['chatgpt'],
       queryLimit = 10,
+      queriesPerPlatform: rawQueriesPerPlatform,
       companyDescription = '',
       companyImageUrl = '',
       fetchGSCKeywords = false,
       analysisLanguages = [],
-      analysisCountries = []
+      analysisCountries = [],
+      queryMode = 'auto',
+      manualQueries = []
     } = body
 
-    // Validate required fields
+    const queriesPerPlatform = rawQueriesPerPlatform != null
+      ? Math.min(50, Math.max(1, Number(rawQueriesPerPlatform)))
+      : 50
+
+    // When projectId is provided, update existing project (e.g. Configure Project)
+    if (projectId) {
+      const { data: existingById, error: fetchError } = await supabase
+        .from('brand_analysis_projects')
+        .select('id')
+        .eq('id', projectId)
+        .eq('user_id', session.user.id)
+        .maybeSingle()
+
+      if (fetchError || !existingById) {
+        return NextResponse.json(
+          { error: 'Project not found or access denied' },
+          { status: 404 }
+        )
+      }
+
+      const { error: updateError } = await supabase
+        .from('brand_analysis_projects')
+        .update({
+          ...(brandName && { brand_name: brandName }),
+          ...(industry && { industry: industry }),
+          ...(websiteUrl !== undefined && { website_url: websiteUrl }),
+          ...(Array.isArray(keywords) && { keywords, target_keywords: keywords }),
+          ...(Array.isArray(competitors) && { competitors: competitors }),
+          ...(Array.isArray(platforms) && { active_platforms: platforms }),
+          ...(companyDescription !== undefined && { company_description: companyDescription }),
+          ...(companyImageUrl !== undefined && { company_image_url: companyImageUrl }),
+          ...(Array.isArray(analysisLanguages) && { analysis_languages: analysisLanguages }),
+          ...(Array.isArray(analysisCountries) && { analysis_countries: analysisCountries }),
+          queries_per_platform: queriesPerPlatform,
+          ...(queryMode && { query_mode: queryMode }),
+          ...(Array.isArray(manualQueries) && { manual_queries: manualQueries }),
+        })
+        .eq('id', projectId)
+        .eq('user_id', session.user.id)
+
+      if (updateError) {
+        return NextResponse.json({ error: updateError.message }, { status: 500 })
+      }
+
+      return NextResponse.json({
+        success: true,
+        projectId: projectId,
+        message: 'Project updated successfully. Click "Run Analysis" to re-run with your changes.',
+      }, { status: 200 })
+    }
+
+    // Validate required fields for create
     if (!brandName) {
       return NextResponse.json(
         { error: 'Brand name is required' },
@@ -80,7 +134,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    let finalProjectId = projectId
+    let finalProjectId: string | undefined
 
     // Create or find project if projectId not provided
     if (!finalProjectId) {
@@ -105,6 +159,9 @@ export async function POST(request: NextRequest) {
             competitors: competitors,
             ...(Array.isArray(analysisLanguages) && { analysis_languages: analysisLanguages }),
             ...(Array.isArray(analysisCountries) && { analysis_countries: analysisCountries }),
+            queries_per_platform: queriesPerPlatform,
+            ...(queryMode && { query_mode: queryMode }),
+            ...(Array.isArray(manualQueries) && { manual_queries: manualQueries }),
           })
           .eq('id', finalProjectId)
       } else {
@@ -124,6 +181,9 @@ export async function POST(request: NextRequest) {
             company_image_url: companyImageUrl,
             analysis_languages: Array.isArray(analysisLanguages) ? analysisLanguages : [],
             analysis_countries: Array.isArray(analysisCountries) ? analysisCountries : [],
+            queries_per_platform: queriesPerPlatform,
+            query_mode: queryMode === 'manual' || queryMode === 'auto_manual' ? queryMode : 'auto',
+            manual_queries: Array.isArray(manualQueries) ? manualQueries : [],
           })
           .select('id')
           .single()

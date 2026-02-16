@@ -43,6 +43,7 @@ interface SynthesizeRequest {
   competitors: string[];
   influenceLevel?: "subtle" | "moderate" | "strong";
   brandVoice?: BrandVoice | null;
+  language?: "en" | "he";
 }
 
 export async function POST(request: NextRequest) {
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request
     const body: SynthesizeRequest = await request.json();
-    const { prompt, responses, brandName, industry, keywords, competitors, influenceLevel = "subtle", brandVoice } = body;
+    const { prompt, responses, brandName, industry, keywords, competitors, influenceLevel = "subtle", brandVoice, language = "en" } = body;
 
     // Validation
     if (!prompt || !responses || responses.length === 0 || !brandName) {
@@ -139,7 +140,13 @@ ${brandVoiceInstructions}
 - Include specific details and examples from the source responses
 - If sources were cited, you may reference relevant ones
 - Aim for comprehensive but concise (300-500 words typically)
-${brandVoice?.use_emojis ? `- Include relevant emojis (${brandVoice.emoji_style || 'moderate'} usage)` : '- Avoid using emojis unless the brand voice requires it'}`;
+${brandVoice?.use_emojis ? `- Include relevant emojis (${brandVoice.emoji_style || 'moderate'} usage)` : '- Avoid using emojis unless the brand voice requires it'}
+${language === "he" ? `
+## CRITICAL - Hebrew Output:
+- The user's query is in Hebrew. You MUST write the ENTIRE synthesized response in HEBREW (עברית) only.
+- Use Hebrew script (right-to-left). Do not mix in English or other languages.
+- If any source response is in Hebrew, prefer and preserve Hebrew. If sources are in English, translate the synthesized answer into natural Hebrew.
+- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in Hebrew.` : ""}`;
 
     const userPrompt = `## Original User Query:
 "${prompt}"
@@ -154,6 +161,7 @@ Now synthesize the best possible response that:
 2. Combines the best insights from all responses
 3. Naturally mentions "${brandName}" in a helpful, value-adding way
 4. Is optimized for SEO and readability
+${language === "he" ? "5. Write the ENTIRE response in HEBREW (עברית) only - no English or other languages in the output." : ""}
 
 Write the optimized response:`;
 
