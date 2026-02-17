@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
 
     // Get request body
     const body = await request.json();
-    const { mapUrl, placeId } = body;
+    const { mapUrl, placeId, purpose: businessPurpose } = body;
 
     if (!mapUrl && !placeId) {
       return NextResponse.json(
@@ -259,16 +259,18 @@ export async function POST(request: NextRequest) {
     try {
       if (businessExists && existingBusinessId) {
         // Update existing business
+        const updatePayload: Record<string, unknown> = {
+          place_name: placeDetails.name,
+          place_address: placeDetails.formatted_address,
+          place_rating: placeDetails.rating,
+          place_reviews_total: placeDetails.user_ratings_total,
+          reviews_data: sanitizedReviews,
+          fetched_at: new Date().toISOString(),
+        };
+        if (businessPurpose !== undefined) updatePayload.business_purpose = businessPurpose;
         const { error: dbError } = await supabase
           .from('google_maps_reviews')
-          .update({
-            place_name: placeDetails.name,
-            place_address: placeDetails.formatted_address,
-            place_rating: placeDetails.rating,
-            place_reviews_total: placeDetails.user_ratings_total,
-            reviews_data: sanitizedReviews,
-            fetched_at: new Date().toISOString(),
-          })
+          .update(updatePayload)
           .eq('id', existingBusinessId);
 
         if (dbError) {
@@ -276,7 +278,7 @@ export async function POST(request: NextRequest) {
         }
       } else {
         // Insert new business
-        const { error: dbError } = await supabase.from('google_maps_reviews').insert({
+        const insertPayload: Record<string, unknown> = {
           user_id: user.id,
           place_id: extractedPlaceId,
           place_name: placeDetails.name,
@@ -285,7 +287,9 @@ export async function POST(request: NextRequest) {
           place_reviews_total: placeDetails.user_ratings_total,
           reviews_data: sanitizedReviews,
           fetched_at: new Date().toISOString(),
-        });
+        };
+        if (businessPurpose !== undefined) insertPayload.business_purpose = businessPurpose;
+        const { error: dbError } = await supabase.from('google_maps_reviews').insert(insertPayload);
 
         if (dbError) {
           console.warn('⚠️ Could not store reviews in database:', dbError.message);

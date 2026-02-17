@@ -2,9 +2,13 @@
 
 import { motion } from "framer-motion";
 import { useOnboarding } from "@/hooks/useOnboarding";
-import { Globe, ArrowRight, CheckCircle2, XCircle } from "lucide-react";
+import { Globe, ArrowRight, CheckCircle2, XCircle, Plus } from "lucide-react";
 import Button from "@/components/Button";
 import { useState, useEffect, useRef } from "react";
+import toast from "react-hot-toast";
+
+const ONBOARDING_KEYWORDS_KEY = "onboarding-keywords";
+const ONBOARDING_COMPETITORS_KEY = "onboarding-competitors";
 
 export default function EnterDomain() {
   const { nextStep } = useOnboarding();
@@ -13,6 +17,13 @@ export default function EnterDomain() {
   const [isValid, setIsValid] = useState(false);
   const [normalizedDomain, setNormalizedDomain] = useState("");
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [keywords, setKeywords] = useState<string[]>([]);
+  const [competitors, setCompetitors] = useState<Array<{ name: string; domain?: string }>>([]);
+  const [newKeyword, setNewKeyword] = useState("");
+  const [newCompetitorName, setNewCompetitorName] = useState("");
+  const [newCompetitorDomain, setNewCompetitorDomain] = useState("");
 
   // Clear any stale domain from localStorage when component mounts
   // This ensures a clean start for each onboarding session
@@ -140,8 +151,7 @@ export default function EnterDomain() {
     };
   }, [domain]);
 
-  const handleContinue = () => {
-    // Use normalized domain if available, otherwise validate current input
+  const handleContinue = async () => {
     const finalDomain = normalizedDomain || domain;
     const validation = validateDomain(finalDomain);
 
@@ -150,20 +160,86 @@ export default function EnterDomain() {
       setIsValid(false);
       return;
     }
-
-    // Double-check validation before proceeding
     if (!isValid) {
       setError("Please wait for domain validation to complete");
       return;
     }
 
-    // Store domain in localStorage for next steps
-    if (typeof window !== "undefined") {
-      localStorage.setItem("onboarding-domain", validation.normalized);
-      console.log("✅ Domain stored:", validation.normalized);
+    setLoading(true);
+    setError("");
+    try {
+      const domainName = (() => {
+        try {
+          const u = new URL(validation.normalized.startsWith("http") ? validation.normalized : `https://${validation.normalized}`);
+          return u.hostname.replace("www.", "").split(".")[0] || "Brand";
+        } catch {
+          return "Brand";
+        }
+      })();
+      const res = await fetch("/api/ai-suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brandName: domainName,
+          websiteUrl: validation.normalized,
+          industry: "General",
+          language: "en",
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Failed to generate keywords and competitors");
+        setLoading(false);
+        return;
+      }
+      if (!data.success) {
+        toast.error(data.error || "Failed to generate suggestions");
+        setLoading(false);
+        return;
+      }
+      if (!data.keywords?.length && !data.competitors?.length) {
+        toast("Add keywords and competitors below or confirm to continue.");
+      }
+      setKeywords(Array.isArray(data.keywords) ? data.keywords : []);
+      setCompetitors(Array.isArray(data.competitors) ? data.competitors : []);
+      setModalOpen(true);
+    } catch (err: unknown) {
+      toast.error("Something went wrong. Please try again.");
     }
+    setLoading(false);
+  };
 
-    // Only proceed if domain is valid
+  const removeKeyword = (index: number) => {
+    setKeywords((prev) => prev.filter((_, i) => i !== index));
+  };
+  const addKeyword = () => {
+    const k = newKeyword.trim();
+    if (k && !keywords.includes(k)) {
+      setKeywords((prev) => [...prev, k]);
+      setNewKeyword("");
+    }
+  };
+  const removeCompetitor = (index: number) => {
+    setCompetitors((prev) => prev.filter((_, i) => i !== index));
+  };
+  const addCompetitor = () => {
+    const name = newCompetitorName.trim();
+    if (name) {
+      setCompetitors((prev) => [...prev, { name, domain: newCompetitorDomain.trim() || undefined }]);
+      setNewCompetitorName("");
+      setNewCompetitorDomain("");
+    }
+  };
+
+  const handleConfirmAndContinue = () => {
+    if (typeof window !== "undefined") {
+      const finalDomain = normalizedDomain || domain;
+      const validation = validateDomain(finalDomain);
+      if (validation.normalized) localStorage.setItem("onboarding-domain", validation.normalized);
+      localStorage.setItem(ONBOARDING_KEYWORDS_KEY, JSON.stringify(keywords));
+      localStorage.setItem(ONBOARDING_COMPETITORS_KEY, JSON.stringify(competitors));
+    }
+    setModalOpen(false);
     nextStep();
   };
 
@@ -242,11 +318,93 @@ export default function EnterDomain() {
           variant="primary"
           size="lg"
           className="w-full"
-          disabled={!isValid}
+          disabled={!isValid || loading}
+          isLoading={loading}
         >
-          Continue <ArrowRight className="w-5 h-5 ml-2" />
+          {loading ? "Generating…" : "Continue"} <ArrowRight className="w-5 h-5 ml-2" />
         </Button>
       </div>
+
+      {/* Modal: review and edit keywords & competitors */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            <div className="p-6 border-b border-gray-200">
+              <h3 className="text-xl font-bold text-gray-900">Review keywords & competitors</h3>
+              <p className="text-sm text-gray-600 mt-1">Add or remove items, then confirm to continue.</p>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Keywords</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {keywords.map((k, i) => (
+                    <span
+                      key={`${k}-${i}`}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary-100 text-primary-800 rounded-lg text-sm"
+                    >
+                      {k}
+                      <button type="button" onClick={() => removeKeyword(i)} className="hover:bg-primary-200 rounded p-0.5" aria-label="Remove">×</button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newKeyword}
+                    onChange={(e) => setNewKeyword(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addKeyword())}
+                    placeholder="Add keyword..."
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                  <Button onClick={addKeyword} variant="outline" size="sm"><Plus className="w-4 h-4" /></Button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Competitors</label>
+                <div className="space-y-2 mb-2">
+                  {competitors.map((c, i) => (
+                    <div key={`${c.name}-${i}`} className="flex items-start justify-between gap-3 py-2 px-3 bg-gray-50 rounded-lg">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-gray-900">{c.name}</div>
+                        {c.domain && (
+                          <div className="text-xs text-gray-500 mt-0.5 break-all">{c.domain}</div>
+                        )}
+                      </div>
+                      <button type="button" onClick={() => removeCompetitor(i)} className="text-red-600 hover:bg-red-50 rounded p-1 flex-shrink-0" aria-label="Remove">×</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    value={newCompetitorName}
+                    onChange={(e) => setNewCompetitorName(e.target.value)}
+                    placeholder="Competitor name"
+                    className="flex-1 min-w-[120px] px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                  <input
+                    type="text"
+                    value={newCompetitorDomain}
+                    onChange={(e) => setNewCompetitorDomain(e.target.value)}
+                    placeholder="Domain (optional)"
+                    className="flex-1 min-w-[120px] px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                  <Button onClick={addCompetitor} variant="outline" size="sm"><Plus className="w-4 h-4" /></Button>
+                </div>
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-200">
+              <Button onClick={handleConfirmAndContinue} variant="primary" size="lg" className="w-full">
+                Confirm & Continue <ArrowRight className="w-5 h-5 ml-2" />
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

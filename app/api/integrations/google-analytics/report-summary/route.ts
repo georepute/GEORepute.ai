@@ -23,29 +23,25 @@ export async function GET(request: NextRequest) {
 
     const { data: integration, error: intError } = await supabase
       .from('platform_integrations')
-      .select('id, metadata')
+      .select('id, access_token, refresh_token, expires_at, metadata')
       .eq('user_id', user.id)
       .eq('platform', 'google_analytics')
       .eq('status', 'connected')
       .single();
 
-    if (intError || !integration?.metadata) {
+    if (intError || !integration) {
       return NextResponse.json(
         { error: 'GA4 not connected', summary: null, topPages: [] },
         { status: 200 }
       );
     }
 
-    const meta = integration.metadata as {
-      access_token?: string;
-      refresh_token?: string;
-      expires_at?: number;
-      selected_property?: { propertyId?: string; propertyIdNum?: string };
-    };
-
-    const accessToken = meta.access_token;
-    const refreshToken = meta.refresh_token;
-    const expiresAt = meta.expires_at ?? 0;
+    const accessToken = integration.access_token;
+    const refreshToken = integration.refresh_token;
+    const expiresAt = integration.expires_at
+      ? new Date(integration.expires_at).getTime()
+      : 0;
+    const meta = (integration.metadata ?? {}) as { selected_property?: { propertyId?: string; propertyIdNum?: string } };
     const selected = meta.selected_property;
     let propertyId = selected?.propertyIdNum ?? selected?.propertyId;
     if (typeof propertyId === 'string' && propertyId.startsWith('properties/')) {
@@ -67,11 +63,13 @@ export async function GET(request: NextRequest) {
     if (expiresAt && Date.now() >= expiresAt - 60_000) {
       try {
         const { accessToken: newToken, expiresAt: newExpiry } = await ga4.refreshAccessToken();
-        (meta as any).access_token = newToken;
-        (meta as any).expires_at = newExpiry;
         await supabase
           .from('platform_integrations')
-          .update({ metadata: meta, updated_at: new Date().toISOString() })
+          .update({
+            access_token: newToken,
+            expires_at: new Date(newExpiry).toISOString(),
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', integration.id);
       } catch (_) {
         // continue with existing token

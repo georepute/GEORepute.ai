@@ -8,18 +8,21 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const returnTo = searchParams.get("return_to") || "/dashboard/settings";
 
-    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
     if (!googleClientId) {
       return NextResponse.json(
-        { error: "Google OAuth not configured" },
+        { error: "Google OAuth not configured. Add NEXT_PUBLIC_GOOGLE_CLIENT_ID or GOOGLE_CLIENT_ID to .env.local." },
         { status: 500 }
       );
     }
 
-    const redirectUri = `${process.env.NEXT_PUBLIC_SITE_URL || request.nextUrl.origin}/api/integrations/google-analytics/callback?return_to=${encodeURIComponent(returnTo)}`;
-    const scope = "https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/analytics.manage";
-    
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;
+    // Redirect URI must match EXACTLY what's in Google Cloud Console (no query params)
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || request.nextUrl.origin;
+    const redirectUri = `${baseUrl.replace(/\/$/, "")}/api/integrations/google-analytics/callback`;
+    const scope = "https://www.googleapis.com/auth/analytics.readonly";
+    const state = encodeURIComponent(JSON.stringify({ return_to: returnTo }));
+
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${state}`;
 
     return NextResponse.json({ authUrl });
   } catch (error: any) {
