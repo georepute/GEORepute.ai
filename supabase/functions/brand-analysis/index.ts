@@ -1550,11 +1550,14 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
 
   if (mode === 'auto_manual') {
     const combined = [...manualTexts];
-    for (let i = 0; i < buckets.length; i++) {
+    const bucketPromises = buckets.map((b, i) => {
       const count = perBucket + (i < remainder ? 1 : 0);
-      if (count <= 0) continue;
-      const { lang, country } = buckets[i];
-      const generated = await generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', lang, { languages: [lang], countries: country ? [country] : [], maxQueries: count });
+      if (count <= 0) return Promise.resolve([]);
+      const { lang, country } = b;
+      return generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', lang, { languages: [lang], countries: country ? [country] : [], maxQueries: count });
+    });
+    const bucketResults = await Promise.all(bucketPromises);
+    for (const generated of bucketResults) {
       for (const q of generated) {
         if (combined.length >= N) break;
         if (!combined.includes(q)) combined.push(q);
@@ -1564,14 +1567,15 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
     return combined.slice(0, N);
   }
 
-  for (let i = 0; i < buckets.length; i++) {
+  const bucketPromises = buckets.map((b, i) => {
     const count = perBucket + (i < remainder ? 1 : 0);
-    if (count <= 0) continue;
-    const { lang, country } = buckets[i];
-    const generated = await generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', lang, { languages: [lang], countries: country ? [country] : [], maxQueries: count });
-    allQueries.push(...generated);
-  }
-  console.log(`Option A: ${N} queries across ${bucketCount} (lang×region) buckets`);
+    if (count <= 0) return Promise.resolve([]);
+    const { lang, country } = b;
+    return generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', lang, { languages: [lang], countries: country ? [country] : [], maxQueries: count });
+  });
+  const bucketResults = await Promise.all(bucketPromises);
+  for (const generated of bucketResults) allQueries.push(...generated);
+  console.log(`Option A: ${allQueries.length} queries across ${bucketCount} (lang×region) buckets (parallel generation)`);
   return allQueries.slice(0, N);
 }
 function analyzeCrossPlatformResults(platformResults, brandName, competitors) {
@@ -2086,11 +2090,33 @@ async function processAnalysisInBackground(projectId, platforms, sessionId, lang
     }).eq('id', sessionId);
   }
 }
-// Process a small batch of queries to avoid timeout
-async function processBatchOfQueries(projectId, platforms, sessionId, queries, batchStartIndex = 0, batchSize = 3, language = 'en' // Reduced default batch size from 5 to 3
-) {
+
+// Run async tasks with a concurrency limit for faster analysis without overwhelming APIs
+const PARALLEL_CONCURRENCY = 6;
+async function runWithConcurrency(tasks, concurrency = PARALLEL_CONCURRENCY) {
+  const results = [];
+  let index = 0;
+  async function runNext() {
+    const i = index++;
+    if (i >= tasks.length) return;
+    const task = tasks[i];
+    try {
+      const value = await task();
+      results[i] = { ok: true, value };
+    } catch (err) {
+      results[i] = { ok: false, error: err };
+    }
+    await runNext();
+  }
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => runNext());
+  await Promise.all(workers);
+  return results;
+}
+
+// Process a batch of queries with parallel API calls for faster results
+async function processBatchOfQueries(projectId, platforms, sessionId, queries, batchStartIndex = 0, batchSize = 6, language = 'en') {
   try {
-    console.log(`Processing batch starting at index ${batchStartIndex} for session: ${sessionId} (language: ${language})`);
+    console.log(`Processing batch starting at index ${batchStartIndex} for session: ${sessionId} (language: ${language}), batch size: ${batchSize}`);
     
     // Check if session is paused before processing
     const { data: sessionCheck, error: sessionCheckError } = await supabase
@@ -2124,64 +2150,47 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
     if (projectError || !project) {
       throw new Error(`Project not found: ${projectError?.message}`);
     }
-    // Get the current batch of queries
     const currentBatch = queries.slice(batchStartIndex, batchStartIndex + batchSize);
-    console.log(`Processing ${currentBatch.length} queries for ${platforms.length} platforms`);
-    let processedQueries = 0;
-    let totalMentions = 0;
-    // Process each query in the batch
-    for (const query of currentBatch){
-      console.log(`Processing query: "${query.substring(0, 30)}..." across all platforms`);
-      // Process this query across all platforms before moving to the next query
-      for (const platform of platforms){
-        try {
+    console.log(`Processing ${currentBatch.length} queries × ${platforms.length} platforms in parallel (concurrency: ${PARALLEL_CONCURRENCY})`);
+    
+    // Build one task per (query, platform) pair for parallel execution
+    const tasks = [];
+    for (const query of currentBatch) {
+      for (const platform of platforms) {
+        tasks.push(async () => {
           const response = await queryAIPlatform(platform, query, language);
-          if (response) {
-            console.log(`Got response from ${platform} for query "${query.substring(0, 30)}..."`);
-            // Extract sources from the response
-            const extractedSources = extractSourcesFromResponse(response);
-            // Analyze the response for brand mentions
-            const analysis = await analyzeBrandMention(response, project.brand_name, project.competitors || []);
-            // Add sources to the analysis if they exist
-            if (analysis && extractedSources.length > 0) {
-              analysis.sources = extractedSources;
-            }
-            if (analysis?.brand_mentioned) {
-              totalMentions++;
-              console.log(`✓ Brand mentioned in ${platform} response to: "${query}"`);
-            }
-            // Store the response with metadata
-            await supabase.from('ai_platform_responses').insert({
-              project_id: projectId,
-              session_id: sessionId,
-              platform: platform,
-              prompt: query,
-              response: response,
-              response_metadata: analysis
-            });
-            processedQueries++;
-          } else {
-            console.log(`No response received from ${platform} for query: "${query}"`);
+          if (!response) {
+            console.log(`No response from ${platform} for query "${query.substring(0, 30)}..."`);
+            return { stored: false };
           }
-        } catch (error) {
-          console.error(`Error processing query "${query}" for ${platform}:`, error);
-        // Continue with next platform
-        }
-        // Small delay between requests to avoid rate limiting
-        // Use a longer delay for the first few batches to ensure they complete quickly
-        const delayTime = batchStartIndex < 5 ? 500 : 300;
-        await new Promise((resolve)=>setTimeout(resolve, delayTime));
+          const extractedSources = extractSourcesFromResponse(response);
+          const analysis = await analyzeBrandMention(response, project.brand_name, project.competitors || []);
+          if (analysis && extractedSources.length > 0) analysis.sources = extractedSources;
+          await supabase.from('ai_platform_responses').insert({
+            project_id: projectId,
+            session_id: sessionId,
+            platform,
+            prompt: query,
+            response,
+            response_metadata: analysis
+          });
+          return { stored: true, brandMentioned: analysis?.brand_mentioned };
+        });
       }
-      // Update progress after each query is processed across all platforms
-      const { data: currentSession } = await supabase.from('brand_analysis_sessions').select('completed_queries, total_queries').eq('id', sessionId).single();
-      if (currentSession) {
-        const queriesProcessed = platforms.length; // Each query is processed across all platforms
-        const newCompletedQueries = (currentSession.completed_queries || 0) + queriesProcessed;
-        await supabase.from('brand_analysis_sessions').update({
-          completed_queries: newCompletedQueries
-        }).eq('id', sessionId);
-        console.log(`Progress updated: ${newCompletedQueries}/${currentSession.total_queries} queries processed`);
-      }
+    }
+    
+    const results = await runWithConcurrency(tasks);
+    const storedCount = results.filter((r) => r?.ok && r?.value?.stored).length;
+    const totalMentions = results.filter((r) => r?.ok && r?.value?.brandMentioned).length;
+    results.filter((r) => r?.ok === false).forEach((r, i) => console.error(`Task ${i} failed:`, r?.error));
+    
+    const { data: currentSession } = await supabase.from('brand_analysis_sessions').select('completed_queries, total_queries').eq('id', sessionId).single();
+    if (currentSession) {
+      const newCompletedQueries = (currentSession.completed_queries || 0) + storedCount;
+      await supabase.from('brand_analysis_sessions').update({
+        completed_queries: newCompletedQueries
+      }).eq('id', sessionId);
+      console.log(`Progress updated: ${newCompletedQueries}/${currentSession.total_queries} (stored ${storedCount} in this batch)`);
     }
     // Get final session state after processing this batch
     const { data: finalSessionState } = await supabase.from('brand_analysis_sessions').select('completed_queries, total_queries').eq('id', sessionId).single();
@@ -2195,16 +2204,7 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
     const nextBatchStartIndex = batchStartIndex + batchSize;
     const hasMoreQueries = nextBatchStartIndex < queries.length;
     if (hasMoreQueries && newCompletedQueries < totalQueries) {
-      // Calculate adaptive batch size - start small and increase gradually
-      // First batch: 1 query, second batch: 2 queries, then 3 queries (max)
-      let nextBatchSize = 3; // Default max batch size
-      if (batchStartIndex === 0) {
-        // We just finished the first batch (which was very small)
-        nextBatchSize = 1; // Process just 1 query in the second batch
-      } else if (batchStartIndex <= 3) {
-        // For the next few batches, keep it small
-        nextBatchSize = 2;
-      }
+      const nextBatchSize = 6;
       // Schedule next batch by calling the edge function again
       console.log(`Scheduling next batch starting at index ${nextBatchStartIndex} with ${platforms.length} platforms: ${platforms.join(', ')}, batch size: ${nextBatchSize}`);
       // Use the platforms passed in the request for continuation batches
@@ -2318,7 +2318,7 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
     }
     return {
       success: true,
-      processedQueries,
+      processedQueries: storedCount,
       totalMentions,
       hasMoreQueries,
       nextBatchStartIndex: hasMoreQueries ? nextBatchStartIndex : -1
@@ -2351,7 +2351,7 @@ Deno.serve(async (req) => {
       'gemini',
       'perplexity',
       'groq'
-    ], sessionId, queries, batchStartIndex = 0, batchSize = 3, continueProcessing = false, language, action, languages: bodyLanguages, countries: bodyCountries } = body;
+    ], sessionId, queries, batchStartIndex = 0, batchSize = 6, continueProcessing = false, language, action, languages: bodyLanguages, countries: bodyCountries } = body;
     
     // Handle resume action
     if (action === 'resume' && sessionId) {
@@ -2416,8 +2416,8 @@ Deno.serve(async (req) => {
         platformsToUse,
         sessionId,
         remainingQueries,
-        0, // Start from beginning of remaining queries
-        3, // Batch size
+        0,
+        6,
         'en'
       );
       
@@ -2726,9 +2726,7 @@ Deno.serve(async (req) => {
       ];
       console.log(`Platforms being used for first batch: ${platformsToUse.join(', ')}`);
       // Do NOT overwrite user's selected active_platforms; keep user's selection intact
-      // Use a very small initial batch size (2 queries) to ensure the first batch completes quickly
-      // Subsequent batches will use the default batch size defined in the function (3)
-      await processBatchOfQueries(projectId, platformsToUse, session.id, selectedQueriesForRun, 0, 2, preferredLanguage);
+      await processBatchOfQueries(projectId, platformsToUse, session.id, selectedQueriesForRun, 0, 6, preferredLanguage);
       // Return immediately with session info
       return new Response(JSON.stringify({
         success: true,

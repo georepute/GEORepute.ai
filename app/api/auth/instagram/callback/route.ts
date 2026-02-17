@@ -29,25 +29,23 @@ export async function GET(request: NextRequest) {
     const error = request.nextUrl.searchParams.get("error");
     const errorReason = request.nextUrl.searchParams.get("error_reason");
     const errorDescription = request.nextUrl.searchParams.get("error_description");
+    const state = request.nextUrl.searchParams.get("state");
+    const returnBase = state && state.startsWith("/") && !state.startsWith("//")
+      ? new URL(state, request.nextUrl.origin)
+      : new URL("/dashboard/settings", request.nextUrl.origin);
 
     // Handle Facebook OAuth errors
     if (error) {
       console.error("Instagram OAuth error:", { error, errorReason, errorDescription });
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?instagram=error&message=${encodeURIComponent(errorDescription || error)}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("instagram", "error");
+      returnBase.searchParams.set("message", errorDescription || error);
+      return NextResponse.redirect(returnBase);
     }
 
     if (!code) {
-      return NextResponse.redirect(
-        new URL(
-          "/dashboard/settings?instagram=error&message=No authorization code received",
-          request.url
-        )
-      );
+      returnBase.searchParams.set("instagram", "error");
+      returnBase.searchParams.set("message", "No authorization code received");
+      return NextResponse.redirect(returnBase);
     }
 
     // Get Facebook App credentials from environment (same as Facebook integration)
@@ -61,12 +59,9 @@ export async function GET(request: NextRequest) {
         hasAppId: !!appId,
         hasAppSecret: !!appSecret,
       });
-      return NextResponse.redirect(
-        new URL(
-          "/dashboard/settings?instagram=error&message=Instagram integration not configured. Please check your environment variables.",
-          request.url
-        )
-      );
+      returnBase.searchParams.set("instagram", "error");
+      returnBase.searchParams.set("message", "Instagram integration not configured. Please check your environment variables.");
+      return NextResponse.redirect(returnBase);
     }
 
     console.log("🔄 Exchanging Instagram authorization code for access token...", {
@@ -89,12 +84,9 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.ok || tokenData.error) {
       console.error("Token exchange error:", tokenData);
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?instagram=error&message=${encodeURIComponent(tokenData.error?.message || "Failed to get access token")}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("instagram", "error");
+      returnBase.searchParams.set("message", tokenData.error?.message || "Failed to get access token");
+      return NextResponse.redirect(returnBase);
     }
 
     const userAccessToken = tokenData.access_token;
@@ -175,12 +167,9 @@ export async function GET(request: NextRequest) {
       
       if (!hasPagesShowList) {
         console.error("\n❌ CRITICAL ERROR: pages_show_list permission is MISSING!");
-        return NextResponse.redirect(
-          new URL(
-            `/dashboard/settings?instagram=error&message=${encodeURIComponent("Missing 'pages_show_list' permission. Please reconnect and make sure to grant ALL requested permissions, especially 'pages_show_list'.")}`,
-            request.url
-          )
-        );
+        returnBase.searchParams.set("instagram", "error");
+        returnBase.searchParams.set("message", "Missing 'pages_show_list' permission. Please reconnect and make sure to grant ALL requested permissions, especially 'pages_show_list'.");
+        return NextResponse.redirect(returnBase);
       }
       
       if (!hasInstagramBusinessBasic && !hasInstagramBasic) {
@@ -192,12 +181,9 @@ export async function GET(request: NextRequest) {
         console.error("   3. App is not added as Instagram Tester");
         console.error("\n   SOLUTION: Disconnect and reconnect, ensuring you click 'Allow' for ALL permissions.");
         
-        return NextResponse.redirect(
-          new URL(
-            `/dashboard/settings?instagram=error&message=${encodeURIComponent("Missing 'instagram_business_basic' permission. This permission is REQUIRED to access Instagram Business Accounts. Please reconnect and grant ALL permissions. If you're a Tester, ensure you've accepted the Instagram Tester invitation.")}`,
-            request.url
-          )
-        );
+        returnBase.searchParams.set("instagram", "error");
+        returnBase.searchParams.set("message", "Missing 'instagram_business_basic' permission. This permission is REQUIRED to access Instagram Business Accounts. Please reconnect and grant ALL permissions. If you're a Tester, ensure you've accepted the Instagram Tester invitation.");
+        return NextResponse.redirect(returnBase);
       }
       
       if (!hasInstagramBusinessBasic) {
@@ -238,30 +224,21 @@ export async function GET(request: NextRequest) {
       
       // If no pages found, provide a more helpful error with troubleshooting steps
       if (pagesResult.error?.includes("No Facebook Pages found")) {
-        return NextResponse.redirect(
-          new URL(
-            `/dashboard/settings?instagram=error&message=${encodeURIComponent("No Facebook Pages found. Troubleshooting: 1) Verify you're Admin (not Editor) of the Page in Page Settings → Page Roles, 2) Make sure the Page is published, 3) Try disconnecting and reconnecting, granting ALL permissions including 'instagram_business_basic'.")}`,
-            request.url
-          )
-        );
+        returnBase.searchParams.set("instagram", "error");
+        returnBase.searchParams.set("message", "No Facebook Pages found. Troubleshooting: 1) Verify you're Admin (not Editor) of the Page in Page Settings → Page Roles, 2) Make sure the Page is published, 3) Try disconnecting and reconnecting, granting ALL permissions including 'instagram_business_basic'.");
+        return NextResponse.redirect(returnBase);
       }
       
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?instagram=error&message=${encodeURIComponent(pagesResult.error || "Failed to get Facebook pages. Please ensure you granted 'pages_show_list' permission.")}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("instagram", "error");
+      returnBase.searchParams.set("message", pagesResult.error || "Failed to get Facebook pages. Please ensure you granted 'pages_show_list' permission.");
+      return NextResponse.redirect(returnBase);
     }
 
     if (!pagesResult.pages || pagesResult.pages.length === 0) {
       console.error("❌ No pages found in result");
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?instagram=error&message=${encodeURIComponent("No Facebook Pages found. Please verify: 1) You are Admin (not Editor) of the Page, 2) The Page is published, 3) You're using the same Facebook account that owns the Page, 4) Try disconnecting and reconnecting with ALL permissions granted.")}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("instagram", "error");
+      returnBase.searchParams.set("message", "No Facebook Pages found. Please verify: 1) You are Admin (not Editor) of the Page, 2) The Page is published, 3) You're using the same Facebook account that owns the Page, 4) Try disconnecting and reconnecting with ALL permissions granted.");
+      return NextResponse.redirect(returnBase);
     }
 
     // Step 5: Find page with Instagram Business Account
@@ -354,12 +331,9 @@ export async function GET(request: NextRequest) {
     }
 
     if (!selectedPage || !instagramAccountId) {
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?instagram=error&message=${encodeURIComponent("No Instagram Business Account found. Please ensure: 1) Your Instagram account is a Business account, 2) It's connected to a Facebook Page, 3) You have admin access to that Page.")}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("instagram", "error");
+      returnBase.searchParams.set("message", "No Instagram Business Account found. Please ensure: 1) Your Instagram account is a Business account, 2) It's connected to a Facebook Page, 3) You have admin access to that Page.");
+      return NextResponse.redirect(returnBase);
     }
 
     const pageAccessToken = selectedPage.access_token || longLivedToken;
@@ -435,21 +409,19 @@ export async function GET(request: NextRequest) {
 
     console.log("✅ Instagram integration saved to Supabase");
 
-    // Step 9: Redirect back to settings with success
-    return NextResponse.redirect(
-      new URL(
-        `/dashboard/settings?instagram=connected&username=${encodeURIComponent(instagramUsername || pageName)}#instagram-integration`,
-        request.url
-      )
-    );
+    // Step 9: Redirect back to return path or settings with success
+    returnBase.searchParams.set("instagram", "connected");
+    returnBase.searchParams.set("username", instagramUsername || pageName);
+    return NextResponse.redirect(returnBase);
   } catch (error: any) {
     console.error("Instagram OAuth callback error:", error);
-    return NextResponse.redirect(
-      new URL(
-        `/dashboard/settings?instagram=error&message=${encodeURIComponent(error.message || "Unknown error occurred")}`,
-        request.url
-      )
-    );
+    const state = request.nextUrl.searchParams.get("state");
+    const errBase = state && state.startsWith("/") && !state.startsWith("//")
+      ? new URL(state, request.nextUrl.origin)
+      : new URL("/dashboard/settings", request.nextUrl.origin);
+    errBase.searchParams.set("instagram", "error");
+    errBase.searchParams.set("message", error.message || "Unknown error occurred");
+    return NextResponse.redirect(errBase);
   }
 }
 

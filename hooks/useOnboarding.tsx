@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type OnboardingStep = 0 | 1 | 2;
+export type OnboardingStep = 0 | 1 | 2 | 3;
+
+const MAX_STEP = 3;
 
 interface OnboardingState {
   currentStep: OnboardingStep;
@@ -37,7 +39,7 @@ export const useOnboarding = create<OnboardingState>()(
       nextStep: () => {
         const { currentStep, completeStep } = get();
         completeStep(currentStep);
-        if (currentStep < 2) {
+        if (currentStep < MAX_STEP) {
           set({ currentStep: (currentStep + 1) as OnboardingStep });
         } else {
           set({ isOnboardingComplete: true });
@@ -54,7 +56,7 @@ export const useOnboarding = create<OnboardingState>()(
       skipOnboarding: () => {
         set({ 
           isOnboardingComplete: true,
-          completedSteps: [0, 1, 2]
+          completedSteps: [0, 1, 2, 3]
         });
       },
 

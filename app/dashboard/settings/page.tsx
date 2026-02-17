@@ -72,6 +72,7 @@ export default function Settings() {
   // Check for OAuth callback and auto-switch to integrations tab
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
+    const successParam = urlParams.get("success");
     const hasCallback = urlParams.get("facebook") || 
                         urlParams.get("instagram") || 
                         urlParams.get("linkedin") ||
@@ -79,22 +80,31 @@ export default function Settings() {
                         urlParams.get("reddit") ||
                         urlParams.get("medium") ||
                         urlParams.get("quora") ||
-                        urlParams.get("success") === "gsc_connected" ||
+                        successParam === "gsc_connected" ||
+                        successParam === "ga4_connected" ||
+                        successParam === "gbp_connected" ||
                         urlParams.get("error");
     
     // If any integration callback detected, switch to integrations tab
     if (hasCallback) {
       setActiveTab("integrations");
       
-      // Show success/error toast for GSC
-      if (urlParams.get("success") === "gsc_connected") {
+      // Show success toasts for integrations
+      if (successParam === "gsc_connected") {
         toast.success("Google Search Console connected successfully!");
-      } else if (urlParams.get("error")) {
+      } else if (successParam === "ga4_connected") {
+        toast.success("Google Analytics 4 connected successfully!");
+      } else if (successParam === "gbp_connected") {
+        toast.success("Google Business Profile connected successfully!");
+      }
+      if (urlParams.get("error")) {
         const error = urlParams.get("error");
         if (error === "no_verified_sites") {
           toast.error("No verified sites found in Google Search Console");
         } else if (error === "access_denied") {
           toast.error("Access denied. Please try again.");
+        } else if (error === "platform_not_allowed") {
+          toast.error("Database does not allow this integration yet. Run database/028_allow_ga4_gbp_platform_integrations.sql in Supabase SQL Editor, then try again.");
         } else {
           toast.error(`Connection failed: ${error}`);
         }
@@ -1675,6 +1685,308 @@ NEXT_PUBLIC_GITHUB_CLIENT_ID=prod_client_id`}
 
       {/* Google Search Console Integration */}
       <GoogleSearchConsoleSettings />
+
+      {/* Google Analytics 4 Integration */}
+      <GoogleAnalyticsSettings />
+
+      {/* Google Business Profile Integration */}
+      <GoogleBusinessProfileSettings />
+    </div>
+  );
+}
+
+// Google Analytics 4 Integration Component
+function GoogleAnalyticsSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [propertyName, setPropertyName] = useState<string | null>(null);
+  const [propertyCount, setPropertyCount] = useState(0);
+
+  const settingsReturnPath = "/dashboard/settings?tab=integrations";
+
+  useEffect(() => {
+    checkGA4Status();
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("success") === "ga4_connected") {
+      setTimeout(() => {
+        checkGA4Status();
+        window.history.replaceState({}, "", settingsReturnPath);
+      }, 500);
+    }
+  }, []);
+
+  const checkGA4Status = async () => {
+    try {
+      const response = await fetch("/api/integrations/google-analytics");
+      if (response.ok) {
+        const data = await response.json();
+        setIsConnected(data.connected);
+        setPropertyName(data.propertyName ?? null);
+        setPropertyCount(data.propertyCount ?? 0);
+      }
+    } catch (error) {
+      console.error("Error checking GA4 status:", error);
+    }
+  };
+
+  const handleConnect = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/integrations/google-analytics/auth-url?return_to=${encodeURIComponent(settingsReturnPath)}`
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to get auth URL");
+      }
+      const { authUrl } = await res.json();
+      if (authUrl) window.location.href = authUrl;
+      else toast.error("Failed to get authorization URL");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to initiate connection";
+      toast.error(msg);
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Disconnect Google Analytics 4? You can reconnect anytime.")) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/integrations/google-analytics", { method: "DELETE" });
+      if (res.ok) {
+        toast.success("Google Analytics 4 disconnected");
+        setIsConnected(false);
+        setPropertyName(null);
+        setPropertyCount(0);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to disconnect");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden">
+            <Image
+              src="/google-analytics-4.svg"
+              alt="Google Analytics 4"
+              width={40}
+              height={40}
+              className="w-full h-full object-contain"
+            />
+          </div>
+          <div>
+            <h3 className="font-semibold">Google Analytics 4</h3>
+            <p className="text-sm text-gray-600">
+              Connect GA4 to use analytics data in reports and AI Visibility
+            </p>
+          </div>
+        </div>
+        <span
+          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+            isConnected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+          }`}
+        >
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+      {!isConnected ? (
+        <div className="pt-4">
+          <button
+            onClick={handleConnect}
+            disabled={loading}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Connecting...
+              </>
+            ) : (
+              <>
+                <Image src="/google-analytics-4.svg" alt="GA4" width={16} height={16} className="w-4 h-4" />
+                Connect Google Analytics 4
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-900">
+              <strong>Connected.</strong>
+              {propertyCount > 0 && (
+                <> {propertyName ? `${propertyName}${propertyCount > 1 ? ` (${propertyCount} properties)` : ""}` : `${propertyCount} propert${propertyCount === 1 ? "y" : "ies"}`}</>
+              )}
+            </p>
+          </div>
+          <div className="pt-4 border-t border-gray-200">
+            <button
+              onClick={handleDisconnect}
+              disabled={loading}
+              className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loading ? <Loader className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+              Disconnect
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Google Business Profile Integration Component
+function GoogleBusinessProfileSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [locationName, setLocationName] = useState<string | null>(null);
+  const [locationCount, setLocationCount] = useState(0);
+
+  const settingsReturnPath = "/dashboard/settings?tab=integrations";
+
+  useEffect(() => {
+    checkGBPStatus();
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("success") === "gbp_connected") {
+      setTimeout(() => {
+        checkGBPStatus();
+        window.history.replaceState({}, "", settingsReturnPath);
+      }, 500);
+    }
+  }, []);
+
+  const checkGBPStatus = async () => {
+    try {
+      const response = await fetch("/api/integrations/google-business-profile");
+      if (response.ok) {
+        const data = await response.json();
+        setIsConnected(data.connected);
+        setLocationName(data.locationName ?? null);
+        setLocationCount(data.locationCount ?? 0);
+      }
+    } catch (error) {
+      console.error("Error checking GBP status:", error);
+    }
+  };
+
+  const handleConnect = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/integrations/google-business-profile/auth-url?return_to=${encodeURIComponent(settingsReturnPath)}`
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to get auth URL");
+      }
+      const { authUrl } = await res.json();
+      if (authUrl) window.location.href = authUrl;
+      else toast.error("Failed to get authorization URL");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to initiate connection";
+      toast.error(msg);
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Disconnect Google Business Profile? You can reconnect anytime.")) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/integrations/google-business-profile", { method: "DELETE" });
+      if (res.ok) {
+        toast.success("Google Business Profile disconnected");
+        setIsConnected(false);
+        setLocationName(null);
+        setLocationCount(0);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to disconnect");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg flex items-center justify-center overflow-hidden">
+            <Image
+              src="/google-my-business.svg"
+              alt="Google Business Profile"
+              width={40}
+              height={40}
+              className="w-full h-full object-contain"
+            />
+          </div>
+          <div>
+            <h3 className="font-semibold">Google Business Profile</h3>
+            <p className="text-sm text-gray-600">
+              Connect your Business Profile for location and Maps visibility
+            </p>
+          </div>
+        </div>
+        <span
+          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+            isConnected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"
+          }`}
+        >
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+      {!isConnected ? (
+        <div className="pt-4">
+          <button
+            onClick={handleConnect}
+            disabled={loading}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                Connecting...
+              </>
+            ) : (
+              <>
+                <Image src="/google-my-business.svg" alt="GBP" width={16} height={16} className="w-4 h-4" />
+                Connect Google Business Profile
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-900">
+              <strong>Connected:</strong>{" "}
+              {locationName ? `${locationName}${locationCount > 1 ? ` (${locationCount} locations)` : ""}` : `${locationCount} location${locationCount === 1 ? "" : "s"}`}
+            </p>
+          </div>
+          <div className="pt-4 border-t border-gray-200">
+            <button
+              onClick={handleDisconnect}
+              disabled={loading}
+              className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loading ? <Loader className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+              Disconnect
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

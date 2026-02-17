@@ -857,6 +857,7 @@ function AIVisibilityContent() {
       setDomainIntelligenceJobs(data || []);
     } catch (error) {
       console.error('Error fetching domain intelligence jobs:', error);
+      setDomainIntelligenceJobs([]);
     }
   };
 

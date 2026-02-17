@@ -189,9 +189,10 @@ export async function POST(request: NextRequest) {
 
     if (updateError) {
       console.error("Error storing crawl data:", updateError);
+      const isTableMissing = updateError?.code === "42P01" || updateError?.message?.includes("does not exist");
       return NextResponse.json(
-        { error: "Failed to store crawl data" },
-        { status: 500 }
+        { error: isTableMissing ? "Domain intelligence is being updated." : "Failed to store crawl data" },
+        { status: isTableMissing ? 503 : 500 }
       );
     }
 

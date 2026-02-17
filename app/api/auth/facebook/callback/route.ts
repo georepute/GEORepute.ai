@@ -29,25 +29,24 @@ export async function GET(request: NextRequest) {
     const error = request.nextUrl.searchParams.get("error");
     const errorReason = request.nextUrl.searchParams.get("error_reason");
     const errorDescription = request.nextUrl.searchParams.get("error_description");
+    const state = request.nextUrl.searchParams.get("state");
+    // If state is a relative return path (e.g. /onboarding?step=1), redirect there instead of settings
+    const returnBase = state && state.startsWith("/") && !state.startsWith("//")
+      ? new URL(state, request.nextUrl.origin)
+      : new URL("/dashboard/settings", request.nextUrl.origin);
 
     // Handle Facebook OAuth errors
     if (error) {
       console.error("Facebook OAuth error:", { error, errorReason, errorDescription });
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?facebook=error&message=${encodeURIComponent(errorDescription || error)}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("facebook", "error");
+      returnBase.searchParams.set("message", errorDescription || error);
+      return NextResponse.redirect(returnBase);
     }
 
     if (!code) {
-      return NextResponse.redirect(
-        new URL(
-          "/dashboard/settings?facebook=error&message=No authorization code received",
-          request.url
-        )
-      );
+      returnBase.searchParams.set("facebook", "error");
+      returnBase.searchParams.set("message", "No authorization code received");
+      return NextResponse.redirect(returnBase);
     }
 
     // Get Facebook App credentials from environment
@@ -63,12 +62,9 @@ export async function GET(request: NextRequest) {
         appIdLength: appId?.length,
         appSecretLength: appSecret?.length,
       });
-      return NextResponse.redirect(
-        new URL(
-          "/dashboard/settings?facebook=error&message=Facebook integration not configured. Please check your environment variables.",
-          request.url
-        )
-      );
+      returnBase.searchParams.set("facebook", "error");
+      returnBase.searchParams.set("message", "Facebook integration not configured. Please check your environment variables.");
+      return NextResponse.redirect(returnBase);
     }
 
     console.log("🔄 Exchanging Facebook authorization code for access token...", {
@@ -94,12 +90,9 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.ok || tokenData.error) {
       console.error("Token exchange error:", tokenData);
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?facebook=error&message=${encodeURIComponent(tokenData.error?.message || "Failed to get access token")}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("facebook", "error");
+      returnBase.searchParams.set("message", tokenData.error?.message || "Failed to get access token");
+      return NextResponse.redirect(returnBase);
     }
 
     const userAccessToken = tokenData.access_token;
@@ -140,12 +133,9 @@ export async function GET(request: NextRequest) {
 
     if (!pagesResult.success || !pagesResult.pages || pagesResult.pages.length === 0) {
       console.error("No pages found:", pagesResult.error);
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?facebook=error&message=${encodeURIComponent(pagesResult.error || "No Facebook pages found. Please create a Facebook Page first.")}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("facebook", "error");
+      returnBase.searchParams.set("message", pagesResult.error || "No Facebook pages found. Please create a Facebook Page first.");
+      return NextResponse.redirect(returnBase);
     }
 
     // Use the first page (or you could let user select)
@@ -288,21 +278,19 @@ export async function GET(request: NextRequest) {
     console.log(`   Page Access Token stored in access_token:`, !!result?.access_token);
     console.log(`   User Access Token stored in metadata.userAccessToken:`, !!result?.metadata?.userAccessToken);
 
-    // Step 8: Redirect back to settings with success
-    return NextResponse.redirect(
-      new URL(
-        `/dashboard/settings?facebook=connected&page=${encodeURIComponent(pageName)}#facebook-integration`,
-        request.url
-      )
-    );
+    // Step 8: Redirect back to return path or settings with success
+    returnBase.searchParams.set("facebook", "connected");
+    returnBase.searchParams.set("page", pageName);
+    return NextResponse.redirect(returnBase);
   } catch (error: any) {
     console.error("Facebook OAuth callback error:", error);
-    return NextResponse.redirect(
-      new URL(
-        `/dashboard/settings?facebook=error&message=${encodeURIComponent(error.message || "Unknown error occurred")}`,
-        request.url
-      )
-    );
+    const state = request.nextUrl.searchParams.get("state");
+    const errBase = state && state.startsWith("/") && !state.startsWith("//")
+      ? new URL(state, request.nextUrl.origin)
+      : new URL("/dashboard/settings", request.nextUrl.origin);
+    errBase.searchParams.set("facebook", "error");
+    errBase.searchParams.set("message", error.message || "Unknown error occurred");
+    return NextResponse.redirect(errBase);
   }
 }
 

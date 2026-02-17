@@ -17,7 +17,15 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const code = searchParams.get('code');
     const error = searchParams.get('error');
-    const returnTo = searchParams.get('return_to') || '/dashboard/settings';
+    let returnTo = '/dashboard/settings';
+    try {
+      const stateRaw = searchParams.get('state');
+      if (stateRaw) {
+        const state = JSON.parse(decodeURIComponent(stateRaw));
+        if (state?.return_to) returnTo = state.return_to;
+      }
+    } catch (_) {}
+    if (!searchParams.get('state') && searchParams.get('return_to')) returnTo = searchParams.get('return_to')!;
 
     // Handle user denial
     if (error) {
@@ -34,11 +42,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Initialize OAuth client
+    // Must match the redirect_uri used in the auth URL (no query params)
+    const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || request.nextUrl.origin).replace(/\/$/, '');
+    const redirectUri = `${baseUrl}/api/integrations/google-business-profile/callback`;
+
     const oauth2Client = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
+      redirectUri
     );
 
     // Exchange code for tokens
@@ -79,29 +90,58 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Save integration to database
+    // Save integration to database (same structure as GSC: tokens in columns, rest in metadata)
     console.log('💾 Saving GBP integration to database...');
-    const { error: dbError } = await supabase
-      .from('platform_integrations')
-      .upsert({
-        user_id: user.id,
-        platform: 'google_business_profile',
-        enabled: true,
-        status: 'connected',
-        metadata: {
-          access_token: tokens.access_token,
-          refresh_token: tokens.refresh_token,
-          expires_at: tokens.expiry_date,
-          locations: locations,
-          selected_location: locations[0], // Default to first location
-        },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+    const expiresAt = tokens.expiry_date
+      ? new Date(tokens.expiry_date).toISOString()
+      : new Date(Date.now() + 3600 * 1000).toISOString();
 
-    if (dbError) {
-      console.error('Database error:', dbError);
-      throw dbError;
+    const integrationData = {
+      user_id: user.id,
+      platform: 'google_business_profile',
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token || null,
+      expires_at: expiresAt,
+      token_type: 'Bearer',
+      status: 'connected',
+      metadata: {
+        locations: locations,
+        selected_location: locations[0],
+      },
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: existingIntegration } = await supabase
+      .from('platform_integrations')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('platform', 'google_business_profile')
+      .maybeSingle();
+
+    if (existingIntegration) {
+      const { error: updateError } = await supabase
+        .from('platform_integrations')
+        .update(integrationData)
+        .eq('id', existingIntegration.id);
+
+      if (updateError) {
+        console.error('Database error:', updateError);
+        throw updateError;
+      }
+    } else {
+      const { error: insertError } = await supabase
+        .from('platform_integrations')
+        .insert({ ...integrationData, created_at: new Date().toISOString() });
+
+      if (insertError) {
+        console.error('GBP database error:', insertError);
+        if (insertError.code === '23514') {
+          return NextResponse.redirect(
+            new URL(`${returnTo}?error=platform_not_allowed`, request.url)
+          );
+        }
+        throw insertError;
+      }
     }
 
     console.log('✅ GBP integration saved successfully');
@@ -112,7 +152,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(returnUrl);
   } catch (error: any) {
     console.error('❌ GBP OAuth callback error:', error);
-    const returnTo = request.nextUrl.searchParams.get('return_to') || '/dashboard/settings';
+    let returnTo = '/dashboard/settings';
+    try {
+      const stateRaw = request.nextUrl.searchParams.get('state');
+      if (stateRaw) {
+        const state = JSON.parse(decodeURIComponent(stateRaw));
+        if (state?.return_to) returnTo = state.return_to;
+      }
+    } catch (_) {}
     return NextResponse.redirect(
       new URL(`${returnTo}?error=${encodeURIComponent(error.message)}`, request.url)
     );

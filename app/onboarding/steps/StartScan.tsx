@@ -22,6 +22,8 @@ import Button from "@/components/Button";
 import { useState, useEffect } from "react";
 import { useOnboarding } from "@/hooks/useOnboarding";
 import toast from "react-hot-toast";
+import { supabase } from "@/lib/supabase/client";
+import { Pencil } from "lucide-react";
 
 interface ScanProgress {
   currentStep: string;
@@ -50,6 +52,14 @@ interface ScanResults {
   recommendedActions?: any[];
 }
 
+interface OnboardingSummary {
+  domain: string | null;
+  languages: string[];
+  countries: string[];
+  companyLocation: string | null;
+  integrations: { gsc: boolean; ga4: boolean; gbp: boolean; facebook: boolean; instagram: boolean; linkedin: boolean };
+}
+
 export default function StartScan() {
   const router = useRouter();
   const { skipOnboarding } = useOnboarding();
@@ -66,6 +76,86 @@ export default function StartScan() {
   const [results, setResults] = useState<ScanResults | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [summary, setSummary] = useState<OnboardingSummary | null>(null);
+  const [identityConflicts, setIdentityConflicts] = useState<Array<{ type: string; message: string; source: string }> | null>(null);
+  const [verifyingIdentity, setVerifyingIdentity] = useState(false);
+
+  // Load all previous-step data for cross-validation summary
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const domain = localStorage.getItem("onboarding-domain");
+    let languages: string[] = [];
+    let countries: string[] = [];
+    try {
+      const langStr = localStorage.getItem("onboarding-analysis-languages");
+      if (langStr) {
+        const parsed = JSON.parse(langStr);
+        if (Array.isArray(parsed)) languages = parsed;
+      }
+      const countryStr = localStorage.getItem("onboarding-analysis-countries");
+      if (countryStr) {
+        const parsed = JSON.parse(countryStr);
+        if (Array.isArray(parsed)) countries = parsed;
+      }
+    } catch (_) {}
+    const businessesPromise = fetch("/api/integrations/google-maps/businesses")
+      .then((res) => res.json())
+      .then((data) => (data.success && data.businesses?.length > 0 ? (data.businesses[0].place_name || data.businesses[0].place_address || "Saved") : null))
+      .catch(() => null);
+    const integrationsPromise = supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return { data: [] as { platform: string }[] };
+      const res = await supabase.from("platform_integrations").select("platform").eq("user_id", user.id).eq("status", "connected");
+      return res;
+    });
+    Promise.all([businessesPromise, integrationsPromise]).then(([companyLocation, integrationsRes]) => {
+      const rows = integrationsRes?.data || [];
+      const platforms = new Set(rows.map((r: { platform: string }) => r.platform));
+      setSummary({
+        domain,
+        languages,
+        countries,
+        companyLocation,
+        integrations: {
+          gsc: platforms.has("google_search_console"),
+          ga4: platforms.has("google_analytics"),
+          gbp: platforms.has("google_business_profile"),
+          facebook: platforms.has("facebook"),
+          instagram: platforms.has("instagram"),
+          linkedin: platforms.has("linkedin"),
+        },
+      });
+    });
+  }, []);
+
+  const runCrossVerification = async (): Promise<{ valid: boolean; conflicts: Array<{ type: string; message: string; source: string }> }> => {
+    const domain = localStorage.getItem("onboarding-domain");
+    let analysisCountries: string[] = [];
+    try {
+      const countryStr = localStorage.getItem("onboarding-analysis-countries");
+      if (countryStr) {
+        const parsed = JSON.parse(countryStr);
+        if (Array.isArray(parsed)) analysisCountries = parsed;
+      }
+    } catch (_) {}
+    const res = await fetch("/api/onboarding/verify-identity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ domain: domain || "", analysisCountries }),
+    });
+    const data = await res.json().catch(() => ({ valid: false, conflicts: [] }));
+    return { valid: data.valid === true, conflicts: Array.isArray(data.conflicts) ? data.conflicts : [] };
+  };
+
+  useEffect(() => {
+    if (!summary?.domain) return;
+    setVerifyingIdentity(true);
+    runCrossVerification()
+      .then(({ valid, conflicts }) => {
+        setIdentityConflicts(valid ? [] : conflicts);
+      })
+      .catch(() => setIdentityConflicts([]))
+      .finally(() => setVerifyingIdentity(false));
+  }, [summary?.domain]);
 
   useEffect(() => {
     // Don't auto-start - wait for user to explicitly start the scan
@@ -108,68 +198,146 @@ export default function StartScan() {
 
   const startScan = async () => {
     try {
-      // Get domain and integrations from localStorage
       const domain = localStorage.getItem("onboarding-domain");
-      const integrationsStr = localStorage.getItem("onboarding-integrations");
-      const integrations = integrationsStr ? JSON.parse(integrationsStr) : { gsc: true, ga4: false, gbp: false };
-
       if (!domain) {
         setError("Domain not found");
         setErrorDetails("Please go back and enter your domain.");
         return;
       }
 
+      setVerifyingIdentity(true);
+      const { valid, conflicts } = await runCrossVerification();
+      setVerifyingIdentity(false);
+      if (!valid && conflicts.length > 0) {
+        setIdentityConflicts(conflicts);
+        toast.error("Fix conflicts before starting the scan.");
+        return;
+      }
+      setIdentityConflicts([]);
+
+      let keywords: string[] = [];
+      let competitors: Array<{ name: string; domain?: string }> = [];
+      let analysisLanguages: string[] = [];
+      let analysisCountries: string[] = [];
+      try {
+        const kw = localStorage.getItem("onboarding-keywords");
+        if (kw) {
+          const parsed = JSON.parse(kw);
+          if (Array.isArray(parsed)) keywords = parsed.filter((k: unknown) => typeof k === "string");
+        }
+        const comp = localStorage.getItem("onboarding-competitors");
+        if (comp) {
+          const parsed = JSON.parse(comp);
+          if (Array.isArray(parsed)) competitors = parsed.map((c: unknown) => typeof c === "string" ? { name: c } : (c as { name: string; domain?: string }));
+        }
+        const langStr = localStorage.getItem("onboarding-analysis-languages");
+        if (langStr) {
+          const parsed = JSON.parse(langStr);
+          if (Array.isArray(parsed)) analysisLanguages = parsed.filter((l: unknown) => typeof l === "string");
+        }
+        const countryStr = localStorage.getItem("onboarding-analysis-countries");
+        if (countryStr) {
+          const parsed = JSON.parse(countryStr);
+          if (Array.isArray(parsed)) analysisCountries = parsed.filter((c: unknown) => typeof c === "string");
+        }
+      } catch (_) {}
+
+      const websiteUrl = domain.startsWith("http") ? domain : `https://${domain}`;
+      const brandName = (() => {
+        try {
+          return new URL(websiteUrl).hostname.replace(/^www\./, "").split(".")[0] || "Brand";
+        } catch {
+          return "Brand";
+        }
+      })();
+
       setIsScanning(true);
       setError(null);
       setErrorDetails(null);
-      setResults(null);
-      setIsRetrying(true);
 
-      const response = await fetch("/api/geo-core/domain-intelligence", {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error("Supabase configuration missing");
+      }
+
+      // 1) Create project from onboarding data (keywords, competitors, region & language)
+      const createRes = await fetch("/api/ai-visibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brandName,
+          websiteUrl,
+          industry: "General",
+          keywords,
+          competitors: competitors.map((c) => (c.domain ? { name: c.name, domain: c.domain } : { name: c.name })),
+          platforms: ["perplexity", "chatgpt"],
+          analysisLanguages,
+          analysisCountries,
+          queriesPerPlatform: 50,
+          queryMode: "auto",
+        }),
+      });
+      const createData = await createRes.json();
+      if (!createRes.ok) {
+        throw new Error(createData.error || "Failed to create project");
+      }
+      const projectId = createData.projectId;
+      if (!projectId) throw new Error("No project ID returned");
+
+      // 2) Run brand_analysis_summary (uses keywords, saves to project)
+      try {
+        const summaryRes = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            projectId,
+            url: websiteUrl,
+            brandName,
+            industry: "General",
+            keywords,
+          }),
+        });
+        if (!summaryRes.ok) {
+          const errText = await summaryRes.text();
+          console.warn("Brand summary failed:", errText);
+        }
+      } catch (summaryErr) {
+        console.warn("Brand summary error:", summaryErr);
+      }
+
+      // 3) Start brand_analysis (creates running session; analysis continues in background)
+      const analysisRes = await fetch(`${supabaseUrl}/functions/v1/brand-analysis`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseAnonKey}`,
         },
         body: JSON.stringify({
-          domainUrl: domain,
-          language: "en",
-          integrations,
+          projectId,
+          platforms: ["perplexity", "chatgpt"],
+          language: analysisLanguages[0]?.split("-")[0] || "en",
+          languages: analysisLanguages,
+          countries: analysisCountries,
         }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errorMsg = data.error || "Failed to start scan";
-        const errorCode = data.code || "";
-        
-        if (errorCode === "GSC_REQUIRED") {
-          setError("Google Search Console Required");
-          setErrorDetails("Please connect Google Search Console in the previous step to continue.");
-        } else {
-          setError(errorMsg);
-          setErrorDetails(data.details || "Please check your domain URL and try again.");
-        }
-        setIsScanning(false);
-        setIsRetrying(false);
-        toast.error(errorMsg);
-        return;
+      const analysisData = await analysisRes.json();
+      if (!analysisRes.ok && !analysisData.alreadyRunning) {
+        throw new Error(analysisData.error || "Failed to start analysis");
       }
 
-      if (data.jobId) {
-        setJobId(data.jobId);
-        setIsRetrying(false);
-        toast.success("Domain intelligence scan started!");
-      } else {
-        throw new Error("No job ID returned");
-      }
+      skipOnboarding();
+      toast.success("Intelligence scan started. Taking you to AI Visibility.");
+      router.push(`/dashboard/ai-visibility?project=${projectId}`);
     } catch (err: any) {
       console.error("Error starting scan:", err);
       const errorMsg = err.message || "Failed to start scan";
       setError(errorMsg);
-      setErrorDetails("Network error occurred. Please check your connection and try again.");
+      setErrorDetails(err.details || "Please check your connection and try again.");
       setIsScanning(false);
-      setIsRetrying(false);
       toast.error(errorMsg);
     }
   };
@@ -318,7 +486,7 @@ export default function StartScan() {
               {isRetrying ? "Retrying..." : "Retry Scan"}
             </Button>
             <Button
-              onClick={() => router.push("/onboarding?step=1")}
+              onClick={() => router.push("/onboarding?step=2")}
               variant="outline"
               size="lg"
               className="flex-1"
@@ -464,44 +632,121 @@ export default function StartScan() {
             View Full Results in Dashboard
           </Button>
         </div>
-      ) : !isScanning && !isComplete && !error ? (
-        // Initial state - show Start Scan button
+      ) : (!isScanning && !isComplete && !error) || (isScanning && !jobId) ? (
+        // Initial state or starting scan (new flow): verification summary and Start Scan button
         <div className="mb-8">
           <div className="p-6 bg-blue-50 border-2 border-blue-200 rounded-lg mb-6">
             <div className="flex items-start gap-3">
               <Sparkles className="w-6 h-6 text-blue-600 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
-                <h3 className="text-lg font-bold text-blue-900 mb-2">Ready to Start</h3>
+                <h3 className="text-lg font-bold text-blue-900 mb-2">Verify your setup</h3>
                 <p className="text-sm text-blue-700 mb-4">
-                  Your domain has been validated and integrations are ready. Click the button below to start the comprehensive intelligence scan.
+                  Review what you added in previous steps. Edit any step to make changes before starting the scan.
                 </p>
-                <div className="text-xs text-blue-600 space-y-1">
-                  <p>• Domain: {(() => {
-                    if (typeof window !== "undefined") {
-                      const domain = localStorage.getItem("onboarding-domain");
-                      return domain || "Not set";
-                    }
-                    return "Not set";
-                  })()}</p>
-                  <p>• This scan will analyze your domain across multiple platforms</p>
-                </div>
               </div>
             </div>
           </div>
+
+          {summary && (
+            <div className="space-y-4 mb-6">
+              {/* Step 1 - Domain */}
+              <div className="p-4 border-2 border-gray-200 rounded-xl bg-gray-50">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-5 h-5 text-primary-600" />
+                    <span className="font-semibold text-gray-900">Domain</span>
+                  </div>
+                  <Button onClick={() => router.push("/onboarding?step=0")} variant="outline" size="sm">
+                    <Pencil className="w-4 h-4 mr-1" /> Edit
+                  </Button>
+                </div>
+                <p className="text-sm text-gray-700">{summary.domain || "Not set"}</p>
+              </div>
+
+              {/* Step 2 - Region & Language */}
+              <div className="p-4 border-2 border-gray-200 rounded-xl bg-gray-50">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-5 h-5 text-primary-600" />
+                    <span className="font-semibold text-gray-900">Region & Language</span>
+                  </div>
+                  <Button onClick={() => router.push("/onboarding?step=1")} variant="outline" size="sm">
+                    <Pencil className="w-4 h-4 mr-1" /> Edit
+                  </Button>
+                </div>
+                <div className="text-sm text-gray-700 space-y-1">
+                  <p><span className="text-gray-500">Languages:</span> {summary.languages.length ? summary.languages.join(", ") : "Not set"}</p>
+                  <p><span className="text-gray-500">Regions:</span> {summary.countries.length ? summary.countries.join(", ") : "Not set"}</p>
+                  <p><span className="text-gray-500">Map location:</span> {summary.companyLocation || "None added"}</p>
+                </div>
+              </div>
+
+              {/* Step 3 - Connect Sources */}
+              <div className="p-4 border-2 border-gray-200 rounded-xl bg-gray-50">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-primary-600" />
+                    <span className="font-semibold text-gray-900">Connect Sources</span>
+                  </div>
+                  <Button onClick={() => router.push("/onboarding?step=2")} variant="outline" size="sm">
+                    <Pencil className="w-4 h-4 mr-1" /> Edit
+                  </Button>
+                </div>
+                <div className="text-sm text-gray-700 space-y-1">
+                  <p>{summary.integrations.gsc ? <><CheckCircle2 className="w-4 h-4 inline text-green-600 mr-1" /> Google Search Console</> : <><XCircle className="w-4 h-4 inline text-red-500 mr-1" /> Google Search Console</>}</p>
+                  <p>{summary.integrations.ga4 ? <><CheckCircle2 className="w-4 h-4 inline text-green-600 mr-1" /> Google Analytics 4</> : <><XCircle className="w-4 h-4 inline text-gray-400 mr-1" /> Google Analytics 4</>}</p>
+                  <p>{summary.integrations.gbp ? <><CheckCircle2 className="w-4 h-4 inline text-green-600 mr-1" /> Google Business Profile</> : <><XCircle className="w-4 h-4 inline text-gray-400 mr-1" /> Google Business Profile</>}</p>
+                  <p>{summary.integrations.facebook ? <><CheckCircle2 className="w-4 h-4 inline text-green-600 mr-1" /> Facebook</> : <><XCircle className="w-4 h-4 inline text-gray-400 mr-1" /> Facebook</>}</p>
+                  <p>{summary.integrations.instagram ? <><CheckCircle2 className="w-4 h-4 inline text-green-600 mr-1" /> Instagram</> : <><XCircle className="w-4 h-4 inline text-gray-400 mr-1" /> Instagram</>}</p>
+                  <p>{summary.integrations.linkedin ? <><CheckCircle2 className="w-4 h-4 inline text-green-600 mr-1" /> LinkedIn</> : <><XCircle className="w-4 h-4 inline text-gray-400 mr-1" /> LinkedIn</>}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!summary && (
+            <div className="py-4 text-center text-sm text-gray-500 mb-6">Loading summary...</div>
+          )}
+
+          {identityConflicts && identityConflicts.length > 0 && (
+            <div className="mb-6 p-4 border-2 border-red-200 rounded-xl bg-red-50">
+              <div className="flex items-start gap-2 mb-3">
+                <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="font-semibold text-red-900">Cross-verification found issues</h3>
+                  <p className="text-sm text-red-700 mt-1">Please review and correct the following before starting the scan.</p>
+                </div>
+              </div>
+              <ul className="space-y-2">
+                {identityConflicts.map((c, i) => (
+                  <li key={i} className="text-sm text-red-800 flex items-start gap-2 flex-wrap">
+                    <span className="text-red-500 mt-0.5">•</span>
+                    <span className="flex-1 min-w-0">{c.message}</span>
+                    {(c.source === "website" || c.source === "google_search_console") && (
+                      <Button onClick={() => router.push(c.source === "website" ? "/onboarding?step=0" : "/onboarding?step=2")} variant="outline" size="sm" className="flex-shrink-0">Edit</Button>
+                    )}
+                    {(c.source === "google_business_profile" || c.source === "geography") && (
+                      <Button onClick={() => router.push("/onboarding?step=1")} variant="outline" size="sm" className="flex-shrink-0">Edit</Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <Button
             onClick={startScan}
             variant="primary"
             size="lg"
             className="w-full"
-            disabled={isScanning}
+            disabled={isScanning || verifyingIdentity || (identityConflicts != null && identityConflicts.length > 0)}
           >
             <Sparkles className="w-5 h-5 mr-2" />
-            {isScanning ? "Starting Scan..." : "Start Intelligence Scan"}
+            {verifyingIdentity ? "Verifying..." : isScanning ? "Starting Scan..." : (identityConflicts && identityConflicts.length > 0) ? "Fix issues to continue" : "Start Intelligence Scan"}
           </Button>
 
           <Button
-            onClick={() => router.push("/onboarding?step=1")}
+            onClick={() => router.push("/onboarding?step=2")}
             variant="outline"
             size="lg"
             className="w-full mt-3"
@@ -509,9 +754,9 @@ export default function StartScan() {
             Go Back to Integrations
           </Button>
         </div>
-      ) : (
+      ) : jobId ? (
         <div className="mb-8">
-          {/* Overall Progress */}
+          {/* Overall Progress (legacy domain-intelligence job) */}
           <div className="mb-8">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-gray-700">
@@ -630,7 +875,7 @@ export default function StartScan() {
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

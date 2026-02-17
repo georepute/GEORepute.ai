@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create job record
+    // Create job record (domain_intelligence_jobs table may have been removed)
     const { data: job, error: jobError } = await supabase
       .from("domain_intelligence_jobs")
       .insert({
@@ -99,9 +99,15 @@ export async function POST(request: NextRequest) {
 
     if (jobError || !job) {
       console.error("Error creating job:", jobError);
+      const isTableMissing = jobError?.code === "42P01" || jobError?.message?.includes("does not exist");
       return NextResponse.json(
-        { error: "Failed to create analysis job" },
-        { status: 500 }
+        {
+          error: isTableMissing
+            ? "Domain intelligence is being updated. Please try again later."
+            : "Failed to create analysis job",
+          code: isTableMissing ? "SERVICE_UNAVAILABLE" : undefined,
+        },
+        { status: isTableMissing ? 503 : 500 }
       );
     }
 
@@ -231,9 +237,10 @@ export async function GET(request: NextRequest) {
       .single();
 
     if (error || !job) {
+      const isTableMissing = error?.code === "42P01" || error?.message?.includes("does not exist");
       return NextResponse.json(
-        { error: "Job not found" },
-        { status: 404 }
+        { error: isTableMissing ? "Domain intelligence is being updated." : "Job not found" },
+        { status: isTableMissing ? 503 : 404 }
       );
     }
 

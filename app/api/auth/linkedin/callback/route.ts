@@ -28,25 +28,22 @@ export async function GET(request: NextRequest) {
     const error = request.nextUrl.searchParams.get("error");
     const errorDescription = request.nextUrl.searchParams.get("error_description");
     const state = request.nextUrl.searchParams.get("state");
+    const returnBase = state && state.startsWith("/") && !state.startsWith("//")
+      ? new URL(state, request.nextUrl.origin)
+      : new URL("/dashboard/settings", request.nextUrl.origin);
 
     // Handle LinkedIn OAuth errors
     if (error) {
       console.error("LinkedIn OAuth error:", { error, errorDescription });
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?linkedin=error&message=${encodeURIComponent(errorDescription || error)}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("linkedin", "error");
+      returnBase.searchParams.set("message", errorDescription || error);
+      return NextResponse.redirect(returnBase);
     }
 
     if (!code) {
-      return NextResponse.redirect(
-        new URL(
-          "/dashboard/settings?linkedin=error&message=No authorization code received",
-          request.url
-        )
-      );
+      returnBase.searchParams.set("linkedin", "error");
+      returnBase.searchParams.set("message", "No authorization code received");
+      return NextResponse.redirect(returnBase);
     }
 
     // Get LinkedIn App credentials from environment
@@ -60,12 +57,9 @@ export async function GET(request: NextRequest) {
         hasClientId: !!clientId,
         hasClientSecret: !!clientSecret,
       });
-      return NextResponse.redirect(
-        new URL(
-          "/dashboard/settings?linkedin=error&message=LinkedIn integration not configured. Please check your environment variables.",
-          request.url
-        )
-      );
+      returnBase.searchParams.set("linkedin", "error");
+      returnBase.searchParams.set("message", "LinkedIn integration not configured. Please check your environment variables.");
+      return NextResponse.redirect(returnBase);
     }
 
     console.log("🔄 Exchanging LinkedIn authorization code for access token...", {
@@ -95,12 +89,9 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.ok || tokenData.error) {
       console.error("Token exchange error:", tokenData);
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?linkedin=error&message=${encodeURIComponent(tokenData.error_description || tokenData.error || "Failed to get access token")}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("linkedin", "error");
+      returnBase.searchParams.set("message", tokenData.error_description || tokenData.error || "Failed to get access token");
+      return NextResponse.redirect(returnBase);
     }
 
     const accessToken = tokenData.access_token;
@@ -134,12 +125,9 @@ export async function GET(request: NextRequest) {
     if (!profileResponse.ok) {
       const error = await profileResponse.json().catch(() => ({ error: { message: "Unknown error" } }));
       console.error("Failed to get LinkedIn profile:", error);
-      return NextResponse.redirect(
-        new URL(
-          `/dashboard/settings?linkedin=error&message=${encodeURIComponent(error.error?.message || error.message || "Failed to get LinkedIn profile. Please ensure you granted profile permissions.")}`,
-          request.url
-        )
-      );
+      returnBase.searchParams.set("linkedin", "error");
+      returnBase.searchParams.set("message", error.error?.message || error.message || "Failed to get LinkedIn profile. Please ensure you granted profile permissions.");
+      return NextResponse.redirect(returnBase);
     }
 
     profileData = await profileResponse.json();
@@ -223,21 +211,19 @@ export async function GET(request: NextRequest) {
 
     console.log("✅ LinkedIn integration saved to Supabase");
 
-    // Step 7: Redirect back to settings with success
-    return NextResponse.redirect(
-      new URL(
-        `/dashboard/settings?linkedin=connected&name=${encodeURIComponent(fullName)}#linkedin-integration`,
-        request.url
-      )
-    );
+    // Step 7: Redirect back to return path or settings with success
+    returnBase.searchParams.set("linkedin", "connected");
+    returnBase.searchParams.set("name", fullName);
+    return NextResponse.redirect(returnBase);
   } catch (error: any) {
     console.error("LinkedIn OAuth callback error:", error);
-    return NextResponse.redirect(
-      new URL(
-        `/dashboard/settings?linkedin=error&message=${encodeURIComponent(error.message || "Unknown error occurred")}`,
-        request.url
-      )
-    );
+    const state = request.nextUrl.searchParams.get("state");
+    const errBase = state && state.startsWith("/") && !state.startsWith("//")
+      ? new URL(state, request.nextUrl.origin)
+      : new URL("/dashboard/settings", request.nextUrl.origin);
+    errBase.searchParams.set("linkedin", "error");
+    errBase.searchParams.set("message", error.message || "Unknown error occurred");
+    return NextResponse.redirect(errBase);
   }
 }
 
