@@ -1847,9 +1847,12 @@ function GoogleAnalyticsSettings() {
 // Google Business Profile Integration Component
 function GoogleBusinessProfileSettings() {
   const [loading, setLoading] = useState(false);
+  const [loadingLocations, setLoadingLocations] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [locationName, setLocationName] = useState<string | null>(null);
+  const [locationWebsite, setLocationWebsite] = useState<string | null>(null);
   const [locationCount, setLocationCount] = useState(0);
+  const [locations, setLocations] = useState<{ locationName?: string; website?: string }[]>([]);
 
   const settingsReturnPath = "/dashboard/settings?tab=integrations";
 
@@ -1871,10 +1874,30 @@ function GoogleBusinessProfileSettings() {
         const data = await response.json();
         setIsConnected(data.connected);
         setLocationName(data.locationName ?? null);
+        setLocationWebsite(data.locationWebsite ?? null);
         setLocationCount(data.locationCount ?? 0);
+        setLocations(data.locations ?? []);
       }
     } catch (error) {
       console.error("Error checking GBP status:", error);
+    }
+  };
+
+  const handleLoadLocations = async () => {
+    setLoadingLocations(true);
+    try {
+      const res = await fetch("/api/integrations/google-business-profile/refresh-locations", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        toast.success("Business location(s) loaded");
+        await checkGBPStatus();
+      } else {
+        toast.error(data.error || "Could not load locations. Try again in a minute.");
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to load locations");
+    } finally {
+      setLoadingLocations(false);
     }
   };
 
@@ -1970,12 +1993,68 @@ function GoogleBusinessProfileSettings() {
       ) : (
         <div className="pt-4">
           <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-            <p className="text-sm text-green-900">
-              <strong>Connected:</strong>{" "}
-              {locationName ? `${locationName}${locationCount > 1 ? ` (${locationCount} locations)` : ""}` : `${locationCount} location${locationCount === 1 ? "" : "s"}`}
-            </p>
+            {locationCount > 0 ? (
+              <>
+                <p className="text-sm font-medium text-green-900">
+                  Connected business{locationCount > 1 ? "es" : ""}:
+                </p>
+                <ul className="mt-2 space-y-1.5 text-sm text-green-800">
+                  {locations.length > 0
+                    ? locations.map((loc, i) => (
+                        <li key={i} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span className="font-medium">{loc.locationName || "Unnamed location"}</span>
+                          {loc.website && (
+                            <a
+                              href={loc.website.startsWith("http") ? loc.website : `https://${loc.website}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline truncate max-w-[200px]"
+                            >
+                              {loc.website.replace(/^https?:\/\//, "")}
+                            </a>
+                          )}
+                        </li>
+                      ))
+                    : (
+                        <li>
+                          <span className="font-medium">{locationName || "Business"}</span>
+                          {locationWebsite && (
+                            <a
+                              href={locationWebsite.startsWith("http") ? locationWebsite : `https://${locationWebsite}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-2 text-blue-600 hover:underline"
+                            >
+                              {locationWebsite.replace(/^https?:\/\//, "")}
+                            </a>
+                          )}
+                        </li>
+                      )}
+                </ul>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-green-900">
+                  <strong>Connected.</strong> No business location loaded yet (Google may have limited the request).
+                </p>
+                <p className="text-xs text-green-700 mt-2">
+                  Click &quot;Load my business&quot; below to fetch your business name and website from Google.
+                </p>
+              </>
+            )}
           </div>
-          <div className="pt-4 border-t border-gray-200">
+          <div className="pt-4 border-t border-gray-200 flex gap-3">
+            {locationCount === 0 && (
+              <button
+                type="button"
+                onClick={handleLoadLocations}
+                disabled={loadingLocations}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm disabled:opacity-50 flex items-center gap-2"
+              >
+                {loadingLocations ? <Loader className="w-4 h-4 animate-spin" /> : <ExternalLink className="w-4 h-4" />}
+                Load my business
+              </button>
+            )}
             <button
               onClick={handleDisconnect}
               disabled={loading}

@@ -73,18 +73,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get list of GBP locations
-    console.log('🔍 Fetching GBP locations...');
+    // Get list of GBP locations (may fail with 429 quota or API disabled)
+    let locations: any[] = [];
+    let locationsApiFailed = false;
     const gbpService = new GoogleBusinessProfileService({
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiresAt: tokens.expiry_date!,
     });
 
-    const locations = await gbpService.getLocations();
-    console.log(`✅ Found ${locations.length} GBP locations`);
+    try {
+      console.log('🔍 Fetching GBP locations...');
+      locations = await gbpService.getLocations();
+      console.log(`✅ Found ${locations.length} GBP locations`);
+    } catch (locError: any) {
+      // On any failure (429 quota, 403, network, etc.) still save the connection so user sees Connected
+      console.warn('⚠️ GBP locations API failed; saving connection anyway.', locError?.message || locError);
+      locations = [];
+      locationsApiFailed = true;
+    }
 
-    if (locations.length === 0) {
+    if (locations.length === 0 && !locationsApiFailed) {
       return NextResponse.redirect(
         new URL(`${returnTo}?error=no_locations`, request.url)
       );
@@ -105,8 +114,8 @@ export async function GET(request: NextRequest) {
       token_type: 'Bearer',
       status: 'connected',
       metadata: {
-        locations: locations,
-        selected_location: locations[0],
+        locations,
+        selected_location: locations[0] ?? null,
       },
       updated_at: new Date().toISOString(),
     };
