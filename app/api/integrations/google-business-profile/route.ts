@@ -56,7 +56,9 @@ export async function GET() {
       return NextResponse.json({
         connected: false,
         locationName: null,
+        locationWebsite: null,
         locationCount: 0,
+        locations: [],
       });
     }
 
@@ -66,8 +68,13 @@ export async function GET() {
 
     return NextResponse.json({
       connected: isConnected,
-      locationName: selected?.title ?? selected?.storeName ?? null,
+      locationName: selected?.locationName ?? selected?.title ?? selected?.storeName ?? null,
+      locationWebsite: selected?.website ?? selected?.websiteUri ?? null,
       locationCount: locations.length,
+      locations: locations.map((loc: any) => ({
+        locationName: loc.locationName ?? loc.title ?? loc.storeName,
+        website: loc.website ?? loc.websiteUri,
+      })),
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
