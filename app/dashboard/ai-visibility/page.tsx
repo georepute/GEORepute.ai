@@ -229,6 +229,7 @@ function AIVisibilityContent() {
   const [configQueryMode, setConfigQueryMode] = useState<'auto' | 'manual' | 'auto_manual'>('auto');
   const [configManualQueries, setConfigManualQueries] = useState<Array<{ text: string; language?: string; country?: string; isManual?: boolean }>>([]);
   const [configPlatforms, setConfigPlatforms] = useState<string[]>([]);
+  const [configProjectName, setConfigProjectName] = useState('');
   const [configSaving, setConfigSaving] = useState(false);
   
   // Domain Intelligence state
@@ -775,15 +776,7 @@ function AIVisibilityContent() {
 
     setLoadingBrandSummary(true);
     try {
-      // First, check if summary exists in the project data (from database)
-      if (selectedProject.brand_summary) {
-        console.log('✅ Using cached brand summary from database');
-        setBrandSummary(selectedProject.brand_summary);
-        setLoadingBrandSummary(false);
-        return;
-      }
-
-      // If no cached summary, fetch from edge function
+      // Always fetch a fresh summary from the edge function (no cache)
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
       const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -1128,65 +1121,50 @@ function AIVisibilityContent() {
         throw new Error("Supabase configuration missing");
       }
 
-      // Step 1: Call brand-analysis-summary FIRST (replaces crawler)
-      // Only call if we don't already have a cached summary
-      console.log('📊 Checking brand summary...');
+      // Step 1: Always generate a fresh brand summary for this run (no cache)
+      console.log('📊 Generating fresh brand summary...');
       let summaryData = null;
-      
-      // Check if we already have a cached summary in the project
-      if (project.brand_summary) {
-        console.log('✅ Using cached brand summary from project');
-        summaryData = project.brand_summary;
-        setBrandSummary(summaryData);
-      } else {
-        // Fetch new summary
-        try {
-          const summaryResponse = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${supabaseAnonKey}`,
-            },
-            body: JSON.stringify({
-              projectId: project.id,
-              url: project.website_url,
-              brandName: project.brand_name,
-              industry: project.industry || '',
-              keywords: project.keywords || []
-            }),
-          });
+      try {
+        const summaryResponse = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            projectId: project.id,
+            url: project.website_url,
+            brandName: project.brand_name,
+            industry: project.industry || '',
+            keywords: project.keywords || []
+          }),
+        });
 
-          if (summaryResponse.ok) {
-            summaryData = await summaryResponse.json();
-            console.log('✅ Brand summary generated successfully');
+        if (summaryResponse.ok) {
+          summaryData = await summaryResponse.json();
+          console.log('✅ Brand summary generated successfully');
+          
+          setBrandSummary(summaryData);
+          
+          if (summaryData.summary?.overview) {
+            const truncatedOverview = summaryData.summary.overview
+              .split('\n')
+              .slice(0, 5)
+              .join('\n');
             
-            // Set the brand summary state immediately so it shows in the UI
-            setBrandSummary(summaryData);
-            
-            // Update project with summary data (for cards: truncated overview + favicon)
-            // The full summary is already saved in brand_summary column by the edge function
-            if (summaryData.summary?.overview) {
-              // Truncate overview to 5 lines for card display
-              const truncatedOverview = summaryData.summary.overview
-                .split('\n')
-                .slice(0, 5)
-                .join('\n');
-              
-              await supabase
-                .from('brand_analysis_projects')
-                .update({
-                  company_description: truncatedOverview,
-                  company_image_url: summaryData.favicon || null,
-                })
-                .eq('id', project.id);
-            }
-          } else {
-            console.warn('⚠️ Brand summary generation failed, continuing with analysis');
+            await supabase
+              .from('brand_analysis_projects')
+              .update({
+                company_description: truncatedOverview,
+                company_image_url: summaryData.favicon || null,
+              })
+              .eq('id', project.id);
           }
-        } catch (summaryError) {
-          console.error('❌ Error generating brand summary:', summaryError);
-          // Continue with analysis even if summary generation fails
+        } else {
+          console.warn('⚠️ Brand summary generation failed, continuing with analysis');
         }
+      } catch (summaryError) {
+        console.error('❌ Error generating brand summary:', summaryError);
       }
 
       // Step 2: Call the brand-analysis edge function
@@ -1299,6 +1277,7 @@ function AIVisibilityContent() {
     setConfigQueryMode((project.query_mode as 'auto' | 'manual' | 'auto_manual') || 'auto');
     setConfigManualQueries(initialQueries);
     setConfigPlatforms(project.active_platforms?.length ? [...project.active_platforms] : ['perplexity', 'chatgpt']);
+    setConfigProjectName(project.brand_name || '');
     if (responses.length > 0 && initialQueries.length > 0) {
       setConfigQueryMode('manual');
     }
@@ -1314,6 +1293,7 @@ function AIVisibilityContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId: selectedProject.id,
+          brandName: configProjectName.trim() || selectedProject.brand_name,
           queryMode: 'manual',
           manualQueries: configManualQueries
             .filter((q) => q.text.trim())
@@ -5999,6 +5979,17 @@ function AIVisibilityContent() {
                     </div>
                     <div className="px-6 py-4 overflow-y-auto flex-1 space-y-4">
                       <div>
+                        <label className="block text-sm font-medium text-gray-900 mb-2">Project name</label>
+                        <p className="text-xs text-gray-500 mb-2">Display name for this project (e.g. brand or company name).</p>
+                        <input
+                          type="text"
+                          value={configProjectName}
+                          onChange={(e) => setConfigProjectName(e.target.value)}
+                          placeholder="e.g. Dr kroman"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        />
+                      </div>
+                      <div>
                         <label className="block text-sm font-medium text-gray-900 mb-2">AI platforms for re-analysis</label>
                         <p className="text-xs text-gray-500 mb-2">Choose which LLMs to run when you click Run Analysis.</p>
                         <div className="flex flex-wrap gap-3">
@@ -6105,7 +6096,7 @@ function AIVisibilityContent() {
                       </button>
                         <button
                           onClick={handleSaveConfigure}
-                          disabled={configSaving || configManualQueries.every((q) => !q.text.trim()) || configPlatforms.length === 0}
+                          disabled={configSaving || !configProjectName.trim() || configManualQueries.every((q) => !q.text.trim()) || configPlatforms.length === 0}
                           className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
                         >
                         {configSaving ? (
