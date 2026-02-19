@@ -112,6 +112,30 @@ export interface AnalyzeAndLearnOutput {
   appliedToFuture: boolean;
 }
 
+export interface GscKeywordData {
+  keyword: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+
+export interface GscPageData {
+  page: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+
+export interface AiVisibilityPlatformData {
+  platform: string;
+  prompt: string;
+  response: string | null;
+  gap_suggestion: string | null;
+  response_metadata?: Record<string, any>;
+}
+
 export interface ActionPlanInput {
   objective: string;
   targetKeywords?: string[];
@@ -121,6 +145,12 @@ export interface ActionPlanInput {
   region?: string;
   channels?: string[]; // ['all'] or specific channels like ['seo', 'social_media', 'content']
   language?: "en" | "he";
+  // GSC performance data
+  gscKeywords?: GscKeywordData[];   // Top queries from gsc_keywords (project-linked)
+  gscQueries?: GscKeywordData[];    // Top queries from gsc_queries (domain-linked)
+  gscPages?: GscPageData[];         // Top pages from gsc_pages (domain-linked)
+  // AI visibility data from brand analysis sessions
+  aiVisibilityData?: AiVisibilityPlatformData[];
 }
 
 export interface ActionPlanOutput {
@@ -1069,13 +1099,81 @@ export async function generateActionPlan(
   let domainContext = "";
   if (input.domain) {
     if (input.domainEnrichment?.hasContent) {
-      // Use enriched domain data if available
       const formattedDomain = formatDomainDataForPrompt(input.domainEnrichment);
       domainContext = `Domain: ${input.domain}\n${formattedDomain ? `Domain Information:\n${formattedDomain}` : ""}`;
     } else {
-      // Fallback to basic domain string
       domainContext = `Domain: ${input.domain}`;
     }
+  }
+
+  // Build GSC performance context
+  const allGscKeywords = [
+    ...(input.gscKeywords || []),
+    ...(input.gscQueries || []),
+  ];
+  const seenKws = new Set<string>();
+  const dedupedGscKeywords = allGscKeywords.filter(k => {
+    if (seenKws.has(k.keyword)) return false;
+    seenKws.add(k.keyword);
+    return true;
+  });
+
+  let gscContext = "";
+  if (dedupedGscKeywords.length > 0 || (input.gscPages && input.gscPages.length > 0)) {
+    const topKws = dedupedGscKeywords.slice(0, 20);
+    const weakKws = dedupedGscKeywords
+      .filter(k => k.impressions > 50 && (k.position > 15 || k.ctr < 0.02))
+      .slice(0, 10);
+    const topPages = (input.gscPages || []).slice(0, 10);
+
+    const fmtKw = (k: GscKeywordData) =>
+      `"${k.keyword}" (pos ${k.position.toFixed(1)}, ${k.impressions} impr, ${k.clicks} clicks, CTR ${(k.ctr * 100).toFixed(1)}%)`;
+    const fmtPage = (p: GscPageData) =>
+      `${p.page} (pos ${p.position.toFixed(1)}, ${p.impressions} impr, ${p.clicks} clicks)`;
+
+    gscContext = `
+📊 GOOGLE SEARCH CONSOLE DATA (REAL PERFORMANCE):
+${topKws.length > 0 ? `Top performing queries:\n${topKws.map(fmtKw).join("\n")}` : ""}
+${topPages.length > 0 ? `\nTop performing pages:\n${topPages.map(fmtPage).join("\n")}` : ""}
+${weakKws.length > 0 ? `\nHigh-impression, weak-performing queries (opportunity keywords — high impressions but poor position/CTR, meaning Google sees you but users don't click):\n${weakKws.map(fmtKw).join("\n")}` : ""}
+
+USE THIS DATA TO:
+- Prioritize action steps around the opportunity keywords (weak-performing queries with high impressions) — these have the highest quick-win ROI.
+- Recommend content or SEO improvements for the weakest pages (low CTR, poor position) to convert existing impressions into clicks.
+- Build GEORepute.ai-specific steps: e.g. "Run AI Visibility check on [keyword] via GEORepute.ai", "Generate optimized article for [opportunity keyword] using GEORepute.ai Content Generator", "Set up brand monitoring for [top query] in GEORepute.ai AI Visibility dashboard".
+`;
+  }
+
+  // Build AI visibility context
+  let aiVisibilityContext = "";
+  if (input.aiVisibilityData && input.aiVisibilityData.length > 0) {
+    const platforms = [...new Set(input.aiVisibilityData.map(r => r.platform))];
+    const gapSuggestions = input.aiVisibilityData
+      .filter(r => r.gap_suggestion)
+      .slice(0, 8)
+      .map(r => `[${r.platform}] ${r.gap_suggestion}`);
+
+    const platformSummaries = platforms.map(platform => {
+      const platformResponses = input.aiVisibilityData!.filter(r => r.platform === platform);
+      const mentionCount = platformResponses.filter(r =>
+        r.response && r.response.length > 10
+      ).length;
+      return `${platform}: ${mentionCount}/${platformResponses.length} queries returned results`;
+    });
+
+    aiVisibilityContext = `
+🤖 AI VISIBILITY DATA (FROM GEOREPUTE.AI BRAND ANALYSIS):
+Platforms analyzed: ${platforms.join(", ")}
+Platform coverage:
+${platformSummaries.join("\n")}
+${gapSuggestions.length > 0 ? `\nAI vs Google Gap Suggestions (from previous analysis):\n${gapSuggestions.join("\n")}` : ""}
+
+USE THIS DATA TO:
+- Recommend GEORepute.ai platform features the user should leverage to fix visibility gaps (e.g. "Use GEORepute.ai Content Generator to create AI-optimized content for ChatGPT/Gemini/Perplexity visibility").
+- Suggest running deeper brand analysis on platforms with low coverage using GEORepute.ai.
+- Frame steps around improving brand mentions across AI platforms: create authoritative content, structured data, entity building.
+- Directly reference gap suggestions above as action items (e.g. "Address gap: [specific suggestion]").
+`;
   }
 
   const languageInstruction = input.language === "he"
@@ -1083,7 +1181,15 @@ export async function generateActionPlan(
 You MUST write the ENTIRE action plan in HEBREW (עברית) only: title, objective, all step titles, all step descriptions, context_explanation, reasoning, expectedOutcome, timeline, and any other text. Use Hebrew script (right-to-left). Do not mix English. Keep JSON structure and field names in English; only the human-readable string values must be in Hebrew.\n`
     : "";
 
-  const prompt = `You are a business-focused growth strategist creating multi-channel action plans that drive revenue, conversions, and reputation. Every step and recommendation MUST be explicitly tied to business outcomes: leads, sales, pipeline, brand trust, and measurable ROI.
+  const prompt = `You are a GEORepute.ai growth strategist. GEORepute.ai is an AI-powered brand visibility and reputation platform that helps businesses improve their presence across AI search engines (ChatGPT, Gemini, Perplexity) and traditional Google search. Your role is to generate business-driven action plans that show the user how to leverage GEORepute.ai's platform features to grow their brand visibility, generate leads, and drive revenue.
+
+GEOREPUTE.AI PLATFORM FEATURES (reference these in action steps):
+- AI Visibility Analysis: check brand mentions across ChatGPT, Gemini, Perplexity, Claude, Groq
+- Content Generator: create AI-optimized content for any platform (Reddit, LinkedIn, Medium, blog, etc.)
+- Action Plans: automated growth strategy generation (this feature)
+- Brand Analysis: competitor tracking, keyword monitoring, sentiment analysis
+- GSC Integration: Google Search Console data + AI visibility gap analysis
+- Global Visibility Matrix: track brand visibility across countries and AI platforms
 ${languageInstruction}
 Objective: "${input.objective}"
 ${input.targetKeywords && input.targetKeywords.length > 0 ? `Target Keywords: ${input.targetKeywords.join(", ")}` : ""}
@@ -1091,13 +1197,18 @@ ${domainContext ? `${domainContext}` : ""}
 ${input.region ? `Region: ${input.region}` : ""}
 ${channels ? `Focus Channels: ${channels}` : "All available channels"}
 ${input.currentSituation ? `Current Situation: ${input.currentSituation}` : ""}
+${gscContext}
+${aiVisibilityContext}
 
-🎯 BUSINESS & SALES REQUIREMENTS (MANDATORY):
+🎯 BUSINESS & PLATFORM-DRIVEN REQUIREMENTS (MANDATORY):
 - Every step must have a clear business purpose: generate leads, nurture prospects, close deals, or strengthen reputation to support sales.
+- At least 2 steps MUST reference specific GEORepute.ai features the user can use RIGHT NOW (e.g. "Run AI Visibility check using GEORepute.ai", "Generate content using GEORepute.ai Content Generator for [keyword]", "Set up brand monitoring in GEORepute.ai for [query]").
 - Step titles and descriptions must be sales- and conversion-oriented (e.g. "Lead-capture landing page for [product]", "Nurture email sequence for [audience]", "Trust-building case study to support sales").
 - Avoid generic marketing language. Use outcome-focused wording: revenue, conversion, pipeline, qualified leads, customer acquisition, retention, reputation, and authority.
-- expectedOutcome and context_explanation must reference business goals: e.g. "Increase qualified leads", "Improve conversion on high-intent keywords", "Build reputation so sales conversations convert faster".
+- expectedOutcome and context_explanation must reference business goals: e.g. "Increase qualified leads", "Improve conversion on high-intent keywords", "Build AI platform visibility to capture AI-search traffic".
 - Prioritize steps by revenue impact and conversion potential, not just "engagement".
+${gscContext ? `- GSC opportunity keywords MUST drive at least one content_generation step targeting those keywords.` : ""}
+${aiVisibilityContext ? `- AI visibility gaps MUST drive at least one step recommending use of GEORepute.ai Content Generator or AI Visibility feature.` : ""}
 
 ${input.targetKeywords && input.targetKeywords.length > 0 ? `
 🎯 KEYWORD STRATEGY (CRITICAL):
@@ -1123,8 +1234,9 @@ Available Channels:
 - Paid Advertising (Google Ads, Facebook Ads, LinkedIn Ads) - PPC campaigns, sponsored content
 - Video Marketing (YouTube, TikTok) - video content, tutorials, vlogs
 - PR & Outreach - press releases, influencer outreach, partnerships
+- AI Visibility (GEORepute.ai) - brand monitoring on AI platforms, content optimization for AI search
 
-Create an action plan with 4-6 steps across at least 3 channels. Keep step titles and descriptions to 1-2 sentences each.
+Create an action plan with 5-7 steps across at least 3 channels. Keep step titles and descriptions to 1-2 sentences each.
 
 Required JSON structure:
 - Plan: title (MUST be specific, e.g. "Multi-Channel Marketing Plan for [objective or main keyword]" — never use the generic "Action Plan"), objective, channels, seo_geo_classification ("SEO" or "GEO"), target_keyword_phrase, expected_timeline_months (use 4-6 for most plans; this is the expected duration in months), safety_buffer_months (1-2), first_page_estimate_months (or null for GEO), context_explanation (2-3 sentences).

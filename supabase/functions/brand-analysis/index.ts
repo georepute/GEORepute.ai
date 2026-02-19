@@ -338,10 +338,11 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
       apiKeyCache[platform] = apiKey;
     }
     
-    // System message based on language
-    const systemMessage = language === 'he'
-      ? 'אתה עוזר מחקר עסקי מועיל. ספק תגובות מפורטות ועובדתיות על חברות ומותגים. תגיב בעברית אם השאילתה בעברית.'
-      : 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.';
+    // System message based on language — instruct the AI to respond in the query's language
+    const langCode = (language || 'en').toLowerCase().split('-')[0];
+    const systemMessage = langCode === 'en'
+      ? 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.'
+      : 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands. CRITICAL: You MUST respond in the SAME language as the user\'s query. If the query is in French, respond in French. If in German, respond in German. Always match the language of the query exactly.';
     
     if (platform === 'chatgpt' && apiKey) {
       try {
@@ -410,8 +411,8 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
     }
     if (platform === 'gemini' && apiKey) {
       try {
-        // Add language instruction to prompt for Gemini
-        const geminiPrompt = language === 'he' 
+        // Prepend system message for non-English languages so Gemini responds in the correct language
+        const geminiPrompt = langCode !== 'en'
           ? `${systemMessage}\n\n${prompt}`
           : prompt;
         
@@ -1271,18 +1272,36 @@ IMPORTANT: Return EXACTLY ${maxQueries} queries in a valid JSON array format. No
         console.log(`Generated ${queries.length} realistic user queries`);
         // Process queries to ensure proper formatting
         const formattedQueries = queries.map((query)=>{
-          // Ensure first letter is capitalized
           let formattedQuery = query.trim();
           if (formattedQuery.length > 0) {
             formattedQuery = formattedQuery.charAt(0).toUpperCase() + formattedQuery.slice(1);
           }
-          // Ensure query ends with punctuation
-          if (!/[.?!]$/.test(formattedQuery)) {
-            // If it's a question (contains question words or has question-like structure), add question mark
-            if (/\b(what|how|why|where|when|which|who|can|should|will|is|are|do|does|did)\b/i.test(formattedQuery) && !formattedQuery.includes('?')) {
+          // Ensure query ends with punctuation — detect questions in multiple languages
+          if (!/[.?!？。！]$/.test(formattedQuery)) {
+            const isQuestion =
+              // English
+              /\b(what|how|why|where|when|which|who|can|should|will|is|are|do|does|did)\b/i.test(formattedQuery) ||
+              // German
+              /\b(was|wie|warum|wo|wann|wer|welch|kann|soll)\b/i.test(formattedQuery) ||
+              // French
+              /\b(quoi|comment|pourquoi|où|quand|qui|quel|quelle|est-ce)\b/i.test(formattedQuery) ||
+              // Spanish
+              /[¿]/.test(formattedQuery) || /\b(qué|cómo|por qué|dónde|cuándo|quién|cuál)\b/i.test(formattedQuery) ||
+              // Italian
+              /\b(cosa|come|perché|dove|quando|chi|quale)\b/i.test(formattedQuery) ||
+              // Portuguese
+              /\b(o que|como|por que|onde|quando|quem|qual)\b/i.test(formattedQuery) ||
+              // Dutch
+              /\b(wat|hoe|waarom|waar|wanneer|wie|welk)\b/i.test(formattedQuery) ||
+              // Japanese / Chinese question markers
+              /[か？吗呢]/.test(formattedQuery) ||
+              // Hebrew question words
+              /\b(מה|איך|למה|איפה|מתי|מי|האם)\b/.test(formattedQuery) ||
+              // Urdu question words
+              /\b(کیا|کیسے|کہاں|کب|کون)\b/.test(formattedQuery);
+            if (isQuestion && !formattedQuery.includes('?') && !formattedQuery.includes('？')) {
               formattedQuery += '?';
-            } else {
-              // Otherwise add period
+            } else if (!/[.。]$/.test(formattedQuery)) {
               formattedQuery += '.';
             }
           }
@@ -1291,31 +1310,24 @@ IMPORTANT: Return EXACTLY ${maxQueries} queries in a valid JSON array format. No
         // Ensure we have at least maxQueries by duplicating and modifying if needed
         if (formattedQueries.length < maxQueries) {
           console.log(`Only generated ${formattedQueries.length} queries, adding variations to reach ${maxQueries}`);
-          // Create variations by adding year or modifiers
           const years = [
             new Date().getFullYear(),
             new Date().getFullYear() + 1
           ];
-          const modifiers = [
-            'Best',
-            'Top',
-            'Affordable',
-            'Recommended',
-            'Popular'
-          ];
+          // For non-English languages, just duplicate existing queries with year variations
+          // to avoid injecting English text into non-English query sets
           while(formattedQueries.length < maxQueries){
             const originalQuery = formattedQueries[Math.floor(Math.random() * formattedQueries.length)];
             const year = years[Math.floor(Math.random() * years.length)];
-            const modifier = modifiers[Math.floor(Math.random() * modifiers.length)];
-            // Create variation
             if (!originalQuery.includes(year.toString())) {
-              formattedQueries.push(`${originalQuery.replace(/[.?!]$/, '')} in ${year}.`);
-            } else if (!originalQuery.toLowerCase().includes(modifier.toLowerCase())) {
-              formattedQueries.push(`${modifier} ${originalQuery.charAt(0).toLowerCase() + originalQuery.slice(1)}`);
+              formattedQueries.push(`${originalQuery.replace(/[.?!？。！]$/, '')} ${year}.`);
             } else {
-              formattedQueries.push(`${originalQuery.replace(/[.?!]$/, '')} for small businesses.`);
+              // Re-use existing query as-is to avoid English contamination
+              const altQuery = formattedQueries[Math.floor(Math.random() * Math.min(formattedQueries.length, 10))];
+              if (!formattedQueries.includes(altQuery + ' ')) {
+                formattedQueries.push(altQuery);
+              }
             }
-            // Avoid infinite loop if we can't add more variations
             if (formattedQueries.length >= 95) break;
           }
         }
@@ -1486,7 +1498,7 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
   }
   // Ensure we have exactly 50 queries
   if (baseQueries.length > 50) {
-    return baseQueries.slice(0, 50);
+    baseQueries.length = 50;
   }
   // If we have fewer than 50, add some variations
   const queries = [
@@ -1502,12 +1514,25 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
   while(queries.length < 50){
     const originalQuery = baseQueries[Math.floor(Math.random() * baseQueries.length)];
     const modifier = modifiers[Math.floor(Math.random() * modifiers.length)];
-    // Create a new query with the modifier
     queries.push(`${modifier} ${originalQuery.charAt(0).toLowerCase() + originalQuery.slice(1)}`);
-    // Avoid infinite loop
     if (queries.length >= 95) break;
   }
-  return queries.slice(0, 50);
+  const final = queries.slice(0, 50);
+
+  // For non-English languages, prepend a language instruction so AI platforms respond accordingly
+  const langCode = (language || 'en').toLowerCase().split('-')[0];
+  if (langCode !== 'en') {
+    const fallbackLangNames: Record<string, string> = {
+      he: 'Hebrew', ur: 'Urdu', de: 'German', fr: 'French', es: 'Spanish',
+      it: 'Italian', pt: 'Portuguese', nl: 'Dutch', ja: 'Japanese', zh: 'Chinese',
+      pl: 'Polish', ru: 'Russian', ko: 'Korean', ar: 'Arabic', tr: 'Turkish',
+      hi: 'Hindi', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian', sv: 'Swedish',
+      no: 'Norwegian', da: 'Danish', fi: 'Finnish',
+    };
+    const langName = fallbackLangNames[langCode] || langCode;
+    return final.map(q => `[Answer in ${langName}] ${q}`);
+  }
+  return final;
 }
 const MAX_QUERIES = 50;
 
@@ -1528,10 +1553,20 @@ function getLanguageRegionBuckets(analysisLangs, analysisCountriesRun, queryLang
 
 async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, analysisCountriesRun, mergedKeywords = null) {
   const keywords = mergedKeywords != null ? mergedKeywords : (project.target_keywords || []);
-  const mode = project.query_mode || 'auto';
+  let mode = project.query_mode || 'auto';
   const manualList = Array.isArray(project.manual_queries) ? project.manual_queries : [];
   const manualTexts = manualList.map((q) => (q && typeof q.text === 'string' ? q.text.trim() : '')).filter(Boolean);
   const N = Math.min(Number(project.queries_per_platform) || MAX_QUERIES, MAX_QUERIES);
+
+  // When non-English analysis languages are selected and mode is manual,
+  // upgrade to auto_manual so new language-specific queries are generated
+  if (mode === 'manual' && analysisLangs && analysisLangs.length > 0) {
+    const hasNonEnglish = analysisLangs.some(l => !l.toLowerCase().startsWith('en'));
+    if (hasNonEnglish && manualTexts.length > 0) {
+      console.log(`Manual mode with non-English analysis languages detected; upgrading to auto_manual for language-specific query generation`);
+      mode = 'auto_manual';
+    }
+  }
 
   if (mode === 'manual') {
     if (manualTexts.length === 0) {
@@ -2409,8 +2444,12 @@ Deno.serve(async (req) => {
         });
       }
       
-      // Resume processing with remaining queries
+      // Resume processing with remaining queries, using the project's configured language
       const platformsToUse = projectData.active_platforms || platforms;
+      const resumeLanguages = projectData.analysis_languages || [];
+      const resumeLang = resumeLanguages.length > 0
+        ? resumeLanguages[0].toLowerCase().split('-')[0]
+        : (language || 'en');
       const result = await processBatchOfQueries(
         projectId,
         platformsToUse,
@@ -2418,7 +2457,7 @@ Deno.serve(async (req) => {
         remainingQueries,
         0,
         6,
-        'en'
+        resumeLang
       );
       
       return new Response(JSON.stringify({
@@ -2443,7 +2482,7 @@ Deno.serve(async (req) => {
           return acc;
         }, {} as Record<string, string>);
         const cookieLanguage = cookies["preferred-language"];
-        if (cookieLanguage === "he" || cookieLanguage === "en") {
+        if (cookieLanguage && /^[a-z]{2}(-[A-Z]{2})?$/.test(cookieLanguage)) {
           preferredLanguage = cookieLanguage;
         }
       }

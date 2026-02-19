@@ -53,7 +53,9 @@ import {
   CheckCircle,
   XCircle,
   Trophy,
-  AlertTriangle
+  AlertTriangle,
+  Clock,
+  History
 } from "lucide-react";
 import {
   PieChart,
@@ -122,6 +124,7 @@ interface Session {
   results_summary?: any;
   session_name?: string;
   started_at: string;
+  completed_at?: string;
   competitor_analysis?: {
     competitor_data?: Array<{
       name: string;
@@ -159,6 +162,11 @@ interface Session {
     summary?: any;
   };
 }
+
+const normalizeUrl = (url: string) => {
+  if (!url) return url;
+  return url.match(/^https?:\/\//) ? url : `https://${url}`;
+};
 
 function AIVisibilityContent() {
   const { isRtl, t, language } = useLanguage();
@@ -203,6 +211,8 @@ function AIVisibilityContent() {
   const [newManualQueryText, setNewManualQueryText] = useState('');
   const [newManualQueryLanguage, setNewManualQueryLanguage] = useState('en-US');
   const [newManualQueryCountry, setNewManualQueryCountry] = useState('');
+  const [availableDomains, setAvailableDomains] = useState<Array<{ id: string; domain: string; status: string }>>([]);
+  const [loadingDomains, setLoadingDomains] = useState(false);
 
   // Project details state
   const [projectSessions, setProjectSessions] = useState<Session[]>([]);
@@ -231,6 +241,16 @@ function AIVisibilityContent() {
   const [configPlatforms, setConfigPlatforms] = useState<string[]>([]);
   const [configProjectName, setConfigProjectName] = useState('');
   const [configSaving, setConfigSaving] = useState(false);
+  const [configLanguages, setConfigLanguages] = useState<string[]>([]);
+  const [configCountries, setConfigCountries] = useState<string[]>([]);
+
+  // History modal state
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null);
+  const [historyResponses, setHistoryResponses] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historySessions, setHistorySessions] = useState<Session[]>([]);
+  const [historySessionsLoading, setHistorySessionsLoading] = useState(false);
   
   // Domain Intelligence state
   const [domainIntelligenceJobs, setDomainIntelligenceJobs] = useState<any[]>([]);
@@ -429,12 +449,33 @@ function AIVisibilityContent() {
     }
   }, [projects, searchParams, initialLoadDone]);
 
-  // Check GSC connection status when form is shown
+  // Check GSC connection status and load domains when form is shown
   useEffect(() => {
     if (viewMode === 'form') {
       checkGSCConnection();
+      fetchAvailableDomains();
     }
   }, [viewMode]);
+
+  const fetchAvailableDomains = async () => {
+    try {
+      setLoadingDomains(true);
+      const response = await fetch('/api/integrations/google-search-console/domains');
+      if (response.ok) {
+        const data = await response.json();
+        const activeDomains = (data.domains || []).filter((d: any) => d.status === 'active' || d.status === 'verified' || d.gsc_integration?.verification_status === 'verified');
+        setAvailableDomains(
+          activeDomains.length > 0
+            ? activeDomains.map((d: any) => ({ id: d.id, domain: d.domain, status: d.status }))
+            : (data.domains || []).map((d: any) => ({ id: d.id, domain: d.domain, status: d.status }))
+        );
+      }
+    } catch (error) {
+      console.error('Error fetching domains:', error);
+    } finally {
+      setLoadingDomains(false);
+    }
+  };
 
   const checkGSCConnection = async () => {
     try {
@@ -477,24 +518,38 @@ function AIVisibilityContent() {
     }
   }, [viewMode, projects, projectSessions, selectedProject]);
 
-  // Fetch responses when switching to results tab
+  // Fetch responses when switching to results tab (respect history selection)
   useEffect(() => {
-    if (viewMode === 'details' && selectedProject && activeTab === 'results') {
+    if (viewMode === 'details' && selectedProject) {
+      if (historySessionId) {
+        fetchProjectResponses(historySessionId);
+        return;
+      }
       const latestCompleted = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
       if (latestCompleted?.id) {
-        console.log('Results tab active, fetching responses for session:', latestCompleted.id);
+        setHistorySessionId(latestCompleted.id);
         fetchProjectResponses(latestCompleted.id);
       } else {
-        // Try latest session if no completed session
         const latestSession = projectSessions.find(s => s.project_id === selectedProject.id);
         if (latestSession?.id) {
-          console.log('Results tab active, fetching responses for latest session:', latestSession.id);
           fetchProjectResponses(latestSession.id);
         }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProject?.id, activeTab, projectSessions.length, viewMode]);
+  }, [selectedProject?.id, activeTab, projectSessions.length, viewMode, historySessionId]);
+
+  // Auto-select latest completed session when sessions are loaded
+  useEffect(() => {
+    if (!selectedProject || projectSessions.length === 0) return;
+    const latestCompleted = projectSessions.find(
+      s => s.project_id === selectedProject.id && s.status === 'completed'
+    );
+    if (latestCompleted?.id && latestCompleted.id !== historySessionId) {
+      setHistorySessionId(latestCompleted.id);
+      setProjectStats(latestCompleted.results_summary || null);
+    }
+  }, [selectedProject?.id, projectSessions]);
 
   // Fetch brand summary when switching to summary tab
   useEffect(() => {
@@ -550,13 +605,20 @@ function AIVisibilityContent() {
           console.error('Error fetching sessions:', sessionsError);
         }
 
-        // Group sessions by project and get latest (prefer completed)
-        const latestSessions = projectIds.map(projectId => {
+        // For the currently selected project, keep ALL sessions so history modal works.
+        // For other projects, keep only the latest (prefer completed) for the project cards.
+        const selectedId = selectedProject?.id;
+
+        const latestSessions = projectIds.flatMap(projectId => {
           const projectSessions = (sessions || []).filter(s => s.project_id === projectId);
           
           if (projectSessions.length === 0) {
             console.log(`⚠️ No sessions found for project ${projectId}`);
-            return null;
+            return [];
+          }
+
+          if (projectId === selectedId) {
+            return projectSessions;
           }
           
           // First try to find a completed session (for accurate stats)
@@ -576,7 +638,7 @@ function AIVisibilityContent() {
                 Math.round((latestCompleted.results_summary.total_mentions || 0) / (latestCompleted.results_summary.total_queries || 1) * 100) : 0,
               hasSummary: !!latestCompleted.results_summary
             });
-            return latestCompleted;
+            return [latestCompleted];
           }
           
           // Fallback to latest session if no completed session
@@ -586,8 +648,8 @@ function AIVisibilityContent() {
             hasSummary: !!projectSessions[0].results_summary,
             mentions: projectSessions[0].results_summary?.total_mentions || 'N/A'
           });
-          return projectSessions[0];
-        }).filter(Boolean);
+          return [projectSessions[0]];
+        });
 
         // Fetch all responses for all sessions at once to calculate accurate stats
         let finalSessions = latestSessions as Session[];
@@ -702,8 +764,14 @@ function AIVisibilityContent() {
       // Calculate stats from latest completed session
       const latestCompleted = sessions?.find(s => s.status === 'completed');
       const wasRunning = projectSessions.find(s => s.project_id === projectId && s.status === 'running');
+      const newAnalysisJustCompleted = wasRunning && latestCompleted && wasRunning.id === latestCompleted.id;
       
       if (latestCompleted) {
+        // Auto-select latest completed session on initial load or when a new analysis completes
+        if (!historySessionId || newAnalysisJustCompleted) {
+          setHistorySessionId(latestCompleted.id);
+        }
+
         // Set stats if available
         if (latestCompleted.results_summary) {
           setProjectStats(latestCompleted.results_summary);
@@ -791,8 +859,8 @@ function AIVisibilityContent() {
           'Authorization': `Bearer ${supabaseAnonKey}`,
         },
         body: JSON.stringify({
-          projectId: selectedProject.id, // Pass projectId so it can check cache and save result
-          url: selectedProject.website_url,
+          projectId: selectedProject.id,
+          url: normalizeUrl(selectedProject.website_url || ''),
           brandName: selectedProject.brand_name,
           industry: selectedProject.industry || '',
           keywords: selectedProject.keywords || []
@@ -831,6 +899,53 @@ function AIVisibilityContent() {
 
   const getProjectSession = (projectId: string): Session | null => {
     return projectSessions.find(s => s.project_id === projectId) || null;
+  };
+
+  const fetchHistorySessions = async (projectId: string) => {
+    setHistorySessionsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('brand_analysis_sessions')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('started_at', { ascending: false });
+      if (error) throw error;
+      setHistorySessions((data || []) as Session[]);
+    } catch (error) {
+      console.error('Error fetching history sessions:', error);
+      setHistorySessions([]);
+    } finally {
+      setHistorySessionsLoading(false);
+    }
+  };
+
+  const fetchHistorySessionResponses = async (sessionId: string) => {
+    setHistoryLoading(true);
+    setHistorySessionId(sessionId);
+    try {
+      const { data: responses, error } = await supabase
+        .from('ai_platform_responses')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setHistoryResponses(responses || []);
+    } catch (error) {
+      console.error('Error fetching history responses:', error);
+      setHistoryResponses([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleViewHistorySession = async (sessionId: string) => {
+    setHistorySessionId(sessionId);
+    const session = historySessions.find(s => s.id === sessionId) || projectSessions.find(s => s.id === sessionId);
+    if (session?.results_summary) {
+      setProjectStats(session.results_summary);
+    }
+    await fetchProjectResponses(sessionId);
+    setShowHistoryModal(false);
   };
 
   const fetchDomainIntelligenceJobs = async () => {
@@ -1016,7 +1131,7 @@ function AIVisibilityContent() {
           },
           body: JSON.stringify({
             projectId: data.projectId,
-            url: websiteUrl,
+            url: normalizeUrl(websiteUrl),
             brandName: brandName,
             industry: industry || '',
             keywords: keywords || []
@@ -1121,50 +1236,55 @@ function AIVisibilityContent() {
         throw new Error("Supabase configuration missing");
       }
 
-      // Step 1: Always generate a fresh brand summary for this run (no cache)
+      // Step 1: Generate a fresh brand summary (requires URL and brand name)
       console.log('📊 Generating fresh brand summary...');
       let summaryData = null;
-      try {
-        const summaryResponse = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${supabaseAnonKey}`,
-          },
-          body: JSON.stringify({
-            projectId: project.id,
-            url: project.website_url,
-            brandName: project.brand_name,
-            industry: project.industry || '',
-            keywords: project.keywords || []
-          }),
-        });
+      const normalizedUrl = normalizeUrl(project.website_url || '');
+      if (normalizedUrl && project.brand_name) {
+        try {
+          const summaryResponse = await fetch(`${supabaseUrl}/functions/v1/brand-analysis-summary`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${supabaseAnonKey}`,
+            },
+            body: JSON.stringify({
+              projectId: project.id,
+              url: normalizedUrl,
+              brandName: project.brand_name,
+              industry: project.industry || '',
+              keywords: project.keywords || []
+            }),
+          });
 
-        if (summaryResponse.ok) {
-          summaryData = await summaryResponse.json();
-          console.log('✅ Brand summary generated successfully');
-          
-          setBrandSummary(summaryData);
-          
-          if (summaryData.summary?.overview) {
-            const truncatedOverview = summaryData.summary.overview
-              .split('\n')
-              .slice(0, 5)
-              .join('\n');
+          if (summaryResponse.ok) {
+            summaryData = await summaryResponse.json();
+            console.log('✅ Brand summary generated successfully');
             
-            await supabase
-              .from('brand_analysis_projects')
-              .update({
-                company_description: truncatedOverview,
-                company_image_url: summaryData.favicon || null,
-              })
-              .eq('id', project.id);
+            setBrandSummary(summaryData);
+            
+            if (summaryData.summary?.overview) {
+              const truncatedOverview = summaryData.summary.overview
+                .split('\n')
+                .slice(0, 5)
+                .join('\n');
+              
+              await supabase
+                .from('brand_analysis_projects')
+                .update({
+                  company_description: truncatedOverview,
+                  company_image_url: summaryData.favicon || null,
+                })
+                .eq('id', project.id);
+            }
+          } else {
+            console.warn('⚠️ Brand summary generation failed, continuing with analysis');
           }
-        } else {
-          console.warn('⚠️ Brand summary generation failed, continuing with analysis');
+        } catch (summaryError) {
+          console.error('❌ Error generating brand summary:', summaryError);
         }
-      } catch (summaryError) {
-        console.error('❌ Error generating brand summary:', summaryError);
+      } else {
+        console.log('⏭️ Skipping brand summary — no website URL or brand name available');
       }
 
       // Step 2: Call the brand-analysis edge function
@@ -1278,6 +1398,8 @@ function AIVisibilityContent() {
     setConfigManualQueries(initialQueries);
     setConfigPlatforms(project.active_platforms?.length ? [...project.active_platforms] : ['perplexity', 'chatgpt']);
     setConfigProjectName(project.brand_name || '');
+    setConfigLanguages(Array.isArray(project.analysis_languages) ? [...project.analysis_languages] : []);
+    setConfigCountries(Array.isArray(project.analysis_countries) ? [...project.analysis_countries] : []);
     if (responses.length > 0 && initialQueries.length > 0) {
       setConfigQueryMode('manual');
     }
@@ -1288,17 +1410,28 @@ function AIVisibilityContent() {
     if (!selectedProject?.id) return;
     setConfigSaving(true);
     try {
+      const originalLanguages = new Set(selectedProject.analysis_languages ?? []);
+      const originalCountries = new Set(selectedProject.analysis_countries ?? []);
+      const hasNewLanguages = configLanguages.some(lang => !originalLanguages.has(lang));
+      const hasNewCountries = configCountries.some(country => !originalCountries.has(country));
+
+      // When new languages/countries are added, use auto_manual so the edge function
+      // generates new queries in the new languages alongside existing manual ones
+      const effectiveQueryMode = (hasNewLanguages || hasNewCountries) ? 'auto_manual' : 'manual';
+
       const res = await fetch('/api/ai-visibility', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           projectId: selectedProject.id,
           brandName: configProjectName.trim() || selectedProject.brand_name,
-          queryMode: 'manual',
+          queryMode: effectiveQueryMode,
           manualQueries: configManualQueries
             .filter((q) => q.text.trim())
             .map(({ text, language, country }) => ({ text, language, country })),
           platforms: configPlatforms.length > 0 ? configPlatforms : selectedProject.active_platforms,
+          analysisLanguages: configLanguages,
+          analysisCountries: configCountries,
         }),
       });
       const data = await res.json();
@@ -1306,6 +1439,20 @@ function AIVisibilityContent() {
       await fetchProjectDetails(selectedProject.id, true);
       await fetchProjects();
       setShowConfigureModal(false);
+
+      if (hasNewLanguages || hasNewCountries) {
+        const updatedProject: Project = {
+          ...selectedProject,
+          brand_name: configProjectName.trim() || selectedProject.brand_name,
+          analysis_languages: configLanguages,
+          analysis_countries: configCountries,
+          active_platforms: configPlatforms.length > 0 ? configPlatforms : selectedProject.active_platforms,
+          manual_queries: configManualQueries
+            .filter(q => q.text.trim())
+            .map(({ text, language, country }) => ({ text, language, country })),
+        };
+        handleRunAnalysis(updatedProject);
+      }
     } catch (e: any) {
       console.error('Save configure error:', e);
       alert(e?.message || 'Failed to save project');
@@ -1315,12 +1462,11 @@ function AIVisibilityContent() {
   };
 
   const handleProjectClick = (project: Project) => {
-    // Clear brand summary immediately when switching projects to prevent showing old data
     setBrandSummary(null);
+    setHistorySessionId(null);
     setSelectedProject(project);
     fetchProjectDetails(project.id);
     setViewMode('details');
-    // Update URL with project ID for persistence on refresh
     router.push(`/dashboard/ai-visibility?project=${project.id}`, { scroll: false });
   };
 
@@ -1408,18 +1554,43 @@ function AIVisibilityContent() {
       const pageHeight = doc.internal.pageSize.getHeight();
       let yPos = 20;
       const margin = 20;
-      const lineHeight = 7;
-      const logoSize = 30; // Logo size in mm
+      const contentWidth = pageWidth - 2 * margin;
+      const lineHeight = 6;
 
-      // Helper function to add new page if needed
-      const checkPageBreak = (requiredSpace: number) => {
-        if (yPos + requiredSpace > pageHeight - margin) {
-          doc.addPage();
-          yPos = margin;
-        }
-      };
+      const PURPLE = { r: 147, g: 51, b: 234 };       // #9333ea
+      const PURPLE_DARK = { r: 107, g: 33, b: 168 };   // #6b21a8
+      const GRAY_700 = { r: 55, g: 65, b: 81 };
+      const GRAY_500 = { r: 107, g: 114, b: 128 };
+      const GRAY_400 = { r: 156, g: 163, b: 175 };
+      const GREEN = { r: 16, g: 185, b: 129 };
+      const RED = { r: 239, g: 68, b: 68 };
+      const BLUE = { r: 59, g: 130, b: 246 };
+      const AMBER = { r: 245, g: 158, b: 11 };
 
-      // Upscale logo to higher resolution so it stays sharp in the PDF (avoids pixelation from small favicons)
+      // ---------- Preload GeoRepute logo ----------
+      let geoReputeLogoData: string | null = null;
+      try {
+        const logoImg = document.createElement('img') as HTMLImageElement;
+        logoImg.crossOrigin = 'anonymous';
+        geoReputeLogoData = await new Promise<string | null>((resolve) => {
+          const t = setTimeout(() => resolve(null), 4000);
+          logoImg.onload = () => {
+            clearTimeout(t);
+            try {
+              const c = document.createElement('canvas');
+              c.width = 400; c.height = 400;
+              const ctx = c.getContext('2d');
+              if (!ctx) { resolve(null); return; }
+              ctx.drawImage(logoImg, 0, 0, 400, 400);
+              resolve(c.toDataURL('image/png', 0.95));
+            } catch { resolve(null); }
+          };
+          logoImg.onerror = () => { clearTimeout(t); resolve(null); };
+          logoImg.src = '/logo.png';
+        });
+      } catch { /* ignore */ }
+
+      // ---------- Preload brand logo ----------
       const LOGO_PDF_SIZE_PX = 240;
       const upscaleLogoForPdf = (dataUrl: string): Promise<string | null> => {
         return new Promise((resolve) => {
@@ -1434,340 +1605,587 @@ function AIVisibilityContent() {
               if (!ctx) { resolve(dataUrl); return; }
               ctx.drawImage(img, 0, 0, LOGO_PDF_SIZE_PX, LOGO_PDF_SIZE_PX);
               resolve(canvas.toDataURL('image/png', 0.95));
-            } catch {
-              resolve(dataUrl);
-            }
+            } catch { resolve(dataUrl); }
           };
           img.onerror = () => resolve(dataUrl);
           img.src = dataUrl;
         });
       };
 
-      // Helper function to add image from URL (with better CORS handling and higher resolution)
-      const addImageFromUrl = async (url: string, x: number, y: number, width: number, height: number): Promise<boolean> => {
-        return new Promise(async (resolve) => {
+      const loadImageAsDataUrl = async (url: string): Promise<string | null> => {
+        const tryFetch = async (fetchUrl: string): Promise<string | null> => {
           try {
-            const corsProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-
-            const addLogoToPdf = async (dataUrl: string) => {
-              const hiRes = await upscaleLogoForPdf(dataUrl);
-              if (hiRes) {
-                doc.addImage(hiRes, 'PNG', x, y, width, height);
-                return true;
-              }
-              return false;
-            };
-            
-            // Method 1: Try CORS proxy
+            const resp = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit', signal: AbortSignal.timeout(5000) });
+            if (!resp.ok) return null;
+            const blob = await resp.blob();
+            return await new Promise<string>((res, rej) => {
+              const reader = new FileReader();
+              reader.onloadend = () => res(reader.result as string);
+              reader.onerror = () => rej(new Error('read failed'));
+              reader.readAsDataURL(blob);
+            });
+          } catch { return null; }
+        };
+        let dataUrl = await tryFetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+        if (!dataUrl) dataUrl = await tryFetch(url);
+        if (dataUrl) return upscaleLogoForPdf(dataUrl);
+        return new Promise((resolve) => {
+          const img = document.createElement('img') as HTMLImageElement;
+          img.crossOrigin = 'anonymous';
+          const t = setTimeout(() => resolve(null), 5000);
+          img.onload = () => {
+            clearTimeout(t);
             try {
-              const proxyResponse = await fetch(corsProxyUrl, { 
-                mode: 'cors',
-                credentials: 'omit',
-                signal: AbortSignal.timeout(5000)
-              });
-              
-              if (proxyResponse.ok) {
-                const blob = await proxyResponse.blob();
-                const dataUrl = await new Promise<string>((res, rej) => {
-                  const reader = new FileReader();
-                  reader.onloadend = () => res(reader.result as string);
-                  reader.onerror = () => rej(new Error('read failed'));
-                  reader.readAsDataURL(blob);
-                });
-                try {
-                  if (await addLogoToPdf(dataUrl)) {
-                    resolve(true);
-                    return;
-                  }
-                } catch (error) {
-                  console.error('Error adding proxied image to PDF:', error);
-                }
-              }
-            } catch (proxyError) {
-              console.warn('CORS proxy failed, trying direct fetch:', proxyError);
-            }
-            
-            // Method 2: Try direct fetch
-            try {
-              const response = await fetch(url, { 
-                mode: 'cors', 
-                credentials: 'omit',
-                signal: AbortSignal.timeout(5000)
-              });
-              if (response.ok) {
-                const blob = await response.blob();
-                const dataUrl = await new Promise<string>((res, rej) => {
-                  const reader = new FileReader();
-                  reader.onloadend = () => res(reader.result as string);
-                  reader.onerror = () => rej(new Error('read failed'));
-                  reader.readAsDataURL(blob);
-                });
-                try {
-                  if (await addLogoToPdf(dataUrl)) {
-                    resolve(true);
-                    return;
-                  }
-                } catch (error) {
-                  console.error('Error adding image to PDF:', error);
-                }
-              }
-            } catch (fetchError) {
-              console.warn('Direct fetch failed, trying image element:', fetchError);
-            }
-            
-            // Method 3: Fallback - Direct image load with canvas, then upscale for resolution
-            const img = document.createElement('img') as HTMLImageElement;
-            img.crossOrigin = 'anonymous';
-            const timeout = setTimeout(() => {
-              console.warn('Image load timeout, skipping logo:', url);
-              resolve(false);
-            }, 5000);
-            
-            img.onload = async () => {
-              clearTimeout(timeout);
-              try {
-                const canvas = document.createElement('canvas');
-                canvas.width = LOGO_PDF_SIZE_PX;
-                canvas.height = LOGO_PDF_SIZE_PX;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  ctx.drawImage(img, 0, 0, LOGO_PDF_SIZE_PX, LOGO_PDF_SIZE_PX);
-                  const hiRes = canvas.toDataURL('image/png', 0.95);
-                  doc.addImage(hiRes, 'PNG', x, y, width, height);
-                  resolve(true);
-                } else {
-                  resolve(false);
-                }
-              } catch (error) {
-                console.warn('Error converting image to base64 (CORS likely blocked):', error);
-                resolve(false);
-              }
-            };
-            
-            img.onerror = () => {
-              clearTimeout(timeout);
-              console.warn('Image load failed (CORS blocked):', url);
-              resolve(false);
-            };
-            
-            img.src = url;
-          } catch (error) {
-            console.warn('Error in addImageFromUrl, skipping logo:', error);
-            resolve(false);
-          }
+              const c = document.createElement('canvas');
+              c.width = LOGO_PDF_SIZE_PX; c.height = LOGO_PDF_SIZE_PX;
+              const ctx = c.getContext('2d');
+              if (ctx) { ctx.drawImage(img, 0, 0, LOGO_PDF_SIZE_PX, LOGO_PDF_SIZE_PX); resolve(c.toDataURL('image/png', 0.95)); }
+              else resolve(null);
+            } catch { resolve(null); }
+          };
+          img.onerror = () => { clearTimeout(t); resolve(null); };
+          img.src = url;
         });
       };
 
-      // Add Project Logo (if available) - Top right corner
-      let logoAdded = false;
+      let brandLogoData: string | null = null;
       if (selectedProject.company_image_url) {
-        try {
-          const logoWidth = 30;
-          const logoHeight = 30;
-          logoAdded = await addImageFromUrl(
-            selectedProject.company_image_url, 
-            pageWidth - margin - logoWidth, 
-            margin, 
-            logoWidth, 
-            logoHeight
-          );
-          if (!logoAdded) {
-            console.warn('Logo could not be loaded, continuing without logo');
-          }
-        } catch (error) {
-          console.error('Error adding logo:', error);
+        try { brandLogoData = await loadImageAsDataUrl(selectedProject.company_image_url); } catch { /* ignore */ }
+      }
+
+      // ---------- Helper: header / footer on every page ----------
+      const HEADER_HEIGHT = 18;
+      const FOOTER_HEIGHT = 14;
+      const contentTop = margin + HEADER_HEIGHT;
+      const contentBottom = pageHeight - FOOTER_HEIGHT;
+
+      const addPageHeader = () => {
+        doc.setFillColor(PURPLE.r, PURPLE.g, PURPLE.b);
+        doc.rect(0, 0, pageWidth, 14, 'F');
+        if (geoReputeLogoData) {
+          try { doc.addImage(geoReputeLogoData, 'PNG', margin, 2.5, 9, 9); } catch { /* ignore */ }
         }
-      }
-
-      // Title (positioned to not overlap with logo)
-      doc.setFontSize(20);
-      doc.setFont('helvetica', 'bold');
-      const titleY = logoAdded ? margin + 8 : yPos;
-      doc.text('AI Visibility Report', margin, titleY);
-      yPos = logoAdded ? margin + logoSize + 5 : yPos + 10;
-
-      // Project Information
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Project Information', margin, yPos);
-      yPos += 8;
-
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Brand Name: ${selectedProject.brand_name}`, margin, yPos);
-      yPos += lineHeight;
-      doc.text(`Industry: ${selectedProject.industry}`, margin, yPos);
-      yPos += lineHeight;
-      if (selectedProject.website_url) {
-        doc.text(`Website: ${selectedProject.website_url}`, margin, yPos);
-        yPos += lineHeight;
-      }
-      if (selectedProject.active_platforms && selectedProject.active_platforms.length > 0) {
-        doc.text(`Platforms: ${selectedProject.active_platforms.join(', ')}`, margin, yPos);
-        yPos += lineHeight;
-      }
-      
-      // Company Description
-      if (selectedProject.company_description) {
-        checkPageBreak(20);
-        yPos += 3;
+        doc.setFontSize(9);
         doc.setFont('helvetica', 'bold');
-        doc.text('Company Description:', margin, yPos);
-        yPos += lineHeight;
+        doc.setTextColor(255, 255, 255);
+        doc.text('GEORepute.ai', geoReputeLogoData ? margin + 11 : margin, 8.5);
+        doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
-        const descriptionLines = doc.splitTextToSize(selectedProject.company_description, pageWidth - 2 * margin);
-        descriptionLines.forEach((line: string) => {
-          checkPageBreak(lineHeight);
-          doc.text(line, margin, yPos);
-          yPos += lineHeight;
+        doc.text('AI Visibility Intelligence Platform', pageWidth - margin, 8.5, { align: 'right' });
+        doc.setDrawColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+        doc.setLineWidth(0.5);
+        doc.line(0, 14, pageWidth, 14);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      };
+
+      const addPageFooter = (pageNum: number, totalPages: number) => {
+        const footerY = pageHeight - 10;
+        doc.setDrawColor(GRAY_400.r, GRAY_400.g, GRAY_400.b);
+        doc.setLineWidth(0.3);
+        doc.line(margin, footerY - 3, pageWidth - margin, footerY - 3);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.text('Confidential - Generated by GEORepute.ai', margin, footerY);
+        doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: 'center' });
+        doc.text(new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }), pageWidth - margin, footerY, { align: 'right' });
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      };
+
+      const checkPageBreak = (requiredSpace: number) => {
+        if (yPos + requiredSpace > contentBottom) {
+          doc.addPage();
+          addPageHeader();
+          yPos = contentTop;
+        }
+      };
+
+      // ---------- Helpers: styled drawing ----------
+      const drawSectionTitle = (title: string) => {
+        checkPageBreak(14);
+        doc.setFillColor(PURPLE.r, PURPLE.g, PURPLE.b);
+        doc.roundedRect(margin, yPos - 1, contentWidth, 8, 1.5, 1.5, 'F');
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(255, 255, 255);
+        doc.text(title, margin + 4, yPos + 5);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        yPos += 11;
+      };
+
+      const drawSubsectionTitle = (title: string) => {
+        checkPageBreak(10);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+        doc.text(title, margin, yPos);
+        yPos += 1.5;
+        doc.setDrawColor(PURPLE.r, PURPLE.g, PURPLE.b);
+        doc.setLineWidth(0.4);
+        doc.line(margin, yPos, margin + doc.getTextWidth(title), yPos);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        yPos += 4;
+      };
+
+      const drawKeyValue = (label: string, value: string, indent: number = 0) => {
+        checkPageBreak(lineHeight);
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.text(label, margin + indent, yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.text(value, margin + indent + doc.getTextWidth(label) + 2, yPos);
+        yPos += lineHeight;
+      };
+
+      const drawMetricCard = (x: number, y: number, w: number, h: number, label: string, value: string, color: { r: number; g: number; b: number }) => {
+        doc.setFillColor(color.r, color.g, color.b);
+        doc.roundedRect(x, y, w, h, 2, 2, 'F');
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(255, 255, 255);
+        doc.text(label, x + w / 2, y + 5, { align: 'center' });
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.text(value, x + w / 2, y + 14, { align: 'center' });
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      };
+
+      const drawTableHeader = (cols: { x: number; label: string }[], endX: number) => {
+        doc.setFillColor(245, 243, 255);
+        doc.rect(cols[0].x, yPos - 4, endX - cols[0].x, 7, 'F');
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+        cols.forEach(c => doc.text(c.label, c.x, yPos));
+        yPos += 1;
+        doc.setDrawColor(PURPLE.r, PURPLE.g, PURPLE.b);
+        doc.setLineWidth(0.4);
+        doc.line(cols[0].x, yPos, endX, yPos);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        yPos += 4;
+      };
+
+      const drawTableRow = (cols: { x: number; text: string; wrap?: boolean }[], endX: number, isAlternate: boolean) => {
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        const rowLineH = 3.5;
+        let maxLines = 1;
+        const colLines: string[][] = cols.map((c, i) => {
+          const colW = (i < cols.length - 1 ? cols[i + 1].x : endX) - c.x - 1.5;
+          if (c.wrap) {
+            const lines: string[] = doc.splitTextToSize(c.text, colW);
+            if (lines.length > maxLines) maxLines = lines.length;
+            return lines.slice(0, 3);
+          }
+          const lines = doc.splitTextToSize(c.text, colW);
+          return [lines[0] || c.text];
         });
+        if (maxLines > 1 && maxLines > 3) maxLines = 3;
+        const rowH = maxLines * rowLineH + 3;
+        checkPageBreak(rowH + 2);
+        if (isAlternate) {
+          doc.setFillColor(250, 250, 255);
+          doc.rect(cols[0].x, yPos - 3.5, endX - cols[0].x, rowH, 'F');
+        }
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        colLines.forEach((lines, i) => {
+          let lineY = yPos;
+          lines.forEach((line) => {
+            doc.text(line, cols[i].x, lineY);
+            lineY += rowLineH;
+          });
+        });
+        yPos += rowH - 2;
+        doc.setDrawColor(230, 230, 235);
+        doc.setLineWidth(0.1);
+        doc.line(cols[0].x, yPos, endX, yPos);
+        yPos += 2.5;
+      };
+
+      // ---------- Chart helper ----------
+      const createChartImage = async (
+        type: 'pie' | 'bar' | 'stackedBar' | 'horizontalBar' | 'groupedBar' | 'groupedHorizontalBar' | 'multiDatasetBar',
+        data: any,
+        labels: string[],
+        title: string,
+        width: number = 700,
+        height: number = 400
+      ): Promise<string | null> => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return null;
+
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, width, height);
+
+          let chartConfig: any;
+          const chartColors = ['#9333ea', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316'];
+          const titleOpts = { display: true, text: title, font: { size: 15, weight: 'bold' as const }, color: '#1f2937', padding: { bottom: 15 } };
+          const legendOpts = { display: true, position: 'top' as const, labels: { font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' as const } };
+
+          if (type === 'pie') {
+            const arr = data as { name: string; value: number }[];
+            chartConfig = {
+              type: 'doughnut',
+              data: {
+                labels,
+                datasets: [{ data: arr.map(d => d.value), backgroundColor: arr.map((_, i) => chartColors[i % chartColors.length]), borderColor: '#ffffff', borderWidth: 3 }],
+              },
+              options: {
+                responsive: false, maintainAspectRatio: false,
+                plugins: { title: titleOpts, legend: { display: true, position: 'right', labels: { font: { size: 12 }, padding: 12, usePointStyle: true, pointStyle: 'circle' } } },
+              },
+            };
+          } else if (type === 'bar') {
+            const values = (data as number[]).map(d => (typeof d === 'object' && d !== null && 'value' in d) ? (d as { value: number }).value : d);
+            chartConfig = {
+              type: 'bar',
+              data: { labels, datasets: [{ label: title, data: values, backgroundColor: chartColors.slice(0, labels.length), borderRadius: 6, borderSkipped: false }] },
+              options: { responsive: false, maintainAspectRatio: false, plugins: { title: titleOpts, legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } } },
+            };
+          } else if (type === 'stackedBar') {
+            const { mentioned, missed } = data as { mentioned: number[]; missed: number[] };
+            chartConfig = {
+              type: 'bar',
+              data: { labels, datasets: [
+                { label: 'Mentioned', data: mentioned, backgroundColor: '#10b981', borderRadius: 4, borderSkipped: false },
+                { label: 'Not Mentioned', data: missed, backgroundColor: '#ef4444', borderRadius: 4, borderSkipped: false },
+              ] },
+              options: { responsive: false, maintainAspectRatio: false, scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, grid: { color: '#f3f4f6' } } }, plugins: { title: titleOpts, legend: legendOpts } },
+            };
+          } else if (type === 'horizontalBar') {
+            const items = data as { name: string; value: number; isBrand?: boolean }[];
+            chartConfig = {
+              type: 'bar',
+              data: { labels: items.map(d => d.name), datasets: [{ label: 'Visibility %', data: items.map(d => d.value), backgroundColor: items.map(d => d.isBrand ? '#9333ea' : '#3b82f6'), borderRadius: 6, borderSkipped: false }] },
+              options: { indexAxis: 'y' as const, responsive: false, maintainAspectRatio: false, plugins: { title: titleOpts, legend: { display: false } }, scales: { x: { beginAtZero: true, grid: { color: '#f3f4f6' } }, y: { grid: { display: false } } } },
+            };
+          } else if (type === 'groupedBar') {
+            const datasets = (data as { label: string; values: number[]; color: string }[]).map(ds => ({
+              label: ds.label, data: ds.values, backgroundColor: ds.color, borderRadius: 4, borderSkipped: false,
+            }));
+            chartConfig = {
+              type: 'bar',
+              data: { labels, datasets },
+              options: { responsive: false, maintainAspectRatio: false, plugins: { title: titleOpts, legend: legendOpts }, scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } } },
+            };
+          } else if (type === 'groupedHorizontalBar') {
+            const datasets = (data as { label: string; values: number[]; color: string }[]).map(ds => ({
+              label: ds.label, data: ds.values, backgroundColor: ds.color, borderRadius: 4, borderSkipped: false,
+            }));
+            chartConfig = {
+              type: 'bar',
+              data: { labels, datasets },
+              options: { indexAxis: 'y' as const, responsive: false, maintainAspectRatio: false, plugins: { title: titleOpts, legend: legendOpts }, scales: { x: { beginAtZero: true, grid: { color: '#f3f4f6' } }, y: { grid: { display: false } } } },
+            };
+          } else if (type === 'multiDatasetBar') {
+            const dsInput = data as { label: string; values: number[]; color: string }[];
+            const datasets = dsInput.map(ds => ({ label: ds.label, data: ds.values, backgroundColor: ds.color, borderRadius: 6, borderSkipped: false }));
+            chartConfig = {
+              type: 'bar',
+              data: { labels, datasets },
+              options: { responsive: false, maintainAspectRatio: false, plugins: { title: titleOpts, legend: legendOpts }, scales: { y: { beginAtZero: true, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } } },
+            };
+          } else {
+            return null;
+          }
+
+          const chart = new Chart(ctx, chartConfig);
+          await new Promise(resolve => setTimeout(resolve, 500));
+          const imageData = canvas.toDataURL('image/png', 0.95);
+          chart.destroy();
+          canvas.remove();
+          return imageData;
+        } catch (error) {
+          console.error('Error creating chart:', error);
+          return null;
+        }
+      };
+
+      // =====================================================
+      //  PAGE 1 — COVER PAGE
+      // =====================================================
+      // Purple gradient header block
+      doc.setFillColor(PURPLE.r, PURPLE.g, PURPLE.b);
+      doc.rect(0, 0, pageWidth, 90, 'F');
+      doc.setFillColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+      doc.rect(0, 0, pageWidth, 50, 'F');
+
+      // GeoRepute logo on cover
+      if (geoReputeLogoData) {
+        try { doc.addImage(geoReputeLogoData, 'PNG', margin, 12, 22, 22); } catch { /* ignore */ }
       }
-      
-      yPos += 5;
-
-      // Visibility Score
-      checkPageBreak(20);
-      doc.setFontSize(14);
+      doc.setFontSize(22);
       doc.setFont('helvetica', 'bold');
-      doc.text('Visibility Score', margin, yPos);
-      yPos += 8;
+      doc.setTextColor(255, 255, 255);
+      doc.text('GEORepute.ai', geoReputeLogoData ? margin + 26 : margin, 27);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text('AI Visibility Intelligence Platform', geoReputeLogoData ? margin + 26 : margin, 35);
 
+      // Report title
+      doc.setFontSize(28);
+      doc.setFont('helvetica', 'bold');
+      doc.text('AI Visibility Report', margin, 63);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'normal');
+      doc.text(selectedProject.brand_name, margin, 74);
+      const websiteSource = selectedProject.website_url || brandSummary?.sourceUrl || '';
+      const extractDomain = (url: string) => {
+        if (!url) return '';
+        try { return new URL(url.startsWith('http') ? url : `https://${url}`).hostname; } catch { return url.replace(/^https?:\/\//, '').split('/')[0]; }
+      };
+      const coverDomain = extractDomain(websiteSource);
+      if (coverDomain) {
+        doc.setFontSize(10);
+        doc.setTextColor(220, 220, 255);
+        doc.text(coverDomain, margin, 81);
+        doc.setTextColor(255, 255, 255);
+      }
+
+      // Thin accent line
+      doc.setFillColor(245, 158, 11);
+      doc.rect(margin, 84, 40, 2, 'F');
+
+      // Brand logo on cover (right side)
+      if (brandLogoData) {
+        try { doc.addImage(brandLogoData, 'PNG', pageWidth - margin - 30, 55, 28, 28); } catch { /* ignore */ }
+      }
+
+      // Report metadata below header
+      yPos = 105;
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+
+      const reportDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      const analysisDate = latestSession.completed_at
+        ? new Date(latestSession.completed_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+        : reportDate;
+
+      const metaDomain = coverDomain || 'N/A';
+      const metaWebsite = websiteSource || 'N/A';
+
+      const metaItems = [
+        ['Brand:', selectedProject.brand_name],
+        ['Domain:', metaDomain],
+        ['Industry:', selectedProject.industry],
+        ['Website:', metaWebsite],
+        ['Platforms:', (selectedProject.active_platforms || []).join(', ') || 'N/A'],
+        ['Analysis Date:', analysisDate],
+        ['Report Generated:', reportDate],
+      ];
+      metaItems.forEach(([label, value]) => {
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.text(label, margin, yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.text(value, margin + 40, yPos);
+        yPos += 7;
+      });
+
+      // Company description on cover
+      const overview = brandSummary?.summary?.overview || selectedProject.company_description;
+      if (overview) {
+        yPos += 3;
+        doc.setFillColor(245, 243, 255);
+        const descLines = doc.splitTextToSize(overview, contentWidth - 10);
+        const visibleLines = descLines.slice(0, 8);
+        const descBlockH = visibleLines.length * 4.5 + 10;
+        doc.roundedRect(margin, yPos, contentWidth, descBlockH, 2, 2, 'F');
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+        doc.text('About ' + selectedProject.brand_name, margin + 5, yPos + 5.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.setFontSize(8);
+        let descY = yPos + 10;
+        visibleLines.forEach((line: string) => {
+          doc.text(line, margin + 5, descY);
+          descY += 4.5;
+        });
+        yPos += descBlockH + 3;
+      }
+
+      // Confidential notice on cover
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'italic');
+      doc.setTextColor(GRAY_400.r, GRAY_400.g, GRAY_400.b);
+      doc.text('This report is confidential and intended solely for the authorized recipient.', pageWidth / 2, pageHeight - 15, { align: 'center' });
+      doc.text('Generated by GEORepute.ai - AI Visibility Intelligence Platform', pageWidth / 2, pageHeight - 10, { align: 'center' });
+
+      // =====================================================
+      //  PAGE 2 — EXECUTIVE SUMMARY
+      // =====================================================
+      doc.addPage();
+      addPageHeader();
+      yPos = contentTop;
+
+      drawSectionTitle('Executive Summary');
+
+      // Key metrics
       const totalMentions = projectStats?.total_mentions || projectResponses.filter(r => r.response_metadata?.brand_mentioned).length || 0;
       const totalQueries = projectStats?.total_queries || projectResponses.length || 0;
       const visibilityScore = totalQueries > 0 ? Math.round((totalMentions / totalQueries) * 100) : 0;
 
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Score: ${visibilityScore}%`, margin, yPos);
-      yPos += lineHeight;
-      doc.text(`Mentions: ${totalMentions} of ${totalQueries} prompts`, margin, yPos);
-      yPos += 10;
+      const sentiments = projectResponses
+        .filter(r => r.response_metadata?.sentiment_score !== null)
+        .map(r => r.response_metadata.sentiment_score);
+      const positive = sentiments.filter((s: number) => s > 0.3).length;
+      const negative = sentiments.filter((s: number) => s < -0.3).length;
+      const neutral = sentiments.filter((s: number) => s >= -0.3 && s <= 0.3).length;
+      const avgSentiment = sentiments.length > 0
+        ? (sentiments.reduce((a: number, b: number) => a + b, 0) / sentiments.length).toFixed(2)
+        : 'N/A';
 
-      // Generate charts directly from data using Chart.js
-      try {
-        if (projectResponses.length === 0) {
-          console.log('No project responses data available for charts');
-        } else {
+      const platformsUsed = [...new Set(projectResponses.map(r => r.platform))];
 
-          // Helper function to create a chart and return canvas image data
-          const createChartImage = async (
-            type: 'pie' | 'bar' | 'stackedBar' | 'horizontalBar',
-            data: any,
-            labels: string[],
-            title: string,
-            width: number = 600,
-            height: number = 400
-          ): Promise<string | null> => {
-            try {
-              const canvas = document.createElement('canvas');
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext('2d');
-              if (!ctx) return null;
+      // Metric cards row
+      const cardW = (contentWidth - 9) / 4;
+      const cardH = 20;
+      drawMetricCard(margin, yPos, cardW, cardH, 'Visibility Score', `${visibilityScore}%`, PURPLE);
+      drawMetricCard(margin + cardW + 3, yPos, cardW, cardH, 'Total Mentions', `${totalMentions}/${totalQueries}`, BLUE);
+      drawMetricCard(margin + (cardW + 3) * 2, yPos, cardW, cardH, 'Avg Sentiment', String(avgSentiment), sentiments.length > 0 && Number(avgSentiment) > 0 ? GREEN : sentiments.length > 0 && Number(avgSentiment) < 0 ? RED : GRAY_500);
+      drawMetricCard(margin + (cardW + 3) * 3, yPos, cardW, cardH, 'Platforms', `${platformsUsed.length}`, PURPLE_DARK);
+      yPos += cardH + 5;
 
-              let chartConfig: any;
-              if (type === 'pie') {
-                const arr = data as { name: string; value: number }[];
-                chartConfig = {
-                  type: 'doughnut',
-                  data: {
-                    labels: labels,
-                    datasets: [{
-                      label: title,
-                      data: arr.map(d => d.value),
-                      backgroundColor: arr.map((_, i) => ['#10b981', '#6b7280', '#ef4444', '#9333ea', '#3b82f6', '#f59e0b'][i % 6]),
-                      borderColor: '#ffffff',
-                      borderWidth: 2,
-                    }],
-                  },
-                  options: {
-                    responsive: false,
-                    maintainAspectRatio: false,
-                    plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: true, position: 'right' } },
-                  },
-                };
-              } else if (type === 'bar') {
-                const values = (data as number[]).map(d => (typeof d === 'object' && d !== null && 'value' in d) ? (d as { value: number }).value : d);
-                chartConfig = {
-                  type: 'bar',
-                  data: {
-                    labels,
-                    datasets: [{ label: title, data: values, backgroundColor: '#9333ea', borderColor: '#ffffff', borderWidth: 2 }],
-                  },
-                  options: {
-                    responsive: false,
-                    maintainAspectRatio: false,
-                    plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: false } },
-                  },
-                };
-              } else if (type === 'stackedBar') {
-                const { mentioned, missed } = data as { mentioned: number[]; missed: number[] };
-                chartConfig = {
-                  type: 'bar',
-                  data: {
-                    labels,
-                    datasets: [
-                      { label: 'Mentioned', data: mentioned, backgroundColor: '#10b981', borderColor: '#ffffff', borderWidth: 1 },
-                      { label: 'Not Mentioned', data: missed, backgroundColor: '#ef4444', borderColor: '#ffffff', borderWidth: 1 },
-                    ],
-                  },
-                  options: {
-                    responsive: false,
-                    maintainAspectRatio: false,
-                    scales: { x: { stacked: true }, y: { stacked: true } },
-                    plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: true, position: 'top' } },
-                  },
-                };
-              } else if (type === 'horizontalBar') {
-                const items = data as { name: string; value: number; isBrand?: boolean }[];
-                const names = items.map(d => d.name);
-                const values = items.map(d => d.value);
-                const colors = items.map(d => (d.isBrand ? '#9333ea' : '#3b82f6'));
-                chartConfig = {
-                  type: 'bar',
-                  data: {
-                    labels: names,
-                    datasets: [{ label: 'Visibility %', data: values, backgroundColor: colors, borderColor: '#ffffff', borderWidth: 1 }],
-                  },
-                  options: {
-                    indexAxis: 'y' as const,
-                    responsive: false,
-                    maintainAspectRatio: false,
-                    plugins: { title: { display: true, text: title, font: { size: 16, weight: 'bold' } }, legend: { display: false } },
-                  },
-                };
-              } else {
-                return null;
-              }
+      // Sentiment breakdown
+      if (sentiments.length > 0) {
+        drawSubsectionTitle('Sentiment Breakdown');
+        const sentTotal = sentiments.length;
+        const sentBarWidth = contentWidth;
+        const sentBarH = 8;
+        const posW = (positive / sentTotal) * sentBarWidth;
+        const neuW = (neutral / sentTotal) * sentBarWidth;
+        const negW = (negative / sentTotal) * sentBarWidth;
+        doc.setFillColor(GREEN.r, GREEN.g, GREEN.b);
+        doc.roundedRect(margin, yPos, posW || 0.1, sentBarH, posW > 2 ? 2 : 0, posW > 2 ? 2 : 0, 'F');
+        doc.setFillColor(GRAY_400.r, GRAY_400.g, GRAY_400.b);
+        doc.rect(margin + posW, yPos, neuW, sentBarH, 'F');
+        doc.setFillColor(RED.r, RED.g, RED.b);
+        if (negW > 2) doc.roundedRect(margin + posW + neuW, yPos, negW, sentBarH, 2, 2, 'F');
+        else doc.rect(margin + posW + neuW, yPos, negW, sentBarH, 'F');
+        yPos += sentBarH + 3;
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(GREEN.r, GREEN.g, GREEN.b);
+        doc.text(`Positive: ${positive} (${sentTotal > 0 ? Math.round((positive / sentTotal) * 100) : 0}%)`, margin, yPos);
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.text(`Neutral: ${neutral} (${sentTotal > 0 ? Math.round((neutral / sentTotal) * 100) : 0}%)`, margin + contentWidth / 3, yPos);
+        doc.setTextColor(RED.r, RED.g, RED.b);
+        doc.text(`Negative: ${negative} (${sentTotal > 0 ? Math.round((negative / sentTotal) * 100) : 0}%)`, margin + (contentWidth * 2) / 3, yPos);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        yPos += 5;
+      }
 
-              const chart = new Chart(ctx, chartConfig);
-              await new Promise(resolve => setTimeout(resolve, 500));
-              const imageData = canvas.toDataURL('image/png', 0.95);
-              chart.destroy();
-              canvas.remove();
-              return imageData;
-            } catch (error) {
-              console.error('Error creating chart:', error);
-              return null;
+      // Platform performance summary
+      if (platformsUsed.length > 0) {
+        drawSubsectionTitle('Platform Performance Overview');
+        const platCols = [
+          { x: margin, label: 'Platform' },
+          { x: margin + 50, label: 'Queries' },
+          { x: margin + 80, label: 'Mentions' },
+          { x: margin + 110, label: 'Mention Rate' },
+          { x: margin + 145, label: 'Avg Sentiment' },
+        ];
+        const platEndX = margin + contentWidth;
+        drawTableHeader(platCols, platEndX);
+
+        platformsUsed.forEach((platform, idx) => {
+          checkPageBreak(8);
+          const pResponses = projectResponses.filter(r => r.platform === platform);
+          const pMentions = pResponses.filter(r => r.response_metadata?.brand_mentioned).length;
+          const pRate = pResponses.length > 0 ? Math.round((pMentions / pResponses.length) * 100) : 0;
+          const pSentiments = pResponses.filter(r => r.response_metadata?.sentiment_score != null).map(r => r.response_metadata.sentiment_score);
+          const pAvgSent = pSentiments.length > 0 ? (pSentiments.reduce((a: number, b: number) => a + b, 0) / pSentiments.length).toFixed(2) : 'N/A';
+          const platformOption = platformOptions.find(p => p.id === platform);
+          drawTableRow([
+            { x: margin, text: platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1) },
+            { x: margin + 50, text: pResponses.length.toString() },
+            { x: margin + 80, text: pMentions.toString() },
+            { x: margin + 110, text: `${pRate}%` },
+            { x: margin + 145, text: pAvgSent.toString() },
+          ], platEndX, idx % 2 === 1);
+        });
+        yPos += 2;
+      }
+
+      // Results summary - avg sentiment, etc.
+      if (latestSession.results_summary) {
+        const summary = latestSession.results_summary;
+        if (summary.avg_sentiment !== undefined) {
+          drawKeyValue('Average Sentiment Score: ', `${summary.avg_sentiment}%`);
+        }
+      }
+
+      // =====================================================
+      //  BRAND OVERVIEW (from brandSummary)
+      // =====================================================
+      if (brandSummary?.summary) {
+        checkPageBreak(30);
+        drawSectionTitle('Brand Overview');
+        const bs = brandSummary.summary;
+        if (bs.overview) {
+          const overviewLines = doc.splitTextToSize(bs.overview, contentWidth);
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'normal');
+          overviewLines.forEach((line: string) => {
+            checkPageBreak(5);
+            doc.text(line, margin, yPos);
+            yPos += 5;
+          });
+          yPos += 2;
+        }
+        const brandDetails = [
+          ['Industry:', bs.industry],
+          ['Founded:', bs.founded_year],
+          ['Headquarters:', bs.headquarters],
+          ['Business Model:', bs.business_model],
+          ['Typical Clients:', bs.typical_clients],
+          ['Brand Essence:', bs.brand_essence],
+          ['Key Offerings:', bs.key_offerings],
+        ].filter(([, val]) => val && val !== 'unknown');
+        if (brandDetails.length > 0) {
+          drawSubsectionTitle('Brand Details');
+          brandDetails.forEach(([label, value]) => {
+            const valStr = String(value);
+            if (valStr.length > 100) {
+              drawKeyValue(label, '');
+              const valLines = doc.splitTextToSize(valStr, contentWidth - 5);
+              doc.setFontSize(8);
+              doc.setFont('helvetica', 'normal');
+              valLines.slice(0, 4).forEach((line: string) => {
+                checkPageBreak(5);
+                doc.text(line, margin + 3, yPos);
+                yPos += 4.5;
+              });
+              yPos += 2;
+            } else {
+              drawKeyValue(label, valStr);
             }
-          };
+          });
+        }
+      }
 
-          checkPageBreak(30);
-          doc.setFontSize(14);
-          doc.setFont('helvetica', 'bold');
-          doc.text('Visual Analytics', margin, yPos);
-          yPos += 10;
+      // =====================================================
+      //  VISUAL ANALYTICS — CHARTS
+      // =====================================================
+      const chartH = 70;
+      try {
+        if (projectResponses.length > 0) {
+          checkPageBreak(20);
+          drawSectionTitle('Visual Analytics');
 
-          // Chart 1: Sentiment Distribution (Pie Chart)
-          const sentiments = projectResponses
-            .filter(r => r.response_metadata?.sentiment_score !== null)
-            .map(r => r.response_metadata.sentiment_score);
-          const positive = sentiments.filter(s => s > 0.3).length;
-          const negative = sentiments.filter(s => s < -0.3).length;
-          const neutral = sentiments.filter(s => s >= -0.3 && s <= 0.3).length;
-          const total = sentiments.length;
-
-          if (total > 0) {
+          // Chart 1: Sentiment Distribution
+          if (sentiments.length > 0) {
             const sentimentData = [
               { name: 'Positive', value: positive },
               { name: 'Neutral', value: neutral },
@@ -1775,148 +2193,60 @@ function AIVisibilityContent() {
             ].filter(item => item.value > 0);
 
             if (sentimentData.length > 0) {
-              checkPageBreak(90);
-              doc.setFontSize(12);
-              doc.setFont('helvetica', 'bold');
-              doc.text('Sentiment Distribution', margin, yPos);
-              yPos += 6;
-
-              const chartImage = await createChartImage(
-                'pie',
-                sentimentData,
-                sentimentData.map(d => d.name),
-                'Sentiment Distribution',
-                600,
-                400
-              );
-
+              checkPageBreak(chartH + 5);
+              const chartImage = await createChartImage('pie', sentimentData, sentimentData.map(d => d.name), 'Sentiment Distribution', 700, 400);
               if (chartImage) {
-                const availableWidth = pageWidth - 2 * margin;
-                const chartHeight = 80; // mm
-                const chartWidth = availableWidth;
-                
-                if (yPos + chartHeight > pageHeight - margin - 20) {
-                  doc.addPage();
-                  yPos = margin;
-                  doc.setFontSize(12);
-                  doc.setFont('helvetica', 'bold');
-                  doc.text('Sentiment Distribution', margin, yPos);
-                  yPos += 6;
-                }
-
-                const chartX = (pageWidth - chartWidth) / 2;
-                doc.addImage(chartImage, 'PNG', chartX, yPos, chartWidth, chartHeight);
-                yPos += chartHeight + 10;
-                console.log('✓ Added Sentiment Distribution chart');
+                doc.addImage(chartImage, 'PNG', margin, yPos, contentWidth, chartH);
+                yPos += chartH + 4;
               }
             }
           }
 
-          // Chart 2: Platform Performance (Bar Chart)
-          const platformData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
-            const platformResponses = projectResponses.filter(r => r.platform === platform);
-            const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
-            const total = platformResponses.length;
-            const mentionRate = total > 0 ? (mentions / total) * 100 : 0;
-            return {
-              platform: platform.charAt(0).toUpperCase() + platform.slice(1),
-              mentionRate: Math.round(mentionRate),
-            };
+          // Chart 2: Platform Performance
+          const platformChartData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+            const pResp = projectResponses.filter(r => r.platform === platform);
+            const pMent = pResp.filter(r => r.response_metadata?.brand_mentioned).length;
+            const rate = pResp.length > 0 ? Math.round((pMent / pResp.length) * 100) : 0;
+            const opt = platformOptions.find(p => p.id === platform);
+            return { platform: opt?.name || platform.charAt(0).toUpperCase() + platform.slice(1), mentionRate: rate };
           }).sort((a, b) => b.mentionRate - a.mentionRate);
 
-          if (platformData.length > 0) {
-            checkPageBreak(90);
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            doc.text('Platform Performance', margin, yPos);
-            yPos += 6;
-
-            const chartImage = await createChartImage(
-              'bar',
-              platformData.map(p => p.mentionRate),
-              platformData.map(p => p.platform),
-              'Platform Performance (Mention Rate %)',
-              600,
-              400
-            );
-
+          if (platformChartData.length > 0) {
+            checkPageBreak(chartH + 5);
+            const chartImage = await createChartImage('bar', platformChartData.map(p => p.mentionRate), platformChartData.map(p => p.platform), 'Platform Performance (Mention Rate %)', 700, 400);
             if (chartImage) {
-              const availableWidth = pageWidth - 2 * margin;
-              const chartHeight = 80; // mm
-              const chartWidth = availableWidth;
-              
-              if (yPos + chartHeight > pageHeight - margin - 20) {
-                doc.addPage();
-                yPos = margin;
-                doc.setFontSize(12);
-                doc.setFont('helvetica', 'bold');
-                doc.text('Platform Performance', margin, yPos);
-                yPos += 6;
-              }
-
-              const chartX = (pageWidth - chartWidth) / 2;
-                doc.addImage(chartImage, 'PNG', chartX, yPos, chartWidth, chartHeight);
-                yPos += chartHeight + 10;
-                console.log('✓ Added Platform Performance chart');
+              doc.addImage(chartImage, 'PNG', margin, yPos, contentWidth, chartH);
+              yPos += chartH + 4;
             }
           }
 
-          // Chart 3: Platform Comparison (Stacked Bar - Mentioned vs Not Mentioned)
-          const comparisonData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
-            const platformResponses = projectResponses.filter(r => r.platform === platform);
-            const mentions = platformResponses.filter(r => r.response_metadata?.brand_mentioned).length;
-            const total = platformResponses.length;
-            const platformOption = platformOptions.find(p => p.id === platform);
-            return {
-              platform: platformOption?.name || platform.charAt(0).toUpperCase() + platform.slice(1),
-              mentioned: mentions,
-              missed: total - mentions,
-            };
+          // Chart 3: Platform Comparison (stacked)
+          const stackCompData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+            const pResp = projectResponses.filter(r => r.platform === platform);
+            const mentions = pResp.filter(r => r.response_metadata?.brand_mentioned).length;
+            const opt = platformOptions.find(p => p.id === platform);
+            return { platform: opt?.name || platform.charAt(0).toUpperCase() + platform.slice(1), mentioned: mentions, missed: pResp.length - mentions };
           });
-          if (comparisonData.length > 0) {
-            checkPageBreak(90);
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            doc.text('Platform Comparison (Mentioned vs Not Mentioned)', margin, yPos);
-            yPos += 6;
-            const stackedImage = await createChartImage(
-              'stackedBar',
-              { mentioned: comparisonData.map(p => p.mentioned), missed: comparisonData.map(p => p.missed) },
-              comparisonData.map(p => p.platform),
-              'Platform Comparison',
-              600,
-              400
-            );
-            if (stackedImage) {
-              const chartHeight = 80;
-              const chartWidth = pageWidth - 2 * margin;
-              if (yPos + chartHeight > pageHeight - margin - 20) {
-                doc.addPage();
-                yPos = margin;
-                doc.setFontSize(12);
-                doc.setFont('helvetica', 'bold');
-                doc.text('Platform Comparison (Mentioned vs Not Mentioned)', margin, yPos);
-                yPos += 6;
-              }
-              doc.addImage(stackedImage, 'PNG', margin, yPos, chartWidth, chartHeight);
-              yPos += chartHeight + 10;
-              console.log('✓ Added Platform Comparison chart');
+          if (stackCompData.length > 0) {
+            checkPageBreak(chartH + 5);
+            const chartImage = await createChartImage('stackedBar', { mentioned: stackCompData.map(p => p.mentioned), missed: stackCompData.map(p => p.missed) }, stackCompData.map(p => p.platform), 'Platform Comparison (Mentioned vs Not Mentioned)', 700, 400);
+            if (chartImage) {
+              doc.addImage(chartImage, 'PNG', margin, yPos, contentWidth, chartH);
+              yPos += chartH + 4;
             }
           }
 
-          // Chart 4: Competitor vs Brand Visibility (Horizontal Bar)
+          // Chart 4: Competitor vs Brand Visibility
           const brandMentions = projectResponses.filter(r => r.response_metadata?.brand_mentioned).length;
-          const totalQueries = projectResponses.length;
-          const brandVisibility = totalQueries > 0 ? Math.round((brandMentions / totalQueries) * 100) : 0;
+          const totalQueriesChart = projectResponses.length;
+          const brandVisibility = totalQueriesChart > 0 ? Math.round((brandMentions / totalQueriesChart) * 100) : 0;
           const competitorMentionCount: Record<string, number> = {};
           projectResponses.forEach((response) => {
             const competitorsRaw = response.response_metadata?.competitors_found || [];
             const competitorNames = competitorsRaw.map((comp: string | { name: string }) => {
               if (typeof comp === 'string') {
                 if (comp.startsWith('{') && comp.includes('name')) {
-                  try {
-                    return JSON.parse(comp).name || comp;
-                  } catch { return comp; }
+                  try { return JSON.parse(comp).name || comp; } catch { return comp; }
                 }
                 return comp;
               }
@@ -1929,320 +2259,445 @@ function AIVisibilityContent() {
           const comparisonChartData = [
             { name: selectedProject?.brand_name || 'Your Brand', value: brandVisibility, isBrand: true },
             ...Object.entries(competitorMentionCount)
-              .map(([name, mentions]) => ({ name, value: totalQueries > 0 ? Math.round((mentions / totalQueries) * 100) : 0, isBrand: false }))
+              .map(([name, mentions]) => ({ name, value: totalQueriesChart > 0 ? Math.round((mentions / totalQueriesChart) * 100) : 0, isBrand: false }))
               .sort((a, b) => b.value - a.value)
               .slice(0, 10),
           ].filter(d => d.value > 0 || d.isBrand);
           if (comparisonChartData.length > 0) {
-            checkPageBreak(90);
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            doc.text('Competitor vs Brand Visibility', margin, yPos);
-            yPos += 6;
-            const horizImage = await createChartImage(
-              'horizontalBar',
-              comparisonChartData,
-              [],
-              'Competitor vs Brand Visibility (%)',
-              600,
-              400
-            );
-            if (horizImage) {
-              const chartHeight = 80;
-              const chartWidth = pageWidth - 2 * margin;
-              if (yPos + chartHeight > pageHeight - margin - 20) {
-                doc.addPage();
-                yPos = margin;
-                doc.setFontSize(12);
-                doc.setFont('helvetica', 'bold');
-                doc.text('Competitor vs Brand Visibility', margin, yPos);
-                yPos += 6;
+            checkPageBreak(chartH + 5);
+            const chartImage = await createChartImage('horizontalBar', comparisonChartData, [], 'Competitor vs Brand Visibility (%)', 700, 400);
+            if (chartImage) {
+              doc.addImage(chartImage, 'PNG', margin, yPos, contentWidth, chartH);
+              yPos += chartH + 4;
+            }
+          }
+
+          // Chart 5: Platform Sentiment Analysis (grouped bar — mention rate + avg sentiment per platform)
+          const platformSentimentData = Array.from(new Set(projectResponses.map(r => r.platform))).map((platform) => {
+            const pResp = projectResponses.filter(r => r.platform === platform);
+            const pMent = pResp.filter(r => r.response_metadata?.brand_mentioned).length;
+            const rate = pResp.length > 0 ? Math.round((pMent / pResp.length) * 100) : 0;
+            const pSent = pResp.filter(r => r.response_metadata?.sentiment_score != null).map(r => r.response_metadata.sentiment_score);
+            const avgSent = pSent.length > 0 ? Math.round((pSent.reduce((a: number, b: number) => a + b, 0) / pSent.length) * 100) : 0;
+            const opt = platformOptions.find(p => p.id === platform);
+            return { platform: opt?.name || platform.charAt(0).toUpperCase() + platform.slice(1), rate, avgSent };
+          }).sort((a, b) => b.rate - a.rate);
+
+          if (platformSentimentData.length > 1) {
+            checkPageBreak(chartH + 5);
+            const chartImage = await createChartImage('groupedBar', [
+              { label: 'Mention Rate %', values: platformSentimentData.map(d => d.rate), color: '#9333ea' },
+              { label: 'Avg Sentiment %', values: platformSentimentData.map(d => Math.max(0, d.avgSent)), color: '#10b981' },
+            ], platformSentimentData.map(d => d.platform), 'Platform: Mention Rate vs Sentiment', 700, 400);
+            if (chartImage) {
+              doc.addImage(chartImage, 'PNG', margin, yPos, contentWidth, chartH);
+              yPos += chartH + 4;
+            }
+          }
+
+          // Chart 6: Top Competitor Mentions (bar chart — how many times each competitor appears)
+          const topCompetitors = Object.entries(competitorMentionCount)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 8);
+          if (topCompetitors.length > 0) {
+            checkPageBreak(chartH + 5);
+            const chartImage = await createChartImage('bar', topCompetitors.map(([, v]) => v), topCompetitors.map(([n]) => n.length > 18 ? n.substring(0, 16) + '..' : n), 'Top Competitor Mentions (Count)', 700, 400);
+            if (chartImage) {
+              doc.addImage(chartImage, 'PNG', margin, yPos, contentWidth, chartH);
+              yPos += chartH + 4;
+            }
+          }
+
+          // Chart 7: Share of Voice (pie chart from competitor_analysis)
+          const sovData = latestSession.competitor_analysis?.share_of_voice;
+          if (sovData && sovData.length > 0) {
+            const sovPieData = sovData.slice(0, 10).map((sov: any) => {
+              const { name } = parseCompetitorNameGlobal(sov.brand);
+              return { name, value: sov.share_percentage || sov.mentions || 0 };
+            }).filter((d: { name: string; value: number }) => d.value > 0);
+            if (sovPieData.length > 0) {
+              checkPageBreak(chartH + 5);
+              const chartImage = await createChartImage('pie', sovPieData, sovPieData.map((d: { name: string }) => d.name), 'Share of Voice', 700, 400);
+              if (chartImage) {
+                doc.addImage(chartImage, 'PNG', margin, yPos, contentWidth, chartH);
+                yPos += chartH + 4;
               }
-              doc.addImage(horizImage, 'PNG', margin, yPos, chartWidth, chartHeight);
-              yPos += chartHeight + 10;
-              console.log('✓ Added Competitor vs Brand Visibility chart');
+            }
+          }
+
+          // Chart 8: Competitive Strength Analysis (grouped horizontal bar — market share, sentiment, strength)
+          const mpData = latestSession.competitor_analysis?.market_positions;
+          if (mpData && mpData.length > 0) {
+            const mpLabels: string[] = [];
+            const marketShareVals: number[] = [];
+            const sentimentVals: number[] = [];
+            const strengthVals: number[] = [];
+            mpData.slice(0, 8).forEach((pos: any) => {
+              const { name } = parseCompetitorNameGlobal(pos.brand);
+              mpLabels.push(name.length > 18 ? name.substring(0, 16) + '..' : name);
+              marketShareVals.push(Math.round(pos.market_share < 1 ? pos.market_share * 100 : pos.market_share));
+              sentimentVals.push(Math.round(pos.sentiment_score < 1 ? pos.sentiment_score * 100 : pos.sentiment_score));
+              strengthVals.push(Math.round(pos.competitive_strength < 1 ? pos.competitive_strength * 100 : pos.competitive_strength));
+            });
+            checkPageBreak(chartH + 5);
+            const chartImage = await createChartImage('groupedHorizontalBar', [
+              { label: 'Market Share %', values: marketShareVals, color: '#3b82f6' },
+              { label: 'Sentiment %', values: sentimentVals, color: '#10b981' },
+              { label: 'Competitive Strength %', values: strengthVals, color: '#9333ea' },
+            ], mpLabels, 'Competitive Strength Analysis', 700, 400);
+            if (chartImage) {
+              doc.addImage(chartImage, 'PNG', margin, yPos, contentWidth, chartH);
+              yPos += chartH + 4;
+            }
+          }
+
+          // Chart 9: Sentiment Score Distribution (color-coded bar per range)
+          if (sentiments.length > 3) {
+            const buckets = [
+              { label: 'Very Negative', min: -1, max: -0.6, count: 0, color: '#dc2626' },
+              { label: 'Negative', min: -0.6, max: -0.3, count: 0, color: '#ef4444' },
+              { label: 'Slightly Neg.', min: -0.3, max: 0, count: 0, color: '#f97316' },
+              { label: 'Slightly Pos.', min: 0, max: 0.3, count: 0, color: '#84cc16' },
+              { label: 'Positive', min: 0.3, max: 0.6, count: 0, color: '#10b981' },
+              { label: 'Very Positive', min: 0.6, max: 1.01, count: 0, color: '#059669' },
+            ];
+            sentiments.forEach((s: number) => {
+              for (const b of buckets) { if (s >= b.min && s < b.max) { b.count++; break; } }
+            });
+            const filledBuckets = buckets.filter(b => b.count > 0);
+            if (filledBuckets.length > 1) {
+              checkPageBreak(chartH + 5);
+              const canvas = document.createElement('canvas');
+              canvas.width = 700; canvas.height = 400;
+              const ctxH = canvas.getContext('2d');
+              if (ctxH) {
+                ctxH.fillStyle = '#ffffff';
+                ctxH.fillRect(0, 0, 700, 400);
+                const histChart = new Chart(ctxH, {
+                  type: 'bar',
+                  data: {
+                    labels: filledBuckets.map(b => b.label),
+                    datasets: [{
+                      label: 'Responses',
+                      data: filledBuckets.map(b => b.count),
+                      backgroundColor: filledBuckets.map(b => b.color),
+                      borderRadius: 6,
+                      borderSkipped: false,
+                    }],
+                  },
+                  options: {
+                    responsive: false, maintainAspectRatio: false,
+                    plugins: {
+                      title: { display: true, text: 'Sentiment Score Distribution', font: { size: 15, weight: 'bold' }, color: '#1f2937', padding: { bottom: 15 } },
+                      legend: { display: false },
+                    },
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Number of Responses', font: { size: 12 } }, grid: { color: '#f3f4f6' } }, x: { grid: { display: false } } },
+                  },
+                });
+                await new Promise(resolve => setTimeout(resolve, 500));
+                const histImg = canvas.toDataURL('image/png', 0.95);
+                histChart.destroy();
+                canvas.remove();
+                doc.addImage(histImg, 'PNG', margin, yPos, contentWidth, chartH);
+                yPos += chartH + 4;
+              }
             }
           }
         }
       } catch (chartError) {
         console.error('Error generating charts:', chartError);
-        // Fallback: Add text-based analytics if charts failed
-        if (projectResponses.length > 0) {
-          try {
-            checkPageBreak(20);
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            doc.text('Analytics Data (Charts unavailable):', margin, yPos);
-            yPos += lineHeight;
-            doc.setFont('helvetica', 'normal');
-            doc.text(`Total Responses: ${projectResponses.length}`, margin, yPos);
-            yPos += lineHeight;
-            const mentions = projectResponses.filter(r => r.response_metadata?.brand_mentioned).length;
-            doc.text(`Brand Mentions: ${mentions}`, margin, yPos);
-          } catch (e) {
-            console.error('Error adding fallback analytics:', e);
+      }
+
+      // =====================================================
+      //  TOP PERFORMING QUERIES
+      // =====================================================
+      const topQueries = projectResponses.filter(r => r.response_metadata?.brand_mentioned).slice(0, 10);
+      if (topQueries.length > 0) {
+        checkPageBreak(30);
+        drawSectionTitle('Top Performing Queries');
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.text('Queries where your brand was successfully mentioned by AI platforms.', margin, yPos);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        yPos += 6;
+
+        topQueries.forEach((response, idx) => {
+          checkPageBreak(16);
+          const isAlt = idx % 2 === 1;
+          if (isAlt) {
+            doc.setFillColor(250, 250, 255);
+            doc.rect(margin, yPos - 3, contentWidth, 13, 'F');
           }
-        }
-      }
-
-      // Results Summary
-      if (latestSession.results_summary) {
-        checkPageBreak(30);
-        doc.setFontSize(14);
-        doc.setFont('helvetica', 'bold');
-        doc.text('Results Summary', margin, yPos);
-        yPos += 8;
-
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'normal');
-        const summary = latestSession.results_summary;
-        if (summary.avg_sentiment !== undefined) {
-          doc.text(`Average Sentiment: ${summary.avg_sentiment}%`, margin, yPos);
-          yPos += lineHeight;
-        }
-        if (summary.platform_breakdown) {
-          doc.text('Platform Breakdown:', margin, yPos);
-          yPos += lineHeight;
-          Object.entries(summary.platform_breakdown).forEach(([platform, data]: [string, any]) => {
-            checkPageBreak(lineHeight);
-            doc.text(`  ${platform}: ${data.mentions || 0} mentions`, margin + 5, yPos);
-            yPos += lineHeight;
-          });
-        }
-        yPos += 5;
-      }
-
-      // Competitor Analysis
-      if (latestSession.competitor_analysis) {
-        checkPageBreak(30);
-        doc.setFontSize(14);
-        doc.setFont('helvetica', 'bold');
-        doc.text('Competitor Analysis', margin, yPos);
-        yPos += 8;
-
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'normal');
-
-        // Rankings - Create a table
-        if (latestSession.competitor_analysis.rankings && latestSession.competitor_analysis.rankings.length > 0) {
+          doc.setFontSize(8);
           doc.setFont('helvetica', 'bold');
-          doc.text('Competitor Rankings:', margin, yPos);
-          yPos += 8;
-          
-          // Table dimensions
-          const tableTop = yPos;
-          const col1 = margin; // Rank
-          const col2 = margin + 15; // Name
-          const col3 = margin + 80; // Domain
-          const col4 = margin + 120; // Mentions
-          const col5 = margin + 150; // Score
-          const rowHeight = 8;
-          const lineGap = 5;
-          const gapAfterLine = 4;
-          
-          // Draw table header
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(10);
-          doc.text('Rank', col1, yPos);
-          doc.text('Name', col2, yPos);
-          doc.text('Domain', col3, yPos);
-          doc.text('Mentions', col4, yPos);
-          doc.text('Score', col5, yPos);
-          
-          // Draw header underline (below text with clear gap)
-          yPos += lineGap;
-          doc.setLineWidth(0.5);
-          doc.setDrawColor(0, 0, 0);
-          doc.line(col1, yPos, col5 + 30, yPos);
-          yPos += gapAfterLine;
-          
-          // Table rows
+          doc.setTextColor(PURPLE.r, PURPLE.g, PURPLE.b);
+          doc.text(`#${idx + 1}`, margin + 2, yPos);
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          const maxPromptW = contentWidth - 14;
+          let promptText = response.prompt || 'N/A';
+          if (doc.getTextWidth(promptText) > maxPromptW) {
+            while (promptText.length > 1 && doc.getTextWidth(promptText + '..') > maxPromptW) { promptText = promptText.slice(0, -1); }
+            promptText = promptText + '..';
+          }
+          doc.text(promptText, margin + 12, yPos);
+          yPos += 4.5;
+          doc.setFontSize(7);
           doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
+          doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+          const platformOption = platformOptions.find(p => p.id === response.platform);
+          const platName = platformOption?.name || response.platform;
+          const sentScore = response.response_metadata?.sentiment_score;
+          const sentLabel = sentScore != null ? ` | Sentiment: ${sentScore.toFixed(2)}` : '';
+          doc.text(`Platform: ${platName}${sentLabel}`, margin + 12, yPos);
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          yPos += 5;
+        });
+        yPos += 1;
+      }
+
+      // =====================================================
+      //  KEYWORDS ANALYSIS
+      // =====================================================
+      const keywords = selectedProject.keywords || [];
+      const brandKeywords = brandSummary?.summary?.keywords?.branded || [];
+      const nonBrandedKeywords = brandSummary?.summary?.keywords?.nonBranded || [];
+      if (keywords.length > 0 || brandKeywords.length > 0 || nonBrandedKeywords.length > 0) {
+        checkPageBreak(25);
+        drawSectionTitle('Keywords Analysis');
+
+        if (keywords.length > 0) {
+          drawSubsectionTitle(`All Keywords (${keywords.length})`);
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'normal');
+          const kwText = keywords.join('  |  ');
+          const kwLines = doc.splitTextToSize(kwText, contentWidth);
+          kwLines.slice(0, 6).forEach((line: string) => {
+            checkPageBreak(5);
+            doc.text(line, margin, yPos);
+            yPos += 5;
+          });
+          yPos += 1;
+        }
+        if (brandKeywords.length > 0) {
+          drawSubsectionTitle(`Branded Keywords (${brandKeywords.length})`);
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(PURPLE.r, PURPLE.g, PURPLE.b);
+          const bkText = brandKeywords.join('  |  ');
+          const bkLines = doc.splitTextToSize(bkText, contentWidth);
+          bkLines.slice(0, 4).forEach((line: string) => {
+            checkPageBreak(5);
+            doc.text(line, margin, yPos);
+            yPos += 5;
+          });
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          yPos += 1;
+        }
+        if (nonBrandedKeywords.length > 0) {
+          drawSubsectionTitle(`Non-Branded Keywords (${nonBrandedKeywords.length})`);
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(BLUE.r, BLUE.g, BLUE.b);
+          const nbText = nonBrandedKeywords.join('  |  ');
+          const nbLines = doc.splitTextToSize(nbText, contentWidth);
+          nbLines.slice(0, 4).forEach((line: string) => {
+            checkPageBreak(5);
+            doc.text(line, margin, yPos);
+            yPos += 5;
+          });
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          yPos += 1;
+        }
+      }
+
+      // =====================================================
+      //  COMPETITOR ANALYSIS
+      // =====================================================
+      if (latestSession.competitor_analysis) {
+        checkPageBreak(20);
+        drawSectionTitle('Competitor Analysis');
+
+        // Rankings table
+        if (latestSession.competitor_analysis.rankings && latestSession.competitor_analysis.rankings.length > 0) {
+          drawSubsectionTitle('Competitor Rankings');
+          const rankCols = [
+            { x: margin, label: '#' },
+            { x: margin + 10, label: 'Competitor' },
+            { x: margin + 75, label: 'Domain' },
+            { x: margin + 120, label: 'Mentions' },
+            { x: margin + 148, label: 'Score' },
+          ];
+          const rankEndX = margin + contentWidth;
+          drawTableHeader(rankCols, rankEndX);
+
           latestSession.competitor_analysis.rankings.slice(0, 10).forEach((rank: any, idx: number) => {
-            checkPageBreak(rowHeight + gapAfterLine);
-            
-            // Parse competitor name (handle both string and object formats)
+            checkPageBreak(8);
             let competitorName = '';
             let competitorDomain = '';
-            
             if (typeof rank.name === 'string') {
-              // Try to parse if it's a JSON string
-              try {
-                const parsed = JSON.parse(rank.name);
-                if (parsed.name) {
-                  competitorName = parsed.name;
-                  competitorDomain = parsed.domain || '';
-                } else {
-                  competitorName = rank.name;
-                }
-              } catch {
-                // Not JSON, use as is
-                competitorName = rank.name;
-              }
+              try { const p = JSON.parse(rank.name); competitorName = p.name || rank.name; competitorDomain = p.domain || ''; } catch { competitorName = rank.name; }
             } else if (rank.name && typeof rank.name === 'object') {
-              competitorName = rank.name.name || rank.name;
-              competitorDomain = rank.name.domain || '';
-            } else {
-              competitorName = String(rank.name || 'N/A');
-            }
-            
-            // Truncate long names/domains
-            const maxNameWidth = 50;
-            const maxDomainWidth = 30;
-            if (competitorName.length > maxNameWidth) {
-              competitorName = competitorName.substring(0, maxNameWidth - 3) + '...';
-            }
-            if (competitorDomain.length > maxDomainWidth) {
-              competitorDomain = competitorDomain.substring(0, maxDomainWidth - 3) + '...';
-            }
-            
-            // Draw row data
-            doc.text((idx + 1).toString(), col1, yPos);
-            doc.text(competitorName, col2, yPos);
-            doc.text(competitorDomain || 'N/A', col3, yPos);
-            doc.text(rank.mentions?.toString() || '0', col4, yPos);
-            doc.text(rank.ranking_score?.toFixed(2) || '0.00', col5, yPos);
-            
-            // Draw row separator below text with clear gap so line doesn't cut through text
-            yPos += lineGap;
-            doc.setLineWidth(0.1);
-            doc.setDrawColor(200, 200, 200);
-            doc.line(col1, yPos, col5 + 30, yPos);
-            yPos += gapAfterLine;
+              competitorName = rank.name.name || rank.name; competitorDomain = rank.name.domain || '';
+            } else { competitorName = String(rank.name || 'N/A'); }
+            if (competitorName.length > 40) competitorName = competitorName.substring(0, 37) + '...';
+            if (competitorDomain.length > 25) competitorDomain = competitorDomain.substring(0, 22) + '...';
+
+            drawTableRow([
+              { x: margin, text: (idx + 1).toString() },
+              { x: margin + 10, text: competitorName },
+              { x: margin + 75, text: competitorDomain || 'N/A' },
+              { x: margin + 120, text: rank.mentions?.toString() || '0' },
+              { x: margin + 148, text: rank.ranking_score?.toFixed(2) || '0.00' },
+            ], rankEndX, idx % 2 === 1);
           });
-          
-          yPos += 3;
+          yPos += 2;
         }
 
-        // Market Positioning - Create a table
+        // Market Positioning table
         if (latestSession.competitor_analysis.market_positions && latestSession.competitor_analysis.market_positions.length > 0) {
-          checkPageBreak(30);
-          doc.setFont('helvetica', 'bold');
-          doc.text('Market Positioning:', margin, yPos);
-          yPos += 8;
-          
-          // Table dimensions
-          const col1 = margin; // Brand
-          const col2 = margin + 50; // Positioning
-          const col3 = margin + 100; // Market Share
-          const col4 = margin + 140; // Sentiment
-          const rowHeight = 8;
-          const lineGapMP = 5;
-          const gapAfterLineMP = 4;
-          
-          // Draw table header
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(10);
-          doc.text('Brand', col1, yPos);
-          doc.text('Positioning', col2, yPos);
-          doc.text('Market Share', col3, yPos);
-          doc.text('Sentiment', col4, yPos);
-          
-          // Draw header underline (below text with clear gap)
-          yPos += lineGapMP;
-          doc.setLineWidth(0.5);
-          doc.setDrawColor(0, 0, 0);
-          doc.line(col1, yPos, col4 + 30, yPos);
-          yPos += gapAfterLineMP;
-          
-          // Table rows
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
-          latestSession.competitor_analysis.market_positions.slice(0, 10).forEach((pos: any) => {
-            checkPageBreak(rowHeight + gapAfterLineMP);
-            
-            // Parse brand name
-            const { name: brandName } = parseCompetitorNameGlobal(pos.brand);
-            const positioning = (pos.positioning || 'N/A').substring(0, 30);
-            const marketShare = `${pos.market_share || 0}%`;
-            const sentiment = pos.sentiment_score?.toFixed(1) || 'N/A';
-            
-            doc.text(brandName.substring(0, 40), col1, yPos);
-            doc.text(positioning, col2, yPos);
-            doc.text(marketShare, col3, yPos);
-            doc.text(sentiment, col4, yPos);
-            
-            // Draw row separator below text with clear gap
-            yPos += lineGapMP;
-            doc.setLineWidth(0.1);
-            doc.setDrawColor(200, 200, 200);
-            doc.line(col1, yPos, col4 + 30, yPos);
-            yPos += gapAfterLineMP;
+          checkPageBreak(20);
+          drawSubsectionTitle('Market Positioning');
+          const mpCols = [
+            { x: margin, label: 'Brand' },
+            { x: margin + 50, label: 'Positioning' },
+            { x: margin + 95, label: 'Market Share' },
+            { x: margin + 130, label: 'Sentiment' },
+            { x: margin + 155, label: 'Strength' },
+          ];
+          const mpEndX = margin + contentWidth;
+          drawTableHeader(mpCols, mpEndX);
+
+          latestSession.competitor_analysis.market_positions.slice(0, 10).forEach((pos: any, idx: number) => {
+            checkPageBreak(8);
+            const { name: bn } = parseCompetitorNameGlobal(pos.brand);
+            drawTableRow([
+              { x: margin, text: bn.substring(0, 35) },
+              { x: margin + 50, text: (pos.positioning || 'N/A').substring(0, 25) },
+              { x: margin + 95, text: `${typeof pos.market_share === 'number' ? (pos.market_share < 1 ? Math.round(pos.market_share * 100) : Math.round(pos.market_share)) : 0}%` },
+              { x: margin + 130, text: pos.sentiment_score != null ? (pos.sentiment_score < 1 ? pos.sentiment_score.toFixed(2) : pos.sentiment_score.toFixed(1)) : 'N/A' },
+              { x: margin + 155, text: pos.competitive_strength != null ? `${Math.round((pos.competitive_strength < 1 ? pos.competitive_strength * 100 : pos.competitive_strength))}%` : 'N/A' },
+            ], mpEndX, idx % 2 === 1);
           });
-          
-          yPos += 3;
+          yPos += 2;
         }
 
-        // Share of Voice - Create a table
+        // Share of Voice table
         if (latestSession.competitor_analysis.share_of_voice && latestSession.competitor_analysis.share_of_voice.length > 0) {
-          checkPageBreak(30);
-          doc.setFont('helvetica', 'bold');
-          doc.text('Share of Voice:', margin, yPos);
-          yPos += 8;
-          
-          // Table dimensions
-          const col1 = margin; // Brand
-          const col2 = margin + 60; // Mentions
-          const col3 = margin + 100; // Share %
-          const rowHeightSOV = 8;
-          const lineGapSOV = 5;
-          const gapAfterLineSOV = 4;
-          
-          // Draw table header
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(10);
-          doc.text('Brand', col1, yPos);
-          doc.text('Mentions', col2, yPos);
-          doc.text('Share %', col3, yPos);
-          
-          // Draw header underline (below text with clear gap)
-          yPos += lineGapSOV;
-          doc.setLineWidth(0.5);
-          doc.setDrawColor(0, 0, 0);
-          doc.line(col1, yPos, col3 + 30, yPos);
-          yPos += gapAfterLineSOV;
-          
-          // Table rows
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(9);
-          latestSession.competitor_analysis.share_of_voice.slice(0, 10).forEach((sov: any) => {
-            checkPageBreak(rowHeightSOV + gapAfterLineSOV);
-            
-            // Parse brand name
-            const { name: brandName } = parseCompetitorNameGlobal(sov.brand);
-            const mentions = sov.mentions?.toString() || '0';
-            const sharePercent = `${sov.share_percentage || 0}%`;
-            
-            doc.text(brandName.substring(0, 50), col1, yPos);
-            doc.text(mentions, col2, yPos);
-            doc.text(sharePercent, col3, yPos);
-            
-            // Draw row separator below text with clear gap
-            yPos += lineGapSOV;
-            doc.setLineWidth(0.1);
-            doc.setDrawColor(200, 200, 200);
-            doc.line(col1, yPos, col3 + 30, yPos);
-            yPos += gapAfterLineSOV;
+          checkPageBreak(20);
+          drawSubsectionTitle('Share of Voice');
+          const sovCols = [
+            { x: margin, label: 'Brand' },
+            { x: margin + 70, label: 'Mentions' },
+            { x: margin + 110, label: 'Share %' },
+          ];
+          const sovEndX = margin + contentWidth;
+          drawTableHeader(sovCols, sovEndX);
+
+          latestSession.competitor_analysis.share_of_voice.slice(0, 10).forEach((sov: any, idx: number) => {
+            checkPageBreak(8);
+            const { name: bn } = parseCompetitorNameGlobal(sov.brand);
+            drawTableRow([
+              { x: margin, text: bn.substring(0, 45) },
+              { x: margin + 70, text: sov.mentions?.toString() || '0' },
+              { x: margin + 110, text: `${sov.share_percentage || 0}%` },
+            ], sovEndX, idx % 2 === 1);
           });
-          
-          yPos += 3;
+          yPos += 2;
+        }
+
+        // Competitive Gaps & Recommendations
+        if (latestSession.competitor_analysis.competitive_gaps && latestSession.competitor_analysis.competitive_gaps.length > 0) {
+          checkPageBreak(25);
+          drawSubsectionTitle('Competitive Gaps & Recommendations');
+
+          latestSession.competitor_analysis.competitive_gaps.forEach((gap: any, idx: number) => {
+            checkPageBreak(22);
+            const severityColor = gap.severity === 'high' ? RED : gap.severity === 'medium' ? AMBER : BLUE;
+            doc.setFillColor(severityColor.r, severityColor.g, severityColor.b);
+            doc.rect(margin, yPos - 3, 2, 16, 'F');
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(severityColor.r, severityColor.g, severityColor.b);
+            doc.text(`${(gap.severity || '').toUpperCase()} PRIORITY`, margin + 5, yPos);
+            doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+            doc.setFont('helvetica', 'normal');
+            doc.text((gap.type || '').replace('_', ' ').toUpperCase(), margin + 40, yPos);
+            yPos += 4;
+            doc.setFontSize(8);
+            doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+            const descLines = doc.splitTextToSize(gap.description || '', contentWidth - 10);
+            descLines.slice(0, 2).forEach((line: string) => {
+              checkPageBreak(4.5);
+              doc.text(line, margin + 5, yPos);
+              yPos += 4.5;
+            });
+            if (gap.recommendation) {
+              doc.setFont('helvetica', 'italic');
+              doc.setTextColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+              const recLines = doc.splitTextToSize('Recommendation: ' + gap.recommendation, contentWidth - 10);
+              recLines.slice(0, 2).forEach((line: string) => {
+                checkPageBreak(4.5);
+                doc.text(line, margin + 5, yPos);
+                yPos += 4.5;
+              });
+              doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+            }
+            yPos += 2;
+          });
         }
       }
 
-      // Footer
-      const totalPages = doc.getNumberOfPages();
-      for (let i = 1; i <= totalPages; i++) {
-        doc.setPage(i);
-        doc.setFontSize(10);
+      // =====================================================
+      //  DETAILED RESPONSES (top 15)
+      // =====================================================
+      const topResponses = projectResponses.slice(0, 15);
+      if (topResponses.length > 0) {
+        checkPageBreak(25);
+        drawSectionTitle('Detailed Query Responses');
+        doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
-        doc.text(
-          `Page ${i} of ${totalPages} | Generated on ${new Date().toLocaleDateString()}`,
-          pageWidth / 2,
-          pageHeight - 10,
-          { align: 'center' }
-        );
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.text(`Showing ${topResponses.length} of ${projectResponses.length} total queries analyzed.`, margin, yPos);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        yPos += 6;
+
+        const resCols = [
+          { x: margin, label: '#' },
+          { x: margin + 7, label: 'Query' },
+          { x: margin + 100, label: 'Platform' },
+          { x: margin + 130, label: 'Mentioned' },
+          { x: margin + 155, label: 'Sentiment' },
+        ];
+        const resEndX = margin + contentWidth;
+        drawTableHeader(resCols, resEndX);
+
+        topResponses.forEach((resp, idx) => {
+          checkPageBreak(12);
+          const mentioned = resp.response_metadata?.brand_mentioned ? 'Yes' : 'No';
+          const sent = resp.response_metadata?.sentiment_score != null ? resp.response_metadata.sentiment_score.toFixed(2) : 'N/A';
+          const platOpt = platformOptions.find(p => p.id === resp.platform);
+          drawTableRow([
+            { x: margin, text: (idx + 1).toString() },
+            { x: margin + 7, text: resp.prompt || 'N/A', wrap: true },
+            { x: margin + 100, text: platOpt?.name || resp.platform },
+            { x: margin + 130, text: mentioned },
+            { x: margin + 155, text: sent },
+          ], resEndX, idx % 2 === 1);
+        });
       }
+
+      // =====================================================
+      //  APPLY HEADERS & FOOTERS TO ALL PAGES
+      // =====================================================
+      const totalPages = doc.getNumberOfPages();
+      for (let i = 2; i <= totalPages; i++) {
+        doc.setPage(i);
+        addPageFooter(i, totalPages);
+      }
+      // Ensure page 1 (cover) doesn't get header but re-apply footer style
+      doc.setPage(1);
+      // Cover page already has its own footer
 
       // Save PDF
       const fileName = `AI_Visibility_Report_${selectedProject.brand_name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
@@ -3311,9 +3766,9 @@ function AIVisibilityContent() {
         },
         body: JSON.stringify({
           brandName,
-          websiteUrl,
+          websiteUrl: normalizeUrl(websiteUrl),
           industry,
-          language, // Pass the current language
+          language,
         }),
       });
 
@@ -4192,6 +4647,11 @@ function AIVisibilityContent() {
     const progress = latestSession && latestSession.total_queries 
       ? Math.round((latestSession.completed_queries || 0) / latestSession.total_queries * 100)
       : 0;
+    const activeSession = historySessionId
+      ? projectSessions.find(s => s.id === historySessionId) || latestSession
+      : (projectSessions.find(s => s.status === 'completed') || latestSession);
+    const defaultCompletedSession = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
+    const isViewingHistory = historySessionId != null && defaultCompletedSession != null && historySessionId !== defaultCompletedSession.id;
 
     return (
       <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -4498,6 +4958,33 @@ function AIVisibilityContent() {
                 </div>
               </div>
 
+              {/* Viewing historical session banner */}
+              {isViewingHistory && activeSession && (
+                <div className="mb-4 flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-center gap-2 text-sm text-amber-800">
+                    <History className="w-4 h-4 shrink-0" />
+                    <span>
+                      Viewing: <strong>{activeSession.session_name || 'Analysis Session'}</strong>
+                      {' '}&mdash;{' '}
+                      {new Date(activeSession.started_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setHistorySessionId(null);
+                      if (defaultCompletedSession) {
+                        setProjectStats(defaultCompletedSession.results_summary || null);
+                        fetchProjectResponses(defaultCompletedSession.id);
+                      }
+                    }}
+                    className="shrink-0 flex items-center gap-1.5 text-sm font-medium text-amber-700 hover:text-amber-900 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    Back to latest
+                  </button>
+                </div>
+              )}
+
               {/* Tabs */}
               <div className="bg-white rounded-lg border border-gray-200" dir={isRtl ? 'rtl' : 'ltr'}>
                 <div className="border-b border-gray-200 flex overflow-x-auto">
@@ -4694,17 +5181,16 @@ function AIVisibilityContent() {
                         <div className="text-center py-12 text-gray-500">
                           <Search className="w-12 h-12 mx-auto mb-4 text-gray-400" />
                           <p>No Analysis Results</p>
-                          {projectSessions.find(s => s.project_id === selectedProject?.id)?.status === 'running' && (
+                          {latestSession?.status === 'running' && (
                             <p className="text-sm mt-2">Analysis is still running. Results will appear here when complete.</p>
                           )}
-                          {projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed') && (
+                          {activeSession?.status === 'completed' && (
                             <div className="mt-4">
                               <p className="text-sm text-gray-600 mb-2">No responses found in database.</p>
                               <button
                                 onClick={() => {
-                                  const session = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
-                                  if (session?.id) {
-                                    fetchProjectResponses(session.id);
+                                  if (activeSession?.id) {
+                                    fetchProjectResponses(activeSession.id);
                                   }
                                 }}
                                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
@@ -4901,8 +5387,7 @@ function AIVisibilityContent() {
                     <div className="space-y-6">
                       {/* Advanced Competitor Analysis Section */}
                       {(() => {
-                        const latestSession = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
-                        const competitorAnalysis = latestSession?.competitor_analysis;
+                        const competitorAnalysis = activeSession?.competitor_analysis;
                         
                         if (competitorAnalysis && competitorAnalysis.rankings && competitorAnalysis.rankings.length > 0) {
                           return (
@@ -5756,8 +6241,7 @@ function AIVisibilityContent() {
                             
                             {/* Market Position Chart - Advanced Competitor Analysis */}
                             {(() => {
-                              const latestSession = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
-                              const competitorAnalysis = latestSession?.competitor_analysis;
+                              const competitorAnalysis = activeSession?.competitor_analysis;
                               
                               if (competitorAnalysis?.market_positions && competitorAnalysis.market_positions.length > 0) {
                                 const positionData = competitorAnalysis.market_positions.map((pos: any) => {
@@ -5858,6 +6342,13 @@ function AIVisibilityContent() {
                 >
                   <Settings className="w-4 h-4" />
                   Configure Project
+                </button>
+                <button
+                  onClick={() => { if (selectedProject) fetchHistorySessions(selectedProject.id); setShowHistoryModal(true); }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  <History className="w-4 h-4" />
+                  Analysis History
                 </button>
                 <div className="relative" ref={exportDropdownRef}>
                   <button 
@@ -6022,9 +6513,94 @@ function AIVisibilityContent() {
                           ))}
                         </div>
                       </div>
+                      {/* Language & Region Selection */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="p-4 rounded-xl bg-teal-50 border border-teal-100">
+                          <h3 className="text-sm font-semibold text-gray-900 mb-1">Languages for Analysis</h3>
+                          <p className="text-xs text-gray-500 mb-2">Select languages to generate queries in. Analysis will run in these languages.</p>
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {configLanguages.map((code) => {
+                              const opt = analysisLanguageOptions.find((o) => o.value === code);
+                              return (
+                                <span key={code} className="inline-flex items-center gap-1 px-2.5 py-1 bg-teal-100 text-teal-800 rounded-lg text-xs">
+                                  {opt?.label ?? code}
+                                  <button type="button" onClick={() => setConfigLanguages(configLanguages.filter((c) => c !== code))} className="text-teal-600 hover:text-teal-800">
+                                    &times;
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v && !configLanguages.includes(v)) setConfigLanguages([...configLanguages, v]);
+                              e.target.value = "";
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                          >
+                            <option value="">Select language...</option>
+                            {analysisLanguageOptions.filter((o) => !configLanguages.includes(o.value)).map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="p-4 rounded-xl bg-cyan-50 border border-cyan-100">
+                          <h3 className="text-sm font-semibold text-gray-900 mb-1">Countries/Regions</h3>
+                          <p className="text-xs text-gray-500 mb-2">Select countries for geography-specific queries.</p>
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {configCountries.map((code) => {
+                              const opt = analysisCountryOptions.find((o) => o.value === code);
+                              return (
+                                <span key={code} className="inline-flex items-center gap-1 px-2.5 py-1 bg-cyan-100 text-cyan-800 rounded-lg text-xs">
+                                  {opt?.label ?? code}
+                                  <button type="button" onClick={() => setConfigCountries(configCountries.filter((c) => c !== code))} className="text-cyan-600 hover:text-cyan-800">
+                                    &times;
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v && !configCountries.includes(v)) setConfigCountries([...configCountries, v]);
+                              e.target.value = "";
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                          >
+                            <option value="">Select country...</option>
+                            {analysisCountryOptions.filter((o) => !configCountries.includes(o.value)).map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
                       <div>
                         <label className="block text-sm font-medium text-gray-900 mb-2">Prompts used during analysis</label>
-                        <p className="text-xs text-gray-500 mb-2">Language and region are shown only for prompts that were manually added in the first analysis (not for auto-generated prompts).</p>
+                        <p className="text-xs text-gray-500 mb-2">All prompts will run in the languages and regions selected above.</p>
+                        {(configLanguages.length > 0 || configCountries.length > 0) && (
+                          <div className="flex flex-wrap items-center gap-1.5 mb-3 px-3 py-2 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600">
+                            {configLanguages.length > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Globe className="w-3 h-3 text-teal-600" />
+                                {configLanguages.map(c => analysisLanguageOptions.find(o => o.value === c)?.label ?? c).join(', ')}
+                              </span>
+                            )}
+                            {configLanguages.length > 0 && configCountries.length > 0 && (
+                              <span className="text-gray-300">|</span>
+                            )}
+                            {configCountries.length > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Target className="w-3 h-3 text-cyan-600" />
+                                {configCountries.map(c => analysisCountryOptions.find(o => o.value === c)?.label ?? c).join(', ')}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                           {configManualQueries.map((q, i) => (
                             <div key={i} className="flex gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -6035,36 +6611,6 @@ function AIVisibilityContent() {
                                 rows={2}
                                 className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y"
                               />
-                              {q.isManual ? (
-                                <>
-                                  <div className="flex flex-col gap-1 shrink-0">
-                                    <span className="text-xs text-gray-500">Language</span>
-                                    <select
-                                      value={q.language ?? ''}
-                                      onChange={(e) => setConfigManualQueries((prev) => prev.map((p, j) => (j === i ? { ...p, language: e.target.value || undefined } : p)))}
-                                      className="w-36 px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                                    >
-                                      <option value="">—</option>
-                                      {analysisLanguageOptions.map((o) => (
-                                        <option key={o.value} value={o.value}>{o.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div className="flex flex-col gap-1 shrink-0">
-                                    <span className="text-xs text-gray-500">Region</span>
-                                    <select
-                                      value={q.country ?? ''}
-                                      onChange={(e) => setConfigManualQueries((prev) => prev.map((p, j) => (j === i ? { ...p, country: e.target.value || undefined } : p)))}
-                                      className="w-36 px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                                    >
-                                      <option value="">—</option>
-                                      {analysisCountryOptions.map((o) => (
-                                        <option key={o.value} value={o.value}>{o.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </>
-                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => setConfigManualQueries((prev) => prev.filter((_, j) => j !== i))}
@@ -6115,6 +6661,185 @@ function AIVisibilityContent() {
                   </div>
                 </div>
               )}
+
+              {/* Analysis History Modal */}
+              {showHistoryModal && selectedProject && (() => {
+                const defaultSessionId = defaultCompletedSession?.id;
+                const currentlyViewingId = historySessionId || defaultSessionId;
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowHistoryModal(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                      {/* Header */}
+                      <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-indigo-50">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
+                              <History className="w-5 h-5 text-purple-600" />
+                            </div>
+                            <div>
+                              <h2 className="text-lg font-semibold text-gray-900">Analysis History</h2>
+                              <p className="text-xs text-gray-500">
+                                {historySessionsLoading ? 'Loading...' : `${historySessions.length} session${historySessions.length !== 1 ? 's' : ''}`} for {selectedProject.brand_name}
+                              </p>
+                            </div>
+                          </div>
+                          <button onClick={() => setShowHistoryModal(false)} className="p-2 text-gray-400 hover:text-gray-600 rounded-xl hover:bg-white/80 transition-colors">
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Session List */}
+                      <div className="px-6 py-4 overflow-y-auto flex-1">
+                        {historySessionsLoading ? (
+                          <div className="text-center py-16 text-gray-400">
+                            <RefreshCw className="w-10 h-10 mx-auto mb-4 text-purple-300 animate-spin" />
+                            <p className="font-medium text-gray-500">Loading sessions...</p>
+                          </div>
+                        ) : historySessions.length === 0 ? (
+                          <div className="text-center py-16 text-gray-400">
+                            <History className="w-14 h-14 mx-auto mb-4 text-gray-200" />
+                            <p className="font-medium text-gray-500">No analysis sessions yet</p>
+                            <p className="text-sm mt-1">Run an analysis to see history here</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {[...historySessions].sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()).map((session, idx) => {
+                              const isCurrentlyViewing = currentlyViewingId === session.id;
+                              const isLatest = idx === 0;
+                              const prog = session.total_queries && session.total_queries > 0
+                                ? Math.round(((session.completed_queries || 0) / session.total_queries) * 100)
+                                : 0;
+                              const mentions = session.results_summary?.total_mentions || 0;
+                              const totalQ = session.results_summary?.total_queries || session.total_queries || 0;
+                              const mentionRate = totalQ > 0 ? ((mentions / totalQ) * 100).toFixed(1) : '0';
+
+                              return (
+                                <div
+                                  key={session.id}
+                                  className={`group relative rounded-xl border transition-all cursor-pointer ${
+                                    isCurrentlyViewing
+                                      ? 'border-purple-300 bg-purple-50 ring-1 ring-purple-200'
+                                      : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
+                                  }`}
+                                  onClick={() => session.status === 'completed' && handleViewHistorySession(session.id)}
+                                >
+                                  <div className="px-4 py-3.5">
+                                    {/* Top row: title + badges */}
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        {session.status === 'completed' ? (
+                                          <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                                        ) : session.status === 'running' ? (
+                                          <RefreshCw className="w-4 h-4 text-blue-500 animate-spin shrink-0" />
+                                        ) : session.status === 'paused' ? (
+                                          <Clock className="w-4 h-4 text-yellow-500 shrink-0" />
+                                        ) : (
+                                          <XCircle className="w-4 h-4 text-red-500 shrink-0" />
+                                        )}
+                                        <span className="font-medium text-gray-900 text-sm truncate">
+                                          {session.session_name || 'Analysis Session'}
+                                        </span>
+                                        {isLatest && (
+                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-600">
+                                            Latest
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        {isCurrentlyViewing && (
+                                          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-600 text-white">
+                                            <Eye className="w-3 h-3" />
+                                            Active
+                                          </span>
+                                        )}
+                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                                          session.status === 'completed' ? 'bg-green-100 text-green-700'
+                                            : session.status === 'running' ? 'bg-blue-100 text-blue-700'
+                                            : session.status === 'paused' ? 'bg-yellow-100 text-yellow-700'
+                                            : 'bg-red-100 text-red-700'
+                                        }`}>
+                                          {session.status}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Date row */}
+                                    <div className="flex items-center gap-3 text-xs text-gray-500 mb-2">
+                                      <span className="flex items-center gap-1">
+                                        <Clock className="w-3 h-3" />
+                                        {new Date(session.started_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                                        {' '}
+                                        {new Date(session.started_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                      {session.completed_at && (
+                                        <span className="text-gray-400">
+                                          &rarr; {new Date(session.completed_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Stats row for completed */}
+                                    {session.status === 'completed' && (
+                                      <div className="flex items-center gap-3 flex-wrap">
+                                        <div className="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-xs text-gray-700">
+                                          <BarChart3 className="w-3 h-3 text-gray-500" />
+                                          {totalQ} queries
+                                        </div>
+                                        <div className="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-xs text-gray-700">
+                                          <Eye className="w-3 h-3 text-gray-500" />
+                                          {mentions} mentions
+                                        </div>
+                                        <div className="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-xs text-gray-700">
+                                          <TrendingUp className="w-3 h-3 text-gray-500" />
+                                          {mentionRate}% rate
+                                        </div>
+                                        {session.results_summary?.platforms_analyzed && (
+                                          <div className="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-xs text-gray-700">
+                                            <Globe className="w-3 h-3 text-gray-500" />
+                                            {session.results_summary.platforms_analyzed.length} platforms
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Progress bar for running */}
+                                    {session.status === 'running' && (
+                                      <div>
+                                        <div className="w-full h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                                          <div className="h-full bg-blue-500 rounded-full transition-all duration-300" style={{ width: `${prog}%` }} />
+                                        </div>
+                                        <span className="text-[11px] text-blue-600 mt-1">{prog}% &mdash; {session.completed_queries || 0}/{session.total_queries || 0}</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Hover arrow for completed, non-viewing sessions */}
+                                  {session.status === 'completed' && !isCurrentlyViewing && (
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <ArrowRight className="w-4 h-4 text-purple-400" />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer */}
+                      <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex justify-end">
+                        <button
+                          onClick={() => setShowHistoryModal(false)}
+                          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Running Status */}
               {isRunning && latestSession?.id && (
@@ -6466,17 +7191,53 @@ function AIVisibilityContent() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
-                  {t.dashboard.aiVisibility.website} *
-                </label>
-                <input
-                  type="text"
-                  value={websiteUrl}
-                  onChange={(e) => setWebsiteUrl(e.target.value)}
-                  placeholder="example.com"
-                  className={`w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${isRtl ? 'text-right' : 'text-left'}`}
-                  dir="ltr"
-                />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-900">
+                    {t.dashboard.aiVisibility.website} *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/dashboard/domains')}
+                    className="flex items-center gap-1.5 text-sm text-purple-600 hover:text-purple-700 font-medium"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add domain
+                  </button>
+                </div>
+                <div className="relative">
+                  {loadingDomains ? (
+                    <div className="w-full px-4 py-3 bg-gray-50 text-gray-400 border border-gray-300 rounded-lg flex items-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Loading domains...
+                    </div>
+                  ) : availableDomains.length > 0 ? (
+                    <select
+                      value={websiteUrl}
+                      onChange={(e) => setWebsiteUrl(e.target.value)}
+                      className="w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent appearance-none pr-10"
+                    >
+                      <option value="">Select a domain</option>
+                      {availableDomains.map((d) => (
+                        <option key={d.id} value={d.domain}>{d.domain}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={websiteUrl}
+                      onChange={(e) => setWebsiteUrl(e.target.value)}
+                      placeholder="example.com"
+                      className={`w-full px-4 py-3 bg-white text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${isRtl ? 'text-right' : 'text-left'}`}
+                      dir="ltr"
+                    />
+                  )}
+                  {availableDomains.length > 0 && !loadingDomains && (
+                    <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                  )}
+                </div>
+                {availableDomains.length === 0 && !loadingDomains && (
+                  <p className="text-xs text-gray-500 mt-1">No domains found. Add domains in <span className="text-purple-600 font-medium">Domain Management</span> or enter manually.</p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">

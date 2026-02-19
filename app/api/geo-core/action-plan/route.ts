@@ -59,6 +59,104 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ── Fetch GSC Keywords (project-linked, from gsc_keywords table) ──
+    let gscKeywords: any[] = [];
+    if (projectId) {
+      try {
+        const { data: kwData } = await supabase
+          .from("gsc_keywords")
+          .select("keyword, clicks, impressions, ctr, position")
+          .eq("project_id", projectId)
+          .order("impressions", { ascending: false })
+          .limit(30);
+        gscKeywords = kwData || [];
+        if (gscKeywords.length > 0)
+          console.log(`✅ Loaded ${gscKeywords.length} GSC keywords for project`);
+      } catch (e) {
+        console.error("Error fetching gsc_keywords:", e);
+      }
+    }
+
+    // ── Fetch GSC Queries + Pages (domain-linked, via domains table) ──
+    let gscQueries: any[] = [];
+    let gscPages: any[] = [];
+    try {
+      // Resolve domain_id from the domains table using the project's website_url
+      const rawDomain = (projectCrawlerData?.domain || domain || "")
+        .replace(/https?:\/\//i, "")
+        .replace(/^www\./i, "")
+        .split("/")[0]
+        .trim();
+
+      if (rawDomain) {
+        const { data: domainRow } = await supabase
+          .from("domains")
+          .select("id")
+          .or(`domain.ilike.%${rawDomain}%,domain.eq.${rawDomain}`)
+          .limit(1)
+          .maybeSingle();
+
+        if (domainRow?.id) {
+          console.log(`✅ Found domain_id ${domainRow.id} for ${rawDomain}`);
+
+          const [queriesRes, pagesRes] = await Promise.all([
+            supabase
+              .from("gsc_queries")
+              .select("query, clicks, impressions, ctr, position")
+              .eq("domain_id", domainRow.id)
+              .order("impressions", { ascending: false })
+              .limit(25),
+            supabase
+              .from("gsc_pages")
+              .select("page, clicks, impressions, ctr, position")
+              .eq("domain_id", domainRow.id)
+              .order("impressions", { ascending: false })
+              .limit(10),
+          ]);
+
+          // Map gsc_queries.query → keyword field to match GscKeywordData shape
+          gscQueries = (queriesRes.data || []).map((r: any) => ({
+            keyword: r.query,
+            clicks: r.clicks,
+            impressions: r.impressions,
+            ctr: r.ctr,
+            position: r.position,
+          }));
+          gscPages = pagesRes.data || [];
+          console.log(`✅ Loaded ${gscQueries.length} GSC queries, ${gscPages.length} GSC pages`);
+        }
+      }
+    } catch (e) {
+      console.error("Error fetching GSC queries/pages:", e);
+    }
+
+    // ── Fetch AI Visibility Data (from latest brand_analysis_session) ──
+    let aiVisibilityData: any[] = [];
+    if (projectId) {
+      try {
+        const { data: sessions } = await supabase
+          .from("brand_analysis_sessions")
+          .select("id")
+          .eq("project_id", projectId)
+          .eq("status", "completed")
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (sessions && sessions.length > 0) {
+          const { data: aiResponses } = await supabase
+            .from("ai_platform_responses")
+            .select("platform, prompt, response, gap_suggestion, response_metadata")
+            .eq("project_id", projectId)
+            .eq("session_id", sessions[0].id)
+            .limit(30);
+          aiVisibilityData = aiResponses || [];
+          console.log(`✅ Loaded ${aiVisibilityData.length} AI platform responses`);
+        }
+      } catch (e) {
+        console.error("Error fetching AI visibility data:", e);
+      }
+    }
+
     if (!objective) {
       return NextResponse.json(
         { error: "Objective is required" },
@@ -108,6 +206,11 @@ export async function POST(request: NextRequest) {
       region,
       channels: channels || ['all'],
       language: language || 'en',
+      // Real performance data for business-driven, platform-specific planning
+      gscKeywords: gscKeywords.length > 0 ? gscKeywords : undefined,
+      gscQueries: gscQueries.length > 0 ? gscQueries : undefined,
+      gscPages: gscPages.length > 0 ? gscPages : undefined,
+      aiVisibilityData: aiVisibilityData.length > 0 ? aiVisibilityData : undefined,
     });
 
     // Map AI output steps to frontend format with execution metadata
