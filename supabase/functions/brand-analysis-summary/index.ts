@@ -72,6 +72,70 @@ async function getSiteMetadata(url: string) {
   return { title, description, icon };
 }
 
+/** Extract main readable content from HTML for accurate website-based summary (no DOM; regex/string based). */
+function extractPageContent(html: string, maxBodyChars = 4000): { headings: string[]; bodyExcerpt: string } {
+  // Remove script and style tags and their content
+  let cleaned = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ');
+  cleaned = cleaned.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+  cleaned = cleaned.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ');
+
+  const headings: string[] = [];
+  const h1Matches = cleaned.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi);
+  for (const m of h1Matches) headings.push(m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+  const h2Matches = cleaned.matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/gi);
+  for (const m of h2Matches) headings.push(m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+  const h3Matches = cleaned.matchAll(/<h3\b[^>]*>([\s\S]*?)<\/h3>/gi);
+  for (const m of h3Matches) headings.push(m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+
+  // Get text from body: strip all tags and normalize whitespace
+  const bodyMatch = cleaned.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
+  const bodyHtml = bodyMatch ? bodyMatch[1] : cleaned;
+  const bodyText = bodyHtml
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*[\r\n]+\s*/g, '\n')
+    .trim();
+  const bodyExcerpt = bodyText.length > maxBodyChars ? bodyText.slice(0, maxBodyChars) + '…' : bodyText;
+
+  return { headings: headings.filter(Boolean), bodyExcerpt: bodyExcerpt.trim() };
+}
+
+async function getSiteContent(url: string) {
+  const res = await fetchWithTimeout(url);
+  const html = await res.text();
+  const meta = getSiteMetadataFromHtml(html, url);
+  const { headings, bodyExcerpt } = extractPageContent(html);
+  return { ...meta, headings, bodyExcerpt };
+}
+
+function getSiteMetadataFromHtml(html: string, url: string) {
+  const getMatch = (regex: RegExp) => {
+    const m = regex.exec(html);
+    return m ? m[1].trim() : null;
+  };
+  const title =
+    getMatch(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["'][^>]*>/i) ||
+    getMatch(/<meta[^>]+name=["']twitter:title["'][^>]*content=["']([^"']+)["'][^>]*>/i) ||
+    getMatch(/<title[^>]*>([^<]+)<\/title>/i);
+  const description =
+    getMatch(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["'][^>]*>/i) ||
+    getMatch(/<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["'][^>]*>/i) ||
+    getMatch(/<meta[^>]+name=["']twitter:description["'][^>]*content=["']([^"']+)["'][^>]*>/i);
+  let icon: string | null = null;
+  const iconMatch = /<link[^>]+rel=["'](?:shortcut icon|icon|apple-touch-icon[^"']*)["'][^>]*href=["']([^"']+)["'][^>]*>/i.exec(html);
+  if (iconMatch) {
+    const href = iconMatch[1];
+    icon = href.startsWith('http') ? href : new URL(href, extractDomain(url) || url).toString();
+  } else {
+    try {
+      icon = new URL('/favicon.ico', extractDomain(url) || url).toString();
+    } catch {
+      icon = null;
+    }
+  }
+  return { title, description, icon };
+}
+
 async function searchBrandInformation(brandName: string, website: string, industry?: string): Promise<string> {
   if (!PERPLEXITY_API_KEY) {
     console.warn('PERPLEXITY_API_KEY not available, skipping web search');
@@ -134,37 +198,16 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'url and brandName are required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // If projectId is provided, check if summary already exists in database
-    if (projectId) {
-      const { data: project, error: projectError } = await supabase
-        .from('brand_analysis_projects')
-        .select('brand_summary, brand_summary_updated_at')
-        .eq('id', projectId)
-        .single();
+    // Always generate a fresh summary; use actual website content for exact details
+    console.log(`📄 Fetching website content from ${url}...`);
+    const siteData = await getSiteContent(url);
+    const meta = { title: siteData.title, description: siteData.description, icon: siteData.icon };
 
-      if (!projectError && project?.brand_summary) {
-        console.log(`✅ Using cached brand summary for project: ${projectId}`);
-        return new Response(
-          JSON.stringify({
-            summary: project.brand_summary.summary || project.brand_summary,
-            favicon: project.brand_summary.favicon || null,
-            sourceUrl: project.brand_summary.sourceUrl || url,
-            lastUpdated: project.brand_summary_updated_at || project.brand_summary.lastUpdated || new Date().toISOString(),
-            cached: true
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-    }
-
-    const meta = await getSiteMetadata(url);
-    
-    // Fetch accurate brand information from Google and other sources via Perplexity
     console.log(`🔍 Fetching brand information for ${brandName} from web sources...`);
     const webSearchResults = await searchBrandInformation(brandName, url, industry || undefined);
 
     const system = `You are a brand analyst. Return ONLY valid compact JSON with these fields:\n{
-      "overview": string (CONCISE but comprehensive - must be 250-300 words that includes key information: company size, revenue/valuation, key markets, main competitors, key partnerships, recent achievements, social media presence, key executives, mission statement, values & culture, target audience, market position, technology stack, certifications & awards. Make it informative but concise),
+      "overview": string (250-300 words: accurate company overview based FIRST on the website's own text, then supplement with web research only where the site doesn't say enough),
       "industry": string,
       "typical_clients": string,
       "business_model": string,
@@ -174,25 +217,37 @@ serve(async (req) => {
       "headquarters": string
     }`;
 
-    // Enhance user prompt with web search results
-    const userPrompt = webSearchResults 
+    const websiteSection = `EXACT CONTENT FROM THE COMPANY'S WEBSITE (use this as the PRIMARY source; the summary must reflect what the website actually says):
+---
+Page title: ${siteData.title || ''}
+Meta description: ${siteData.description || ''}
+
+Headings on the page: ${(siteData.headings || []).slice(0, 30).join(' | ') || '—'}
+
+Main text from the website:
+${(siteData.bodyExcerpt && siteData.bodyExcerpt.length > 80) ? siteData.bodyExcerpt : '(page may be JS-rendered or sparse; use title, meta description, and headings above as the primary source)'}
+---`;
+
+    const userPrompt = webSearchResults
       ? `Brand name: ${brandName}
-Website: ${url}
-Website title: ${meta.title || ''}
-Website description: ${meta.description || ''}
+Website URL: ${url}
 Industry: ${industry || ''}
 Target keywords: ${(keywords || []).join(', ')}
 
-RESEARCH DATA FROM WEB SOURCES (Google, news articles, company profiles):
+${websiteSection}
+
+SUPPLEMENTARY RESEARCH (use only to fill gaps or add facts not on the website—e.g. revenue, competitors, headquarters):
 ${webSearchResults}
 
-Task: Produce a comprehensive brand profile using the RESEARCH DATA above as the primary source of information. Prioritize facts from the web search results over the website metadata. The "overview" field MUST be 250-300 words (not more, not less) that naturally integrates key information about: company size, revenue/valuation, key markets, main competitors, key partnerships, recent achievements, social media presence, key executives, mission statement, values & culture, target audience, market position, technology stack, and certifications & awards. Write it as a cohesive, informative but concise overview. For other fields, extract specific facts from the research data. If information is truly unknown or not available in the research data, put "unknown". Be specific and detailed where information is available.`
+Task: Produce a brand profile that ACCURATELY reflects the website. Base overview, key_offerings, business_model, brand_essence, and typical_clients on the EXACT WEBSITE CONTENT above. Use the same wording and details as the site where possible. Only use supplementary research for facts the site does not mention. The "overview" MUST be 250-300 words. For any field with no information, use "unknown".`
       : `Brand name: ${brandName}
-Website title: ${meta.title || ''}
-Website description: ${meta.description || ''}
+Website URL: ${url}
 Industry: ${industry || ''}
 Target keywords: ${(keywords || []).join(', ')}
-Task: Produce a comprehensive brand profile. The "overview" field MUST be 250-300 words (not more, not less) that naturally integrates key information about: company size, revenue/valuation, key markets, main competitors, key partnerships, recent achievements, social media presence, key executives, mission statement, values & culture, target audience, market position, technology stack, and certifications & awards. Write it as a cohesive, informative but concise overview. For other fields, if data is unknown or not applicable, put "unknown". Be specific and detailed where information is available.`;
+
+${websiteSection}
+
+Task: Produce a brand profile that ACCURATELY reflects the website. Base all fields on the EXACT WEBSITE CONTENT above. Use the same wording and details as the site. The "overview" MUST be 250-300 words. For any field with no information, use "unknown".`;
 
     const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
