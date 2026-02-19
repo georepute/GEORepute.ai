@@ -53,7 +53,9 @@ import {
   CheckCircle,
   XCircle,
   Trophy,
-  AlertTriangle
+  AlertTriangle,
+  Clock,
+  History
 } from "lucide-react";
 import {
   PieChart,
@@ -122,6 +124,7 @@ interface Session {
   results_summary?: any;
   session_name?: string;
   started_at: string;
+  completed_at?: string;
   competitor_analysis?: {
     competitor_data?: Array<{
       name: string;
@@ -231,6 +234,14 @@ function AIVisibilityContent() {
   const [configPlatforms, setConfigPlatforms] = useState<string[]>([]);
   const [configProjectName, setConfigProjectName] = useState('');
   const [configSaving, setConfigSaving] = useState(false);
+  const [configLanguages, setConfigLanguages] = useState<string[]>([]);
+  const [configCountries, setConfigCountries] = useState<string[]>([]);
+
+  // History modal state
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null);
+  const [historyResponses, setHistoryResponses] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   
   // Domain Intelligence state
   const [domainIntelligenceJobs, setDomainIntelligenceJobs] = useState<any[]>([]);
@@ -477,24 +488,25 @@ function AIVisibilityContent() {
     }
   }, [viewMode, projects, projectSessions, selectedProject]);
 
-  // Fetch responses when switching to results tab
+  // Fetch responses when switching to results tab (respect history selection)
   useEffect(() => {
-    if (viewMode === 'details' && selectedProject && activeTab === 'results') {
+    if (viewMode === 'details' && selectedProject) {
+      if (historySessionId) {
+        fetchProjectResponses(historySessionId);
+        return;
+      }
       const latestCompleted = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
       if (latestCompleted?.id) {
-        console.log('Results tab active, fetching responses for session:', latestCompleted.id);
         fetchProjectResponses(latestCompleted.id);
       } else {
-        // Try latest session if no completed session
         const latestSession = projectSessions.find(s => s.project_id === selectedProject.id);
         if (latestSession?.id) {
-          console.log('Results tab active, fetching responses for latest session:', latestSession.id);
           fetchProjectResponses(latestSession.id);
         }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProject?.id, activeTab, projectSessions.length, viewMode]);
+  }, [selectedProject?.id, activeTab, projectSessions.length, viewMode, historySessionId]);
 
   // Fetch brand summary when switching to summary tab
   useEffect(() => {
@@ -831,6 +843,35 @@ function AIVisibilityContent() {
 
   const getProjectSession = (projectId: string): Session | null => {
     return projectSessions.find(s => s.project_id === projectId) || null;
+  };
+
+  const fetchHistorySessionResponses = async (sessionId: string) => {
+    setHistoryLoading(true);
+    setHistorySessionId(sessionId);
+    try {
+      const { data: responses, error } = await supabase
+        .from('ai_platform_responses')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setHistoryResponses(responses || []);
+    } catch (error) {
+      console.error('Error fetching history responses:', error);
+      setHistoryResponses([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleViewHistorySession = async (sessionId: string) => {
+    setHistorySessionId(sessionId);
+    const session = projectSessions.find(s => s.id === sessionId);
+    if (session?.results_summary) {
+      setProjectStats(session.results_summary);
+    }
+    await fetchProjectResponses(sessionId);
+    setShowHistoryModal(false);
   };
 
   const fetchDomainIntelligenceJobs = async () => {
@@ -1278,6 +1319,8 @@ function AIVisibilityContent() {
     setConfigManualQueries(initialQueries);
     setConfigPlatforms(project.active_platforms?.length ? [...project.active_platforms] : ['perplexity', 'chatgpt']);
     setConfigProjectName(project.brand_name || '');
+    setConfigLanguages(Array.isArray(project.analysis_languages) ? [...project.analysis_languages] : []);
+    setConfigCountries(Array.isArray(project.analysis_countries) ? [...project.analysis_countries] : []);
     if (responses.length > 0 && initialQueries.length > 0) {
       setConfigQueryMode('manual');
     }
@@ -1299,6 +1342,8 @@ function AIVisibilityContent() {
             .filter((q) => q.text.trim())
             .map(({ text, language, country }) => ({ text, language, country })),
           platforms: configPlatforms.length > 0 ? configPlatforms : selectedProject.active_platforms,
+          analysisLanguages: configLanguages,
+          analysisCountries: configCountries,
         }),
       });
       const data = await res.json();
@@ -1315,12 +1360,11 @@ function AIVisibilityContent() {
   };
 
   const handleProjectClick = (project: Project) => {
-    // Clear brand summary immediately when switching projects to prevent showing old data
     setBrandSummary(null);
+    setHistorySessionId(null);
     setSelectedProject(project);
     fetchProjectDetails(project.id);
     setViewMode('details');
-    // Update URL with project ID for persistence on refresh
     router.push(`/dashboard/ai-visibility?project=${project.id}`, { scroll: false });
   };
 
@@ -4192,6 +4236,11 @@ function AIVisibilityContent() {
     const progress = latestSession && latestSession.total_queries 
       ? Math.round((latestSession.completed_queries || 0) / latestSession.total_queries * 100)
       : 0;
+    const activeSession = historySessionId
+      ? projectSessions.find(s => s.id === historySessionId) || latestSession
+      : (projectSessions.find(s => s.status === 'completed') || latestSession);
+    const defaultCompletedSession = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
+    const isViewingHistory = historySessionId != null && defaultCompletedSession != null && historySessionId !== defaultCompletedSession.id;
 
     return (
       <div className="min-h-screen bg-gray-50 p-4 sm:p-6 lg:p-8" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -4498,6 +4547,33 @@ function AIVisibilityContent() {
                 </div>
               </div>
 
+              {/* Viewing historical session banner */}
+              {isViewingHistory && activeSession && (
+                <div className="mb-4 flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-center gap-2 text-sm text-amber-800">
+                    <History className="w-4 h-4 shrink-0" />
+                    <span>
+                      Viewing: <strong>{activeSession.session_name || 'Analysis Session'}</strong>
+                      {' '}&mdash;{' '}
+                      {new Date(activeSession.started_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setHistorySessionId(null);
+                      if (defaultCompletedSession) {
+                        setProjectStats(defaultCompletedSession.results_summary || null);
+                        fetchProjectResponses(defaultCompletedSession.id);
+                      }
+                    }}
+                    className="shrink-0 flex items-center gap-1.5 text-sm font-medium text-amber-700 hover:text-amber-900 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    Back to latest
+                  </button>
+                </div>
+              )}
+
               {/* Tabs */}
               <div className="bg-white rounded-lg border border-gray-200" dir={isRtl ? 'rtl' : 'ltr'}>
                 <div className="border-b border-gray-200 flex overflow-x-auto">
@@ -4694,17 +4770,16 @@ function AIVisibilityContent() {
                         <div className="text-center py-12 text-gray-500">
                           <Search className="w-12 h-12 mx-auto mb-4 text-gray-400" />
                           <p>No Analysis Results</p>
-                          {projectSessions.find(s => s.project_id === selectedProject?.id)?.status === 'running' && (
+                          {latestSession?.status === 'running' && (
                             <p className="text-sm mt-2">Analysis is still running. Results will appear here when complete.</p>
                           )}
-                          {projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed') && (
+                          {activeSession?.status === 'completed' && (
                             <div className="mt-4">
                               <p className="text-sm text-gray-600 mb-2">No responses found in database.</p>
                               <button
                                 onClick={() => {
-                                  const session = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
-                                  if (session?.id) {
-                                    fetchProjectResponses(session.id);
+                                  if (activeSession?.id) {
+                                    fetchProjectResponses(activeSession.id);
                                   }
                                 }}
                                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
@@ -4901,8 +4976,7 @@ function AIVisibilityContent() {
                     <div className="space-y-6">
                       {/* Advanced Competitor Analysis Section */}
                       {(() => {
-                        const latestSession = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
-                        const competitorAnalysis = latestSession?.competitor_analysis;
+                        const competitorAnalysis = activeSession?.competitor_analysis;
                         
                         if (competitorAnalysis && competitorAnalysis.rankings && competitorAnalysis.rankings.length > 0) {
                           return (
@@ -5756,8 +5830,7 @@ function AIVisibilityContent() {
                             
                             {/* Market Position Chart - Advanced Competitor Analysis */}
                             {(() => {
-                              const latestSession = projectSessions.find(s => s.project_id === selectedProject?.id && s.status === 'completed');
-                              const competitorAnalysis = latestSession?.competitor_analysis;
+                              const competitorAnalysis = activeSession?.competitor_analysis;
                               
                               if (competitorAnalysis?.market_positions && competitorAnalysis.market_positions.length > 0) {
                                 const positionData = competitorAnalysis.market_positions.map((pos: any) => {
@@ -5858,6 +5931,13 @@ function AIVisibilityContent() {
                 >
                   <Settings className="w-4 h-4" />
                   Configure Project
+                </button>
+                <button
+                  onClick={() => setShowHistoryModal(true)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  <History className="w-4 h-4" />
+                  Analysis History
                 </button>
                 <div className="relative" ref={exportDropdownRef}>
                   <button 
@@ -6022,9 +6102,94 @@ function AIVisibilityContent() {
                           ))}
                         </div>
                       </div>
+                      {/* Language & Region Selection */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="p-4 rounded-xl bg-teal-50 border border-teal-100">
+                          <h3 className="text-sm font-semibold text-gray-900 mb-1">Languages for Analysis</h3>
+                          <p className="text-xs text-gray-500 mb-2">Select languages to generate queries in. Analysis will run in these languages.</p>
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {configLanguages.map((code) => {
+                              const opt = analysisLanguageOptions.find((o) => o.value === code);
+                              return (
+                                <span key={code} className="inline-flex items-center gap-1 px-2.5 py-1 bg-teal-100 text-teal-800 rounded-lg text-xs">
+                                  {opt?.label ?? code}
+                                  <button type="button" onClick={() => setConfigLanguages(configLanguages.filter((c) => c !== code))} className="text-teal-600 hover:text-teal-800">
+                                    &times;
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v && !configLanguages.includes(v)) setConfigLanguages([...configLanguages, v]);
+                              e.target.value = "";
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                          >
+                            <option value="">Select language...</option>
+                            {analysisLanguageOptions.filter((o) => !configLanguages.includes(o.value)).map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="p-4 rounded-xl bg-cyan-50 border border-cyan-100">
+                          <h3 className="text-sm font-semibold text-gray-900 mb-1">Countries/Regions</h3>
+                          <p className="text-xs text-gray-500 mb-2">Select countries for geography-specific queries.</p>
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {configCountries.map((code) => {
+                              const opt = analysisCountryOptions.find((o) => o.value === code);
+                              return (
+                                <span key={code} className="inline-flex items-center gap-1 px-2.5 py-1 bg-cyan-100 text-cyan-800 rounded-lg text-xs">
+                                  {opt?.label ?? code}
+                                  <button type="button" onClick={() => setConfigCountries(configCountries.filter((c) => c !== code))} className="text-cyan-600 hover:text-cyan-800">
+                                    &times;
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v && !configCountries.includes(v)) setConfigCountries([...configCountries, v]);
+                              e.target.value = "";
+                            }}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                          >
+                            <option value="">Select country...</option>
+                            {analysisCountryOptions.filter((o) => !configCountries.includes(o.value)).map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
                       <div>
                         <label className="block text-sm font-medium text-gray-900 mb-2">Prompts used during analysis</label>
-                        <p className="text-xs text-gray-500 mb-2">Language and region are shown only for prompts that were manually added in the first analysis (not for auto-generated prompts).</p>
+                        <p className="text-xs text-gray-500 mb-2">All prompts will run in the languages and regions selected above.</p>
+                        {(configLanguages.length > 0 || configCountries.length > 0) && (
+                          <div className="flex flex-wrap items-center gap-1.5 mb-3 px-3 py-2 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600">
+                            {configLanguages.length > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Globe className="w-3 h-3 text-teal-600" />
+                                {configLanguages.map(c => analysisLanguageOptions.find(o => o.value === c)?.label ?? c).join(', ')}
+                              </span>
+                            )}
+                            {configLanguages.length > 0 && configCountries.length > 0 && (
+                              <span className="text-gray-300">|</span>
+                            )}
+                            {configCountries.length > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Target className="w-3 h-3 text-cyan-600" />
+                                {configCountries.map(c => analysisCountryOptions.find(o => o.value === c)?.label ?? c).join(', ')}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
                           {configManualQueries.map((q, i) => (
                             <div key={i} className="flex gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -6035,36 +6200,6 @@ function AIVisibilityContent() {
                                 rows={2}
                                 className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y"
                               />
-                              {q.isManual ? (
-                                <>
-                                  <div className="flex flex-col gap-1 shrink-0">
-                                    <span className="text-xs text-gray-500">Language</span>
-                                    <select
-                                      value={q.language ?? ''}
-                                      onChange={(e) => setConfigManualQueries((prev) => prev.map((p, j) => (j === i ? { ...p, language: e.target.value || undefined } : p)))}
-                                      className="w-36 px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                                    >
-                                      <option value="">—</option>
-                                      {analysisLanguageOptions.map((o) => (
-                                        <option key={o.value} value={o.value}>{o.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div className="flex flex-col gap-1 shrink-0">
-                                    <span className="text-xs text-gray-500">Region</span>
-                                    <select
-                                      value={q.country ?? ''}
-                                      onChange={(e) => setConfigManualQueries((prev) => prev.map((p, j) => (j === i ? { ...p, country: e.target.value || undefined } : p)))}
-                                      className="w-36 px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                                    >
-                                      <option value="">—</option>
-                                      {analysisCountryOptions.map((o) => (
-                                        <option key={o.value} value={o.value}>{o.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </>
-                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => setConfigManualQueries((prev) => prev.filter((_, j) => j !== i))}
@@ -6115,6 +6250,178 @@ function AIVisibilityContent() {
                   </div>
                 </div>
               )}
+
+              {/* Analysis History Modal */}
+              {showHistoryModal && selectedProject && (() => {
+                const defaultSessionId = defaultCompletedSession?.id;
+                const currentlyViewingId = historySessionId || defaultSessionId;
+                return (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowHistoryModal(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+                      {/* Header */}
+                      <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-indigo-50">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
+                              <History className="w-5 h-5 text-purple-600" />
+                            </div>
+                            <div>
+                              <h2 className="text-lg font-semibold text-gray-900">Analysis History</h2>
+                              <p className="text-xs text-gray-500">{projectSessions.length} session{projectSessions.length !== 1 ? 's' : ''} for {selectedProject.brand_name}</p>
+                            </div>
+                          </div>
+                          <button onClick={() => setShowHistoryModal(false)} className="p-2 text-gray-400 hover:text-gray-600 rounded-xl hover:bg-white/80 transition-colors">
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Session List */}
+                      <div className="px-6 py-4 overflow-y-auto flex-1">
+                        {projectSessions.length === 0 ? (
+                          <div className="text-center py-16 text-gray-400">
+                            <History className="w-14 h-14 mx-auto mb-4 text-gray-200" />
+                            <p className="font-medium text-gray-500">No analysis sessions yet</p>
+                            <p className="text-sm mt-1">Run an analysis to see history here</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {projectSessions.map((session, idx) => {
+                              const isCurrentlyViewing = currentlyViewingId === session.id;
+                              const isLatest = idx === 0;
+                              const prog = session.total_queries && session.total_queries > 0
+                                ? Math.round(((session.completed_queries || 0) / session.total_queries) * 100)
+                                : 0;
+                              const mentions = session.results_summary?.total_mentions || 0;
+                              const totalQ = session.results_summary?.total_queries || session.total_queries || 0;
+                              const mentionRate = totalQ > 0 ? ((mentions / totalQ) * 100).toFixed(1) : '0';
+
+                              return (
+                                <div
+                                  key={session.id}
+                                  className={`group relative rounded-xl border transition-all cursor-pointer ${
+                                    isCurrentlyViewing
+                                      ? 'border-purple-300 bg-purple-50 ring-1 ring-purple-200'
+                                      : 'border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm'
+                                  }`}
+                                  onClick={() => session.status === 'completed' && handleViewHistorySession(session.id)}
+                                >
+                                  <div className="px-4 py-3.5">
+                                    {/* Top row: title + badges */}
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        {session.status === 'completed' ? (
+                                          <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+                                        ) : session.status === 'running' ? (
+                                          <RefreshCw className="w-4 h-4 text-blue-500 animate-spin shrink-0" />
+                                        ) : session.status === 'paused' ? (
+                                          <Clock className="w-4 h-4 text-yellow-500 shrink-0" />
+                                        ) : (
+                                          <XCircle className="w-4 h-4 text-red-500 shrink-0" />
+                                        )}
+                                        <span className="font-medium text-gray-900 text-sm truncate">
+                                          {session.session_name || 'Analysis Session'}
+                                        </span>
+                                        {isLatest && (
+                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-600">
+                                            Latest
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        {isCurrentlyViewing && (
+                                          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-600 text-white">
+                                            <Eye className="w-3 h-3" />
+                                            Active
+                                          </span>
+                                        )}
+                                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                                          session.status === 'completed' ? 'bg-green-100 text-green-700'
+                                            : session.status === 'running' ? 'bg-blue-100 text-blue-700'
+                                            : session.status === 'paused' ? 'bg-yellow-100 text-yellow-700'
+                                            : 'bg-red-100 text-red-700'
+                                        }`}>
+                                          {session.status}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Date row */}
+                                    <div className="flex items-center gap-3 text-xs text-gray-500 mb-2">
+                                      <span className="flex items-center gap-1">
+                                        <Clock className="w-3 h-3" />
+                                        {new Date(session.started_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                                        {' '}
+                                        {new Date(session.started_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                      </span>
+                                      {session.completed_at && (
+                                        <span className="text-gray-400">
+                                          &rarr; {new Date(session.completed_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Stats row for completed */}
+                                    {session.status === 'completed' && (
+                                      <div className="flex items-center gap-3 flex-wrap">
+                                        <div className="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-xs text-gray-700">
+                                          <BarChart3 className="w-3 h-3 text-gray-500" />
+                                          {totalQ} queries
+                                        </div>
+                                        <div className="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-xs text-gray-700">
+                                          <Eye className="w-3 h-3 text-gray-500" />
+                                          {mentions} mentions
+                                        </div>
+                                        <div className="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-xs text-gray-700">
+                                          <TrendingUp className="w-3 h-3 text-gray-500" />
+                                          {mentionRate}% rate
+                                        </div>
+                                        {session.results_summary?.platforms_analyzed && (
+                                          <div className="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-md text-xs text-gray-700">
+                                            <Globe className="w-3 h-3 text-gray-500" />
+                                            {session.results_summary.platforms_analyzed.length} platforms
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Progress bar for running */}
+                                    {session.status === 'running' && (
+                                      <div>
+                                        <div className="w-full h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                                          <div className="h-full bg-blue-500 rounded-full transition-all duration-300" style={{ width: `${prog}%` }} />
+                                        </div>
+                                        <span className="text-[11px] text-blue-600 mt-1">{prog}% &mdash; {session.completed_queries || 0}/{session.total_queries || 0}</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Hover arrow for completed, non-viewing sessions */}
+                                  {session.status === 'completed' && !isCurrentlyViewing && (
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <ArrowRight className="w-4 h-4 text-purple-400" />
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Footer */}
+                      <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex justify-end">
+                        <button
+                          onClick={() => setShowHistoryModal(false)}
+                          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Running Status */}
               {isRunning && latestSession?.id && (
