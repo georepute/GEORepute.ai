@@ -497,6 +497,7 @@ function AIVisibilityContent() {
       }
       const latestCompleted = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
       if (latestCompleted?.id) {
+        setHistorySessionId(latestCompleted.id);
         fetchProjectResponses(latestCompleted.id);
       } else {
         const latestSession = projectSessions.find(s => s.project_id === selectedProject.id);
@@ -507,6 +508,18 @@ function AIVisibilityContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject?.id, activeTab, projectSessions.length, viewMode, historySessionId]);
+
+  // Auto-select latest completed session when sessions are loaded
+  useEffect(() => {
+    if (!selectedProject || projectSessions.length === 0) return;
+    const latestCompleted = projectSessions.find(
+      s => s.project_id === selectedProject.id && s.status === 'completed'
+    );
+    if (latestCompleted?.id && latestCompleted.id !== historySessionId) {
+      setHistorySessionId(latestCompleted.id);
+      setProjectStats(latestCompleted.results_summary || null);
+    }
+  }, [selectedProject?.id, projectSessions]);
 
   // Fetch brand summary when switching to summary tab
   useEffect(() => {
@@ -714,8 +727,14 @@ function AIVisibilityContent() {
       // Calculate stats from latest completed session
       const latestCompleted = sessions?.find(s => s.status === 'completed');
       const wasRunning = projectSessions.find(s => s.project_id === projectId && s.status === 'running');
+      const newAnalysisJustCompleted = wasRunning && latestCompleted && wasRunning.id === latestCompleted.id;
       
       if (latestCompleted) {
+        // Auto-select latest completed session on initial load or when a new analysis completes
+        if (!historySessionId || newAnalysisJustCompleted) {
+          setHistorySessionId(latestCompleted.id);
+        }
+
         // Set stats if available
         if (latestCompleted.results_summary) {
           setProjectStats(latestCompleted.results_summary);
@@ -1331,6 +1350,11 @@ function AIVisibilityContent() {
     if (!selectedProject?.id) return;
     setConfigSaving(true);
     try {
+      const originalLanguages = new Set(selectedProject.analysis_languages ?? []);
+      const originalCountries = new Set(selectedProject.analysis_countries ?? []);
+      const hasNewLanguages = configLanguages.some(lang => !originalLanguages.has(lang));
+      const hasNewCountries = configCountries.some(country => !originalCountries.has(country));
+
       const res = await fetch('/api/ai-visibility', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1351,6 +1375,20 @@ function AIVisibilityContent() {
       await fetchProjectDetails(selectedProject.id, true);
       await fetchProjects();
       setShowConfigureModal(false);
+
+      if (hasNewLanguages || hasNewCountries) {
+        const updatedProject: Project = {
+          ...selectedProject,
+          brand_name: configProjectName.trim() || selectedProject.brand_name,
+          analysis_languages: configLanguages,
+          analysis_countries: configCountries,
+          active_platforms: configPlatforms.length > 0 ? configPlatforms : selectedProject.active_platforms,
+          manual_queries: configManualQueries
+            .filter(q => q.text.trim())
+            .map(({ text, language, country }) => ({ text, language, country })),
+        };
+        handleRunAnalysis(updatedProject);
+      }
     } catch (e: any) {
       console.error('Save configure error:', e);
       alert(e?.message || 'Failed to save project');
@@ -6286,7 +6324,7 @@ function AIVisibilityContent() {
                           </div>
                         ) : (
                           <div className="space-y-2">
-                            {projectSessions.map((session, idx) => {
+                            {[...projectSessions].sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()).map((session, idx) => {
                               const isCurrentlyViewing = currentlyViewingId === session.id;
                               const isLatest = idx === 0;
                               const prog = session.total_queries && session.total_queries > 0
