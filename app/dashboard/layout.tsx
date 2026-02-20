@@ -144,6 +144,7 @@ export default function DashboardLayout({
       icon: Activity, 
       requiredCapability: "canViewReports",
       children: [
+        { name: "AI Search Presence", href: "/dashboard/ai-search-presence", icon: Brain, requiredCapability: "canViewReports" },
         { name: "AI vs Google Gap", href: "/dashboard/ai-vs-google-gap", icon: Activity, requiredCapability: "canViewReports" },
       ]
     },
