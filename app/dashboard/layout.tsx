@@ -140,6 +140,14 @@ export default function DashboardLayout({
       ]
     },
     { 
+      name: "Core Reports", 
+      icon: Activity, 
+      requiredCapability: "canViewReports",
+      children: [
+        { name: "AI vs Google Gap", href: "/dashboard/ai-vs-google-gap", icon: Activity, requiredCapability: "canViewReports" },
+      ]
+    },
+    { 
       name: "Global Reports", 
       icon: Globe, 
       requiredCapability: "canViewReports",
