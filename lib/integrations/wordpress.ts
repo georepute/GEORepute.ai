@@ -763,6 +763,183 @@ export async function getWordPressCategories(config: WordPressConfig): Promise<{
   }
 }
 
+// ============================================================================
+// Self-Hosted WordPress (Application Passwords)
+// ============================================================================
+
+export interface SelfHostedWordPressConfig {
+  siteUrl: string;
+  username: string;
+  applicationPassword: string;
+}
+
+/**
+ * Normalize site URL: ensure https://, no trailing slash
+ */
+export function normalizeSelfHostedSiteUrl(url: string): string {
+  let u = url.trim();
+  if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+  u = u.replace(/^http:\/\//i, 'https://');
+  u = u.replace(/\/+$/, '');
+  return u;
+}
+
+/**
+ * Get self-hosted WordPress REST API base URL
+ */
+function getSelfHostedApiBase(siteUrl: string): string {
+  const normalized = normalizeSelfHostedSiteUrl(siteUrl);
+  return `${normalized}/wp-json/wp/v2`;
+}
+
+/**
+ * Verify self-hosted WordPress connection via Application Passwords.
+ * Uses GET /wp-json/wp/v2/users/me with HTTP Basic Auth.
+ */
+export async function verifySelfHostedWordPress(config: SelfHostedWordPressConfig): Promise<{
+  success: boolean;
+  user?: { id: number; name: string; slug: string };
+  error?: string;
+}> {
+  try {
+    const base = getSelfHostedApiBase(config.siteUrl);
+    const credentials = Buffer.from(
+      `${config.username}:${config.applicationPassword}`,
+      'utf8'
+    ).toString('base64');
+
+    const response = await fetch(`${base}/users/me`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const msg = errorData.message || errorData.code || response.statusText;
+
+      if (response.status === 401) {
+        return {
+          success: false,
+          error: 'Invalid username or Application Password. Please check your credentials.',
+        };
+      }
+      if (response.status === 404) {
+        return {
+          success: false,
+          error: 'REST API not found. Ensure your WordPress site supports REST API (WordPress 4.7+).',
+        };
+      }
+
+      return {
+        success: false,
+        error: msg || `Verification failed (${response.status})`,
+      };
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      user: {
+        id: data.id,
+        name: data.name || data.slug || config.username,
+        slug: data.slug || config.username,
+      },
+    };
+  } catch (error: any) {
+    console.error('Self-hosted WordPress verification error:', error);
+    const msg = error?.cause?.code === 'ECONNREFUSED' || error?.message?.includes('fetch')
+      ? 'Could not reach the site. Check the URL and ensure it is publicly accessible.'
+      : error.message || 'Failed to verify connection';
+    return {
+      success: false,
+      error: msg,
+    };
+  }
+}
+
+/**
+ * Publish a post to self-hosted WordPress via REST API.
+ */
+export async function publishToSelfHostedWordPress(
+  config: SelfHostedWordPressConfig,
+  post: WordPressPost
+): Promise<WordPressPublishResult> {
+  try {
+    const base = getSelfHostedApiBase(config.siteUrl);
+    const credentials = Buffer.from(
+      `${config.username}:${config.applicationPassword}`,
+      'utf8'
+    ).toString('base64');
+
+    const postPayload: Record<string, unknown> = {
+      title: post.title,
+      content: post.content || '',
+      status: post.status || 'publish',
+    };
+    if (post.excerpt) postPayload.excerpt = post.excerpt;
+    if (post.date) postPayload.date = post.date;
+    if (post.slug) postPayload.slug = post.slug;
+    // Self-hosted REST API accepts category/tag names as strings (they get created/matched automatically)
+    if (post.categories && post.categories.length > 0) {
+      postPayload.categories = post.categories;
+    }
+    if (post.tags && post.tags.length > 0) {
+      postPayload.tags = post.tags;
+    }
+
+    // Featured image: upload via media endpoint if URL
+    if (post.featured_image && typeof post.featured_image === 'string' && /^https?:\/\//i.test(post.featured_image)) {
+      const mediaRes = await fetch(`${base.replace('/wp/v2', '')}/wp/v2/media`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${credentials}`,
+          'Content-Disposition': `attachment; filename="featured.jpg"`,
+        },
+        body: await fetch(post.featured_image).then(r => r.blob()),
+      });
+      if (mediaRes.ok) {
+        const mediaData = await mediaRes.json();
+        if (mediaData.id) postPayload.featured_media = mediaData.id;
+      }
+    } else if (typeof post.featured_image === 'number') {
+      postPayload.featured_media = post.featured_image;
+    }
+
+    const response = await fetch(`${base}/posts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(postPayload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errorData.message || `Failed to publish (${response.status})`,
+      };
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      url: data.link || data.guid?.rendered,
+      postId: data.id,
+    };
+  } catch (error: any) {
+    console.error('Self-hosted WordPress publish error:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to publish to self-hosted WordPress',
+    };
+  }
+}
+
 /**
  * Upload media to WordPress.com
  */

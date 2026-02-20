@@ -135,6 +135,7 @@ Deno.serve(async (req) => {
         let quoraResult: any = null;
         let shopifyResult: any = null;
         let wordpressResult: any = null;
+        let wordpressSelfHostedResult: any = null;
 
         // Get GitHub integration if platform is GitHub
         if (platform === "github") {
@@ -1143,9 +1144,15 @@ Deno.serve(async (req) => {
               if (articleResponse.ok) {
                 const articleData = await articleResponse.json();
                 const article = articleData.article;
+                const articleHandle = article?.handle || article?.id?.toString() || '';
 
-                // Get blog handle for URL
+                if (!articleHandle) {
+                  console.warn(`Shopify article missing handle for content ${content.id}, article:`, article);
+                }
+
+                // Get blog handle and store's primary domain for correct public URL
                 let blogHandle = 'news';
+                let publicDomain = normalizedDomain;
                 try {
                   const blogInfoResponse = await fetch(
                     `https://${normalizedDomain}/admin/api/2024-01/blogs/${targetBlogId}.json`,
@@ -1165,7 +1172,32 @@ Deno.serve(async (req) => {
                   // Use default handle
                 }
 
-                const articleUrl = `https://${normalizedDomain}/blogs/${blogHandle}/${article.handle}`;
+                // Fetch shop to get primary domain (custom domain if set) for correct public URL
+                try {
+                  const shopResponse = await fetch(
+                    `https://${normalizedDomain}/admin/api/2024-01/shop.json`,
+                    {
+                      method: 'GET',
+                      headers: {
+                        'X-Shopify-Access-Token': shopifyIntegration.access_token,
+                        'Content-Type': 'application/json',
+                      },
+                    }
+                  );
+                  if (shopResponse.ok) {
+                    const shopData = await shopResponse.json();
+                    const primaryDomain = shopData.shop?.domain;
+                    if (primaryDomain) {
+                      publicDomain = primaryDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                    }
+                  }
+                } catch (e) {
+                  // Fall back to normalizedDomain (myshopify.com)
+                }
+
+                const articleUrl = articleHandle
+                  ? `https://${publicDomain}/blogs/${blogHandle}/${articleHandle}`
+                  : null;
 
                 publishUrl = articleUrl;
                 shopifyResult = {
@@ -1319,6 +1351,104 @@ Deno.serve(async (req) => {
           }
         }
 
+        // Self-hosted WordPress (Application Passwords)
+        if (platform === "wordpress_self_hosted") {
+          try {
+            const { data: wpSelfHostedIntegration } = await supabase
+              .from("platform_integrations")
+              .select("*")
+              .eq("user_id", content.user_id)
+              .eq("platform", "wordpress_self_hosted")
+              .eq("status", "connected")
+              .maybeSingle();
+
+            if (wpSelfHostedIntegration && wpSelfHostedIntegration.access_token) {
+              const siteUrl = wpSelfHostedIntegration.metadata?.siteUrl || wpSelfHostedIntegration.platform_user_id;
+              const username = wpSelfHostedIntegration.platform_username || wpSelfHostedIntegration.metadata?.username;
+              const appPassword = wpSelfHostedIntegration.access_token;
+
+              if (!siteUrl || !username || !appPassword) {
+                throw new Error("Self-hosted WordPress credentials incomplete.");
+              }
+
+              const normalizedUrl = siteUrl.replace(/\/+$/, "").replace(/^https?:\/\//i, "https://");
+              if (!normalizedUrl.startsWith("https://")) {
+                throw new Error("Self-hosted WordPress site URL must use HTTPS.");
+              }
+
+              const apiBase = `${normalizedUrl}/wp-json/wp/v2`;
+              const credentials = btoa(`${username}:${appPassword}`);
+
+              const postPayload: Record<string, unknown> = {
+                title: content.topic || "Untitled",
+                content: content.generated_content || "",
+                status: "publish",
+              };
+              if (content.metadata?.summary) postPayload.excerpt = content.metadata.summary;
+              // Note: WordPress REST API expects tag/category IDs (numbers). Omit string values.
+
+              // Featured image upload if URL provided
+              if (content.metadata?.imageUrl && /^https?:\/\//i.test(content.metadata.imageUrl)) {
+                try {
+                  const imgRes = await fetch(content.metadata.imageUrl);
+                  const imgBlob = await imgRes.blob();
+                  const mediaRes = await fetch(`${normalizedUrl}/wp-json/wp/v2/media`, {
+                    method: "POST",
+                    headers: {
+                      "Authorization": `Basic ${credentials}`,
+                      "Content-Disposition": 'attachment; filename="featured.jpg"',
+                    },
+                    body: imgBlob,
+                  });
+                  if (mediaRes.ok) {
+                    const mediaData = await mediaRes.json();
+                    if (mediaData.id) postPayload.featured_media = mediaData.id;
+                  }
+                } catch (imgErr) {
+                  console.warn("Self-hosted WP featured image upload skip:", imgErr);
+                }
+              }
+
+              const postResponse = await fetch(`${apiBase}/posts`, {
+                method: "POST",
+                headers: {
+                  "Authorization": `Basic ${credentials}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(postPayload),
+              });
+
+              if (postResponse.ok) {
+                const postData = await postResponse.json();
+                publishUrl = postData.link || postData.guid?.rendered;
+                wordpressSelfHostedResult = {
+                  success: true,
+                  url: publishUrl,
+                  postId: postData.id,
+                };
+                await supabase
+                  .from("platform_integrations")
+                  .update({ last_used_at: new Date().toISOString() })
+                  .eq("id", wpSelfHostedIntegration.id);
+              } else {
+                const errData = await postResponse.json().catch(() => ({}));
+                wordpressSelfHostedResult = {
+                  success: false,
+                  error: errData.message || `WordPress REST API error (${postResponse.status})`,
+                };
+              }
+            } else {
+              throw new Error("Self-hosted WordPress integration not found or not connected.");
+            }
+          } catch (wpSelfHostedError: any) {
+            console.error(`Self-hosted WordPress publish error for content ${content.id}:`, wpSelfHostedError);
+            wordpressSelfHostedResult = {
+              success: false,
+              error: wpSelfHostedError.message || "Self-hosted WordPress publish failed",
+            };
+          }
+        }
+
         // Get platform post ID based on platform
         const getPlatformPostId = () => {
           switch (platform) {
@@ -1331,6 +1461,7 @@ Deno.serve(async (req) => {
             case "quora": return quoraResult?.postId;
             case "shopify": return shopifyResult?.articleId?.toString();
             case "wordpress": return wordpressResult?.postId?.toString();
+            case "wordpress_self_hosted": return wordpressSelfHostedResult?.postId?.toString();
             default: return null;
           }
         };
@@ -1339,7 +1470,8 @@ Deno.serve(async (req) => {
         const getErrorMessage = () => {
           return gitHubResult?.error || redditResult?.error || linkedInResult?.error || 
                  instagramResult?.error || facebookResult?.error || mediumResult?.error || 
-                 quoraResult?.error || shopifyResult?.error || wordpressResult?.error || null;
+                 quoraResult?.error || shopifyResult?.error || wordpressResult?.error || 
+                 wordpressSelfHostedResult?.error || null;
         };
 
         // Check if schema exists in content metadata
@@ -1377,6 +1509,7 @@ Deno.serve(async (req) => {
               quora: quoraResult || null,
               shopify: shopifyResult || null,
               wordpress: wordpressResult || null,
+              wordpress_self_hosted: wordpressSelfHostedResult || null,
               // Schema data (for SEO)
               schema: schemaData ? {
                 jsonLd: schemaData.jsonLd,

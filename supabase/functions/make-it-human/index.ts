@@ -326,19 +326,22 @@ class MultiPassHumanizer {
         // Escape special regex characters
         const escaped = cleanPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         
-        // Try multiple patterns for better matching - MORE AGGRESSIVE
-        const patterns = [
-          // Pattern 1: Full phrase with word boundaries, optional punctuation, and trailing spaces
-          new RegExp(`\\b${escaped}\\b[,;:.]?\\s*`, 'gi'),
-          // Pattern 2: Phrase at start of sentence (case-insensitive, multiline)
-          new RegExp(`^\\s*${escaped}[,;:.]?\\s*`, 'gim'),
-          // Pattern 3: Phrase at end of sentence with punctuation
-          new RegExp(`\\s+${escaped}[,;:.]?\\s*([.!?]|$)`, 'gi'),
-          // Pattern 4: Phrase in middle of sentence with surrounding spaces
-          new RegExp(`\\s+${escaped}\\s+`, 'gi'),
-          // Pattern 5: Phrase anywhere (less strict - for HTML content)
-          new RegExp(`${escaped}`, 'gi')
-        ];
+        // Try multiple patterns for better matching - Hebrew needs different boundaries (\b doesn't work)
+        const patterns = this.language === 'he'
+          ? [
+              new RegExp(`(^|\\s)${escaped}[,;:.]?\\s*`, 'g'),
+              new RegExp(`^\\s*${escaped}[,;:.]?\\s*`, 'gm'),
+              new RegExp(`\\s+${escaped}[,;:.]?\\s*([.!?]|$)`, 'g'),
+              new RegExp(`\\s+${escaped}\\s+`, 'g'),
+              new RegExp(`${escaped}`, 'g')
+            ]
+          : [
+              new RegExp(`\\b${escaped}\\b[,;:.]?\\s*`, 'gi'),
+              new RegExp(`^\\s*${escaped}[,;:.]?\\s*`, 'gim'),
+              new RegExp(`\\s+${escaped}[,;:.]?\\s*([.!?]|$)`, 'gi'),
+              new RegExp(`\\s+${escaped}\\s+`, 'gi'),
+              new RegExp(`${escaped}`, 'gi')
+            ];
         
         let replaced = false;
         let replacementCount = 0;
@@ -391,12 +394,18 @@ class MultiPassHumanizer {
     // SECOND: Remove phrases completely (longer phrases first)
     const sortedRemove = [...this.replacements.removePhrases].sort((a, b) => b.length - a.length);
     for (const phrase of sortedRemove) {
-      // Try multiple patterns for better matching
-      const patterns = [
-        new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b[,;]?\\s*`, 'gi'),
-        new RegExp(`${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[,;]?\\s*`, 'gi'),
-        new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi')
-      ];
+      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const patterns = this.language === 'he'
+        ? [
+            new RegExp(`(^|\\s)${escapedPhrase}[,;]?\\s*`, 'g'),
+            new RegExp(`\\s+${escapedPhrase}(?=[\\s.,;:!?]|$)`, 'g'),
+            new RegExp(`${escapedPhrase}`, 'g')
+          ]
+        : [
+            new RegExp(`\\b${escapedPhrase}\\b[,;]?\\s*`, 'gi'),
+            new RegExp(`${escapedPhrase}[,;]?\\s*`, 'gi'),
+            new RegExp(`\\b${escapedPhrase}\\b`, 'gi')
+          ];
       
       for (const regex of patterns) {
         result = result.replace(regex, '');
@@ -404,18 +413,29 @@ class MultiPassHumanizer {
     }
     
     // THIRD: Replace dead giveaways with variation (MULTIPLE PASSES for thoroughness)
+    // For Hebrew, \b doesn't work; use space/punctuation boundaries
+    const makeWordRegex = (word: string) => {
+      const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return this.language === 'he' ? new RegExp(`(^|\\s)(${esc})(?=\\s|[.,;:!?]|$)`, 'g') : new RegExp(`\\b${esc}\\b`, 'gi');
+    };
     for (let pass = 0; pass < 2; pass++) {
       for (const [ai, replacements] of Object.entries(this.replacements.deadGiveaway)) {
-        const regex = new RegExp(`\\b${ai}\\b`, 'gi');
-        result = result.replace(regex, () => this.getRandomReplacement(replacements));
+        const regex = makeWordRegex(ai);
+        result = result.replace(regex, (match, g1?: string, g2?: string) => {
+          const repl = this.getRandomReplacement(replacements);
+          return this.language === 'he' && g1 ? g1 + repl : repl;
+        });
       }
     }
     
     // FOURTH: Replace high-frequency words with variation (MULTIPLE PASSES)
     for (let pass = 0; pass < 2; pass++) {
       for (const [ai, replacements] of Object.entries(this.replacements.highFrequency)) {
-        const regex = new RegExp(`\\b${ai}\\b`, 'gi');
-        result = result.replace(regex, () => this.getRandomReplacement(replacements));
+        const regex = makeWordRegex(ai);
+        result = result.replace(regex, (match, g1?: string, g2?: string) => {
+          const repl = this.getRandomReplacement(replacements);
+          return this.language === 'he' && g1 ? g1 + repl : repl;
+        });
       }
     }
     
@@ -436,18 +456,35 @@ class MultiPassHumanizer {
       "quintessential to": ["key to", "essential to", "perfect for"]
     };
     
-    for (const [phrase, replacements] of Object.entries(phrasePatterns)) {
-      const regex = new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-      result = result.replace(regex, () => this.getRandomReplacement(replacements));
+    if (this.language === 'en') {
+      for (const [phrase, replacements] of Object.entries(phrasePatterns)) {
+        const regex = new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+        result = result.replace(regex, () => this.getRandomReplacement(replacements));
+      }
     }
     
     return result;
   }
   
-  // Step 2: Break long sentences - MORE AGGRESSIVE
+  // Step 2: Break long sentences - language-aware
   breakSentences(text: string): string {
     const sentences = text.split(/(?<=[.!?])\s+/);
     const result: string[] = [];
+    
+    const breakPatterns = this.language === 'he'
+      ? [
+          { pattern: /, (ו|אבל|כי|או|אוֹ|אז|כך|לכן|אם) /, minWords: 3 },
+          { pattern: / (ו|אבל|כי|או|אז) /, minWords: 4 },
+          { pattern: /, /, minWords: 4 },
+          { pattern: / (אשר|ש|כאשר|כש) /, minWords: 4 }
+        ]
+      : [
+          { pattern: /, (and|but|so|because|which|that|when|where) /, minWords: 3 },
+          { pattern: / (and|but|so|or) /, minWords: 4 },
+          { pattern: /, /, minWords: 4 },
+          { pattern: / (that|which|who) /, minWords: 4 },
+          { pattern: / (because|since|while|when) /, minWords: 4 }
+        ];
     
     for (let sent of sentences) {
       sent = sent.trim();
@@ -461,17 +498,8 @@ class MultiPassHumanizer {
       if (wordCount >= 8 || charCount >= 60) {
         let broken = false;
         
-        // Try natural break points - expanded list
-        const breakPatterns = [
-          { pattern: /, (and|but|so|because|which|that|when|where) /, minWords: 3 },
-          { pattern: / (and|but|so|or) /, minWords: 4 },
-          { pattern: /, /, minWords: 4 },
-          { pattern: / (that|which|who) /, minWords: 4 },
-          { pattern: / (because|since|while|when) /, minWords: 4 }
-        ];
-        
         for (const bp of breakPatterns) {
-          const regex = new RegExp(bp.pattern, 'i');
+          const regex = new RegExp(bp.pattern, this.language === 'he' ? 'g' : 'i');
           const match = sent.match(regex);
           
           if (match && match.index !== undefined) {
@@ -487,10 +515,9 @@ class MultiPassHumanizer {
               
               // More frequent short connectors (30% chance)
               if (Math.random() < 0.3) {
-                const connectors = [
-                  "Simple.", "Got it?", "See?", "Makes sense.", "Here's why.",
-                  "Clear?", "Right?", "You know?", "Think about it.", "Here's the thing."
-                ];
+                const connectors = this.language === 'he'
+                  ? ["פשוט.", "ברור?", "מעולה.", "בסדר.", "זהו."]
+                  : ["Simple.", "Got it?", "See?", "Makes sense.", "Here's why.", "Clear?", "Right?", "You know?", "Think about it.", "Here's the thing."];
                 result.push(connectors[Math.floor(Math.random() * connectors.length)]);
               }
               
@@ -527,8 +554,9 @@ class MultiPassHumanizer {
     return result.join(' ');
   }
   
-  // Step 3: Vary vocabulary aggressively
+  // Step 3: Vary vocabulary aggressively (English only - Hebrew uses different structure)
   varyVocabulary(text: string): string {
+    if (this.language === 'he') return text;
     const alternatives: { [key: string]: string[] } = {
       "is": ["was", "'s", "seems", "looks"],
       "are": ["were", "seem", "look"],
@@ -583,8 +611,9 @@ class MultiPassHumanizer {
     return result;
   }
   
-  // Step 4: Add contractions
+  // Step 4: Add contractions (English only - Hebrew doesn't have contractions like English)
   addContractions(text: string): string {
+    if (this.language === 'he') return text;
     const contractions = [
       { full: "do not", short: "don't", chance: 0.8 },
       { full: "cannot", short: "can't", chance: 0.9 },
@@ -610,21 +639,28 @@ class MultiPassHumanizer {
     return result;
   }
   
-  // Step 5: Add natural fillers - MORE VARIATION
+  // Step 5: Add natural fillers - language-aware
   addFillers(text: string): string {
     const sentences = text.split(/(?<=[.!?])\s+/);
     const result: string[] = [];
     
-    const fillers = [
-      "Well, ", "Now, ", "So, ", "Look, ", "Actually, ", "Honestly, ",
-      "See, ", "Here's the thing, ", "Thing is, ", "Real talk, ",
-      "I mean, ", "You know, ", "Right, ", "Okay, "
-    ];
-    const shortInserts = [
-      "Simple.", "Got it?", "Clear?", "See?", "Makes sense.",
-      "That's it.", "Easy.", "No big deal.", "Pretty straightforward.",
-      "Not complicated.", "Works for me.", "Fair enough."
-    ];
+    const { fillers, shortInserts } = this.language === 'he'
+      ? {
+          fillers: ["אז ", "טוב, ", "בעצם, ", "למעשה, ", "בקיצור, ", "אוקיי, ", "פשוט, ", "בכל מקרה, "],
+          shortInserts: ["פשוט.", "ברור?", "מעולה.", "בסדר.", "זהו.", "קל.", "ברור.", "בסדר גמור."]
+        }
+      : {
+          fillers: [
+            "Well, ", "Now, ", "So, ", "Look, ", "Actually, ", "Honestly, ",
+            "See, ", "Here's the thing, ", "Thing is, ", "Real talk, ",
+            "I mean, ", "You know, ", "Right, ", "Okay, "
+          ],
+          shortInserts: [
+            "Simple.", "Got it?", "Clear?", "See?", "Makes sense.",
+            "That's it.", "Easy.", "No big deal.", "Pretty straightforward.",
+            "Not complicated.", "Works for me.", "Fair enough."
+          ]
+        };
     
     sentences.forEach((sent, idx) => {
       let processed = sent;
@@ -635,7 +671,7 @@ class MultiPassHumanizer {
       const fillerChance = wordCount > 15 ? 0.3 : (wordCount > 8 ? 0.2 : 0.1);
       if (Math.random() < fillerChance) {
         const filler = fillers[Math.floor(Math.random() * fillers.length)];
-        processed = filler + sent.charAt(0).toLowerCase() + sent.slice(1);
+        processed = this.language === 'he' ? filler + sent : filler + sent.charAt(0).toLowerCase() + sent.slice(1);
       }
       
       result.push(processed);

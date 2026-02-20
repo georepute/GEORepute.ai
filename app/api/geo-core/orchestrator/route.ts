@@ -9,7 +9,7 @@ import { publishToFacebook, FacebookConfig } from "@/lib/integrations/facebook";
 import { publishToLinkedIn, LinkedInConfig } from "@/lib/integrations/linkedin";
 import { publishToInstagram, InstagramConfig } from "@/lib/integrations/instagram";
 import { publishToShopify, ShopifyConfig } from "@/lib/integrations/shopify";
-import { publishToWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
+import { publishToWordPress, publishToSelfHostedWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
 
 /**
  * Content Orchestrator API
@@ -1271,6 +1271,67 @@ export async function POST(request: NextRequest) {
             }
           }
 
+          // Auto-publish to self-hosted WordPress if platform is wordpress_self_hosted
+          let wordpressSelfHostedResult: any = null;
+          if (platform === "wordpress_self_hosted") {
+            try {
+              const { data: wpSelfHostedIntegration } = await supabase
+                .from("platform_integrations")
+                .select("*")
+                .eq("user_id", session.user.id)
+                .eq("platform", "wordpress_self_hosted")
+                .eq("status", "connected")
+                .maybeSingle();
+
+              if (wpSelfHostedIntegration && wpSelfHostedIntegration.access_token) {
+                const siteUrl = wpSelfHostedIntegration.metadata?.siteUrl || wpSelfHostedIntegration.platform_user_id;
+                const username = wpSelfHostedIntegration.platform_username || wpSelfHostedIntegration.metadata?.username;
+
+                if (siteUrl && username) {
+                  wordpressSelfHostedResult = await publishToSelfHostedWordPress(
+                    {
+                      siteUrl,
+                      username,
+                      applicationPassword: wpSelfHostedIntegration.access_token,
+                    },
+                    {
+                      title: contentStrategy.topic || "Untitled",
+                      content: contentStrategy.generated_content || "",
+                      excerpt: contentStrategy.metadata?.excerpt || "",
+                      status: "publish",
+                      tags: contentStrategy.target_keywords || [],
+                      featured_image: contentStrategy.metadata?.imageUrl || undefined,
+                      categories: contentStrategy.metadata?.categories
+                        ? (Array.isArray(contentStrategy.metadata.categories)
+                            ? contentStrategy.metadata.categories
+                            : String(contentStrategy.metadata.categories).split(',').map((c: string) => c.trim()))
+                        : undefined,
+                    }
+                  );
+
+                  if (wordpressSelfHostedResult.success && wordpressSelfHostedResult.url) {
+                    publishUrl = wordpressSelfHostedResult.url;
+                    console.log("✅ Self-hosted WordPress publish successful:", publishUrl);
+                    await supabase
+                      .from("platform_integrations")
+                      .update({ last_used_at: new Date().toISOString() })
+                      .eq("id", wpSelfHostedIntegration.id);
+                  }
+                } else {
+                  throw new Error("Self-hosted WordPress credentials incomplete.");
+                }
+              } else {
+                throw new Error("Self-hosted WordPress integration not found or not connected.");
+              }
+            } catch (wpSelfHostedError: any) {
+              console.error("Self-hosted WordPress publish error:", wpSelfHostedError);
+              wordpressSelfHostedResult = {
+                success: false,
+                error: wpSelfHostedError.message || "Self-hosted WordPress publish failed",
+              };
+            }
+          }
+
           console.log("📝 Creating published_content record:", {
             contentId,
             platform,
@@ -1314,7 +1375,7 @@ export async function POST(request: NextRequest) {
           const insertData: any = {
             user_id: session.user.id,
             content_strategy_id: contentId,
-            platform: platform === "github" ? "github" : (platform === "reddit" ? "reddit" : (platform === "medium" ? "medium" : (platform === "quora" ? "quora" : (platform === "facebook" ? "facebook" : platform)))),
+            platform: platform === "github" ? "github" : platform === "reddit" ? "reddit" : platform === "medium" ? "medium" : platform === "quora" ? "quora" : platform === "facebook" ? "facebook" : platform === "wordpress_self_hosted" ? "wordpress_self_hosted" : platform,
             published_at: new Date().toISOString(),
             platform_post_id: (platform === "github" ? gitHubResult?.discussionNumber?.toString() : 
                               platform === "reddit" ? redditResult?.postId :
@@ -1324,6 +1385,7 @@ export async function POST(request: NextRequest) {
                               platform === "instagram" ? instagramResult?.postId :
                               platform === "linkedin" ? linkedInResult?.postId :
                               platform === "wordpress" ? wordpressResult?.postId?.toString() :
+                              platform === "wordpress_self_hosted" ? wordpressSelfHostedResult?.postId?.toString() :
                               platformPostId) || null,
             error_message: ((gitHubResult && !gitHubResult.success && gitHubResult.error) || 
                            (redditResult && !redditResult.success && redditResult.error) ||
@@ -1332,8 +1394,9 @@ export async function POST(request: NextRequest) {
                            (facebookResult && !facebookResult.success && facebookResult.error) ||
                            (instagramResult && !instagramResult.success && instagramResult.error) ||
                            (linkedInResult && !linkedInResult.success && linkedInResult.error) ||
-                           (wordpressResult && !wordpressResult.success && wordpressResult.error)) ? 
-                           (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error || instagramResult?.error || linkedInResult?.error || wordpressResult?.error) : null,
+                           (wordpressResult && !wordpressResult.success && wordpressResult.error) ||
+                           (wordpressSelfHostedResult && !wordpressSelfHostedResult.success && wordpressSelfHostedResult.error)) ? 
+                           (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error || instagramResult?.error || linkedInResult?.error || wordpressResult?.error || wordpressSelfHostedResult?.error) : null,
             metadata: {
               ...contentStrategy.metadata, // Include all metadata including structuredSEO
               auto_published: true,
@@ -1392,6 +1455,12 @@ export async function POST(request: NextRequest) {
                 postId: wordpressResult.postId,
                 siteId: wordpressResult.siteId,
                 error: wordpressResult.error,
+              } : null,
+              wordpress_self_hosted: wordpressSelfHostedResult ? {
+                success: wordpressSelfHostedResult.success,
+                url: wordpressSelfHostedResult.url,
+                postId: wordpressSelfHostedResult.postId,
+                error: wordpressSelfHostedResult.error,
               } : null,
               linkedin: linkedInResult ? {
                 success: linkedInResult.success,

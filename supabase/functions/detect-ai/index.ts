@@ -1228,17 +1228,19 @@ function analyzeTextDetailed(text: string, language: 'en' | 'he' = 'en'): {
     
     if (detection) {
       // Exclude proper nouns/names (words that start with capital letter in middle of text)
-      // This helps avoid flagging names like "John", "Smith", "Dermatologist", etc.
-      const isProperNoun = /^[A-Z][a-z]+$/.test(cleanWord) && 
-                           index > 0 && 
-                           words[index - 1] && 
-                           !words[index - 1].match(/^[.!?]$/); // Not after sentence end
+      // Skip for Hebrew - different script/capitalization rules
+      const isProperNoun = language === 'en' && 
+                          /^[A-Z][a-z]+$/.test(cleanWord) && 
+                          index > 0 && 
+                          words[index - 1] && 
+                          !words[index - 1].match(/^[.!?]$/); // Not after sentence end
       
-      // Also exclude single capitalized words that are likely names
-      const isLikelyName = /^[A-Z][a-z]{2,}$/.test(cleanWord) && 
+      // Also exclude single capitalized words that are likely names (English only)
+      const isLikelyName = language === 'en' &&
+                          /^[A-Z][a-z]{2,}$/.test(cleanWord) && 
                           cleanWord.length <= 15 && // Reasonable name length
-                          !aiPatterns.highConfidence.some(p => p.pattern.test(cleanWord)) &&
-                          !aiPatterns.mediumConfidence.some(p => p.pattern.test(cleanWord));
+                          !patterns.highConfidence.some(p => p.pattern.test(cleanWord)) &&
+                          !patterns.mediumConfidence.some(p => p.pattern.test(cleanWord));
       
       // Skip if it's a proper noun/name (unless it's part of a high-confidence multi-word phrase)
       if (isProperNoun && detection.confidence < 90) {
@@ -1286,8 +1288,8 @@ function analyzeTextDetailed(text: string, language: 'en' | 'he' = 'en'): {
   let tier3Hits = 0; // Very high (90-94%)
   let tier4Hits = 0; // High (85-89%)
   
-  // TIER 1: Dead giveaways - each hit = massive score
-  aiPatterns.deadGiveaways.forEach(pattern => {
+  // TIER 1: Dead giveaways - each hit = massive score (use language-aware patterns)
+  patterns.deadGiveaways.forEach(pattern => {
     const matches = text.match(pattern.pattern);
     if (matches) {
       tier1Hits += matches.length;
@@ -1296,7 +1298,7 @@ function analyzeTextDetailed(text: string, language: 'en' | 'he' = 'en'): {
   });
   
   // TIER 2: Extremely high confidence
-  aiPatterns.extremelyHigh.forEach(pattern => {
+  patterns.extremelyHigh.forEach(pattern => {
     const matches = text.match(pattern.pattern);
     if (matches) {
       tier2Hits += matches.length;
@@ -1307,13 +1309,13 @@ function analyzeTextDetailed(text: string, language: 'en' | 'he' = 'en'): {
   });
 
   // TIER 3: Very high confidence
-  aiPatterns.veryHigh.forEach(pattern => {
+  patterns.veryHigh.forEach(pattern => {
     const matches = text.match(pattern.pattern);
     if (matches) tier3Hits += matches.length;
   });
   
   // TIER 4: High confidence
-  aiPatterns.high.forEach(pattern => {
+  patterns.high.forEach(pattern => {
     const matches = text.match(pattern.pattern);
     if (matches) tier4Hits += matches.length;
   });
@@ -2142,9 +2144,14 @@ serve(async (req) => {
       console.log(`Top phrases: ${analysis.topPhrases.slice(0, 3).map(p => p.phrase).join(', ')}`);
     }
     
-    // Run ML-based detection (HuggingFace)
-    console.log("🤖 Starting ML-based detection (HuggingFace)...");
-    const hfDetection = await runHuggingFaceDetector(plainText);
+    // Run ML-based detection (HuggingFace) - English only; model is trained on English
+    let hfDetection: Awaited<ReturnType<typeof runHuggingFaceDetector>> = {};
+    if (validLanguage === 'en') {
+      console.log("🤖 Starting ML-based detection (HuggingFace)...");
+      hfDetection = await runHuggingFaceDetector(plainText);
+    } else {
+      console.log("⏭️ Skipping HuggingFace (Hebrew) - using pattern-based detection only");
+    }
     let finalAi = analysis.aiPercentage;
     const signals = [...(analysis.metrics?.signals ?? [])];
 

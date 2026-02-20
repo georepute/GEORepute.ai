@@ -471,7 +471,7 @@ export default function ActionPlansPage() {
     const execMetadata = step.executionMetadata || {};
     const platform = (execMetadata.platform || step.platform || "").toLowerCase();
     const contentType = (execMetadata.contentType || "").toLowerCase();
-    const isBlogStep = platform === "shopify" || platform === "wordpress" || contentType === "blog_article";
+    const isBlogStep = platform === "shopify" || platform === "wordpress" || platform === "wordpress_self_hosted" || contentType === "blog_article";
 
     const params = new URLSearchParams({
       actionPlanId: planId,

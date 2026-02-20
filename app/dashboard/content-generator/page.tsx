@@ -33,12 +33,16 @@ import Card from "@/components/Card";
 import toast from "react-hot-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useLanguage } from "@/lib/language-context";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
+const CONTENT_LANGUAGE_OPTIONS = [
+  { value: "en" as const, label: "English" },
+  { value: "he" as const, label: "Hebrew" },
+];
+
 function ContentGeneratorPageInner() {
-  const { language } = useLanguage();
   const supabase = createClientComponentClient();
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he">("en");
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -90,6 +94,7 @@ function ContentGeneratorPageInner() {
     { id: "github", name: "GitHub", icon: "/github-142.svg" },
     { id: "shopify", name: "Shopify", icon: "/shopify.svg" },
     { id: "wordpress", name: "WordPress.com", icon: "/wordpress.svg" },
+    { id: "wordpress_self_hosted", name: "WordPress (Self-Hosted)", icon: "/wordpress.svg" },
   ];
 
   // Image Selection State
@@ -253,7 +258,7 @@ function ContentGeneratorPageInner() {
           targetPlatform,
           influenceLevel,
           brandVoiceId: selectedVoiceId, // Include brand voice if selected
-          language: language || 'en', // Pass current language preference
+          language: contentGenerationLanguage,
           contentType: targetPlatform === 'linkedin' ? linkedinContentType : undefined, // Pass LinkedIn content type
           // Only include imageUrl for platforms that support it (not Facebook, Instagram, LinkedIn, Medium)
           ...(imageUrl.trim() && !['facebook', 'instagram', 'linkedin', 'medium'].includes(targetPlatform) 
@@ -261,14 +266,16 @@ function ContentGeneratorPageInner() {
             : {}),
           actionPlanId: actionPlanId || undefined, // Link to action plan if present
           actionPlanStepId: actionPlanStepId || undefined, // Link to action plan step if present
+          skipSchema: true, // Schema is created only when user approves and builds schema for all selected platforms
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to generate content');
-      }
+      const data = await response.json().catch(() => ({}));
 
-      const data = await response.json();
+      if (!response.ok) {
+        const message = data?.error || (response.status === 400 ? 'Invalid request: check topic, keywords, and platform.' : 'Failed to generate content');
+        throw new Error(message);
+      }
 
       setGeneratedContent(data.content);
       setOriginalContent(data.content); // Store original for comparison
@@ -305,9 +312,9 @@ function ContentGeneratorPageInner() {
         await detectAIInContent(data.content);
         // Image modal will be shown after detection completes
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Generation error:', error);
-      toast.error("Content generation failed");
+      toast.error(error?.message || "Content generation failed");
     } finally {
       setGeneratingContent(false);
     }
@@ -382,7 +389,7 @@ function ContentGeneratorPageInner() {
       try {
         console.log('🔄 Attempting to call via supabase.functions.invoke...');
         const invokeResult = await supabase.functions.invoke('detect-ai', {
-          body: { text: content, language: language || 'en' }
+          body: { text: content, language: contentGenerationLanguage }
         });
         detectionData = invokeResult.data;
         detectionError = invokeResult.error;
@@ -407,7 +414,7 @@ function ContentGeneratorPageInner() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${supabaseAnonKey}`,
           },
-          body: JSON.stringify({ text: content, language: language || 'en' })
+          body: JSON.stringify({ text: content, language: contentGenerationLanguage })
         });
         
         console.log('📥 Fetch response status:', fetchResponse.status, fetchResponse.statusText);
@@ -719,8 +726,7 @@ function ContentGeneratorPageInner() {
 
   const PLATFORMS_WITH_IMAGE_SUPPORT = ["reddit", "medium", "quora", "facebook", "linkedin", "instagram"];
 
-  // Create one schema and one content_strategy row per selected platform (different schema per platform, like missed prompts)
-  // Skip the platform we already have a row for (from initial generation) to avoid duplicate
+  // Create schema for all selected platforms when user approves (no schema at initial content generation)
   const handleCreateSchemasForPublish = async () => {
     if (publishPlatforms.length === 0) {
       toast.error("Please select at least one platform");
@@ -729,17 +735,7 @@ function ContentGeneratorPageInner() {
     const keywords = targetKeywords.split(",").map((k) => k.trim()).filter(Boolean);
     const content = humanizedContent || generatedContent;
     const primaryPlatform = targetPlatforms[0];
-    const platformsToCreate = contentId
-      ? publishPlatforms.filter((p) => p !== primaryPlatform)
-      : [...publishPlatforms];
-    if (platformsToCreate.length === 0) {
-      sessionStorage.setItem(
-        "contentToPublish",
-        JSON.stringify({ contentId, topic, targetKeywords: keywords, generatedAt: new Date().toISOString() })
-      );
-      router.push("/dashboard/content");
-      return;
-    }
+    const platformsToCreate = [...publishPlatforms]; // Schema for all selected platforms
     setPlatformsBeingCreated(platformsToCreate);
     setCreatingSchemas(true);
     setSchemaProgress(0);
@@ -751,6 +747,7 @@ function ContentGeneratorPageInner() {
     for (let i = 0; i < platformsToCreate.length; i++) {
       const platformId = platformsToCreate[i];
       const platformName = PUBLISHING_PLATFORMS.find((p) => p.id === platformId)?.name || platformId;
+      const isPrimaryWithExistingRow = platformId === primaryPlatform && contentId;
       setCurrentSchemaPlatform(platformName);
       setSchemaProgress(Math.round((i / totalPlatforms) * 100));
       try {
@@ -766,7 +763,7 @@ function ContentGeneratorPageInner() {
             tone: contentMetadata?.tone || "informative",
             contentType: platformId === "github" ? "documentation" : "article",
             generatedContent: content,
-            skipGeneration: false,
+            skipGeneration: isPrimaryWithExistingRow, // Schema-only for existing row; new content+schema for others
             imageUrl: includeImage ? uploadedImageUrl : null,
             imageData:
               includeImage && selectedImage
@@ -776,7 +773,7 @@ function ContentGeneratorPageInner() {
                     photographer: selectedImage.user,
                   }
                 : null,
-            language: language || "en",
+            language: contentGenerationLanguage,
             brandVoiceId: selectedVoiceId || undefined,
             actionPlanId: actionPlanId || undefined,
             actionPlanStepId: actionPlanStepId || undefined,
@@ -788,12 +785,38 @@ function ContentGeneratorPageInner() {
           continue;
         }
         const data = await response.json();
-        if (!firstContentId && data.contentId) firstContentId = data.contentId;
-        schemas[platformId] = {
-          schemaData: { ...data.structuredSEO, jsonLd: data.schema?.jsonLd, scriptTags: data.schema?.scriptTags },
-          contentId: data.contentId,
-          hasImage: includeImage,
-        };
+        if (isPrimaryWithExistingRow && contentId) {
+          const { data: existingRow, error: fetchErr } = await supabase
+            .from("content_strategy")
+            .select("metadata")
+            .eq("id", contentId)
+            .single();
+          if (!fetchErr) {
+            const existingMeta = (existingRow?.metadata && typeof existingRow.metadata === "object") ? existingRow.metadata as Record<string, unknown> : {};
+            await supabase
+              .from("content_strategy")
+              .update({
+                metadata: {
+                  ...existingMeta,
+                  schema: data.schema ?? existingMeta.schema,
+                  structuredSEO: data.structuredSEO ?? existingMeta.structuredSEO,
+                },
+              })
+              .eq("id", contentId);
+          }
+          schemas[platformId] = {
+            schemaData: { ...data.structuredSEO, jsonLd: data.schema?.jsonLd, scriptTags: data.schema?.scriptTags },
+            contentId: contentId,
+            hasImage: includeImage,
+          };
+        } else {
+          if (!firstContentId && data.contentId) firstContentId = data.contentId;
+          schemas[platformId] = {
+            schemaData: { ...data.structuredSEO, jsonLd: data.schema?.jsonLd, scriptTags: data.schema?.scriptTags },
+            contentId: data.contentId,
+            hasImage: includeImage,
+          };
+        }
         setPlatformSchemas((prev) => ({ ...prev, [platformId]: schemas[platformId] }));
         setSchemaProgress(Math.round(((i + 1) / totalPlatforms) * 100));
         toast.success(`Schema created for ${platformName}!`, { id: `schema-${platformId}` });
@@ -818,6 +841,7 @@ function ContentGeneratorPageInner() {
         generatedAt: new Date().toISOString(),
       })
     );
+    sessionStorage.setItem("contentPageOpenImageModal", "1");
     router.push("/dashboard/content");
   };
 
@@ -854,7 +878,7 @@ function ContentGeneratorPageInner() {
             text: contentToHumanize,
             detectedPhrases: detectedPhrases,
             passes: 5,
-            language: language || 'en'
+            language: contentGenerationLanguage
           }
         });
         humanizedData = invokeResult.data;
@@ -884,7 +908,7 @@ function ContentGeneratorPageInner() {
             text: contentToHumanize,
             detectedPhrases: detectedPhrases,
             passes: 5,
-            language: language || 'en'
+            language: contentGenerationLanguage
           })
         });
         
@@ -971,7 +995,7 @@ function ContentGeneratorPageInner() {
             text: generatedContent,
             detectedPhrases: detectedPhrases,
             passes: 5,
-            language: language || 'en'
+            language: contentGenerationLanguage
           }
         });
         humanizedData = invokeResult.data;
@@ -1001,7 +1025,7 @@ function ContentGeneratorPageInner() {
             text: generatedContent,
             detectedPhrases: detectedPhrases,
             passes: 5,
-            language: language || 'en'
+            language: contentGenerationLanguage
           })
         });
         
@@ -1148,6 +1172,22 @@ function ContentGeneratorPageInner() {
                     placeholder="e.g., youtube seo, video optimization, ranking videos"
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
+                </div>
+
+                {/* Content language */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Generate content in
+                  </label>
+                  <select
+                    value={contentGenerationLanguage}
+                    onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
+                  >
+                    {CONTENT_LANGUAGE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Platform Selection (multi-select) */}

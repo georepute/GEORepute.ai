@@ -1683,6 +1683,9 @@ NEXT_PUBLIC_GITHUB_CLIENT_ID=prod_client_id`}
       {/* WordPress.com Integration */}
       <WordPressIntegrationSettings />
 
+      {/* Self-Hosted WordPress Integration */}
+      <WordPressSelfHostedIntegrationSettings />
+
       {/* Google Search Console Integration */}
       <GoogleSearchConsoleSettings />
 
@@ -3566,6 +3569,243 @@ function WordPressIntegrationSettings() {
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <p className="text-sm text-blue-900">
               <strong>Ready to publish!</strong> Go to the <Link href="/dashboard/blog" className="text-blue-600 hover:underline font-medium">Blog section</Link> in Content Generator to create and publish blog posts to your WordPress.com site.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Self-Hosted WordPress Integration Component
+function WordPressSelfHostedIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [siteUrl, setSiteUrl] = useState("");
+  const [username, setUsername] = useState("");
+  const [applicationPassword, setApplicationPassword] = useState("");
+  const [connectedSiteUrl, setConnectedSiteUrl] = useState("");
+  const [showAppPassword, setShowAppPassword] = useState(false);
+
+  useEffect(() => {
+    loadSelfHostedConfig();
+  }, []);
+
+  const loadSelfHostedConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/wordpress-self-hosted");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.connected && data.config) {
+          setIsConnected(true);
+          setConnectedSiteUrl(data.config.siteUrl || "");
+          setUsername(data.config.username || "");
+        } else {
+          setIsConnected(false);
+          setConnectedSiteUrl("");
+          setUsername("");
+        }
+      }
+    } catch (error) {
+      console.error("Error loading self-hosted WordPress config:", error);
+      setIsConnected(false);
+    }
+  };
+
+  const handleConnect = async () => {
+    if (!siteUrl.trim() || !username.trim() || !applicationPassword.trim()) {
+      toast.error("Please enter Site URL, Username, and Application Password");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/wordpress-self-hosted", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          siteUrl: siteUrl.trim(),
+          username: username.trim(),
+          applicationPassword: applicationPassword.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        toast.success("Self-hosted WordPress connected successfully");
+        setIsConnected(true);
+        setConnectedSiteUrl(siteUrl.trim());
+        setApplicationPassword("");
+        loadSelfHostedConfig();
+      } else {
+        toast.error(data.error || "Failed to connect");
+      }
+    } catch (error: any) {
+      console.error("Self-hosted WordPress connect error:", error);
+      toast.error("Failed to connect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect your self-hosted WordPress site?")) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch("/api/integrations/wordpress-self-hosted", {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Self-hosted WordPress disconnected successfully");
+        setIsConnected(false);
+        setSiteUrl("");
+        setUsername("");
+        setApplicationPassword("");
+        setConnectedSiteUrl("");
+      } else {
+        const data = await response.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (error: any) {
+      console.error("Disconnect error:", error);
+      toast.error("Failed to disconnect: " + (error.message || "Unknown error"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/wordpress.svg" alt="WordPress" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">Self-Hosted WordPress</h3>
+          <p className="text-sm text-gray-600">
+            Publish blog posts to your own WordPress site (Namecheap, Hostinger, etc.)
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          isConnected 
+            ? "bg-green-100 text-green-700" 
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-900 mb-4">
+              Connect your self-hosted WordPress site using an Application Password. 
+              Works with any WordPress 5.6+ installation.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Site URL</label>
+                <input
+                  type="url"
+                  placeholder="https://yoursite.com"
+                  value={siteUrl}
+                  onChange={(e) => setSiteUrl(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">WordPress Username</label>
+                <input
+                  type="text"
+                  placeholder="admin"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Application Password</label>
+                <div className="relative">
+                  <input
+                    type={showAppPassword ? "text" : "password"}
+                    placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+                    value={applicationPassword}
+                    onChange={(e) => setApplicationPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAppPassword(!showAppPassword)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                  >
+                    {showAppPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Users → Profile → Application Passwords (WordPress 5.6+)
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleConnect}
+              disabled={loading}
+              className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  Verifying & Connecting...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4" />
+                  Connect Self-Hosted WordPress
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <p className="text-xs text-gray-600">
+              <strong>Note:</strong> Your site must use HTTPS and have the REST API enabled (default in WordPress 4.7+).
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              <div>
+                <p className="text-sm font-medium text-green-900">
+                  Connected: {connectedSiteUrl}
+                </p>
+                {username && (
+                  <p className="text-xs text-green-700">User: {username}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={handleDisconnect}
+              disabled={loading}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              <XCircle className="w-4 h-4" />
+              Disconnect
+            </button>
+          </div>
+
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-900">
+              <strong>Ready to publish!</strong> Select "WordPress (Self-Hosted)" in the Blog or Content Generator to publish to this site.
             </p>
           </div>
         </div>
