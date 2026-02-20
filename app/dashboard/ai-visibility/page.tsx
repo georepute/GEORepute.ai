@@ -1767,22 +1767,22 @@ function AIVisibilityContent() {
         yPos += 4;
       };
 
-      const drawTableRow = (cols: { x: number; text: string; wrap?: boolean }[], endX: number, isAlternate: boolean) => {
+      const drawTableRow = (cols: { x: number; text: string; wrap?: boolean; maxWidth?: number }[], endX: number, isAlternate: boolean) => {
         doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
         const rowLineH = 3.5;
         let maxLines = 1;
         const colLines: string[][] = cols.map((c, i) => {
-          const colW = (i < cols.length - 1 ? cols[i + 1].x : endX) - c.x - 1.5;
+          const nextX = i < cols.length - 1 ? cols[i + 1].x : endX;
+          const colW = (c.maxWidth != null ? c.maxWidth : Math.max(1, nextX - c.x - 2));
+          const lines: string[] = doc.splitTextToSize(c.text || '', colW);
           if (c.wrap) {
-            const lines: string[] = doc.splitTextToSize(c.text, colW);
             if (lines.length > maxLines) maxLines = lines.length;
-            return lines.slice(0, 3);
+            return lines.slice(0, 5);
           }
-          const lines = doc.splitTextToSize(c.text, colW);
-          return [lines[0] || c.text];
+          return [lines[0] || ''];
         });
-        if (maxLines > 1 && maxLines > 3) maxLines = 3;
+        maxLines = Math.min(Math.max(maxLines, 1), 5);
         const rowH = maxLines * rowLineH + 3;
         checkPageBreak(rowH + 2);
         if (isAlternate) {
@@ -2423,25 +2423,30 @@ function AIVisibilityContent() {
         yPos += 6;
 
         topQueries.forEach((response, idx) => {
-          checkPageBreak(16);
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'normal');
+          const promptText = response.prompt || 'N/A';
+          const maxPromptW = contentWidth - 14;
+          const promptLines = doc.splitTextToSize(promptText, maxPromptW);
+          const lineH = 4;
+          const blockH = promptLines.length * lineH + 8;
+          checkPageBreak(blockH);
           const isAlt = idx % 2 === 1;
           if (isAlt) {
             doc.setFillColor(250, 250, 255);
-            doc.rect(margin, yPos - 3, contentWidth, 13, 'F');
+            doc.rect(margin, yPos - 3, contentWidth, blockH, 'F');
           }
           doc.setFontSize(8);
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(PURPLE.r, PURPLE.g, PURPLE.b);
           doc.text(`#${idx + 1}`, margin + 2, yPos);
           doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
-          const maxPromptW = contentWidth - 14;
-          let promptText = response.prompt || 'N/A';
-          if (doc.getTextWidth(promptText) > maxPromptW) {
-            while (promptText.length > 1 && doc.getTextWidth(promptText + '..') > maxPromptW) { promptText = promptText.slice(0, -1); }
-            promptText = promptText + '..';
-          }
-          doc.text(promptText, margin + 12, yPos);
-          yPos += 4.5;
+          let lineY = yPos;
+          promptLines.forEach((line: string) => {
+            doc.text(line, margin + 12, lineY);
+            lineY += lineH;
+          });
+          yPos = lineY + 2;
           doc.setFontSize(7);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
@@ -2646,45 +2651,6 @@ function AIVisibilityContent() {
             yPos += 2;
           });
         }
-      }
-
-      // =====================================================
-      //  DETAILED RESPONSES (top 15)
-      // =====================================================
-      const topResponses = projectResponses.slice(0, 15);
-      if (topResponses.length > 0) {
-        checkPageBreak(25);
-        drawSectionTitle('Detailed Query Responses');
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
-        doc.text(`Showing ${topResponses.length} of ${projectResponses.length} total queries analyzed.`, margin, yPos);
-        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
-        yPos += 6;
-
-        const resCols = [
-          { x: margin, label: '#' },
-          { x: margin + 7, label: 'Query' },
-          { x: margin + 100, label: 'Platform' },
-          { x: margin + 130, label: 'Mentioned' },
-          { x: margin + 155, label: 'Sentiment' },
-        ];
-        const resEndX = margin + contentWidth;
-        drawTableHeader(resCols, resEndX);
-
-        topResponses.forEach((resp, idx) => {
-          checkPageBreak(12);
-          const mentioned = resp.response_metadata?.brand_mentioned ? 'Yes' : 'No';
-          const sent = resp.response_metadata?.sentiment_score != null ? resp.response_metadata.sentiment_score.toFixed(2) : 'N/A';
-          const platOpt = platformOptions.find(p => p.id === resp.platform);
-          drawTableRow([
-            { x: margin, text: (idx + 1).toString() },
-            { x: margin + 7, text: resp.prompt || 'N/A', wrap: true },
-            { x: margin + 100, text: platOpt?.name || resp.platform },
-            { x: margin + 130, text: mentioned },
-            { x: margin + 155, text: sent },
-          ], resEndX, idx % 2 === 1);
-        });
       }
 
       // =====================================================
