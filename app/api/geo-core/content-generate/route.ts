@@ -38,6 +38,9 @@ export async function POST(request: NextRequest) {
       actionPlanStepId, // Optional: Link content to specific step
       sourceMissedPrompt, // Optional: Original missed prompt this content was created from
       skipSchema, // Skip schema generation (generate content only, schema later)
+      schemaOnly, // When true with skipGeneration: return schema only, do not insert (caller inserts, e.g. blog)
+      websiteUrl: bodyWebsiteUrl, // Optional: website URL for backlinks
+      projectId, // Optional: brand project ID to look up website URL
     } = body;
 
     // Get language preference: from request body, or from cookies as fallback
@@ -73,16 +76,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if Instagram requires an image
+    // Image for Instagram can be added later in the image-selection modal after content is generated
     const normalizedPlatform = targetPlatform.toLowerCase().trim();
-    if (normalizedPlatform === 'instagram' && !imageUrl) {
-      return NextResponse.json(
-        { error: "Instagram posts require an image URL. Please provide an imageUrl." },
-        { status: 400 }
-      );
-    }
-
-    // Remove the duplicate normalization (already done above in validation)
     
     // Try to query existing platform values to see what's actually in the database
     const { data: existingPlatforms } = await supabase
@@ -116,6 +111,37 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Resolve website URL for backlinks: prefer explicit URL, then look up from brand project
+    let websiteUrl: string | undefined = bodyWebsiteUrl;
+    if (!websiteUrl && projectId) {
+      const { data: project } = await supabase
+        .from("brand_projects")
+        .select("website_url")
+        .eq("id", projectId)
+        .eq("user_id", session.user.id)
+        .single();
+      if (project?.website_url) {
+        websiteUrl = project.website_url;
+      }
+    }
+    if (!websiteUrl) {
+      // Fallback: use the user's most recent brand project
+      const { data: recentProject } = await supabase
+        .from("brand_projects")
+        .select("website_url")
+        .eq("user_id", session.user.id)
+        .not("website_url", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+      if (recentProject?.website_url) {
+        websiteUrl = recentProject.website_url;
+      }
+    }
+    if (websiteUrl) {
+      console.log("🔗 Backlink URL resolved:", websiteUrl);
+    }
+
     // Use provided content (e.g. humanized from publication flow) when given; otherwise generate
     let result: any;
     let learningRules: any = {};
@@ -131,6 +157,8 @@ export async function POST(request: NextRequest) {
         contentType: contentType || "answer",
         tone: tone || "informative",
         wordCount: generatedContent.split(/\s+/).length,
+        neutralityScore: 0,
+        ai_model: "schema-only",
       };
     } else {
       // Apply learning rules from previous outcomes
@@ -152,9 +180,10 @@ export async function POST(request: NextRequest) {
         brandMention,
         influenceLevel: learningRules.tone || influenceLevel || "subtle",
         userContext,
-        brandVoice: brandVoiceProfile, // Pass brand voice profile
-        language: preferredLanguage, // Pass language preference (from request or cookie)
-        contentType: contentType, // Pass contentType to handle LinkedIn article vs post
+        brandVoice: brandVoiceProfile,
+        language: preferredLanguage,
+        contentType: contentType,
+        websiteUrl: websiteUrl,
       }, learningRules);
     }
 
@@ -329,38 +358,78 @@ export async function POST(request: NextRequest) {
       },
     };
     
-    // Skip database insertion if skipGeneration is true (schema-only generation)
-    // This prevents duplicate entries when generating schema for already-created content
+    // When skipGeneration is true, we still insert one row per platform so drafts appear (e.g. missed prompts multi-platform)
     let data: any = null;
     let error: any = null;
     
+    const insertPayload = {
+      user_id: session.user.id,
+      topic,
+      target_keywords: targetKeywords,
+      target_platform: normalizedPlatform,
+      brand_mention: brandMention,
+      influence_level: influenceLevel || "subtle",
+      generated_content: result.content,
+      neutrality_score: result.neutralityScore ?? 0,
+      tone: result.tone ?? "informative",
+      word_count: result.wordCount ?? 0,
+      ai_model: result.ai_model || "claude-sonnet-4-5-20250929",
+      metadata: contentMetadata,
+      status: "draft",
+    };
+
     if (!skipGeneration) {
-      // Only insert into database if this is a new content generation
       const insertResult = await supabase
         .from("content_strategy")
-        .insert({
-          user_id: session.user.id,
-          topic,
-          target_keywords: targetKeywords,
-          target_platform: normalizedPlatform, // Use normalized value
-          brand_mention: brandMention,
-          influence_level: influenceLevel || "subtle",
-          generated_content: result.content, // Keep original content natural (structured elements in schema only)
-          neutrality_score: result.neutralityScore,
-          tone: result.tone,
-          word_count: result.wordCount, // Use original content word count
-          ai_model: result.ai_model || "claude-sonnet-4-5-20250929",
-          metadata: contentMetadata, // Include imageUrl, schema (with structured elements), and structured SEO in metadata
-          status: "draft",
-        })
+        .insert(insertPayload)
         .select()
         .single();
-      
       data = insertResult.data;
       error = insertResult.error;
     } else {
-      // For skipGeneration mode, we're just generating schema, so don't create a new DB entry
-      console.log("⏭️ Skip generation mode: Returning schema without creating database entry");
+      // skipGeneration: insert one row per platform unless schemaOnly (e.g. blog sends schemaOnly and inserts itself)
+      if (schemaOnly) {
+        console.log("⏭️ Schema-only mode: Not inserting (caller will insert)");
+        data = null;
+        error = null;
+      } else {
+        // Check for existing draft with same topic + platform to avoid duplicates
+        const { data: existingDraft } = await supabase
+          .from("content_strategy")
+          .select("id")
+          .eq("user_id", session.user.id)
+          .eq("topic", topic)
+          .eq("target_platform", normalizedPlatform)
+          .in("status", ["draft", "review"])
+          .maybeSingle();
+
+        if (existingDraft) {
+          console.log("⏭️ Skip generation mode: Updating existing draft row for platform", normalizedPlatform, "id:", existingDraft.id);
+          const updateResult = await supabase
+            .from("content_strategy")
+            .update({
+              generated_content: insertPayload.generated_content,
+              target_keywords: insertPayload.target_keywords,
+              metadata: insertPayload.metadata,
+              word_count: insertPayload.word_count,
+              ai_model: insertPayload.ai_model,
+            })
+            .eq("id", existingDraft.id)
+            .select()
+            .single();
+          data = updateResult.data;
+          error = updateResult.error;
+        } else {
+          console.log("⏭️ Skip generation mode: Inserting one draft row for platform", normalizedPlatform);
+          const insertResult = await supabase
+            .from("content_strategy")
+            .insert(insertPayload)
+            .select()
+            .single();
+          data = insertResult.data;
+          error = insertResult.error;
+        }
+      }
     }
 
     // Handle database errors - but don't fail the entire request if content was generated

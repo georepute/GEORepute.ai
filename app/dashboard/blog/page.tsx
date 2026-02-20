@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useLanguage } from "@/lib/language-context";
@@ -60,7 +60,7 @@ interface BlogPost {
   summary?: string;
 }
 
-type PublishPlatform = "shopify" | "wordpress";
+type PublishPlatform = "shopify" | "wordpress" | "wordpress_self_hosted";
 
 function BlogPageContent() {
   const { isRtl, t, language } = useLanguage();
@@ -90,9 +90,14 @@ function BlogPageContent() {
   const [selectedWordPressSiteId, setSelectedWordPressSiteId] = useState<number | null>(null);
   const [loadingWordPressSites, setLoadingWordPressSites] = useState(false);
 
+  // Self-hosted WordPress state
+  const [wordpressSelfHostedConnected, setWordpressSelfHostedConnected] = useState(false);
+  const [wordpressSelfHostedSiteUrl, setWordpressSelfHostedSiteUrl] = useState("");
+
   // Blog post form state
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he">("en");
   const [post, setPost] = useState<BlogPost>({
     title: "",
     content: "",
@@ -106,14 +111,19 @@ function BlogPageContent() {
   const [generatingContent, setGeneratingContent] = useState(false);
   const [contentGenerated, setContentGenerated] = useState(false);
   const [sendingToPublication, setSendingToPublication] = useState(false);
+  const sendingToPublicationRef = useRef(false);
 
-  // Image selection state (Pixabay)
+  // Image selection state (Pixabay + manual upload)
   const [showImageModal, setShowImageModal] = useState(false);
   const [imageSearchQuery, setImageSearchQuery] = useState("");
   const [fetchingImages, setFetchingImages] = useState(false);
   const [pixabayImages, setPixabayImages] = useState<any[]>([]);
   const [selectedImage, setSelectedImage] = useState<any | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  const [uploadingManualImage, setUploadingManualImage] = useState(false);
+  const [imageModalView, setImageModalView] = useState<"search" | "upload">("search");
+  const blogImageFileInputRef = useRef<HTMLInputElement>(null);
 
 
   // Published posts state
@@ -152,7 +162,7 @@ function BlogPageContent() {
     const platformParam = searchParams.get("platform");
     if (topicParam) setTopic(topicParam);
     if (keywordsParam) setTargetKeywords(keywordsParam);
-    if (platformParam === "wordpress" || platformParam === "shopify") {
+    if (platformParam === "wordpress" || platformParam === "shopify" || platformParam === "wordpress_self_hosted") {
       setSelectedPlatform(platformParam);
     }
   }, [searchParams]);
@@ -167,9 +177,10 @@ function BlogPageContent() {
     setLoading(true);
     try {
       // Check both platforms in parallel
-      const [shopifyRes, wordpressRes] = await Promise.all([
+      const [shopifyRes, wordpressRes, wpSelfHostedRes] = await Promise.all([
         fetch("/api/integrations/shopify"),
         fetch("/api/integrations/wordpress"),
+        fetch("/api/integrations/wordpress-self-hosted"),
       ]);
 
       // Handle Shopify
@@ -186,6 +197,14 @@ function BlogPageContent() {
       }
 
       // Handle WordPress.com
+      if (wpSelfHostedRes.ok) {
+        const data = await wpSelfHostedRes.json();
+        if (data.success && data.connected && data.config) {
+          setWordpressSelfHostedConnected(true);
+          setWordpressSelfHostedSiteUrl(data.config.siteUrl || "");
+        }
+      }
+
       if (wordpressRes.ok) {
         const data = await wordpressRes.json();
         if (data.success && data.connected && data.config) {
@@ -289,7 +308,7 @@ function BlogPageContent() {
         .from("published_content")
         .select("*, content_strategy(*)")
         .eq("user_id", user.id)
-        .in("platform", ["shopify", "wordpress"])
+        .in("platform", ["shopify", "wordpress", "wordpress_self_hosted"])
         .order("published_at", { ascending: false })
         .limit(20);
 
@@ -321,7 +340,7 @@ function BlogPageContent() {
           targetKeywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
           influenceLevel: "moderate",
           contentType: "blog_article",
-          language: language || "en",
+          language: contentGenerationLanguage,
           skipSchema: true, // Schema will be generated when clicking "Send to Publication"
         }),
       });
@@ -467,19 +486,71 @@ function BlogPageContent() {
     }
   };
 
+  // Manual upload from computer (saved to Supabase storage via /api/upload-image)
+  const handleManualImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+      toast.error("Please choose a JPEG, PNG, or WebP image.");
+      e.target.value = "";
+      return;
+    }
+    const maxSize = 20 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error("Image must be under 20MB.");
+      e.target.value = "";
+      return;
+    }
+    setUploadingManualImage(true);
+    toast.loading("Uploading image...", { id: "blog-image-upload" });
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/upload-image", { method: "POST", body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Upload failed");
+      if (data.url) {
+        setUploadedImageUrl(data.url);
+        setPost({ ...post, imageUrl: data.url });
+        setSelectedImage({ id: "manual", tags: "Uploaded from computer", user: "You" });
+        toast.success("Image uploaded to storage. Click \"Use Selected Image\" to confirm.", { id: "blog-image-upload" });
+      }
+    } catch (err) {
+      console.error("Manual image upload:", err);
+      toast.error(err instanceof Error ? err.message : "Upload failed", { id: "blog-image-upload" });
+    } finally {
+      setUploadingManualImage(false);
+      e.target.value = "";
+    }
+  };
+
+  const clearBlogModalImage = () => {
+    setUploadedImageUrl(null);
+    setSelectedImage(null);
+    setPost({ ...post, imageUrl: "" });
+    if (blogImageFileInputRef.current) blogImageFileInputRef.current.value = "";
+  };
+
   // Confirm image selection and close modal
   const handleConfirmImage = () => {
-    if (!selectedImage && !post.imageUrl) {
+    const hasImage = selectedImage || uploadedImageUrl || post.imageUrl;
+    if (!hasImage) {
       toast.error("Please select an image or skip");
       return;
     }
+    if (uploadedImageUrl && !post.imageUrl) setPost({ ...post, imageUrl: uploadedImageUrl });
     setShowImageModal(false);
+    setImageModalView("search");
     toast.success("Featured image set! Review your blog post below.");
   };
 
   // Skip image selection
   const handleSkipImage = () => {
+    setUploadedImageUrl(null);
+    setSelectedImage(null);
     setShowImageModal(false);
+    setImageModalView("search");
     toast.success("Image skipped. You can add one later.");
   };
 
@@ -497,8 +568,10 @@ function BlogPageContent() {
     });
     // Reset image selection state
     setSelectedImage(null);
+    setUploadedImageUrl(null);
     setPixabayImages([]);
     setImageSearchQuery("");
+    setImageModalView("search");
     setContentGenerated(false);
   };
 
@@ -512,16 +585,17 @@ function BlogPageContent() {
       return;
     }
 
-    // Prevent double-click
-    if (sendingToPublication) {
+    // Prevent double-click (ref is synchronous; state update may lag)
+    if (sendingToPublicationRef.current || sendingToPublication) {
       return;
     }
-
+    sendingToPublicationRef.current = true;
     setSendingToPublication(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toast.error("Please log in to continue");
+        sendingToPublicationRef.current = false;
         setSendingToPublication(false);
         return;
       }
@@ -547,6 +621,7 @@ function BlogPageContent() {
           influenceLevel: "moderate",
           contentType: "blog_article",
           skipGeneration: true, // Use existing content, just generate schema
+          schemaOnly: true, // Do not insert; blog will insert/update one row
           generatedContent: post.content,
           imageUrl: cleanImageUrl || undefined,
         }),
@@ -570,13 +645,17 @@ function BlogPageContent() {
       console.log("📋 StructuredSEO to save:", structuredSEO ? "Present" : "Missing");
 
       // Step 2: Check for existing draft with same title
+      // Normalize topic for reliable matching (Hebrew/Unicode: trim + NFC)
+      const normalizedTitle = (post.title || "").trim().normalize("NFC");
       const { data: existingContent } = await supabase
         .from("content_strategy")
         .select("id")
         .eq("user_id", user.id)
-        .eq("topic", post.title)
+        .eq("topic", normalizedTitle)
         .eq("target_platform", selectedPlatform)
         .eq("status", "draft")
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       let contentRecord;
@@ -602,6 +681,11 @@ function BlogPageContent() {
         if (post.categories) {
           contentMetadata.categories = post.categories;
         }
+      } else if (selectedPlatform === "wordpress_self_hosted") {
+        // Self-hosted uses single site from integration; no site ID needed
+        if (post.categories) {
+          contentMetadata.categories = post.categories;
+        }
       }
 
       if (existingContent) {
@@ -620,12 +704,12 @@ function BlogPageContent() {
         contentRecord = data;
         insertError = error;
       } else {
-        // Create new content record
+        // Create new content record (use normalized title for consistency)
         const { data, error } = await supabase
           .from("content_strategy")
           .insert({
             user_id: user.id,
-            topic: post.title,
+            topic: normalizedTitle || post.title,
             generated_content: post.content,
             target_platform: selectedPlatform,
             status: "draft",
@@ -681,6 +765,7 @@ function BlogPageContent() {
       console.error("Send to publication error:", error);
       toast.error("Failed to send to publication: " + (error.message || "Unknown error"));
     } finally {
+      sendingToPublicationRef.current = false;
       setSendingToPublication(false);
     }
   };
@@ -711,7 +796,7 @@ function BlogPageContent() {
         </div>
 
         {/* Not Connected State */}
-        {!shopifyConnected && !wordpressConnected && (
+        {!shopifyConnected && !wordpressConnected && !wordpressSelfHostedConnected && (
           <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
             <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center">
               <Store className="w-8 h-8 text-white" />
@@ -738,6 +823,13 @@ function BlogPageContent() {
                 <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} />
                 Connect WordPress.com
               </Link>
+              <Link
+                href="/dashboard/settings?tab=integrations"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
+              >
+                <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} />
+                Connect Self-Hosted WordPress
+              </Link>
             </div>
 
             <div className="mt-6 pt-6 border-t border-gray-200">
@@ -749,7 +841,7 @@ function BlogPageContent() {
         )}
 
         {/* Connected State - Create Blog Post */}
-        {(shopifyConnected || wordpressConnected) && (
+        {(shopifyConnected || wordpressConnected || wordpressSelfHostedConnected) && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Main Content - Blog Editor */}
             <div className="lg:col-span-2 space-y-6">
@@ -808,20 +900,49 @@ function BlogPageContent() {
                       <span className="font-medium">Connect WordPress.com</span>
                     </Link>
                   )}
+
+                  {/* Self-Hosted WordPress */}
+                  {wordpressSelfHostedConnected ? (
+                    <button
+                      onClick={() => setSelectedPlatform("wordpress_self_hosted")}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${
+                        selectedPlatform === "wordpress_self_hosted"
+                          ? "bg-indigo-50 border-indigo-500 text-indigo-700"
+                          : "bg-white border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} />
+                      <span className="font-medium">WordPress (Self-Hosted)</span>
+                      {selectedPlatform === "wordpress_self_hosted" && (
+                        <CheckCircle className="w-4 h-4 text-indigo-600" />
+                      )}
+                    </button>
+                  ) : (
+                    <Link
+                      href="/dashboard/settings?tab=integrations"
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
+                    >
+                      <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} className="opacity-50" />
+                      <span className="font-medium">Connect Self-Hosted WordPress</span>
+                    </Link>
+                  )}
                 </div>
               </div>
 
               {/* Connection Status - Only show for the currently selected connected platform */}
               {((selectedPlatform === "shopify" && shopifyConnected) || 
-                (selectedPlatform === "wordpress" && wordpressConnected)) && (
+                (selectedPlatform === "wordpress" && wordpressConnected) ||
+                (selectedPlatform === "wordpress_self_hosted" && wordpressSelfHostedConnected)) && (
                 <div className={`${
                   selectedPlatform === "shopify" 
                     ? "bg-green-50 border-green-200" 
+                    : selectedPlatform === "wordpress_self_hosted"
+                    ? "bg-indigo-50 border-indigo-200"
                     : "bg-blue-50 border-blue-200"
                 } border rounded-lg p-4 flex items-center justify-between`}>
                   <div className="flex items-center gap-3">
                     <CheckCircle className={`w-5 h-5 ${
-                      selectedPlatform === "shopify" ? "text-green-600" : "text-blue-600"
+                      selectedPlatform === "shopify" ? "text-green-600" : selectedPlatform === "wordpress_self_hosted" ? "text-indigo-600" : "text-blue-600"
                     }`} />
                     <div>
                       {selectedPlatform === "shopify" && shopifyConnected ? (
@@ -842,6 +963,20 @@ function BlogPageContent() {
                             </a>
                           )}
                         </p>
+                      ) : selectedPlatform === "wordpress_self_hosted" && wordpressSelfHostedConnected ? (
+                        <p className="text-sm font-medium text-indigo-900">
+                          Connected to Self-Hosted WordPress: {wordpressSelfHostedSiteUrl}
+                          {wordpressSelfHostedSiteUrl && (
+                            <a 
+                              href={wordpressSelfHostedSiteUrl} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="ml-2 text-indigo-600 hover:underline text-xs"
+                            >
+                              (view site)
+                            </a>
+                          )}
+                        </p>
                       ) : null}
                     </div>
                   </div>
@@ -850,6 +985,8 @@ function BlogPageContent() {
                     className={`text-sm font-medium ${
                       selectedPlatform === "shopify" 
                         ? "text-green-700 hover:text-green-800" 
+                        : selectedPlatform === "wordpress_self_hosted"
+                        ? "text-indigo-700 hover:text-indigo-800"
                         : "text-blue-700 hover:text-blue-800"
                     }`}
                   >
@@ -921,6 +1058,21 @@ function BlogPageContent() {
                         <p className="text-xs text-gray-500 mt-1">
                           Comma-separated keywords to include in your content
                         </p>
+                      </div>
+
+                      {/* Content language */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Generate content in
+                        </label>
+                        <select
+                          value={contentGenerationLanguage}
+                          onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                        >
+                          <option value="en">English</option>
+                          <option value="he">Hebrew</option>
+                        </select>
                       </div>
 
                       {/* Generate Button */}
@@ -1012,11 +1164,11 @@ function BlogPageContent() {
                         </div>
 
                         {/* Categories - WordPress only */}
-                        {selectedPlatform === "wordpress" && (
+                        {(selectedPlatform === "wordpress" || selectedPlatform === "wordpress_self_hosted") && (
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
                               Categories
-                              <span className="ml-2 text-xs font-normal text-blue-600">(WordPress only)</span>
+                              <span className="ml-2 text-xs font-normal text-blue-600">(WordPress)</span>
                             </label>
                             <input
                               type="text"
@@ -1189,9 +1341,11 @@ function BlogPageContent() {
                             <span className={`flex-shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded ${
                               post.platform === "wordpress" 
                                 ? "bg-blue-100 text-blue-700" 
+                                : post.platform === "wordpress_self_hosted"
+                                ? "bg-indigo-100 text-indigo-700"
                                 : "bg-green-100 text-green-700"
                             }`}>
-                              {post.platform === "wordpress" ? "WP" : "Shopify"}
+                              {post.platform === "wordpress" ? "WP.com" : post.platform === "wordpress_self_hosted" ? "WP Self" : "Shopify"}
                             </span>
                           </div>
                           <div className="flex items-center justify-between mt-1">
@@ -1271,6 +1425,62 @@ function BlogPageContent() {
 
             {/* Modal Content */}
             <div className="p-6 overflow-y-auto flex-1">
+              {imageModalView === "upload" ? (
+                /* Manual upload from computer (saved to Supabase storage) */
+                <div className="space-y-4">
+                  <button
+                    type="button"
+                    onClick={() => setImageModalView("search")}
+                    className="text-sm text-purple-600 hover:text-purple-700 font-medium flex items-center gap-1"
+                  >
+                    ← Back to search
+                  </button>
+                  <h4 className="text-base font-semibold text-gray-900">Upload from your computer</h4>
+                  <p className="text-sm text-gray-500">JPEG, PNG, or WebP, max 20MB. Image is saved to your Supabase storage.</p>
+                  <input
+                    ref={blogImageFileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
+                    onChange={handleManualImageUpload}
+                    disabled={uploadingManualImage}
+                    className="hidden"
+                  />
+                  {!uploadedImageUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => blogImageFileInputRef.current?.click()}
+                      disabled={uploadingManualImage}
+                      className="flex items-center justify-center gap-2 w-full py-10 rounded-xl border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50/50 text-gray-600 hover:text-purple-700 transition-colors disabled:opacity-50 font-medium"
+                    >
+                      {uploadingManualImage ? (
+                        <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+                      ) : (
+                        <ImageIcon className="w-8 h-8" />
+                      )}
+                      {uploadingManualImage ? "Uploading..." : "Choose image (JPEG, PNG, WebP, max 20MB)"}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-4 p-4 rounded-lg border-2 border-green-200 bg-green-50">
+                      <div className="relative w-24 h-24 rounded-lg overflow-hidden border-2 border-green-300">
+                        <Image src={uploadedImageUrl} alt="Uploaded" fill className="object-cover" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-green-900">Image uploaded</p>
+                        <p className="text-xs text-green-700">Saved to Supabase storage. Click &quot;Use Selected Image&quot; below to confirm.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={clearBlogModalImage}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Remove image"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
               {/* Search Input */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1305,6 +1515,18 @@ function BlogPageContent() {
                 </div>
               </div>
 
+              {/* Upload option — switch to manual upload */}
+              <div className="mb-4">
+                <button
+                  type="button"
+                  onClick={() => setImageModalView("upload")}
+                  className="flex items-center justify-center gap-2 w-full py-3 rounded-lg border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50/50 text-gray-600 hover:text-purple-700 transition-colors font-medium text-sm"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  Upload image from your computer
+                </button>
+              </div>
+
               {/* Image Grid */}
               {fetchingImages ? (
                 <div className="text-center py-12">
@@ -1318,12 +1540,12 @@ function BlogPageContent() {
                       <button
                         key={image.id}
                         onClick={() => handleSelectImage(image)}
-                        disabled={uploadingImage}
+                        disabled={uploadingImage || uploadingManualImage}
                         className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all ${
                           selectedImage?.id === image.id
                             ? "border-purple-500 ring-2 ring-purple-500/30"
                             : "border-gray-200 hover:border-purple-300"
-                        } ${uploadingImage ? "opacity-50 cursor-not-allowed" : ""}`}
+                        } ${(uploadingImage || uploadingManualImage) ? "opacity-50 cursor-not-allowed" : ""}`}
                       >
                         <Image
                           src={image.webformatURL}
@@ -1336,7 +1558,7 @@ function BlogPageContent() {
                             <CheckCircle className="w-8 h-8 text-white drop-shadow-lg" />
                           </div>
                         )}
-                        {uploadingImage && selectedImage?.id === image.id && (
+                        {(uploadingImage || uploadingManualImage) && selectedImage?.id === image.id && (
                           <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                             <Loader2 className="w-8 h-8 text-white animate-spin" />
                           </div>
@@ -1366,13 +1588,13 @@ function BlogPageContent() {
                 </div>
               )}
 
-              {/* Selected Image Preview */}
-              {selectedImage && post.imageUrl && (
+              {/* Selected Image Preview (Pixabay or uploaded) */}
+              {(selectedImage || uploadedImageUrl) && (post.imageUrl || uploadedImageUrl) && (
                 <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center gap-4">
                     <div className="relative w-20 h-14 rounded-lg overflow-hidden border-2 border-green-300">
                       <Image
-                        src={post.imageUrl}
+                        src={post.imageUrl || uploadedImageUrl || ""}
                         alt="Selected image"
                         fill
                         className="object-cover"
@@ -1381,12 +1603,14 @@ function BlogPageContent() {
                     <div className="flex-1">
                       <p className="text-sm font-medium text-green-900">Image Selected!</p>
                       <p className="text-xs text-green-700">
-                        {selectedImage.tags || "Featured image"}
+                        {selectedImage?.tags || "Featured image"}
                       </p>
                     </div>
                     <CheckCircle className="w-6 h-6 text-green-600" />
                   </div>
                 </div>
+              )}
+                </>
               )}
             </div>
 
@@ -1400,10 +1624,10 @@ function BlogPageContent() {
               </button>
               <button
                 onClick={handleConfirmImage}
-                disabled={!selectedImage || uploadingImage}
+                disabled={(!selectedImage && !uploadedImageUrl) || uploadingImage || uploadingManualImage}
                 className="px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                {uploadingImage ? (
+                {uploadingImage || uploadingManualImage ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Uploading...

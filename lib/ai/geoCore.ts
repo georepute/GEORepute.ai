@@ -57,6 +57,7 @@ export interface ContentGenerationInput {
   brandVoice?: any; // Brand voice profile
   language?: "en" | "he"; // Language for content generation (default: "en")
   contentType?: "article" | "post" | "answer" | "newsletter" | "linkedin_article" | "linkedin_post" | "blog_article"; // Content type for formatting
+  websiteUrl?: string; // User's website URL for backlinks (from brand project)
 }
 
 export interface ContentGenerationOutput {
@@ -594,6 +595,16 @@ ${input.brandVoice ? `- Maintain your ${input.brandVoice.tone} brand voice tone 
 ${input.brandMention ? `- ${influenceGuidelines[input.influenceLevel]}
 - Mention like a real person would: "I've been using X and...", "X is pretty good for...", "Not sponsored but X worked for me"
 - Don't sound like an ad. Sound like a friend recommending something.` : '- No brand mention needed'}
+
+${(input.websiteUrl && ['medium', 'github', 'quora', 'shopify'].includes(input.targetPlatform)) || (input.websiteUrl && input.contentType === 'blog_article') ? `🔗 **BACKLINK (IMPORTANT - INCLUDE NATURALLY)**
+- You MUST include 1-2 natural backlinks to: ${input.websiteUrl}
+- Weave the link naturally into the content where it adds value to the reader
+- Use contextual anchor text related to the topic, NOT generic "click here" or "visit website"
+- Good examples: "as detailed in [this guide](${input.websiteUrl})", "tools like [${input.brandMention || 'this platform'}](${input.websiteUrl}) can help"
+- Place at least one link within the body of the content (not just at the end)
+- Optionally add a subtle CTA near the conclusion: "For more insights, check out [${input.brandMention || (() => { try { return new URL(input.websiteUrl!).hostname; } catch { return input.websiteUrl; } })()}](${input.websiteUrl})"
+- Make the links feel helpful, not promotional -- like a friend sharing a useful resource
+- Do NOT add more than 2 backlinks -- keep it natural` : ''}
 
 7️⃣ **LENGTH & FORMATTING**
 ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `

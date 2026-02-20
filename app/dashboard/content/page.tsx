@@ -78,6 +78,8 @@ function ContentInner() {
   const [schedulePosition, setSchedulePosition] = useState({ top: 0, right: 0 });
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("");
+  const [showGlobalScheduleModal, setShowGlobalScheduleModal] = useState(false);
+  const [schedulingMultiple, setSchedulingMultiple] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
   const [viewContent, setViewContent] = useState<ContentItem | null>(null);
   const [showSchema, setShowSchema] = useState(false);
@@ -140,6 +142,7 @@ function ContentInner() {
     };
   } | null>(null);
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he">("en");
 
   // Humanization State
   const [isHumanizing, setIsHumanizing] = useState(false);
@@ -179,6 +182,7 @@ function ContentInner() {
     { id: 'github', name: 'GitHub', icon: '/github-142.svg', color: 'bg-gray-800 text-white border-gray-700' },
     { id: 'shopify', name: 'Shopify', icon: '/shopify.svg', color: 'bg-green-100 text-green-700 border-green-200' },
     { id: 'wordpress', name: 'WordPress.com', icon: '/wordpress.svg', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+    { id: 'wordpress_self_hosted', name: 'WordPress (Self-Hosted)', icon: '/wordpress.svg', color: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
   ];
 
 
@@ -336,9 +340,9 @@ function ContentInner() {
               setImageSearchQuery(data.responses[0].prompt);
             }
             
-            // Show image modal if step is image-selection or no step specified
-            // Only if we haven't already completed the flow
-            if ((step === 'image-selection' || !step) && !hasPublishedContent) {
+            // Show image modal only when just navigated (flag set), not on refresh
+            if ((step === 'image-selection' || !step) && !hasPublishedContent && sessionStorage.getItem('contentPageOpenImageModal') === '1') {
+              sessionStorage.removeItem('contentPageOpenImageModal');
               setShowImageModal(true);
             }
           } catch (error) {
@@ -354,6 +358,12 @@ function ContentInner() {
       if (contentToPublishRaw) {
         try {
           const publishData = JSON.parse(contentToPublishRaw);
+          sessionStorage.removeItem('contentToPublish');
+          // Blog flow: content already saved with schema; do NOT enter AI Visibility flow (avoids duplicate inserts)
+          if (publishData.contentId) {
+            // Content from blog is already in DB; just show the list (no aiVisibilityData, no modals)
+            return;
+          }
           const keywords = Array.isArray(publishData.targetKeywords)
             ? publishData.targetKeywords
             : (typeof publishData.targetKeywords === 'string'
@@ -383,9 +393,11 @@ function ContentInner() {
           };
           setAiVisibilityData(publicationData);
           sessionStorage.setItem('aiVisibilityResponses', JSON.stringify(publicationData));
-          sessionStorage.removeItem('contentToPublish');
           setImageSearchQuery(publishData.topic || '');
-          setShowImageModal(true);
+          if (sessionStorage.getItem('contentPageOpenImageModal') === '1') {
+            sessionStorage.removeItem('contentPageOpenImageModal');
+            setShowImageModal(true);
+          }
         } catch (error) {
           console.error('Error parsing contentToPublish:', error);
           sessionStorage.removeItem('contentToPublish');
@@ -400,7 +412,10 @@ function ContentInner() {
             if (!hasPublishedContent) {
               setAiVisibilityData(data);
               if (data.responses?.[0]?.prompt) setImageSearchQuery(data.responses[0].prompt);
-              setShowImageModal(true);
+              if (sessionStorage.getItem('contentPageOpenImageModal') === '1') {
+                sessionStorage.removeItem('contentPageOpenImageModal');
+                setShowImageModal(true);
+              }
             }
           } catch (error) {
             console.error('Error parsing aiVisibilityResponses:', error);
@@ -616,6 +631,67 @@ function ContentInner() {
     setScheduleContentId(null);
     setScheduleDate("");
     setScheduleTime("");
+  };
+
+  const handleOpenGlobalScheduleModal = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setScheduleDate(tomorrow.toISOString().split('T')[0]);
+    setScheduleTime("09:00");
+    setShowGlobalScheduleModal(true);
+  };
+
+  const handleGlobalScheduleSubmit = async () => {
+    if (!scheduleDate || selectedItems.size === 0) {
+      toast.error("Please select a date and at least one item");
+      return;
+    }
+    const scheduledDateTime = scheduleTime
+      ? new Date(`${scheduleDate}T${scheduleTime}`).toISOString()
+      : new Date(`${scheduleDate}T09:00`).toISOString();
+
+    const itemsToSchedule = contentItems.filter(
+      (item) =>
+        selectedItems.has(item.id) &&
+        (item.status === "draft" || item.status === "review" || item.status === "scheduled")
+    );
+
+    if (itemsToSchedule.length === 0) {
+      const publishedCount = Array.from(selectedItems).filter(
+        (id) => contentItems.find((i) => i.id === id)?.status === "published"
+      ).length;
+      toast.error(
+        publishedCount > 0
+          ? "Published items cannot be scheduled. Select draft or review items."
+          : "No draft or review items to schedule"
+      );
+      return;
+    }
+
+    setSchedulingMultiple(true);
+    let successCount = 0;
+    let failCount = 0;
+    try {
+      for (const item of itemsToSchedule) {
+        try {
+          await handleAction("approve", item.id, { scheduledAt: scheduledDateTime });
+          successCount++;
+        } catch {
+          failCount++;
+        }
+      }
+      if (successCount > 0) {
+        toast.success(`${successCount} item(s) scheduled for ${new Date(scheduledDateTime).toLocaleString()}`);
+        await loadContent();
+        setSelectedItems(new Set());
+        setShowGlobalScheduleModal(false);
+      }
+      if (failCount > 0) {
+        toast.error(`Failed to schedule ${failCount} item(s)`);
+      }
+    } finally {
+      setSchedulingMultiple(false);
+    }
   };
 
   const handleAction = async (action: string, contentId: string, additionalData?: any) => {
@@ -997,7 +1073,7 @@ function ContentInner() {
           userContext: originalContent.user_context || '',
           imageUrl: originalContent.image_url || null,
           brandVoiceId: originalContent.brand_voice_id || null,
-          language: language || 'en', // Pass current language preference
+          language: contentGenerationLanguage,
           // Add optimization flag
           optimizeFromContentId: optimizeContentId,
           learningInsights: learningInsights,
@@ -1110,6 +1186,13 @@ function ContentInner() {
     } else {
       setSelectedItems(new Set(contentItems.map(item => item.id)));
     }
+  };
+
+  const handleSelectAllDraftReview = () => {
+    const draftReviewIds = contentItems
+      .filter((item) => item.status === "draft" || item.status === "review" || item.status === "scheduled")
+      .map((item) => item.id);
+    setSelectedItems(new Set(draftReviewIds));
   };
 
   const handleDeleteMultiple = async () => {
@@ -1231,7 +1314,7 @@ function ContentInner() {
           keywords: editData.keywords,
           competitors: editData.competitors,
           influenceLevel: influenceLevel,
-          language: language || 'en',
+          language: contentGenerationLanguage,
           brandVoice: selectedVoice ? {
             id: selectedVoice.id,
             brand_name: selectedVoice.brand_name,
@@ -1272,7 +1355,7 @@ function ContentInner() {
           try {
             console.log('🔄 Attempting to call via supabase.functions.invoke...');
             const invokeResult = await supabase.functions.invoke('detect-ai', {
-              body: { text: data.synthesizedResponse }
+              body: { text: data.synthesizedResponse, language: contentGenerationLanguage }
             });
             detectionData = invokeResult.data;
             detectionError = invokeResult.error;
@@ -1297,7 +1380,7 @@ function ContentInner() {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${supabaseAnonKey}`,
               },
-              body: JSON.stringify({ text: data.synthesizedResponse })
+              body: JSON.stringify({ text: data.synthesizedResponse, language: contentGenerationLanguage })
             });
             
             console.log('📥 Fetch response status:', fetchResponse.status, fetchResponse.statusText);
@@ -1402,7 +1485,8 @@ function ContentInner() {
           body: {
             text: synthesizedResponse,
             detectedPhrases: detectedPhrases,
-            passes: 5
+            passes: 5,
+            language: contentGenerationLanguage
           }
         });
         humanizedData = invokeResult.data;
@@ -1431,7 +1515,8 @@ function ContentInner() {
           body: JSON.stringify({
             text: synthesizedResponse,
             detectedPhrases: detectedPhrases,
-            passes: 5
+            passes: 5,
+            language: contentGenerationLanguage
           })
         });
         
@@ -1747,17 +1832,15 @@ function ContentInner() {
               tone: "informative",
               contentType: "answer",
             targetKeywords: aiVisibilityData?.keywords || [],
-              // When Hebrew: generate new content in Hebrew from prompt; when English: use existing response
-              // When Hebrew: omit generatedContent so API generates content in Hebrew from prompt
-            ...(language !== "he" ? { generatedContent: responseData.response } : {}),
-              skipGeneration: false,
+              generatedContent: responseData.response,
+              skipGeneration: true,
             imageUrl: includeImage ? uploadedImageUrl : null,
             imageData: includeImage && selectedImage ? {
               url: uploadedImageUrl,
               alt: selectedImage.tags || responseData.prompt,
               photographer: selectedImage.user,
             } : null,
-            language: language || "en",
+            language: contentGenerationLanguage,
             actionPlanId: actionPlanContext?.planId || undefined,
             actionPlanStepId: actionPlanContext?.stepId || undefined,
             sourceMissedPrompt: aiVisibilityData?.sourceMissedPrompt || undefined,
@@ -1829,9 +1912,15 @@ function ContentInner() {
     
     toast.success(`Schemas created for ${Object.keys(schemas).length} platform(s)!`);
     
-    // Reload content to show the new items, switch to draft tab so user sees content ready to publish
+    // Reload content to show the new draft items (one per platform)
     await loadContent();
     setActiveTab('draft');
+    // Clear sessionStorage so refresh doesn't reopen modals; drafts are already in DB
+    sessionStorage.removeItem('aiVisibilityResponses');
+    sessionStorage.removeItem('editPromptData');
+    sessionStorage.removeItem('contentPageOpenImageModal');
+    setShowImageModal(false);
+    setAiVisibilityData(null);
   };
 
   const getStatusColor = (status: string) => {
@@ -1998,24 +2087,40 @@ function ContentInner() {
                   />
                   <span className="text-sm font-medium">Select All ({selectedItems.size})</span>
                 </label>
+                <button
+                  onClick={handleSelectAllDraftReview}
+                  className="px-4 py-3 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-2 text-blue-700 text-sm font-medium"
+                >
+                  <Clock className="w-5 h-5" />
+                  <span className="hidden sm:inline">Select Draft & Review</span>
+                </button>
                 {selectedItems.size > 0 && (
-                  <button
-                    onClick={handleDeleteMultiple}
-                    disabled={isDeletingMultiple}
-                    className="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isDeletingMultiple ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        <span className="hidden sm:inline">Deleting...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Trash2 className="w-5 h-5" />
-                        <span className="hidden sm:inline">Delete Selected ({selectedItems.size})</span>
-                      </>
-                    )}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleOpenGlobalScheduleModal}
+                      className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    >
+                      <Clock className="w-5 h-5" />
+                      <span className="hidden sm:inline">Schedule Selected ({selectedItems.size})</span>
+                    </button>
+                    <button
+                      onClick={handleDeleteMultiple}
+                      disabled={isDeletingMultiple}
+                      className="px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isDeletingMultiple ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          <span className="hidden sm:inline">Deleting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-5 h-5" />
+                          <span className="hidden sm:inline">Delete Selected ({selectedItems.size})</span>
+                        </>
+                      )}
+                    </button>
+                  </>
                 )}
               </>
             )}
@@ -2115,7 +2220,8 @@ function ContentInner() {
                       {items.map((item) => {
                         const statusConfig = getStatusColor(item.status);
                         const StatusIcon = statusConfig.icon;
-                        const platform = item.platforms[0] || 'unknown';
+                        const platformId = (item.raw?.target_platform || item.platforms?.[0] || "").toLowerCase();
+                        const platformInfo = PUBLISHING_PLATFORMS.find((p) => p.id === platformId);
 
                         return (
                           <div key={item.id} className="p-4 hover:bg-gray-50/50 transition-colors">
@@ -2127,6 +2233,20 @@ function ContentInner() {
                                 onChange={() => handleSelectItem(item.id)}
                                 className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
                               />
+                              {/* Platform banner – which platform this content is for */}
+                              <div
+                                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium shrink-0 ${
+                                  platformInfo ? `${platformInfo.color} border-current/20` : "bg-gray-100 text-gray-700 border-gray-200"
+                                }`}
+                                title={platformInfo ? `Content for ${platformInfo.name}` : `Platform: ${platformId || "Unknown"}`}
+                              >
+                                {platformInfo?.icon ? (
+                                  <div className="relative w-4 h-4">
+                                    <Image src={platformInfo.icon} alt={platformInfo.name} width={16} height={16} className="object-contain" />
+                                  </div>
+                                ) : null}
+                                <span>{platformInfo?.name || platformId || "Unknown"}</span>
+                              </div>
                               {/* Top 3 Keywords (replacing platform) */}
                               <div className="flex-1 flex flex-wrap items-center gap-2">
                                 {(() => {
@@ -2274,8 +2394,9 @@ function ContentInner() {
                     )}
                     {item.status === "published" && item.published_records && item.published_records.length > 0 && (
                       <div className="mt-2 ml-0">
-                        {item.published_records.map((pub, idx) => (
-                          pub.published_url ? (
+                        {item.published_records
+                          .filter((pub, idx, arr) => pub.published_url && arr.findIndex(p => p.published_url === pub.published_url && p.platform === pub.platform) === idx)
+                          .map((pub, idx) => (
                             <a
                               key={idx}
                               href={pub.published_url}
@@ -2284,9 +2405,8 @@ function ContentInner() {
                               className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 hover:underline"
                             >
                               <ExternalLink className="w-3 h-3" />
-                              View on {pub.platform || platform}
+                              View on {PUBLISHING_PLATFORMS.find(p => p.id === (pub.platform || item.raw?.target_platform || item.platforms?.[0] || "").toLowerCase())?.name || pub.platform || item.raw?.target_platform || item.platforms?.[0] || "external"}
                             </a>
-                          ) : null
                         ))}
                       </div>
                     )}
@@ -2302,6 +2422,8 @@ function ContentInner() {
               const item = firstItem;
             const statusConfig = getStatusColor(item.status);
             const StatusIcon = statusConfig.icon;
+            const singlePlatformId = (item.raw?.target_platform || item.platforms?.[0] || "").toLowerCase();
+            const singlePlatformInfo = PUBLISHING_PLATFORMS.find((p) => p.id === singlePlatformId);
 
             return (
               <motion.div
@@ -2319,6 +2441,20 @@ function ContentInner() {
                     onChange={() => handleSelectItem(item.id)}
                     className="mt-1 w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
                   />
+                  {/* Platform banner */}
+                  <div
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium shrink-0 ${
+                      singlePlatformInfo ? `${singlePlatformInfo.color} border-current/20` : "bg-gray-100 text-gray-700 border-gray-200"
+                    }`}
+                    title={singlePlatformInfo ? `Content for ${singlePlatformInfo.name}` : `Platform: ${singlePlatformId || "Unknown"}`}
+                  >
+                    {singlePlatformInfo?.icon ? (
+                      <div className="relative w-4 h-4">
+                        <Image src={singlePlatformInfo.icon} alt={singlePlatformInfo.name} width={16} height={16} className="object-contain" />
+                      </div>
+                    ) : null}
+                    <span>{singlePlatformInfo?.name || singlePlatformId || "Unknown"}</span>
+                  </div>
                   {/* Content Info - Left Side */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start gap-3 mb-2">
@@ -2384,8 +2520,9 @@ function ContentInner() {
                     {/* Published URL Link */}
                     {item.status === "published" && item.published_records && item.published_records.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-gray-200">
-                        {item.published_records.map((pub, idx) => (
-                          pub.published_url ? (
+                        {item.published_records
+                          .filter((pub, idx, arr) => pub.published_url && arr.findIndex(p => p.published_url === pub.published_url && p.platform === pub.platform) === idx)
+                          .map((pub, idx) => (
                             <a
                               key={idx}
                               href={pub.published_url}
@@ -2397,7 +2534,6 @@ function ContentInner() {
                               <span>Visit published content</span>
                               <span className="text-xs text-gray-500">({pub.platform || 'external'})</span>
                             </a>
-                          ) : null
                         ))}
                       </div>
                     )}
@@ -3071,6 +3207,99 @@ function ContentInner() {
         </>
       )}
 
+      {/* Global Schedule Modal */}
+      {showGlobalScheduleModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md"
+          >
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-blue-600" />
+                  Global Schedule — Auto-Publish at Time
+                </h3>
+                <button
+                  onClick={() => setShowGlobalScheduleModal(false)}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-600 mt-1">
+                {selectedItems.size} item(s) selected — set date & time to auto-publish all at once
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* Date picker */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <input
+                  type="date"
+                  value={scheduleDate}
+                  onChange={(e) => setScheduleDate(e.target.value)}
+                  min={new Date().toISOString().split("T")[0]}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 outline-none"
+                />
+              </div>
+
+              {/* Time picker */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
+                <input
+                  type="time"
+                  value={scheduleTime}
+                  onChange={(e) => setScheduleTime(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 outline-none"
+                />
+              </div>
+
+              {scheduleDate && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <p className="text-xs text-gray-700">
+                    <span className="font-medium">Will publish:</span>{" "}
+                    {new Date(`${scheduleDate}T${scheduleTime || "09:00"}`).toLocaleString("en-US", {
+                      weekday: "short",
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="p-6 pt-0 flex gap-3 justify-end">
+              <button
+                onClick={() => setShowGlobalScheduleModal(false)}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleGlobalScheduleSubmit}
+                disabled={!scheduleDate || schedulingMultiple}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+              >
+                {schedulingMultiple ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Scheduling...
+                  </>
+                ) : (
+                  <>
+                    <Clock className="w-4 h-4" />
+                    Schedule All
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {/* View Content Modal */}
       {showViewModal && viewContent && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -3193,8 +3422,9 @@ function ContentInner() {
                       <div className="mt-6 pt-6 border-t border-gray-200">
                         <h4 className="text-sm font-semibold text-gray-900 mb-3">Published Links:</h4>
                         <div className="space-y-2">
-                          {viewContent.published_records.map((pub: any, idx: number) => (
-                            pub.published_url ? (
+                          {viewContent.published_records
+                            .filter((pub: any, idx: number, arr: any[]) => pub.published_url && arr.findIndex((p: any) => p.published_url === pub.published_url && p.platform === pub.platform) === idx)
+                            .map((pub: any, idx: number) => (
                               <a
                                 key={idx}
                                 href={pub.published_url}
@@ -3206,7 +3436,6 @@ function ContentInner() {
                                 <span className="break-all">{pub.published_url}</span>
                                 <span className="text-xs text-gray-500 capitalize whitespace-nowrap">({pub.platform || 'external'})</span>
                               </a>
-                            ) : null
                           ))}
                         </div>
                       </div>
@@ -3583,7 +3812,7 @@ function ContentInner() {
                       </div>
                       <p className="text-xs text-gray-500 mt-0.5">Select a voice profile to maintain consistent brand personality</p>
                     </div>
-                    <div className="p-4">
+                    <div className="p-4 space-y-4">
                       <select
                         value={selectedVoiceId || ""}
                         onChange={(e) => setSelectedVoiceId(e.target.value || null)}
@@ -3598,6 +3827,18 @@ function ContentInner() {
                           </option>
                         ))}
                       </select>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Generate content in</label>
+                        <select
+                          value={contentGenerationLanguage}
+                          onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
+                          className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none text-gray-800 bg-white"
+                        >
+                          <option value="en">English</option>
+                          <option value="he">Hebrew</option>
+                        </select>
+                      </div>
+                    </div>
 
                       {selectedVoiceId && (
                         <div className="mt-3 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
@@ -3617,14 +3858,13 @@ function ContentInner() {
                                 </div>
                                 {selectedVoice.description && (
                                   <p className="text-xs text-indigo-700">{selectedVoice.description}</p>
-      )}
-    </div>
-  );
+                                )}
+                              </div>
+                            );
                           })()}
                         </div>
                       )}
                     </div>
-                  </div>
 
                   {/* Influence Level Selection */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
