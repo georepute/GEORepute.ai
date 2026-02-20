@@ -13,6 +13,7 @@ import {
   Users,
   BarChart3,
   Target,
+  Crosshair,
   Layers,
   Video,
   Menu,
@@ -50,7 +51,7 @@ export default function DashboardLayout({
   const { isRtl, t } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<string[]>([t.dashboard.sidebar.analytics]); // Track expanded parent items
+  const [expandedItems, setExpandedItems] = useState<string[]>([t.dashboard.sidebar.analytics, "Strategy Reports"]); // Track expanded parent items
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { role, capabilities, loading: permissionsLoading } = usePermissions();
@@ -146,6 +147,14 @@ export default function DashboardLayout({
       children: [
         { name: "AI Search Presence", href: "/dashboard/ai-search-presence", icon: Brain, requiredCapability: "canViewReports" },
         { name: "AI vs Google Gap", href: "/dashboard/ai-vs-google-gap", icon: Activity, requiredCapability: "canViewReports" },
+      ]
+    },
+    { 
+      name: "Strategy Reports", 
+      icon: Crosshair, 
+      requiredCapability: "canViewReports",
+      children: [
+        { name: "Strategic Blind Spots", href: "/dashboard/strategic-blind-spots", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
     { 
