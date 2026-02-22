@@ -21,23 +21,34 @@ interface CountryAIResult {
   ai_mentioned_competitors: string[];
 }
 
-// Map country codes to full names
+// Map country codes to full names (includes 2-letter for GSC: il->Israel; Palestine merged into Israel)
 const getCountryName = (code: string): string => {
   const countryMapping: { [key: string]: string } = {
-    'USA': 'United States', 'GBR': 'United Kingdom', 'CAN': 'Canada', 'AUS': 'Australia',
-    'DEU': 'Germany', 'FRA': 'France', 'ITA': 'Italy', 'ESP': 'Spain', 'NLD': 'Netherlands',
-    'BEL': 'Belgium', 'CHE': 'Switzerland', 'AUT': 'Austria', 'SWE': 'Sweden', 'NOR': 'Norway',
-    'DNK': 'Denmark', 'FIN': 'Finland', 'POL': 'Poland', 'CZE': 'Czech Republic', 'HUN': 'Hungary',
-    'ROU': 'Romania', 'BGR': 'Bulgaria', 'GRC': 'Greece', 'PRT': 'Portugal', 'IRL': 'Ireland',
-    'JPN': 'Japan', 'CHN': 'China', 'IND': 'India', 'KOR': 'South Korea', 'SGP': 'Singapore',
-    'HKG': 'Hong Kong', 'TWN': 'Taiwan', 'THA': 'Thailand', 'MYS': 'Malaysia', 'IDN': 'Indonesia',
-    'PHL': 'Philippines', 'VNM': 'Vietnam', 'NZL': 'New Zealand', 'MEX': 'Mexico', 'BRA': 'Brazil',
-    'ARG': 'Argentina', 'CHL': 'Chile', 'COL': 'Colombia', 'PER': 'Peru', 'ZAF': 'South Africa',
-    'EGY': 'Egypt', 'NGA': 'Nigeria', 'KEN': 'Kenya', 'MAR': 'Morocco', 'ARE': 'UAE',
-    'SAU': 'Saudi Arabia', 'ISR': 'Israel', 'TUR': 'Turkey', 'RUS': 'Russia', 'UKR': 'Ukraine',
-    'PAK': 'Pakistan', 'BGD': 'Bangladesh', 'LKA': 'Sri Lanka', 'NPL': 'Nepal',
+    'USA': 'United States', 'US': 'United States', 'GBR': 'United Kingdom', 'GB': 'United Kingdom',
+    'CAN': 'Canada', 'CA': 'Canada', 'AUS': 'Australia', 'AU': 'Australia',
+    'DEU': 'Germany', 'DE': 'Germany', 'FRA': 'France', 'FR': 'France', 'ITA': 'Italy', 'IT': 'Italy',
+    'ESP': 'Spain', 'ES': 'Spain', 'NLD': 'Netherlands', 'NL': 'Netherlands',
+    'BEL': 'Belgium', 'BE': 'Belgium', 'CHE': 'Switzerland', 'CH': 'Switzerland', 'AUT': 'Austria', 'AT': 'Austria',
+    'SWE': 'Sweden', 'SE': 'Sweden', 'NOR': 'Norway', 'NO': 'Norway', 'DNK': 'Denmark', 'DK': 'Denmark',
+    'FIN': 'Finland', 'FI': 'Finland', 'POL': 'Poland', 'PL': 'Poland', 'CZE': 'Czech Republic', 'CZ': 'Czech Republic',
+    'HUN': 'Hungary', 'HU': 'Hungary', 'ROU': 'Romania', 'RO': 'Romania', 'BGR': 'Bulgaria', 'BG': 'Bulgaria',
+    'GRC': 'Greece', 'GR': 'Greece', 'PRT': 'Portugal', 'PT': 'Portugal', 'IRL': 'Ireland', 'IE': 'Ireland',
+    'JPN': 'Japan', 'JP': 'Japan', 'CHN': 'China', 'CN': 'China', 'IND': 'India', 'IN': 'India',
+    'KOR': 'South Korea', 'KR': 'South Korea', 'SGP': 'Singapore', 'SG': 'Singapore',
+    'HKG': 'Hong Kong', 'HK': 'Hong Kong', 'TWN': 'Taiwan', 'TW': 'Taiwan', 'THA': 'Thailand', 'TH': 'Thailand',
+    'MYS': 'Malaysia', 'MY': 'Malaysia', 'IDN': 'Indonesia', 'ID': 'Indonesia',
+    'PHL': 'Philippines', 'PH': 'Philippines', 'VNM': 'Vietnam', 'VN': 'Vietnam', 'NZL': 'New Zealand', 'NZ': 'New Zealand',
+    'MEX': 'Mexico', 'MX': 'Mexico', 'BRA': 'Brazil', 'BR': 'Brazil',
+    'ARG': 'Argentina', 'AR': 'Argentina', 'CHL': 'Chile', 'CL': 'Chile', 'COL': 'Colombia', 'CO': 'Colombia',
+    'PER': 'Peru', 'PE': 'Peru', 'ZAF': 'South Africa', 'ZA': 'South Africa',
+    'EGY': 'Egypt', 'EG': 'Egypt', 'NGA': 'Nigeria', 'NG': 'Nigeria', 'KEN': 'Kenya', 'KE': 'Kenya',
+    'MAR': 'Morocco', 'MA': 'Morocco', 'ARE': 'UAE', 'AE': 'UAE',
+    'SAU': 'Saudi Arabia', 'SA': 'Saudi Arabia', 'ISR': 'Israel', 'IL': 'Israel', 'TUR': 'Turkey', 'TR': 'Turkey',
+    'RUS': 'Russia', 'RU': 'Russia', 'UKR': 'Ukraine', 'UA': 'Ukraine',
+    'PAK': 'Pakistan', 'PK': 'Pakistan', 'BGD': 'Bangladesh', 'BD': 'Bangladesh', 'LKA': 'Sri Lanka', 'LK': 'Sri Lanka',
+    'NPL': 'Nepal', 'NP': 'Nepal',
   };
-  return countryMapping[code] || code;
+  return countryMapping[code?.toUpperCase?.()] || countryMapping[code] || code;
 };
 
 // Convert sentiment string to numeric score

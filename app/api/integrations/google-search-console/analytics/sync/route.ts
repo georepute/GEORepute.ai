@@ -3,6 +3,7 @@ import { getDateDaysAgo, getSearchConsoleSiteUrl } from '@/lib/integrations/goog
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { google } from 'googleapis';
+import { normalizeCountryForMerge } from '@/lib/utils/countryMerge';
 
 /**
  * POST /api/integrations/google-search-console/analytics/sync
@@ -226,21 +227,26 @@ export async function POST(request: NextRequest) {
       }
     } else if (dimensions.includes('country')) {
       // Store country data in gsc_analytics table
-      const countryData = rows.map((row) => ({
-        domain_id: domainId,
-        user_id: session.user.id,
-        date: row.keys?.[0] || analyticsEndDate,
-        country: row.keys?.[dimensions.indexOf('country')] || '',
-        clicks: row.clicks || 0,
-        impressions: row.impressions || 0,
-        ctr: row.ctr || 0,
-        position: row.position || 0,
-        data_type: 'country',
-        query: null,
-        page: null,
-        device: null,
-        search_appearance: null,
-      }));
+      // Merge Palestine into Israel (same territorial area, GSC reports separately)
+      const countryData = rows.map((row) => {
+        const rawCountry = row.keys?.[dimensions.indexOf('country')] || '';
+        const country = normalizeCountryForMerge(rawCountry);
+        return {
+          domain_id: domainId,
+          user_id: session.user.id,
+          date: row.keys?.[0] || analyticsEndDate,
+          country,
+          clicks: row.clicks || 0,
+          impressions: row.impressions || 0,
+          ctr: row.ctr || 0,
+          position: row.position || 0,
+          data_type: 'country',
+          query: null,
+          page: null,
+          device: null,
+          search_appearance: null,
+        };
+      });
 
       if (countryData.length > 0) {
         // Delete existing country data for this date range
@@ -414,10 +420,39 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
+    // When returning country data, merge Palestine into Israel (sum values)
+    let analytics = data || [];
+    if (dataType === 'country' && analytics.length > 0) {
+      const mergedMap = new Map<string, { clicks: number; impressions: number; positionSum: number }>();
+      analytics.forEach((item: any) => {
+        const rawCountry = item.country || 'UNKNOWN';
+        if (rawCountry === 'UNKNOWN') return;
+        const country = normalizeCountryForMerge(rawCountry);
+        const clicks = item.clicks || 0;
+        const impressions = item.impressions || 0;
+        const position = item.position || 0;
+        const existing = mergedMap.get(country);
+        if (existing) {
+          existing.clicks += clicks;
+          existing.impressions += impressions;
+          existing.positionSum += position * impressions; // weighted sum for avg position
+        } else {
+          mergedMap.set(country, { clicks, impressions, positionSum: position * impressions });
+        }
+      });
+      analytics = Array.from(mergedMap.entries()).map(([country, agg]) => ({
+        country,
+        clicks: agg.clicks,
+        impressions: agg.impressions,
+        ctr: agg.impressions > 0 ? agg.clicks / agg.impressions : 0,
+        position: agg.impressions > 0 ? agg.positionSum / agg.impressions : 0,
+      }));
+    }
+
     return NextResponse.json({
       success: true,
-      analytics: data || [],
-      count: data?.length || 0,
+      analytics,
+      count: analytics.length,
     });
   } catch (error: any) {
     console.error('Get analytics error:', error);

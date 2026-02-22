@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import OpenAI from 'openai'
+import { normalizeCountryForMerge } from '@/lib/utils/countryMerge'
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -377,12 +378,13 @@ export async function POST(request: NextRequest) {
       }, { status: 404 })
     }
 
-    // Step 2: Aggregate GSC data by country
+    // Step 2: Aggregate GSC data by country (merge Palestine into Israel)
     const countryMap = new Map<string, CountryData>()
     
     gscData.analytics.forEach((item: any) => {
-      const countryCode = item.country || 'UNKNOWN'
-      if (countryCode === 'UNKNOWN') return
+      const rawCountry = item.country || 'UNKNOWN'
+      if (rawCountry === 'UNKNOWN') return
+      const countryCode = normalizeCountryForMerge(rawCountry)
       
       if (countryMap.has(countryCode)) {
         const existing = countryMap.get(countryCode)!
