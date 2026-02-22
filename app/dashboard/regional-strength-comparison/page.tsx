@@ -256,7 +256,7 @@ export default function RegionalStrengthComparisonPage() {
       
       // I
       'ISL': 'Iceland', 'IND': 'India', 'IDN': 'Indonesia', 'IRN': 'Iran',
-      'IRQ': 'Iraq', 'IRL': 'Ireland', 'IMN': 'Isle of Man', 'ISR': 'Israel', 'IL': 'Israel',
+      'IRQ': 'Iraq', 'IRL': 'Ireland', 'IMN': 'Isle of Man', 'ISR': 'Israel',
       'ITA': 'Italy',
       
       // J
