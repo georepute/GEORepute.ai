@@ -157,6 +157,7 @@ export default function StrategicBlindSpotsPage() {
     }
     try {
       setGenerating(true);
+      console.log("[strategic-blind-spots] Regenerating report for domainId:", selectedDomain, "- using latest GSC data from Supabase");
       toast.loading("Discovering what we're ignoring (this may take a few minutes)...", {
         id: "generate-blind-spots",
       });

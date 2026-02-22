@@ -4,7 +4,6 @@ import { cookies } from "next/headers";
 
 const BATCH_SIZE = 10;
 const ABSENCE_POSITION_THRESHOLD = 20;
-const MIN_IMPRESSIONS_FOR_ABSENCE = 10;
 const MAX_BLIND_SPOTS = 50;
 
 interface QueryAIResult {
@@ -231,12 +230,6 @@ const ENGINE_CALLERS: Record<
   grok: callGrok,
 };
 
-function isAbsence(position: number, impressions: number, clicks: number): boolean {
-  if (position > ABSENCE_POSITION_THRESHOLD) return true;
-  if (impressions >= MIN_IMPRESSIONS_FOR_ABSENCE && clicks === 0) return true;
-  return false;
-}
-
 function calcDemandScore(impressions: number, maxImpressions: number): number {
   if (maxImpressions <= 0) return 5;
   const normalized = impressions / maxImpressions;
@@ -362,6 +355,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch GSC data" }, { status: 500 });
     }
 
+    console.log("[strategic-blind-spots] Fetched", gscRaw?.length ?? 0, "raw GSC rows from Supabase for domain", domainId, "(no date filter - uses all synced data)");
+
     const queryMap = new Map<
       string,
       { query: string; clicks: number; impressions: number; ctr: number; position: number; count: number }
@@ -389,9 +384,10 @@ export async function POST(request: NextRequest) {
     }
 
     const allQueries = Array.from(queryMap.values())
-      .filter((q) => isAbsence(q.position, q.impressions, q.clicks))
       .sort((a, b) => b.impressions - a.impressions)
       .slice(0, MAX_BLIND_SPOTS);
+
+    console.log("[strategic-blind-spots] Regenerating report on", allQueries.length, "queries:", allQueries.map((q) => q.query));
 
     if (allQueries.length === 0) {
       return NextResponse.json({
