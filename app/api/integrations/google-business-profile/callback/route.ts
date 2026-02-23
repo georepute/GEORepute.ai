@@ -73,33 +73,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get list of GBP locations (may fail with 429 quota or API disabled)
-    let locations: any[] = [];
-    let locationsApiFailed = false;
-    const gbpService = new GoogleBusinessProfileService({
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiresAt: tokens.expiry_date!,
-    });
-
-    try {
-      console.log('🔍 Fetching GBP locations...');
-      locations = await gbpService.getLocations();
-      console.log(`✅ Found ${locations.length} GBP locations`);
-    } catch (locError: any) {
-      // On any failure (429 quota, 403, network, etc.) still save the connection so user sees Connected
-      console.warn('⚠️ GBP locations API failed; saving connection anyway.', locError?.message || locError);
-      locations = [];
-      locationsApiFailed = true;
-    }
-
-    if (locations.length === 0 && !locationsApiFailed) {
-      return NextResponse.redirect(
-        new URL(`${returnTo}?error=no_locations`, request.url)
-      );
-    }
-
-    // Save integration to database (same structure as GSC: tokens in columns, rest in metadata)
+    // Save integration to database first, then try to fetch locations.
+    // This avoids losing the connection if the locations API is rate-limited.
     console.log('💾 Saving GBP integration to database...');
     const expiresAt = tokens.expiry_date
       ? new Date(tokens.expiry_date).toISOString()
@@ -114,8 +89,8 @@ export async function GET(request: NextRequest) {
       token_type: 'Bearer',
       status: 'connected',
       metadata: {
-        locations,
-        selected_location: locations[0] ?? null,
+        locations: [] as any[],
+        selected_location: null,
       },
       updated_at: new Date().toISOString(),
     };
@@ -154,6 +129,31 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('✅ GBP integration saved successfully');
+
+    // Try to fetch locations now (non-blocking -- if it fails, user can click "Load my business" later)
+    const integrationId = existingIntegration?.id;
+    try {
+      console.log('🔍 Fetching GBP locations...');
+      const gbpService = new GoogleBusinessProfileService({
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiresAt: tokens.expiry_date!,
+      });
+      const locations = await gbpService.getLocations();
+      console.log(`✅ Found ${locations.length} GBP locations`);
+
+      if (locations.length > 0 && integrationId) {
+        await supabase
+          .from('platform_integrations')
+          .update({
+            metadata: { locations, selected_location: locations[0] },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', integrationId);
+      }
+    } catch (locError: any) {
+      console.warn('⚠️ GBP locations API failed (quota/rate limit). User can click "Load my business" later.', locError?.message);
+    }
 
     // Redirect back to original page with success message
     const returnUrl = new URL(returnTo, request.url);

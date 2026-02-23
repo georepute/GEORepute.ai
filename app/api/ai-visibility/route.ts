@@ -4,6 +4,16 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { GoogleSearchConsoleService } from '@/lib/integrations/google-search-console'
 
+function computeNextScheduledAt(frequency: string): string | null {
+  if (frequency === 'manual') return null;
+  const now = new Date();
+  if (frequency === 'daily') now.setDate(now.getDate() + 1);
+  else if (frequency === 'weekly') now.setDate(now.getDate() + 7);
+  else if (frequency === 'monthly') now.setMonth(now.getMonth() + 1);
+  else return null;
+  return now.toISOString();
+}
+
 // GET all AI visibility metrics for the authenticated user
 export async function GET(request: NextRequest) {
   try {
@@ -61,7 +71,8 @@ export async function POST(request: NextRequest) {
       analysisLanguages = [],
       analysisCountries = [],
       queryMode = 'auto',
-      manualQueries = []
+      manualQueries = [],
+      analysisFrequency = 'manual',
     } = body
 
     const queriesPerPlatform = rawQueriesPerPlatform != null
@@ -100,6 +111,7 @@ export async function POST(request: NextRequest) {
           queries_per_platform: queriesPerPlatform,
           ...(queryMode && { query_mode: queryMode }),
           ...(Array.isArray(manualQueries) && { manual_queries: manualQueries }),
+          ...(analysisFrequency && { analysis_frequency: analysisFrequency, next_scheduled_at: computeNextScheduledAt(analysisFrequency) }),
         })
         .eq('id', projectId)
         .eq('user_id', session.user.id)
@@ -162,6 +174,7 @@ export async function POST(request: NextRequest) {
             queries_per_platform: queriesPerPlatform,
             ...(queryMode && { query_mode: queryMode }),
             ...(Array.isArray(manualQueries) && { manual_queries: manualQueries }),
+            ...(analysisFrequency && { analysis_frequency: analysisFrequency, next_scheduled_at: computeNextScheduledAt(analysisFrequency) }),
           })
           .eq('id', finalProjectId)
       } else {
@@ -184,6 +197,8 @@ export async function POST(request: NextRequest) {
             queries_per_platform: queriesPerPlatform,
             query_mode: queryMode === 'manual' || queryMode === 'auto_manual' ? queryMode : 'auto',
             manual_queries: Array.isArray(manualQueries) ? manualQueries : [],
+            analysis_frequency: ['daily', 'weekly', 'monthly'].includes(analysisFrequency) ? analysisFrequency : 'manual',
+            next_scheduled_at: computeNextScheduledAt(analysisFrequency),
           })
           .select('id')
           .single()

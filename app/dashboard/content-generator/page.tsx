@@ -34,14 +34,12 @@ import toast from "react-hot-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-
-const CONTENT_LANGUAGE_OPTIONS = [
-  { value: "en" as const, label: "English" },
-  { value: "he" as const, label: "Hebrew" },
-];
+import { useLanguage } from "@/lib/language-context";
 
 function ContentGeneratorPageInner() {
   const supabase = createClientComponentClient();
+  const { t, isRtl } = useLanguage();
+  const cg = t.dashboard.contentGeneratorPage;
   const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he">("en");
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -121,13 +119,13 @@ function ContentGeneratorPageInner() {
 
   // Platforms
   const platforms = [
-    { value: "reddit", label: "Reddit", desc: "Casual, community-focused", icon: "/reddit-icon.svg" },
-    { value: "quora", label: "Quora", desc: "Authoritative, detailed", icon: "/quora.svg" },
-    { value: "medium", label: "Medium", desc: "Professional, thought-leadership", icon: "/medium-square.svg" },
-    { value: "github", label: "GitHub", desc: "Technical, documentation", icon: "/github-142.svg" },
-    { value: "facebook", label: "Facebook", desc: "Social media, engaging", icon: "/facebook-color.svg" },
-    { value: "linkedin", label: "LinkedIn", desc: "Professional network", icon: "/linkedin.svg" },
-    { value: "instagram", label: "Instagram", desc: "Visual social media", icon: "/instagram-1-svgrepo-com.svg" },
+    { value: "reddit", label: "Reddit", desc: cg.casualCommunity, icon: "/reddit-icon.svg" },
+    { value: "quora", label: "Quora", desc: cg.authoritativeDetailed, icon: "/quora.svg" },
+    { value: "medium", label: "Medium", desc: cg.professionalThought, icon: "/medium-square.svg" },
+    { value: "github", label: "GitHub", desc: cg.technicalDocs, icon: "/github-142.svg" },
+    { value: "facebook", label: "Facebook", desc: cg.socialEngaging, icon: "/facebook-color.svg" },
+    { value: "linkedin", label: "LinkedIn", desc: cg.professionalNetwork, icon: "/linkedin.svg" },
+    { value: "instagram", label: "Instagram", desc: cg.visualSocial, icon: "/instagram-1-svgrepo-com.svg" },
   ];
 
   // Load brand voices on mount
@@ -188,7 +186,7 @@ function ContentGeneratorPageInner() {
   const runDiagnosticScan = async () => {
     const keywords = targetKeywords.split(",").map(k => k.trim()).filter(Boolean);
     if (keywords.length === 0) {
-      toast.error("Please enter at least one keyword");
+      toast.error(cg.enterKeyword);
       return;
     }
 
@@ -216,10 +214,10 @@ function ContentGeneratorPageInner() {
         timestamp: new Date().toISOString(),
       });
 
-      toast.success("Diagnostic scan complete!");
+      toast.success(cg.diagnosticComplete);
     } catch (error) {
       console.error('Scan error:', error);
-      toast.error("Diagnostic scan failed");
+      toast.error(cg.diagnosticFailed);
     } finally {
       setScanningKeywords(false);
     }
@@ -228,18 +226,18 @@ function ContentGeneratorPageInner() {
   // Step 2: Generate Content
   const generateContent = async () => {
     if (!topic.trim()) {
-      toast.error("Please enter a topic");
+      toast.error(cg.enterTopic);
       return;
     }
 
     const keywords = targetKeywords.split(",").map(k => k.trim()).filter(Boolean);
     if (keywords.length === 0) {
-      toast.error("Please enter at least one keyword");
+      toast.error(cg.enterKeyword);
       return;
     }
 
     if (targetPlatforms.length === 0) {
-      toast.error("Please select at least one platform");
+      toast.error(cg.selectPlatform);
       return;
     }
 
@@ -302,7 +300,7 @@ function ContentGeneratorPageInner() {
         console.log("📋 Schema Script Tags (for embedding):", data.schema.scriptTags);
       }
       
-      toast.success("Content generated successfully!");
+      toast.success(cg.contentGeneratedSuccess);
 
       // Run AI detection after content is generated (user can manually humanize if needed)
       if (data.content) {
@@ -314,7 +312,7 @@ function ContentGeneratorPageInner() {
       }
     } catch (error: any) {
       console.error('Generation error:', error);
-      toast.error(error?.message || "Content generation failed");
+      toast.error(error?.message || cg.diagnosticFailed);
     } finally {
       setGeneratingContent(false);
     }
@@ -325,7 +323,7 @@ function ContentGeneratorPageInner() {
     const contentToCopy = humanizedContent || generatedContent;
     navigator.clipboard.writeText(contentToCopy);
     setCopied(true);
-    toast.success("Content copied to clipboard!");
+    toast.success(cg.contentCopied);
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -339,7 +337,7 @@ function ContentGeneratorPageInner() {
       setAiDetectionResults(null); // Clear AI detection results since we're using humanized
       // Don't show image modal again - it was already shown after content generation
       setOriginalAiPercentage(null); // Reset original AI percentage
-      toast.success('Using humanized version');
+      toast.success(cg.usingHumanized);
       // Persist humanized content to DB so publication page and view modal show it
       if (contentId) {
         try {
@@ -349,7 +347,7 @@ function ContentGeneratorPageInner() {
             .eq('id', contentId);
           if (error) {
             console.error('Error saving humanized content to database:', error);
-            toast.error('Humanized content saved locally; refresh the publication page if you don’t see it.');
+            toast.error(cg.usingHumanized);
           }
         } catch (err) {
           console.error('Error saving humanized content:', err);
@@ -365,7 +363,7 @@ function ContentGeneratorPageInner() {
       setHumanizedContent(null);
       setShowComparisonModal(false);
       setOriginalContent(null); // Clear since we're reverting
-      toast.success('Reverted to original version');
+      toast.success(cg.revertedToOriginal);
       // Keep AI detection results as they are for the original content
       // Don't show image modal again - it was already shown after content generation
     }
@@ -490,9 +488,9 @@ function ContentGeneratorPageInner() {
         
         // Show AI detection results - user can manually humanize if needed
         if (aiPercentage > 20) {
-          toast.success(`AI detection complete: ${aiPercentage}% AI detected. You can use "Make it Human" button to humanize if needed.`);
+          toast.success(`${aiPercentage}% AI - ${cg.makeItHuman}`);
         } else {
-          toast.success(`AI detection complete: ${aiPercentage}% AI detected - Content looks human!`);
+          toast.success(`${aiPercentage}% AI - OK!`);
         }
         
         // Show image modal after detection (skip for GitHub) - only once
@@ -505,7 +503,7 @@ function ContentGeneratorPageInner() {
         }
       } else {
         console.warn('⚠️ AI detection returned no data and no error');
-        toast.error('AI detection returned no data');
+        toast.error(cg.diagnosticFailed);
       }
     } catch (detectionErr: any) {
       console.error('❌ Error calling AI detection:', detectionErr);
@@ -518,7 +516,7 @@ function ContentGeneratorPageInner() {
   // Fetch images from Pixabay
   const handleFetchImages = async () => {
     if (!imageSearchQuery || imageSearchQuery.trim().length === 0) {
-      toast.error('Please enter a search query');
+      toast.error(cg.enterSearchQuery);
       return;
     }
 
@@ -545,11 +543,11 @@ function ContentGeneratorPageInner() {
       if (data?.images && data.images.length > 0) {
         setPixabayImages(data.images);
       } else {
-        toast.error('No images found. Try a different search query.');
+        toast.error(cg.noImagesFound);
       }
     } catch (err) {
       console.error('Error fetching images:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to fetch images');
+      toast.error(err instanceof Error ? err.message : cg.failedToFetchImages);
     } finally {
       setFetchingImages(false);
     }
@@ -585,7 +583,7 @@ function ContentGeneratorPageInner() {
       return urlData.publicUrl;
     } catch (err) {
       console.error('Failed to upload image:', err);
-      toast.error('Failed to upload image to storage');
+      toast.error(cg.failedToUpload);
       return null;
     } finally {
       setUploadingImage(false);
@@ -597,15 +595,15 @@ function ContentGeneratorPageInner() {
     setSelectedImage(image);
     
     // Upload image to Supabase Storage
-    toast.loading('Uploading image...', { id: 'image-upload' });
+    toast.loading(cg.uploadingImage, { id: 'image-upload' });
     const publicUrl = await uploadImageToStorage(image.largeImageURL, image.id);
     
     if (publicUrl) {
       setUploadedImageUrl(publicUrl);
       setImageUrl(publicUrl); // Also set imageUrl for schema generation
-      toast.success('Image uploaded successfully!', { id: 'image-upload' });
+      toast.success(cg.imageUploaded, { id: 'image-upload' });
     } else {
-      toast.error('Failed to upload image, but you can still continue', { id: 'image-upload' });
+      toast.error(cg.failedToUpload, { id: 'image-upload' });
     }
   };
 
@@ -615,18 +613,18 @@ function ContentGeneratorPageInner() {
     if (!file) return;
     const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
     if (!validTypes.includes(file.type)) {
-      toast.error("Please choose a JPEG, PNG, or WebP image.");
+      toast.error(cg.chooseValidImage);
       e.target.value = "";
       return;
     }
     const maxSize = 20 * 1024 * 1024;
     if (file.size > maxSize) {
-      toast.error("Image must be under 20MB.");
+      toast.error(cg.imageTooLarge);
       e.target.value = "";
       return;
     }
     setUploadingManualImageInModal(true);
-    toast.loading("Uploading image...", { id: "modal-image-upload" });
+    toast.loading(cg.uploadingImage, { id: "modal-image-upload" });
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -642,7 +640,7 @@ function ContentGeneratorPageInner() {
         setImageUrl(data.url);
         setUploadedImageUrl(data.url);
         setSelectedImage({ id: "manual", tags: topic, user: "Uploaded by user" });
-        toast.success("Image uploaded. Click Continue to use it.", { id: "modal-image-upload" });
+        toast.success(cg.imageUploaded, { id: "modal-image-upload" });
       }
     } catch (err) {
       console.error("Manual image upload in modal:", err);
@@ -693,7 +691,7 @@ function ContentGeneratorPageInner() {
 
         if (updateError) {
           console.error('Error updating content with image:', updateError);
-          toast.error('Failed to save image to content, but you can still proceed');
+          toast.error(cg.failedToUpload);
         } else {
           console.log('✅ Image URL saved to content metadata');
         }
@@ -704,13 +702,13 @@ function ContentGeneratorPageInner() {
     }
 
     setShowImageModal(false);
-    toast.success('Image selected! You can proceed to publish.');
+    toast.success(cg.imageSelectedMsg);
   };
 
   // Open platform selection modal (same as missed prompts: one schema + one publication row per platform)
   const handleReadyToPublish = () => {
     if (!generatedContent || !topic || !targetKeywords) {
-      toast.error("Please generate content first");
+      toast.error(cg.pleaseGenerateFirst);
       return;
     }
     setShowPublishPlatformModal(true);
@@ -729,7 +727,7 @@ function ContentGeneratorPageInner() {
   // Create schema for all selected platforms when user approves (no schema at initial content generation)
   const handleCreateSchemasForPublish = async () => {
     if (publishPlatforms.length === 0) {
-      toast.error("Please select at least one platform");
+      toast.error(cg.selectPlatform);
       return;
     }
     const keywords = targetKeywords.split(",").map((k) => k.trim()).filter(Boolean);
@@ -751,7 +749,7 @@ function ContentGeneratorPageInner() {
       setCurrentSchemaPlatform(platformName);
       setSchemaProgress(Math.round((i / totalPlatforms) * 100));
       try {
-        toast.loading(`Creating schema for ${platformName}...`, { id: `schema-${platformId}` });
+        toast.loading(`${cg.processing}: ${platformName}...`, { id: `schema-${platformId}` });
         const includeImage = PLATFORMS_WITH_IMAGE_SUPPORT.includes(platformId) && uploadedImageUrl;
         const response = await fetch("/api/geo-core/content-generate", {
           method: "POST",
@@ -819,7 +817,7 @@ function ContentGeneratorPageInner() {
         }
         setPlatformSchemas((prev) => ({ ...prev, [platformId]: schemas[platformId] }));
         setSchemaProgress(Math.round(((i + 1) / totalPlatforms) * 100));
-        toast.success(`Schema created for ${platformName}!`, { id: `schema-${platformId}` });
+        toast.success(`${cg.schemaCreatedFor} ${platformName}!`, { id: `schema-${platformId}` });
       } catch (err: any) {
         console.error(`Schema error for ${platformId}:`, err);
         toast.error(`${platformId}: ${err.message}`, { id: `schema-${platformId}` });
@@ -827,11 +825,11 @@ function ContentGeneratorPageInner() {
     }
 
     setSchemaProgress(100);
-    setCurrentSchemaPlatform("Complete!");
+    setCurrentSchemaPlatform("✓");
     await new Promise((r) => setTimeout(r, 500));
     setCreatingSchemas(false);
     setShowPublishPlatformModal(false);
-    toast.success(`Schemas created for ${Object.keys(schemas).length} platform(s)!`);
+    toast.success(`${cg.schemasCreatedFor} ${Object.keys(schemas).length} platform(s)!`);
     sessionStorage.setItem(
       "contentToPublish",
       JSON.stringify({
@@ -935,7 +933,7 @@ function ContentGeneratorPageInner() {
         });
         
         setHumanizedContent(humanizedData.humanVersion);
-        toast.success(`Content humanized! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
+        toast.success(cg.contentHumanized);
         
         // Show comparison modal
         setShowComparisonModal(true);
@@ -943,7 +941,7 @@ function ContentGeneratorPageInner() {
         // Don't show image modal again - it was already shown after content generation and AI detection
       } else {
         console.warn('⚠️ Humanization returned no data');
-        toast.error('Humanization returned no data');
+        toast.error(cg.noContentToHumanize);
       }
     } catch (err: any) {
       console.error('❌ Error calling humanization:', err);
@@ -956,7 +954,7 @@ function ContentGeneratorPageInner() {
   // Make It Human Function (manual trigger - should not run if already auto-humanized)
   const handleMakeItHuman = async () => {
     if (!generatedContent) {
-      toast.error('No content to humanize');
+      toast.error(cg.noContentToHumanize);
       return;
     }
 
@@ -1052,7 +1050,7 @@ function ContentGeneratorPageInner() {
         });
         
         setHumanizedContent(humanizedData.humanVersion);
-        toast.success(`Content humanized! ${humanizedData.detectedPhrasesRemoved || 0} AI phrases removed.`);
+        toast.success(cg.contentHumanized);
         
         // Show comparison modal
         setShowComparisonModal(true);
@@ -1060,7 +1058,7 @@ function ContentGeneratorPageInner() {
         // Don't show image modal again - it was already shown after content generation and AI detection
       } else {
         console.warn('⚠️ Humanization returned no data');
-        toast.error('Humanization returned no data');
+        toast.error(cg.noContentToHumanize);
       }
     } catch (err: any) {
       console.error('❌ Error calling humanization:', err);
@@ -1072,7 +1070,7 @@ function ContentGeneratorPageInner() {
 
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 p-6" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
@@ -1085,9 +1083,9 @@ function ContentGeneratorPageInner() {
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">AI Content Generator</h1>
+              <h1 className="text-3xl font-bold text-gray-900">{cg.title}</h1>
               <p className="text-gray-600">
-                Create generated content that bypasses AI detectors
+                {cg.subtitle}
               </p>
             </div>
           </div>
@@ -1101,10 +1099,10 @@ function ContentGeneratorPageInner() {
               <div className="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
                 <FileText className="w-4 h-4 text-primary-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900">1. User Input</h3>
+              <h3 className="text-lg font-semibold text-gray-900">{cg.step1}</h3>
             </div>
             <p className="text-sm text-gray-600">
-              Define your topic, keywords, and target platform
+              {cg.step1Desc}
             </p>
           </Card>
 
@@ -1114,10 +1112,10 @@ function ContentGeneratorPageInner() {
               <div className="w-8 h-8 bg-secondary-100 rounded-lg flex items-center justify-center">
                 <Brain className="w-4 h-4 text-secondary-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900">2. Diagnostic Scan</h3>
+              <h3 className="text-lg font-semibold text-gray-900">{cg.step2}</h3>
             </div>
             <p className="text-sm text-gray-600">
-              AI analyzes keywords and forecasts performance
+              {cg.step2Desc}
             </p>
           </Card>
 
@@ -1127,10 +1125,10 @@ function ContentGeneratorPageInner() {
               <div className="w-8 h-8 bg-accent-100 rounded-lg flex items-center justify-center">
                 <Sparkles className="w-4 h-4 text-accent-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900">3. Content Generation</h3>
+              <h3 className="text-lg font-semibold text-gray-900">{cg.step3}</h3>
             </div>
             <p className="text-sm text-gray-600">
-              Generate AI-detector-proof content
+              {cg.step3Desc}
             </p>
           </Card>
         </div>
@@ -1142,20 +1140,20 @@ function ContentGeneratorPageInner() {
             <Card className="bg-white">
               <div className="flex items-center gap-2 mb-6">
                 <Target className="w-5 h-5 text-primary-600" />
-                <h2 className="text-xl font-bold text-gray-900">Content Configuration</h2>
+                <h2 className="text-xl font-bold text-gray-900">{cg.contentConfig}</h2>
               </div>
 
               <div className="space-y-4">
                 {/* Topic */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Topic / Question
+                    {cg.topicQuestion}
                   </label>
                   <input
                     type="text"
                     value={topic}
                     onChange={(e) => setTopic(e.target.value)}
-                    placeholder="e.g., How to improve YouTube SEO"
+                    placeholder={cg.topicPlaceholder}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
@@ -1163,13 +1161,13 @@ function ContentGeneratorPageInner() {
                 {/* Target Keywords */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Target Keywords (comma-separated)
+                    {cg.targetKeywords}
                   </label>
                   <input
                     type="text"
                     value={targetKeywords}
                     onChange={(e) => setTargetKeywords(e.target.value)}
-                    placeholder="e.g., youtube seo, video optimization, ranking videos"
+                    placeholder={cg.keywordsPlaceholder}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                   />
                 </div>
@@ -1177,26 +1175,25 @@ function ContentGeneratorPageInner() {
                 {/* Content language */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Generate content in
+                    {cg.generateContentIn}
                   </label>
                   <select
                     value={contentGenerationLanguage}
                     onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
                   >
-                    {CONTENT_LANGUAGE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
+                    <option value="en">{cg.english}</option>
+                    <option value="he">{cg.hebrew}</option>
                   </select>
                 </div>
 
                 {/* Platform Selection (multi-select) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Target Platforms
+                    {cg.targetPlatforms}
                   </label>
                   <p className="text-xs text-gray-500 mb-3">
-                    Select one or more. Content is generated for the first selected; you can publish to all selected when ready.
+                    {cg.targetPlatformsDesc}
                   </p>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {platforms.map((platform) => {
@@ -1242,7 +1239,7 @@ function ContentGeneratorPageInner() {
                   </div>
                   {targetPlatforms.length > 1 && (
                     <p className="mt-2 text-xs text-primary-600">
-                      {targetPlatforms.length} platforms selected. Generation uses <strong>{platforms.find((p) => p.value === targetPlatform)?.label ?? targetPlatform}</strong> style.
+                      {targetPlatforms.length} {cg.platformsSelected} <strong>{platforms.find((p) => p.value === targetPlatform)?.label ?? targetPlatform}</strong> {cg.style}
                     </p>
                   )}
                 </div>
@@ -1251,13 +1248,13 @@ function ContentGeneratorPageInner() {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-sm font-medium text-gray-700">
-                      Brand Voice Profile (Optional)
+                      {cg.brandVoiceProfile}
                     </label>
                     <Link
                       href="/dashboard/settings?tab=brand-voice"
                       className="text-xs text-primary-600 hover:text-primary-700 font-medium"
                     >
-                      + Create New
+                      {cg.createNew}
                     </Link>
                   </div>
                   <select
@@ -1266,7 +1263,7 @@ function ContentGeneratorPageInner() {
                     disabled={loadingVoices}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <option value="">No voice profile (generic)</option>
+                    <option value="">{cg.noVoiceProfile}</option>
                     {brandVoices.map((voice) => (
                       <option key={voice.id} value={voice.id}>
                         {voice.brand_name} - {voice.tone} 
@@ -1277,10 +1274,10 @@ function ContentGeneratorPageInner() {
                   {selectedVoiceId && (
                     <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                       <p className="text-xs text-blue-900 font-semibold mb-1">
-                        🎭 Brand Voice Active:
+                        🎭 {cg.brandVoiceActive}
                       </p>
                       <p className="text-xs text-blue-700">
-                        Content will maintain consistent {brandVoices.find(v => v.id === selectedVoiceId)?.brand_name} personality
+                        {cg.contentWillMaintain} {brandVoices.find(v => v.id === selectedVoiceId)?.brand_name} {cg.personality}
                       </p>
                     </div>
                   )}
@@ -1290,13 +1287,13 @@ function ContentGeneratorPageInner() {
                 {/* Influence Level */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Influence Level
+                    {cg.influenceLevel}
                   </label>
                   <div className="grid grid-cols-3 gap-3">
                     {[
-                      { value: "subtle", label: "Subtle", desc: "Natural mention" },
-                      { value: "moderate", label: "Moderate", desc: "Balanced" },
-                      { value: "strong", label: "Strong", desc: "Clear recommendation" },
+                      { value: "subtle", label: cg.subtle, desc: cg.naturalMention },
+                      { value: "moderate", label: cg.moderate, desc: cg.balanced },
+                      { value: "strong", label: cg.strong, desc: cg.clearRecommendation },
                     ].map((level) => (
                       <button
                         key={level.value}
@@ -1328,12 +1325,12 @@ function ContentGeneratorPageInner() {
                   {scanningKeywords ? (
                     <>
                       <Brain className="w-5 h-5 mr-2 animate-spin" />
-                      Running Diagnostic Scan...
+                      {cg.runningDiagnostic}
                     </>
                   ) : (
                     <>
                       <Brain className="w-5 h-5 mr-2" />
-                      Run Diagnostic Scan (Optional)
+                      {cg.runDiagnostic}
                     </>
                   )}
                 </Button>
@@ -1347,12 +1344,12 @@ function ContentGeneratorPageInner() {
                   {generatingContent ? (
                     <>
                       <Sparkles className="w-5 h-5 mr-2 animate-spin" />
-                      Generating Content...
+                      {cg.generatingContent}
                     </>
                   ) : (
                     <>
                       <Sparkles className="w-5 h-5 mr-2" />
-                      Generate Content
+                      {cg.generateContent}
                     </>
                   )}
                 </Button>
@@ -1369,7 +1366,7 @@ function ContentGeneratorPageInner() {
                   <div className="flex items-center gap-2 mb-4">
                     <BarChart3 className="w-5 h-5 text-primary-600" />
                     <h3 className="text-lg font-bold text-gray-900">
-                      Diagnostic Results
+                      {cg.diagnosticResults}
                     </h3>
                   </div>
 
@@ -1391,15 +1388,15 @@ function ContentGeneratorPageInner() {
                         </div>
                         <div className="grid grid-cols-3 gap-2 text-xs">
                           <div>
-                            <div className="text-gray-600">Est. Traffic</div>
+                            <div className="text-gray-600">{cg.estTraffic}</div>
                             <div className="font-semibold">{kw.estimatedTraffic}</div>
                           </div>
                           <div>
-                            <div className="text-gray-600">Competition</div>
+                            <div className="text-gray-600">{cg.competition}</div>
                             <div className="font-semibold">{kw.competition}</div>
                           </div>
                           <div>
-                            <div className="text-gray-600">Trend</div>
+                            <div className="text-gray-600">{cg.trend}</div>
                             <div className="font-semibold">{kw.trend}</div>
                           </div>
                         </div>
@@ -1417,14 +1414,14 @@ function ContentGeneratorPageInner() {
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-2">
                   <FileText className="w-5 h-5 text-primary-600" />
-                  <h2 className="text-xl font-bold text-gray-900">Generated Content</h2>
+                  <h2 className="text-xl font-bold text-gray-900">{cg.generatedContent}</h2>
                 </div>
                 {generatedContent && (
                   <div className="flex items-center gap-2">
                     {isDetectingAI && (
                       <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-medium text-xs flex items-center gap-1">
                         <RefreshCw className="w-3 h-3 animate-spin" />
-                        Detecting AI...
+                        {cg.detectingAi}
                       </span>
                     )}
                     {aiDetectionResults && !isDetectingAI && (
@@ -1435,7 +1432,7 @@ function ContentGeneratorPageInner() {
                           ? 'bg-yellow-100 text-yellow-700'
                           : 'bg-green-100 text-green-700'
                       }`}>
-                        {aiDetectionResults.aiPercentage}% AI Detected
+                        {aiDetectionResults.aiPercentage}{cg.aiDetected}
                       </span>
                     )}
                   </div>
@@ -1447,9 +1444,9 @@ function ContentGeneratorPageInner() {
                   <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                     <Sparkles className="w-8 h-8 text-gray-400" />
                   </div>
-                  <p className="text-gray-600 mb-2">No content generated yet</p>
+                  <p className="text-gray-600 mb-2">{cg.noContentYet}</p>
                   <p className="text-sm text-gray-500">
-                    Fill in the form and click "Generate Content"
+                    {cg.noContentHint}
                   </p>
                 </div>
               )}
@@ -1460,10 +1457,10 @@ function ContentGeneratorPageInner() {
                     <Sparkles className="w-8 h-8 text-primary-600 animate-spin" />
                   </div>
                   <p className="text-gray-900 font-semibold mb-2">
-                    Generating content...
+                    {cg.generatingContentMsg}
                   </p>
                   <p className="text-sm text-gray-600">
-                    Using GPT-4 Turbo with advanced humanization
+                    {cg.usingGpt}
                   </p>
                 </div>
               )}
@@ -1481,13 +1478,13 @@ function ContentGeneratorPageInner() {
                         <div className="font-semibold text-blue-900 capitalize">
                           {contentMetadata.tone}
                         </div>
-                        <div className="text-blue-700">Tone</div>
+                        <div className="text-blue-700">{cg.tone}</div>
                       </div>
                       <div className="bg-purple-50 rounded-lg p-3 text-center">
                         <div className="font-semibold text-purple-900">
                           {contentMetadata.wordCount}
                         </div>
-                        <div className="text-purple-700">Words</div>
+                        <div className="text-purple-700">{cg.words}</div>
                       </div>
                     </div>
                   )}
@@ -1498,7 +1495,7 @@ function ContentGeneratorPageInner() {
                       <button
                         onClick={copyToClipboard}
                         className="bg-white border border-gray-300 rounded-lg p-2 hover:bg-gray-50 transition-colors"
-                        title="Copy to clipboard"
+                        title={cg.copyToClipboard}
                       >
                         {copied ? (
                           <Check className="w-5 h-5 text-green-600" />
@@ -1555,17 +1552,17 @@ function ContentGeneratorPageInner() {
                               {isDetectingAI ? (
                                 <>
                                   <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                                  Analyzing AI Content...
+                                  {cg.analyzingAi}
                                 </>
                               ) : aiDetectionResults ? (
                                 <>
                                   <MessageSquare className="w-4 h-4 text-blue-600" />
-                                  AI Content Analysis
+                                  {cg.aiContentAnalysis}
                                 </>
                               ) : (
                                 <>
                                   <MessageSquare className="w-4 h-4 text-gray-400" />
-                                  AI Detection
+                                  {cg.aiDetection}
                                 </>
                               )}
                             </h3>
@@ -1582,7 +1579,7 @@ function ContentGeneratorPageInner() {
                                   ? 'bg-yellow-100 text-yellow-700'
                                   : 'bg-green-100 text-green-700'
                               }`}>
-                                {aiDetectionResults.aiPercentage}% AI
+                                {aiDetectionResults.aiPercentage}% {cg.ai}
                               </div>
                             </div>
                           )}
@@ -1596,15 +1593,15 @@ function ContentGeneratorPageInner() {
                             <div className="grid grid-cols-3 gap-4 text-sm">
                               <div className="text-center p-2 bg-gray-50 rounded-lg">
                                 <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.burstiness?.toFixed(1) || 'N/A'}</div>
-                                <div className="text-xs text-gray-600">Burstiness</div>
+                                <div className="text-xs text-gray-600">{cg.burstiness}</div>
                               </div>
                               <div className="text-center p-2 bg-gray-50 rounded-lg">
                                 <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.clichés || 0}</div>
-                                <div className="text-xs text-gray-600">Clichés</div>
+                                <div className="text-xs text-gray-600">{cg.cliches}</div>
                               </div>
                               <div className="text-center p-2 bg-gray-50 rounded-lg">
                                 <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.avgSentenceLength || 0}</div>
-                                <div className="text-xs text-gray-600">Avg Sentence</div>
+                                <div className="text-xs text-gray-600">{cg.avgSentence}</div>
                               </div>
                             </div>
                           )}
@@ -1613,7 +1610,7 @@ function ContentGeneratorPageInner() {
                           {aiDetectionResults.topPhrases && aiDetectionResults.topPhrases.length > 0 && (
                             <div>
                               <h4 className="text-sm font-semibold text-gray-900 mb-2">
-                                Detected AI Phrases ({aiDetectionResults.topPhrases.length})
+                                {cg.detectedAiPhrases} ({aiDetectionResults.topPhrases.length})
                               </h4>
                               <div className="space-y-2 max-h-48 overflow-y-auto">
                                 {aiDetectionResults.topPhrases.slice(0, 10).map((phrase: any, idx: number) => (
@@ -1644,15 +1641,15 @@ function ContentGeneratorPageInner() {
                           <div className="flex items-center gap-4 text-xs text-gray-600 pt-2 border-t border-gray-200">
                             <div className="flex items-center gap-1.5">
                               <span className="w-3 h-3 bg-red-200 rounded"></span>
-                              <span>High AI (90%+)</span>
+                              <span>{cg.highAi}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="w-3 h-3 bg-yellow-200 rounded"></span>
-                              <span>Medium AI (75-89%)</span>
+                              <span>{cg.mediumAi}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="w-3 h-3 bg-green-200 rounded"></span>
-                              <span>Low AI (60-74%)</span>
+                              <span>{cg.lowAi}</span>
                             </div>
                           </div>
 
@@ -1666,12 +1663,12 @@ function ContentGeneratorPageInner() {
                               {isHumanizing ? (
                                 <>
                                   <Loader2 className="w-4 h-4 animate-spin" />
-                                  Humanizing Content...
+                                  {cg.humanizingContent}
                                 </>
                               ) : (
                                 <>
                                   <Sparkles className="w-4 h-4" />
-                                  Make it Human
+                                  {cg.makeItHuman}
                                 </>
                               )}
                             </button>
@@ -1704,12 +1701,12 @@ function ContentGeneratorPageInner() {
                           </div>
                           <div>
                             <h4 className="font-semibold text-white text-sm mb-0.5">
-                              {creatingSchemas ? "Creating Schemas..." : "Ready to Publish?"}
+                              {creatingSchemas ? cg.creatingSchemas : cg.readyToPublish}
                             </h4>
                             <p className="text-xs text-white/90">
                               {creatingSchemas
-                                ? "Creating platform-specific schema for each selected platform..."
-                                : "Select platforms and create schema for each, then publish"}
+                                ? cg.creatingPlatformSchemaMsg
+                                : cg.selectPlatformsPublish}
                             </p>
                           </div>
                         </div>
@@ -1735,10 +1732,10 @@ function ContentGeneratorPageInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <Sparkles className="w-5 h-5 text-purple-600" />
-                  Comparison: Original vs Generated
+                  {cg.comparisonTitle}
                 </h3>
                 <p className="text-xs text-gray-600 mt-0.5">
-                  Review both versions side-by-side and choose which one to use
+                  {cg.reviewBothVersions}
                 </p>
               </div>
               <button
@@ -1758,9 +1755,9 @@ function ContentGeneratorPageInner() {
                 <div className="border-r border-gray-200 flex flex-col overflow-hidden">
                   <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex-shrink-0">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-gray-900">Original Version</h4>
+                      <h4 className="text-sm font-semibold text-gray-900">{cg.originalVersion}</h4>
                       <span className="text-xs text-gray-500 px-2 py-1 bg-gray-200 rounded">
-                        {originalAiPercentage !== null ? originalAiPercentage : (aiDetectionResults?.aiPercentage || 0)}% AI
+                        {originalAiPercentage !== null ? originalAiPercentage : (aiDetectionResults?.aiPercentage || 0)}% {cg.ai}
                       </span>
                     </div>
                   </div>
@@ -1776,9 +1773,9 @@ function ContentGeneratorPageInner() {
                   <div className="px-4 py-3 bg-green-50 border-b border-gray-200 flex-shrink-0">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                        Generated Version
+                        {cg.generatedVersion}
                         <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-medium">
-                          New
+                          {cg.new_}
                         </span>
                       </h4>
                     </div>
@@ -1797,14 +1794,14 @@ function ContentGeneratorPageInner() {
                   onClick={handleRevertToOriginal}
                   className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
                 >
-                  Use Original
+                  {cg.useOriginal}
                 </button>
                 <button
                   onClick={handleUseHumanized}
                   className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center gap-2 text-sm font-medium"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  Use Humanized
+                  {cg.useHumanized}
                 </button>
               </div>
             </div>
@@ -1820,10 +1817,10 @@ function ContentGeneratorPageInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <Globe className="w-5 h-5 text-blue-600" />
-                  Select Publishing Platforms
+                  {cg.selectPublishingPlatforms}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  One schema and one draft will be created per platform (same as missed prompts). Each platform gets its own schema.
+                  {cg.platformModalDesc}
                 </p>
               </div>
               <button
@@ -1865,14 +1862,14 @@ function ContentGeneratorPageInner() {
             </div>
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
               <div className="text-sm text-gray-600">
-                {publishPlatforms.length} platform{publishPlatforms.length !== 1 ? "s" : ""} selected
+                {publishPlatforms.length} {cg.platformSelected}
               </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowPublishPlatformModal(false)}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
                 >
-                  Cancel
+                  {cg.cancel}
                 </button>
                 <button
                   onClick={handleCreateSchemasForPublish}
@@ -1882,12 +1879,12 @@ function ContentGeneratorPageInner() {
                   {creatingSchemas ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Creating Schemas...
+                      {cg.creatingSchemas}
                     </>
                   ) : (
                     <>
                       <Code className="w-4 h-4" />
-                      Approve & Generate Schemas
+                      {cg.approveAndGenerateSchemas}
                     </>
                   )}
                 </button>
@@ -1928,14 +1925,14 @@ function ContentGeneratorPageInner() {
                   <span className="text-xl font-bold text-gray-900">{schemaProgress}%</span>
                 </div>
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-1">Creating Platform Schemas</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">{cg.creatingPlatformSchemas}</h3>
               <p className="text-sm text-gray-500">
                 {currentSchemaPlatform ? (
                   <>
-                    Processing: <span className="font-medium text-blue-600">{currentSchemaPlatform}</span>
+                    {cg.processing}: <span className="font-medium text-blue-600">{currentSchemaPlatform}</span>
                   </>
                 ) : (
-                  "Initializing..."
+                  cg.initializing
                 )}
               </p>
             </div>
@@ -1992,10 +1989,10 @@ function ContentGeneratorPageInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <ImageIcon className="w-5 h-5 text-cyan-600" />
-                  Select Image for Your Content
+                  {cg.selectImageTitle}
                 </h3>
                 <p className="text-xs text-gray-600 mt-0.5">
-                  Choose an image to enhance your content (optional)
+                  {cg.selectImageDesc}
                 </p>
               </div>
               <button
@@ -2022,11 +2019,11 @@ function ContentGeneratorPageInner() {
                       onClick={() => setImageModalView("search")}
                       className="text-sm text-cyan-600 hover:text-cyan-700 font-medium flex items-center gap-1"
                     >
-                      ← Back
+                      {cg.back}
                     </button>
                   </div>
-                  <h4 className="text-base font-semibold text-gray-900">Upload from your computer</h4>
-                  <p className="text-sm text-gray-500">JPEG, PNG, or WebP, max 20MB.</p>
+                  <h4 className="text-base font-semibold text-gray-900">{cg.uploadFromComputer}</h4>
+                  <p className="text-sm text-gray-500">{cg.uploadHint}</p>
                   <input
                     ref={modalFileInputRef}
                     type="file"
@@ -2047,20 +2044,20 @@ function ContentGeneratorPageInner() {
                       ) : (
                         <ImageIcon className="w-8 h-8" />
                       )}
-                      {uploadingManualImageInModal ? "Uploading..." : "Choose image (JPEG, PNG, WebP, max 20MB)"}
+                      {uploadingManualImageInModal ? cg.uploading : cg.chooseImage}
                     </button>
                   ) : (
                     <div className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50">
                       <img src={uploadedImageUrl} alt="Uploaded" className="w-24 h-24 object-cover rounded-lg" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900">Image ready</p>
-                        <p className="text-xs text-gray-500">Uploaded from your computer · Click Continue below to use it</p>
+                        <p className="text-sm font-medium text-gray-900">{cg.imageReady}</p>
+                        <p className="text-xs text-gray-500">{cg.uploadedHint}</p>
                       </div>
                       <button
                         type="button"
                         onClick={clearModalImage}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Remove image"
+                        title={cg.removeImage}
                       >
                         <X className="w-5 h-5" />
                       </button>
@@ -2071,13 +2068,13 @@ function ContentGeneratorPageInner() {
                 <>
               {/* Search Query */}
               <div className="space-y-2 mb-4">
-                <label className="text-sm font-medium text-gray-700">Search Query</label>
+                <label className="text-sm font-medium text-gray-700">{cg.searchQuery}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={imageSearchQuery}
                     onChange={(e) => setImageSearchQuery(e.target.value)}
-                    placeholder="Enter search terms for images..."
+                    placeholder={cg.enterSearchTerms}
                     className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all text-sm text-gray-800"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !fetchingImages) {
@@ -2095,14 +2092,14 @@ function ContentGeneratorPageInner() {
                     ) : (
                       <Search className="w-4 h-4" />
                     )}
-                    Search
+                    {cg.search}
                   </button>
                 </div>
               </div>
               
               {/* Quick suggestions */}
               <div className="flex flex-wrap gap-2 mb-6">
-                <span className="text-xs text-gray-400">Suggestions:</span>
+                <span className="text-xs text-gray-400">{cg.suggestions}:</span>
                 {targetKeywords.split(",").map((kw: string, i: number) => {
                   const trimmedKw = kw.trim();
                   if (!trimmedKw) return null;
@@ -2120,7 +2117,7 @@ function ContentGeneratorPageInner() {
                   onClick={() => setImageSearchQuery(topic)}
                   className="px-3 py-1 bg-purple-50 text-purple-700 rounded-lg text-xs hover:bg-purple-100 transition-colors font-medium"
                 >
-                  Use topic
+                  {cg.useTopic}
                 </button>
               </div>
 
@@ -2128,7 +2125,7 @@ function ContentGeneratorPageInner() {
               {fetchingImages ? (
                 <div className="py-12 text-center">
                   <Loader2 className="w-10 h-10 animate-spin text-cyan-600 mx-auto mb-3" />
-                  <p className="text-gray-600">Searching for images...</p>
+                  <p className="text-gray-600">{cg.searchingImages}</p>
                 </div>
               ) : pixabayImages.length > 0 ? (
                 <div className="space-y-4">
@@ -2164,14 +2161,14 @@ function ContentGeneratorPageInner() {
                   </div>
                   <div className="text-center pt-2 border-t border-gray-100">
                     <p className="text-xs text-gray-400">
-                      Images powered by{' '}
+                      {cg.imagesPoweredBy}{' '}
                       <a
                         href="https://pixabay.com"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-cyan-600 hover:underline"
                       >
-                        Pixabay
+                        {cg.pixabay}
                       </a>
                     </p>
                   </div>
@@ -2179,7 +2176,7 @@ function ContentGeneratorPageInner() {
               ) : (
                 <div className="py-12 text-center">
                   <ImageIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">Search for images to get started</p>
+                  <p className="text-gray-500">{cg.searchForImages}</p>
                 </div>
               )}
 
@@ -2191,7 +2188,7 @@ function ContentGeneratorPageInner() {
                   className="flex items-center gap-2 w-full justify-center px-4 py-3 rounded-lg border-2 border-dashed border-gray-300 hover:border-cyan-400 hover:bg-cyan-50/50 text-gray-600 hover:text-cyan-700 transition-colors font-medium text-sm"
                 >
                   <ImageIcon className="w-5 h-5" />
-                  Upload option
+                  {cg.uploadOption}
                 </button>
               </div>
             </>
@@ -2204,10 +2201,10 @@ function ContentGeneratorPageInner() {
                 {uploadedImageUrl ? (
                   <span className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-500" />
-                    Image selected {(uploadingImage || uploadingManualImageInModal) && "(uploading...)"}
+                    {cg.imageSelected} {(uploadingImage || uploadingManualImageInModal) && cg.uploadingImg}
                   </span>
                 ) : (
-                  "Select an image (Pixabay or upload) or skip to continue"
+                  cg.selectImageOrSkip
                 )}
               </div>
               <div className="flex gap-3">
@@ -2221,7 +2218,7 @@ function ContentGeneratorPageInner() {
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
                 >
-                  Skip
+                  {cg.skip}
                 </button>
                 <button
                   onClick={handleConfirmImage}
@@ -2231,12 +2228,12 @@ function ContentGeneratorPageInner() {
                   {(uploadingImage || uploadingManualImageInModal) ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Uploading...
+                      {cg.uploading}
                     </>
                   ) : (
                     <>
                       <CheckCircle className="w-4 h-4" />
-                      Continue
+                      {cg.continue_}
                     </>
                   )}
                 </button>

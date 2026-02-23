@@ -716,6 +716,48 @@ function ContentInner() {
       
       // If content was published successfully, clear AI Visibility flow state
       if (action === "approve" && additionalData?.autoPublish) {
+        // Update missed_prompt_actions to 'published' if this content originated from a missed prompt
+        try {
+          const { data: contentRow } = await supabase
+            .from('content_strategy')
+            .select('metadata, published_url, project_id')
+            .eq('id', contentId)
+            .single();
+
+          const missedPrompt = contentRow?.metadata?.sourceMissedPrompt;
+          if (missedPrompt) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+              const { data: existing } = await supabase
+                .from('missed_prompt_actions')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('prompt_text', missedPrompt)
+                .maybeSingle();
+
+              const publishUrl = result.published_url || contentRow?.published_url || null;
+
+              if (existing) {
+                await supabase.from('missed_prompt_actions')
+                  .update({ status: 'published', published_url: publishUrl, content_id: contentId, updated_at: new Date().toISOString() })
+                  .eq('id', existing.id);
+              } else if (contentRow?.project_id) {
+                await supabase.from('missed_prompt_actions')
+                  .insert({
+                    project_id: contentRow.project_id,
+                    user_id: user.id,
+                    prompt_text: missedPrompt,
+                    status: 'published',
+                    published_url: publishUrl,
+                    content_id: contentId,
+                  });
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to update missed prompt action to published:', err);
+        }
+
         // Clear sessionStorage to prevent modal from reopening
         sessionStorage.removeItem('aiVisibilityResponses');
         sessionStorage.removeItem('editPromptData');
@@ -1911,6 +1953,41 @@ function ContentInner() {
     sessionStorage.setItem('aiVisibilityResponses', JSON.stringify(updatedData));
     
     toast.success(`Schemas created for ${Object.keys(schemas).length} platform(s)!`);
+
+    // Record missed prompt action so it doesn't appear again in the missed prompts list
+    if (aiVisibilityData?.sourceMissedPrompt && editData?.projectId) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const firstContentId = Object.values(schemas)[0]?.contentId;
+          const promptText = aiVisibilityData.sourceMissedPrompt;
+
+          const { data: existing } = await supabase
+            .from('missed_prompt_actions')
+            .select('id')
+            .eq('project_id', editData.projectId)
+            .eq('prompt_text', promptText)
+            .maybeSingle();
+
+          if (existing) {
+            await supabase.from('missed_prompt_actions')
+              .update({ status: 'content_created', content_id: firstContentId || null, updated_at: new Date().toISOString() })
+              .eq('id', existing.id);
+          } else {
+            await supabase.from('missed_prompt_actions')
+              .insert({
+                project_id: editData.projectId,
+                user_id: user.id,
+                prompt_text: promptText,
+                status: 'content_created',
+                content_id: firstContentId || null,
+              });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to record missed prompt action:', err);
+      }
+    }
     
     // Reload content to show the new draft items (one per platform)
     await loadContent();
@@ -1934,11 +2011,11 @@ function ContentInner() {
   };
 
   const tabs = [
-    { id: "all", label: "All Content", count: stats.total },
-    { id: "draft", label: "Drafts", count: stats.draft },
-    { id: "review", label: "In Review", count: stats.review },
-    { id: "scheduled", label: "Scheduled", count: stats.scheduled },
-    { id: "published", label: "Published", count: stats.published },
+    { id: "all", label: t.dashboard.content.allContent, count: stats.total },
+    { id: "draft", label: t.dashboard.content.drafts, count: stats.draft },
+    { id: "review", label: t.dashboard.content.inReview, count: stats.review },
+    { id: "scheduled", label: t.dashboard.content.scheduled, count: stats.scheduled },
+    { id: "published", label: t.dashboard.content.published, count: stats.published },
   ];
 
   if (loading) {
@@ -1968,7 +2045,7 @@ function ContentInner() {
           onClick={handleRefresh}
           disabled={refreshing}
           className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Refresh and check for scheduled content"
+          title={t.dashboard.content.refresh}
         >
           <RefreshCw className={`w-5 h-5 ${refreshing ? "animate-spin" : ""}`} />
         </button>
@@ -1982,10 +2059,10 @@ function ContentInner() {
               <ArrowLeft className="w-5 h-5 text-purple-600" />
               <div>
                 <p className="text-sm font-semibold text-purple-900">
-                  Generated from Action Plan
+                  {t.dashboard.content.generatedFromActionPlan}
                 </p>
                 <p className="text-xs text-purple-700">
-                  {actionPlanContext.planTitle || 'Action Plan Step'}
+                  {actionPlanContext.planTitle || t.dashboard.content.actionPlanStep}
                 </p>
               </div>
             </div>
@@ -1993,7 +2070,7 @@ function ContentInner() {
               onClick={() => router.push(`/dashboard/action-plans?planId=${actionPlanContext.planId}`)}
               className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
             >
-              View Action Plan →
+              {t.dashboard.content.viewActionPlan}
             </button>
           </div>
         </div>
@@ -2008,7 +2085,7 @@ function ContentInner() {
         >
           <FileText className="w-8 h-8 text-blue-600 mb-2" />
           <div className="text-2xl font-bold text-gray-900 mb-1">{stats.total}</div>
-          <p className="text-gray-600">Total Content</p>
+          <p className="text-gray-600">{t.dashboard.content.totalContent}</p>
         </motion.div>
 
         <motion.div
@@ -2019,7 +2096,7 @@ function ContentInner() {
         >
           <CheckCircle className="w-8 h-8 text-green-600 mb-2" />
           <div className="text-2xl font-bold text-gray-900 mb-1">{stats.published}</div>
-          <p className="text-gray-600">Published</p>
+          <p className="text-gray-600">{t.dashboard.content.published}</p>
         </motion.div>
 
         <motion.div
@@ -2030,7 +2107,7 @@ function ContentInner() {
         >
           <Clock className="w-8 h-8 text-purple-600 mb-2" />
           <div className="text-2xl font-bold text-gray-900 mb-1">{stats.scheduled}</div>
-          <p className="text-gray-600">Scheduled</p>
+          <p className="text-gray-600">{t.dashboard.content.scheduled}</p>
         </motion.div>
 
         <motion.div
@@ -2041,7 +2118,7 @@ function ContentInner() {
         >
           <AlertCircle className="w-8 h-8 text-yellow-600 mb-2" />
           <div className="text-2xl font-bold text-gray-900 mb-1">{stats.review}</div>
-          <p className="text-gray-600">In Review</p>
+          <p className="text-gray-600">{t.dashboard.content.inReview}</p>
         </motion.div>
       </div>
 
@@ -2071,7 +2148,7 @@ function ContentInner() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search content..."
+              placeholder={t.dashboard.content.searchContent}
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
             />
           </div>
@@ -2085,14 +2162,14 @@ function ContentInner() {
                     onChange={handleSelectAll}
                     className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
                   />
-                  <span className="text-sm font-medium">Select All ({selectedItems.size})</span>
+                  <span className="text-sm font-medium">{t.dashboard.content.selectAll} ({selectedItems.size})</span>
                 </label>
                 <button
                   onClick={handleSelectAllDraftReview}
                   className="px-4 py-3 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-2 text-blue-700 text-sm font-medium"
                 >
                   <Clock className="w-5 h-5" />
-                  <span className="hidden sm:inline">Select Draft & Review</span>
+                  <span className="hidden sm:inline">{t.dashboard.content.selectDraftReview}</span>
                 </button>
                 {selectedItems.size > 0 && (
                   <>
@@ -2101,7 +2178,7 @@ function ContentInner() {
                       className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
                     >
                       <Clock className="w-5 h-5" />
-                      <span className="hidden sm:inline">Schedule Selected ({selectedItems.size})</span>
+                      <span className="hidden sm:inline">{t.dashboard.content.scheduleSelected} ({selectedItems.size})</span>
                     </button>
                     <button
                       onClick={handleDeleteMultiple}
@@ -2111,12 +2188,12 @@ function ContentInner() {
                       {isDeletingMultiple ? (
                         <>
                           <Loader2 className="w-5 h-5 animate-spin" />
-                          <span className="hidden sm:inline">Deleting...</span>
+                          <span className="hidden sm:inline">{t.dashboard.content.deleting}</span>
                         </>
                       ) : (
                         <>
                           <Trash2 className="w-5 h-5" />
-                          <span className="hidden sm:inline">Delete Selected ({selectedItems.size})</span>
+                          <span className="hidden sm:inline">{t.dashboard.content.deleteSelected} ({selectedItems.size})</span>
                         </>
                       )}
                     </button>
@@ -2126,7 +2203,7 @@ function ContentInner() {
             )}
             <button className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2 text-gray-700">
               <Filter className="w-5 h-5" />
-              <span className="hidden sm:inline">Filter</span>
+              <span className="hidden sm:inline">{t.dashboard.content.filter}</span>
             </button>
           </div>
         </div>
@@ -2142,12 +2219,12 @@ function ContentInner() {
           >
             <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              {activeTab === "all" ? "No Content Yet" : `No ${activeTab} Content`}
+              {activeTab === "all" ? t.dashboard.content.noContentYet : `${t.dashboard.content.noContentInStatus}`}
             </h3>
             <p className="text-gray-600">
               {activeTab === "all"
-                ? "Generate content from the Content Generator to see it here"
-                : `No content in ${activeTab} status`}
+                ? t.dashboard.content.generateContentHint
+                : t.dashboard.content.noContentInStatus}
             </p>
           </motion.div>
         ) : (
@@ -2206,10 +2283,10 @@ function ContentInner() {
                             <span>
                               {firstItem.publishDate
                                 ? new Date(firstItem.publishDate).toLocaleDateString()
-                                : "Not scheduled"}
+                                : t.dashboard.content.notScheduled}
                             </span>
                             <span>•</span>
-                            <span className="text-purple-600 font-medium">{items.length} platforms</span>
+                            <span className="text-purple-600 font-medium">{items.length} {t.dashboard.content.platforms}</span>
                           </div>
                         </div>
                       </div>
@@ -2299,7 +2376,7 @@ function ContentInner() {
                                     className="px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 transition-colors text-sm font-medium flex items-center gap-1.5"
                                   >
                                     <CheckCircle className="w-4 h-4" />
-                                    Approve
+                                    {t.dashboard.content.approve}
                                   </button>
                                 )}
                                 {item.status === "review" && (
@@ -2308,21 +2385,21 @@ function ContentInner() {
                                       onClick={() => handleReviewAction("publish", item.id)}
                                       disabled={publishingContentId === item.id}
                                       className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
-                                      title="Publish"
+                                      title={t.dashboard.content.publish}
                                     >
                                       <CheckCircle className="w-5 h-5" />
                                     </button>
                                     <button
                                       onClick={(e) => handleScheduleClick(item.id, e)}
                                       className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                      title="Schedule"
+                                      title={t.dashboard.content.schedule}
                                     >
                                       <Clock className="w-5 h-5" />
                                     </button>
                                     <button
                                       onClick={() => handleReviewAction("reject", item.id)}
                                       className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                      title="Reject"
+                                      title={t.dashboard.content.reject}
                                     >
                                       <XCircle className="w-5 h-5" />
                                     </button>
@@ -2338,7 +2415,7 @@ function ContentInner() {
                                       await loadPerformanceMetrics(item.id);
                                     }}
                                     className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                                    title="Track Performance"
+                                    title={t.dashboard.content.trackPerformance}
                                   >
                                     <TrendingUp className="w-5 h-5" />
                                   </button>
@@ -2353,7 +2430,7 @@ function ContentInner() {
                                       loadLearningInsights(item.id);
                                     }}
                                     className="p-1.5 text-purple-500 hover:bg-purple-50 rounded-lg transition-colors"
-                                    title="Optimize & Republish"
+                                    title={t.dashboard.content.optimizeRepublish}
                                   >
                                     <Sparkles className="w-5 h-5" />
                                   </button>
@@ -2365,14 +2442,14 @@ function ContentInner() {
                                     setShowViewModal(true);
                                   }}
                                   className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-                                  title="View"
+                                  title={t.dashboard.content.view}
                                 >
                                   <Eye className="w-5 h-5" />
                                 </button>
                                 <button
                                   onClick={() => handleDelete(item.id)}
                                   className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                  title="Delete"
+                                  title={t.dashboard.content.delete}
                                 >
                                   <Trash2 className="w-5 h-5" />
                                 </button>
@@ -2405,7 +2482,7 @@ function ContentInner() {
                               className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 hover:underline"
                             >
                               <ExternalLink className="w-3 h-3" />
-                              View on {PUBLISHING_PLATFORMS.find(p => p.id === (pub.platform || item.raw?.target_platform || item.platforms?.[0] || "").toLowerCase())?.name || pub.platform || item.raw?.target_platform || item.platforms?.[0] || "external"}
+                              {t.dashboard.content.viewOn} {PUBLISHING_PLATFORMS.find(p => p.id === (pub.platform || item.raw?.target_platform || item.platforms?.[0] || "").toLowerCase())?.name || pub.platform || item.raw?.target_platform || item.platforms?.[0] || "external"}
                             </a>
                         ))}
                       </div>
@@ -2467,7 +2544,7 @@ function ContentInner() {
                           <span>
                             {item.publishDate
                               ? new Date(item.publishDate).toLocaleDateString()
-                              : "Not scheduled"}
+                              : t.dashboard.content.notScheduled}
                           </span>
                         </div>
                       </div>
@@ -2506,12 +2583,12 @@ function ContentInner() {
                       <div className="flex items-center gap-6 mt-3 text-sm">
                         <div className="flex items-center gap-2 text-gray-600">
                           <Eye className="w-4 h-4" />
-                          <span className="font-medium">{item.performance.views.toLocaleString()} views</span>
+                          <span className="font-medium">{item.performance.views.toLocaleString()} {t.dashboard.content.views}</span>
                         </div>
                         {item.performance.engagement > 0 && (
                           <div className="flex items-center gap-2 text-gray-600">
                             <TrendingUp className="w-4 h-4" />
-                            <span className="font-medium">{item.performance.engagement}% engagement</span>
+                            <span className="font-medium">{item.performance.engagement}% {t.dashboard.content.engagement}</span>
                           </div>
                         )}
                       </div>
@@ -2531,7 +2608,7 @@ function ContentInner() {
                               className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline"
                             >
                               <Send className="w-4 h-4" />
-                              <span>Visit published content</span>
+                              <span>{t.dashboard.content.visitPublished}</span>
                               <span className="text-xs text-gray-500">({pub.platform || 'external'})</span>
                             </a>
                         ))}
@@ -2557,7 +2634,7 @@ function ContentInner() {
                     {item.status === "review" ? (
                       <button className="px-4 py-2 bg-yellow-100 text-gray-900 rounded-lg font-medium flex items-center gap-2 hover:bg-yellow-200 transition-colors">
                         <Clock className="w-4 h-4 text-gray-600" />
-                        Review
+                        {t.dashboard.content.review}
                       </button>
                     ) : (
                       <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${statusConfig.bg} ${statusConfig.text}`}>
@@ -2584,10 +2661,10 @@ function ContentInner() {
                             <button
                               onClick={() => handleApprove(item.id)}
                               className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 rounded-lg font-medium hover:bg-green-100 transition-colors flex items-center gap-2"
-                              title="Approve"
+                              title={t.dashboard.content.approve}
                             >
                               <CheckCircle className="w-4 h-4" />
-                              Approve
+                              {t.dashboard.content.approve}
                             </button>
                           )}
 
@@ -2598,7 +2675,7 @@ function ContentInner() {
                                 onClick={() => handleReviewAction("publish", item.id)}
                                 disabled={publishingContentId === item.id}
                                 className="p-2 text-green-600 hover:bg-green-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Publish"
+                                title={t.dashboard.content.publish}
                               >
                                 <CheckCircle className="w-5 h-5" />
                               </button>
@@ -2606,7 +2683,7 @@ function ContentInner() {
                                 onClick={() => handleReviewAction("reject", item.id)}
                                 disabled={publishingContentId === item.id}
                                 className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Reject"
+                                title={t.dashboard.content.reject}
                               >
                                 <XCircle className="w-5 h-5" />
                               </button>
@@ -2614,7 +2691,7 @@ function ContentInner() {
                                 onClick={(e) => handleScheduleClick(item.id, e)}
                                 disabled={publishingContentId === item.id}
                                 className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors relative disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Schedule"
+                                title={t.dashboard.content.schedule}
                               >
                                 <Clock className="w-5 h-5" />
                               </button>
@@ -2631,7 +2708,7 @@ function ContentInner() {
                                 await loadPerformanceMetrics(item.id);
                               }}
                               className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Track Performance"
+                              title={t.dashboard.content.trackPerformance}
                             >
                               <TrendingUp className="w-5 h-5" />
                             </button>
@@ -2646,7 +2723,7 @@ function ContentInner() {
                                 loadLearningInsights(item.id);
                               }}
                               className="p-2 text-purple-500 hover:bg-purple-50 rounded-lg transition-colors"
-                              title="Optimize & Republish"
+                              title={t.dashboard.content.optimizeRepublish}
                             >
                               <Sparkles className="w-5 h-5" />
                             </button>
@@ -2660,7 +2737,7 @@ function ContentInner() {
                             }}
                             disabled={publishingContentId === item.id}
                             className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="View"
+                            title={t.dashboard.content.view}
                           >
                             <Eye className="w-5 h-5" />
                           </button>
@@ -2669,7 +2746,7 @@ function ContentInner() {
                             onClick={() => handleDelete(item.id)}
                             disabled={publishingContentId === item.id}
                             className="p-2 text-red-400 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Delete"
+                            title={t.dashboard.content.delete}
                           >
                             <Trash2 className="w-5 h-5" />
                           </button>
@@ -2693,12 +2770,12 @@ function ContentInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <TrendingUp className="w-5 h-5 text-blue-600" />
-                  Track Content Performance
+                  {t.dashboard.content.trackContentPerformance}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
                   {performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora'
-                    ? 'Live metrics from ' + (performancePlatform === 'instagram' ? 'Instagram' : performancePlatform === 'facebook' ? 'Facebook' : performancePlatform === 'linkedin' ? 'LinkedIn' : performancePlatform === 'github' ? 'GitHub' : 'Quora')
-                    : 'Measure your content performance to enable optimization'}
+                    ? t.dashboard.content.liveMetricsFrom
+                    : t.dashboard.content.measurePerformance}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2708,18 +2785,18 @@ function ContentInner() {
                       onClick={handleRefreshMetrics}
                       disabled={refreshingMetrics}
                       className="px-3 py-1.5 text-sm bg-white border border-blue-300 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                      title="Refresh metrics from API"
+                      title={t.dashboard.content.refreshMetrics}
                     >
                       <RefreshCw className={`w-4 h-4 ${refreshingMetrics ? 'animate-spin' : ''}`} />
-                      Refresh
+                      {t.dashboard.content.refresh}
                     </button>
                     {currentMetrics?.lastUpdated ? (
                       <span className="text-xs text-gray-500 whitespace-nowrap">
-                        Last refreshed: {new Date(currentMetrics.lastUpdated).toLocaleString()}
+                        {t.dashboard.content.lastRefreshed}: {new Date(currentMetrics.lastUpdated).toLocaleString()}
                       </span>
                     ) : (
                       <span className="text-xs text-gray-400 italic">
-                        Not refreshed yet
+                        {t.dashboard.content.notRefreshedYet}
                       </span>
                     )}
                   </div>
@@ -2742,14 +2819,14 @@ function ContentInner() {
               {loadingMetrics ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-                  <span className="ml-3 text-gray-600">Loading metrics...</span>
+                  <span className="ml-3 text-gray-600">{t.dashboard.content.loadingMetrics}</span>
                 </div>
               ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora') && currentMetrics ? (
                 // Show live metrics for Instagram/Facebook/LinkedIn/GitHub/Quora with charts
                 <div className="space-y-6">
                   {/* Engagement Metrics Bar Chart */}
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
-                    <h4 className="text-lg font-semibold text-gray-900 mb-4">Engagement Metrics</h4>
+                    <h4 className="text-lg font-semibold text-gray-900 mb-4">{t.dashboard.content.engagementMetrics}</h4>
                     <ResponsiveContainer width="100%" height={250}>
                       <BarChart
                         data={(() => {
@@ -2858,7 +2935,7 @@ function ContentInner() {
                   {/* Engagement Rate Radial Chart - Always show if engagement data exists */}
                   {currentMetrics.engagement !== undefined && (
                     <div className="bg-white border border-gray-200 rounded-lg p-6">
-                      <h4 className="text-lg font-semibold text-gray-900 mb-4 text-center">Engagement Rate</h4>
+                      <h4 className="text-lg font-semibold text-gray-900 mb-4 text-center">{t.dashboard.content.engagementRate}</h4>
                       <div className="flex items-center justify-center">
                         <ResponsiveContainer width="100%" height={250}>
                           <RadialBarChart
@@ -2909,11 +2986,9 @@ function ContentInner() {
                 // No metrics available or not Instagram/Facebook/LinkedIn/GitHub/Quora
                 <div className="flex flex-col items-center justify-center py-12">
                   <TrendingUp className="w-16 h-16 text-gray-300 mb-4" />
-                  <h4 className="text-lg font-semibold text-gray-900 mb-2">No Performance Data Available</h4>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">{t.dashboard.content.noPerformanceData}</h4>
                   <p className="text-sm text-gray-600 text-center max-w-md">
-                    {performancePlatform 
-                      ? 'Performance tracking is only available for Instagram, Facebook, LinkedIn, GitHub, and Quora posts. Please ensure your content is published to one of these platforms.'
-                      : 'This content is not published to Instagram, Facebook, LinkedIn, GitHub, or Quora. Performance tracking is currently only available for these platforms.'}
+                    {t.dashboard.content.performanceTrackingNote}
                   </p>
                 </div>
               )}
@@ -2929,7 +3004,7 @@ function ContentInner() {
                 }}
                 className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
-                Close
+                {t.dashboard.content.close}
               </button>
             </div>
           </div>
@@ -2944,10 +3019,10 @@ function ContentInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <Sparkles className="w-5 h-5 text-purple-600" />
-                  Optimize & Republish Content
+                  {t.dashboard.content.optimizeRepublishContent}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Generate an optimized version based on performance data and learning insights
+                  {t.dashboard.content.generateOptimizedDesc}
                 </p>
               </div>
               <button
@@ -2967,7 +3042,7 @@ function ContentInner() {
               {loadingInsights ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
-                  <span className="ml-3 text-gray-600">Loading learning insights...</span>
+                  <span className="ml-3 text-gray-600">{t.dashboard.content.loadingInsights}</span>
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -2976,17 +3051,17 @@ function ContentInner() {
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                         <Star className="w-4 h-4 text-blue-600" />
-                        Learning Insights
+                        {t.dashboard.content.learningInsights}
                       </h4>
                       {learningInsights.successScore && (
                         <div className="mb-3">
-                          <span className="text-sm text-gray-600">Success Score: </span>
+                          <span className="text-sm text-gray-600">{t.dashboard.content.successScore}: </span>
                           <span className="font-semibold text-blue-600">{learningInsights.successScore}/100</span>
                         </div>
                       )}
                       {learningInsights.insights && learningInsights.insights.length > 0 && (
                         <div className="mb-3">
-                          <p className="text-sm font-medium text-gray-700 mb-1">Key Insights:</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">{t.dashboard.content.keyInsights}:</p>
                           <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
                             {learningInsights.insights.map((insight: string, idx: number) => (
                               <li key={idx}>{insight}</li>
@@ -2996,7 +3071,7 @@ function ContentInner() {
                       )}
                       {learningInsights.recommendations && learningInsights.recommendations.length > 0 && (
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Recommendations:</p>
+                          <p className="text-sm font-medium text-gray-700 mb-1">{t.dashboard.content.recommendations}:</p>
                           <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
                             {learningInsights.recommendations.map((rec: string, idx: number) => (
                               <li key={idx}>{rec}</li>
@@ -3011,7 +3086,7 @@ function ContentInner() {
                   {!optimizedContent ? (
                     <div className="text-center py-8">
                       <p className="text-gray-600 mb-4">
-                        Generate an optimized version of your content based on performance data and learning insights.
+                        {t.dashboard.content.generateOptimizedHint}
                       </p>
                       <button
                         onClick={handleGenerateOptimized}
@@ -3021,26 +3096,26 @@ function ContentInner() {
                         {generatingOptimized ? (
                           <>
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            Generating Optimized Content...
+                            {t.dashboard.content.generatingOptimized}
                           </>
                         ) : (
                           <>
                             <Sparkles className="w-4 h-4" />
-                            Generate Optimized Version
+                            {t.dashboard.content.generateOptimizedVersion}
                           </>
                         )}
                       </button>
                     </div>
                   ) : (
                     <div>
-                      <h4 className="font-semibold text-gray-900 mb-3">Optimized Content Preview</h4>
+                      <h4 className="font-semibold text-gray-900 mb-3">{t.dashboard.content.optimizedPreview}</h4>
                       <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 max-h-96 overflow-y-auto">
                         <pre className="whitespace-pre-wrap text-sm text-gray-700 font-sans">
                           {optimizedContent}
                         </pre>
                       </div>
                       <p className="text-xs text-gray-500 mt-2">
-                        Review the optimized content above. Click "Republish" to publish this version.
+                        {t.dashboard.content.reviewOptimizedHint}
                       </p>
                     </div>
                   )}
@@ -3057,14 +3132,14 @@ function ContentInner() {
                   }}
                   className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                 >
-                  Generate New Version
+                  {t.dashboard.content.generateNewVersion}
                 </button>
                 <button
                   onClick={handleRepublishOptimized}
                   className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2"
                 >
                   <Send className="w-4 h-4" />
-                  Republish Optimized Version
+                  {t.dashboard.content.republishOptimized}
                 </button>
               </div>
             )}
@@ -3122,7 +3197,7 @@ function ContentInner() {
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
                   <Clock className="w-4 h-4 text-blue-600" />
-                  Schedule Publishing
+                  {t.dashboard.content.schedulePublishing}
                 </h3>
                 <button
                   onClick={() => {
@@ -3141,7 +3216,7 @@ function ContentInner() {
                 {/* Date Picker */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Date
+                    {t.dashboard.content.date}
                   </label>
                   <input
                     type="date"
@@ -3155,7 +3230,7 @@ function ContentInner() {
                 {/* Time Picker */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Time
+                    {t.dashboard.content.time}
                   </label>
                   <input
                     type="time"
@@ -3169,7 +3244,7 @@ function ContentInner() {
                 {scheduleDate && (
                   <div className="p-2 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-xs text-gray-700">
-                      <span className="font-medium">Scheduled:</span>{" "}
+                      <span className="font-medium">{t.dashboard.content.scheduledFor}:</span>{" "}
                       {new Date(`${scheduleDate}T${scheduleTime || '09:00'}`).toLocaleString('en-US', {
                         month: 'short',
                         day: 'numeric',
@@ -3191,7 +3266,7 @@ function ContentInner() {
                   }}
                   className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium"
                 >
-                  Cancel
+                  {t.dashboard.content.cancel}
                 </button>
                 <button
                   onClick={handleScheduleSubmit}
@@ -3199,7 +3274,7 @@ function ContentInner() {
                   className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
                   <Clock className="w-3 h-3" />
-                  Schedule
+                  {t.dashboard.content.schedule}
                 </button>
               </div>
             </motion.div>
@@ -3219,7 +3294,7 @@ function ContentInner() {
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                   <Clock className="w-5 h-5 text-blue-600" />
-                  Global Schedule — Auto-Publish at Time
+                  {t.dashboard.content.globalSchedule}
                 </h3>
                 <button
                   onClick={() => setShowGlobalScheduleModal(false)}
@@ -3229,13 +3304,13 @@ function ContentInner() {
                 </button>
               </div>
               <p className="text-sm text-gray-600 mt-1">
-                {selectedItems.size} item(s) selected — set date & time to auto-publish all at once
+                {selectedItems.size} {t.dashboard.content.itemsSelected}
               </p>
             </div>
             <div className="p-6 space-y-4">
               {/* Date picker */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t.dashboard.content.date}</label>
                 <input
                   type="date"
                   value={scheduleDate}
@@ -3247,7 +3322,7 @@ function ContentInner() {
 
               {/* Time picker */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t.dashboard.content.time}</label>
                 <input
                   type="time"
                   value={scheduleTime}
@@ -3259,7 +3334,7 @@ function ContentInner() {
               {scheduleDate && (
                 <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <p className="text-xs text-gray-700">
-                    <span className="font-medium">Will publish:</span>{" "}
+                    <span className="font-medium">{t.dashboard.content.willPublish}:</span>{" "}
                     {new Date(`${scheduleDate}T${scheduleTime || "09:00"}`).toLocaleString("en-US", {
                       weekday: "short",
                       month: "short",
@@ -3276,7 +3351,7 @@ function ContentInner() {
                 onClick={() => setShowGlobalScheduleModal(false)}
                 className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition-colors"
               >
-                Cancel
+                {t.dashboard.content.cancel}
               </button>
               <button
                 onClick={handleGlobalScheduleSubmit}
@@ -3286,12 +3361,12 @@ function ContentInner() {
                 {schedulingMultiple ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Scheduling...
+                    {t.dashboard.content.scheduling}
                   </>
                 ) : (
                   <>
                     <Clock className="w-4 h-4" />
-                    Schedule All
+                    {t.dashboard.content.scheduleAll}
                   </>
                 )}
               </button>
@@ -3335,7 +3410,7 @@ function ContentInner() {
                     {viewContent.raw?.word_count && (
                       <>
                         <span>•</span>
-                        <span>{viewContent.raw.word_count} words</span>
+                        <span>{viewContent.raw.word_count} {t.dashboard.content.words}</span>
                       </>
                     )}
                   </div>
@@ -3363,7 +3438,7 @@ function ContentInner() {
                       : 'text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  Content
+                  {t.dashboard.content.content_}
                 </button>
                 <button
                   onClick={() => setViewMode('schema')}
@@ -3373,7 +3448,7 @@ function ContentInner() {
                       : 'text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  Schema
+                  {t.dashboard.content.schema}
                 </button>
                 <button
                   onClick={() => setViewMode('image')}
@@ -3383,7 +3458,7 @@ function ContentInner() {
                       : 'text-gray-600 hover:text-gray-800'
                   }`}
                 >
-                  Image
+                  {t.dashboard.content.image}
                 </button>
               </div>
             </div>
@@ -3412,7 +3487,7 @@ function ContentInner() {
                       ) : (
                         <div className="text-gray-500 text-center py-12">
                           <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                          <p>No content available</p>
+                          <p>{t.dashboard.content.noContentAvailable}</p>
                         </div>
                       );
                     })()}
@@ -3420,7 +3495,7 @@ function ContentInner() {
                     {/* Published URL Link in View Modal */}
                     {viewContent.status === "published" && viewContent.published_records && viewContent.published_records.length > 0 && (
                       <div className="mt-6 pt-6 border-t border-gray-200">
-                        <h4 className="text-sm font-semibold text-gray-900 mb-3">Published Links:</h4>
+                        <h4 className="text-sm font-semibold text-gray-900 mb-3">{t.dashboard.content.publishedLinks}:</h4>
                         <div className="space-y-2">
                           {viewContent.published_records
                             .filter((pub: any, idx: number, arr: any[]) => pub.published_url && arr.findIndex((p: any) => p.published_url === pub.published_url && p.platform === pub.platform) === idx)
@@ -3479,7 +3554,7 @@ function ContentInner() {
                           </div>
                           <div className="mt-4 text-center">
                             <p className="text-sm text-gray-600">
-                              This image will be published with your content to supported platforms.
+                              {t.dashboard.content.imagePublishedWith}
                             </p>
                             <div className="mt-2 flex flex-wrap justify-center gap-2">
                               <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Reddit</span>
@@ -3493,7 +3568,7 @@ function ContentInner() {
                           </div>
                           <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                             <p className="text-xs text-gray-500 break-all">
-                              <strong>Image URL:</strong> {imageUrl}
+                              <strong>{t.dashboard.content.imageUrl}:</strong> {imageUrl}
                             </p>
                           </div>
                         </div>
@@ -3504,8 +3579,8 @@ function ContentInner() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                           </svg>
                         </div>
-                        <p className="font-medium text-gray-700">No Image Available</p>
-                        <p className="text-sm mt-1">This content doesn&apos;t have an associated image.</p>
+                        <p className="font-medium text-gray-700">{t.dashboard.content.noImageAvailable}</p>
+                        <p className="text-sm mt-1">{t.dashboard.content.noImageDesc}</p>
                       </div>
                       );
                     })()}
@@ -3519,30 +3594,30 @@ function ContentInner() {
                       {/* Auto-Generated Schema (includes structured SEO data) */}
                       <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                         <div className="flex items-center gap-2 mb-3">
-                          <h4 className="text-sm font-semibold text-gray-900">Auto-Generated JSON-LD Schema</h4>
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">Includes Structured SEO Data</span>
+                          <h4 className="text-sm font-semibold text-gray-900">{t.dashboard.content.autoGeneratedSchema}</h4>
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">{t.dashboard.content.includesStructuredSeo}</span>
                         </div>
                         <p className="text-xs text-gray-600 mb-3">
-                          This schema automatically includes: headings (H1/H2/H3), FAQs, meta description, and other structured data from your content.
+                          {t.dashboard.content.schemaIncludes}
                         </p>
                         {viewContent.raw?.metadata?.schema?.jsonLd ? (
                           <pre className="text-xs bg-white p-4 rounded border border-gray-200 overflow-x-auto max-h-96 overflow-y-auto">
                             {JSON.stringify(viewContent.raw.metadata.schema.jsonLd, null, 2)}
                           </pre>
                         ) : (
-                          <p className="text-gray-500 text-sm">No schema data available</p>
+                          <p className="text-gray-500 text-sm">{t.dashboard.content.noSchemaData}</p>
                         )}
                       </div>
                       
                       {/* HTML Script Tags (ready to embed) */}
                       <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                        <h4 className="text-sm font-semibold text-gray-900 mb-3">HTML Script Tags (Ready to Embed):</h4>
+                        <h4 className="text-sm font-semibold text-gray-900 mb-3">{t.dashboard.content.htmlScriptTags}:</h4>
                         {viewContent.raw?.metadata?.schema?.scriptTags ? (
                           <pre className="text-xs bg-white p-4 rounded border border-gray-200 overflow-x-auto max-h-96 overflow-y-auto">
                             {viewContent.raw.metadata.schema.scriptTags}
                           </pre>
                         ) : (
-                          <p className="text-gray-500 text-sm">No script tags available</p>
+                          <p className="text-gray-500 text-sm">{t.dashboard.content.noScriptTags}</p>
                         )}
                       </div>
 
@@ -3550,8 +3625,8 @@ function ContentInner() {
                       {viewContent.raw?.metadata?.structuredSEO && (
                         <div className="bg-green-50 rounded-lg p-4 border border-green-200">
                           <div className="flex items-center gap-2 mb-3">
-                            <h4 className="text-sm font-semibold text-gray-900">Additional SEO Elements</h4>
-                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Not in Schema</span>
+                            <h4 className="text-sm font-semibold text-gray-900">{t.dashboard.content.additionalSeoElements}</h4>
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">{t.dashboard.content.notInSchema}</span>
                           </div>
                           <p className="text-xs text-gray-600 mb-3">
                             These elements are used for meta tags, social sharing, and internal linking (not included in JSON-LD schema).
@@ -3651,12 +3726,12 @@ function ContentInner() {
                         : viewContent.raw?.generated_content;
                       if (toCopy) {
                         navigator.clipboard.writeText(toCopy);
-                        toast.success("Content copied to clipboard!");
+                        toast.success(t.dashboard.content.copyContent + " " + t.dashboard.content.copiedToClipboard);
                       }
                     }}
                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
                   >
-                    Copy Content
+                    {t.dashboard.content.copyContent}
                   </button>
                 )}
                 {viewMode === 'schema' && (
@@ -3665,12 +3740,12 @@ function ContentInner() {
                       const schemaText = viewContent.raw?.metadata?.schema?.scriptTags || JSON.stringify(viewContent.raw?.metadata?.schema?.jsonLd || {}, null, 2);
                       if (schemaText) {
                         navigator.clipboard.writeText(schemaText);
-                        toast.success("Schema copied to clipboard!");
+                        toast.success(t.dashboard.content.copySchema + " " + t.dashboard.content.copiedToClipboard);
                       }
                     }}
                     className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
                   >
-                    Copy Schema
+                    {t.dashboard.content.copySchema}
                   </button>
                 )}
                 {viewMode === 'image' && (() => {
@@ -3684,12 +3759,12 @@ function ContentInner() {
                       onClick={() => {
                         if (imageUrl) {
                           navigator.clipboard.writeText(imageUrl);
-                          toast.success("Image URL copied to clipboard!");
+                          toast.success(t.dashboard.content.copyImageUrl + " " + t.dashboard.content.copiedToClipboard);
                         }
                       }}
                       className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors font-medium text-sm"
                     >
-                      Copy Image URL
+                      {t.dashboard.content.copyImageUrl}
                     </button>
                   ) : null;
                 })()}
@@ -3701,7 +3776,7 @@ function ContentInner() {
                   }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
                 >
-                  Close
+                  {t.dashboard.content.close}
                 </button>
               </div>
             </div>
@@ -3717,10 +3792,10 @@ function ContentInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <MessageSquare className="w-5 h-5 text-purple-600" />
-                  Generate Optimized Response
+                  {t.dashboard.content.generateOptimizedResponse}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Edit prompt, select brand voice, and generate optimized content
+                  {t.dashboard.content.editPromptDesc}
                 </p>
               </div>
                   <button
@@ -3743,19 +3818,19 @@ function ContentInner() {
               <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6 shadow-sm">
                 <div className="flex flex-wrap gap-4 text-sm">
                   <div>
-                    <span className="text-gray-500">Brand:</span>
+                    <span className="text-gray-500">{t.dashboard.content.brand}:</span>
                     <span className="ml-2 font-semibold text-gray-900">{editData.brandName}</span>
                   </div>
                   <div className="w-px h-5 bg-gray-200" />
                   <div>
-                    <span className="text-gray-500">Industry:</span>
+                    <span className="text-gray-500">{t.dashboard.content.industry}:</span>
                     <span className="ml-2 font-medium text-gray-700">{editData.industry}</span>
                   </div>
                   {editData.keywords && editData.keywords.length > 0 && (
                     <>
                       <div className="w-px h-5 bg-gray-200" />
                       <div className="flex items-center gap-2">
-                        <span className="text-gray-500">Keywords:</span>
+                        <span className="text-gray-500">{t.dashboard.content.keywords}:</span>
                         <div className="flex flex-wrap gap-1">
                           {editData.keywords.slice(0, 3).map((kw: string, i: number) => (
                             <span key={i} className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs">
@@ -3779,8 +3854,8 @@ function ContentInner() {
                   {/* Editable Prompt */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                     <div className="px-4 py-3 bg-gradient-to-r from-gray-50 to-gray-100/50 border-b border-gray-200">
-                      <h2 className="font-semibold text-gray-900">Original Prompt</h2>
-                      <p className="text-xs text-gray-500 mt-0.5">Edit the prompt if needed before generating a response</p>
+                      <h2 className="font-semibold text-gray-900">{t.dashboard.content.originalPrompt}</h2>
+                      <p className="text-xs text-gray-500 mt-0.5">{t.dashboard.content.editPromptHint}</p>
                     </div>
                     <div className="p-4">
                       <textarea
@@ -3788,7 +3863,7 @@ function ContentInner() {
                         onChange={(e) => setEditedPrompt(e.target.value)}
                         rows={4}
                         className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all resize-none text-gray-800"
-                        placeholder="Enter your prompt..."
+                        placeholder={t.dashboard.content.enterPrompt}
                       />
                     </div>
                   </div>
@@ -3799,7 +3874,7 @@ function ContentInner() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <Mic className="w-4 h-4 text-indigo-600" />
-                          <h2 className="font-semibold text-gray-900">Brand Voice</h2>
+                          <h2 className="font-semibold text-gray-900">{t.dashboard.content.brandVoice}</h2>
                         </div>
                         <a
                           href="/dashboard/settings?tab=brand-voice"
@@ -3807,10 +3882,10 @@ function ContentInner() {
                           rel="noopener noreferrer"
                           className="text-xs text-purple-600 hover:text-purple-700 font-medium hover:underline"
                         >
-                          + Create New
+                          {t.dashboard.content.createNew}
                         </a>
                       </div>
-                      <p className="text-xs text-gray-500 mt-0.5">Select a voice profile to maintain consistent brand personality</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{t.dashboard.content.selectVoiceProfile}</p>
                     </div>
                     <div className="p-4 space-y-4">
                       <select
@@ -3819,7 +3894,7 @@ function ContentInner() {
                         disabled={loadingVoices}
                         className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all text-gray-800 bg-white disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <option value="">No voice profile (generic)</option>
+                        <option value="">{t.dashboard.content.noVoiceProfile}</option>
                         {brandVoices.map((voice: any) => (
                           <option key={voice.id} value={voice.id}>
                             {voice.brand_name} - {voice.tone}
@@ -3828,14 +3903,14 @@ function ContentInner() {
                         ))}
                       </select>
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">Generate content in</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">{t.dashboard.content.generateContentIn}</label>
                         <select
                           value={contentGenerationLanguage}
                           onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
                           className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none text-gray-800 bg-white"
                         >
-                          <option value="en">English</option>
-                          <option value="he">Hebrew</option>
+                          <option value="en">{t.dashboard.content.english}</option>
+                          <option value="he">{t.dashboard.content.hebrew}</option>
                         </select>
                       </div>
                     </div>
@@ -3869,15 +3944,15 @@ function ContentInner() {
                   {/* Influence Level Selection */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                     <div className="px-4 py-3 bg-gradient-to-r from-cyan-50 to-blue-50 border-b border-gray-200">
-                      <h2 className="font-semibold text-gray-900">Influence Level</h2>
-                      <p className="text-xs text-gray-500 mt-0.5">Control model temperature for response creativity</p>
+                      <h2 className="font-semibold text-gray-900">{t.dashboard.content.influenceLevel}</h2>
+                      <p className="text-xs text-gray-500 mt-0.5">{t.dashboard.content.influenceLevelDesc}</p>
                     </div>
                     <div className="p-4">
                       <div className="grid grid-cols-3 gap-3">
                         {[
-                          { value: "subtle", label: "Subtle", desc: "Natural mention" },
-                          { value: "moderate", label: "Moderate", desc: "Balanced" },
-                          { value: "strong", label: "Strong", desc: "Clear recommendation" },
+                          { value: "subtle", label: t.dashboard.content.subtle, desc: t.dashboard.content.naturalMention },
+                          { value: "moderate", label: t.dashboard.content.moderate, desc: t.dashboard.content.balanced },
+                          { value: "strong", label: t.dashboard.content.strong, desc: t.dashboard.content.clearRecommendation },
                         ].map((level) => (
                           <button
                             key={level.value}
@@ -3901,9 +3976,9 @@ function ContentInner() {
                   {/* LLM Responses */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                     <div className="px-4 py-3 bg-gradient-to-r from-gray-50 to-gray-100/50 border-b border-gray-200">
-                      <h2 className="font-semibold text-gray-900">Current LLM Responses</h2>
+                      <h2 className="font-semibold text-gray-900">{t.dashboard.content.currentLlmResponses}</h2>
                       <p className="text-xs text-gray-500 mt-0.5">
-                        {editData.responses.length} response{editData.responses.length !== 1 ? 's' : ''} from different AI models
+                        {editData.responses.length} {t.dashboard.content.responsesFromModels}
                       </p>
                     </div>
                     <div className="p-4 space-y-3 max-h-[400px] overflow-y-auto">
@@ -3916,7 +3991,7 @@ function ContentInner() {
                             <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getModelBadgeColor(response.platform)}`}>
                               {getModelDisplayName(response.platform)}
                             </span>
-                            <span className="text-xs text-red-500 font-medium">Brand Not Mentioned</span>
+                            <span className="text-xs text-red-500 font-medium">{t.dashboard.content.brandNotMentioned}</span>
                           </div>
                           <p className="text-sm text-gray-700 leading-relaxed">
                             {response.response}
@@ -3935,15 +4010,15 @@ function ContentInner() {
                       <div className="inline-flex items-center justify-center w-14 h-14 bg-white/10 rounded-xl mb-4 backdrop-blur-sm">
                         <Sparkles className="w-7 h-7 text-white" />
                       </div>
-                      <h3 className="text-xl font-bold text-white mb-2">Generate Optimized Response</h3>
+                      <h3 className="text-xl font-bold text-white mb-2">{t.dashboard.content.generateOptimizedBtn}</h3>
                       <p className="text-purple-100 text-sm mb-4 max-w-sm mx-auto">
-                        GPT-4 Turbo will analyze all responses and create the best synthesized answer with your brand prominently mentioned
+                        {t.dashboard.content.gptWillAnalyze}
                       </p>
                       
                       {selectedVoiceId && (
                         <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white/10 rounded-full text-purple-100 text-xs mb-4 backdrop-blur-sm">
                           <Mic className="w-3.5 h-3.5" />
-                          <span>Using: <strong>{brandVoices.find((v: any) => v.id === selectedVoiceId)?.brand_name}</strong> voice</span>
+                          <span>{t.dashboard.content.usingVoice} <strong>{brandVoices.find((v: any) => v.id === selectedVoiceId)?.brand_name}</strong> {t.dashboard.content.voice}</span>
                         </div>
                       )}
                       
@@ -3955,12 +4030,12 @@ function ContentInner() {
                         {isGenerating ? (
                           <>
                             <Loader2 className="w-5 h-5 animate-spin" />
-                            Generating...
+                            {t.dashboard.content.generating}
                           </>
                         ) : (
                           <>
                             <Sparkles className="w-5 h-5" />
-                            Generate Optimized Response
+                            {t.dashboard.content.generateOptimizedBtn}
                           </>
                         )}
                       </button>
@@ -3976,7 +4051,7 @@ function ContentInner() {
                         className="mt-2 flex items-center gap-2 text-red-600 hover:text-red-700 text-sm font-medium"
                       >
                         <RefreshCw className="w-4 h-4" />
-                        Try Again
+                        {t.dashboard.content.tryAgain}
                       </button>
                     </div>
                   )}
@@ -3988,10 +4063,10 @@ function ContentInner() {
                         <div>
                           <h2 className="font-semibold text-green-900 flex items-center gap-2">
                             <Check className="w-4 h-4 text-green-600" />
-                            Optimized Response Generated
+                            {t.dashboard.content.optimizedResponseGenerated}
                           </h2>
                           <div className="flex items-center gap-2 mt-0.5">
-                            <p className="text-xs text-green-700">Brand-optimized, SEO-friendly response</p>
+                            <p className="text-xs text-green-700">{t.dashboard.content.brandOptimizedSeo}</p>
                             {selectedVoiceId && (
                               <>
                                 <span className="text-green-300">•</span>
@@ -4010,12 +4085,12 @@ function ContentInner() {
                           {copied ? (
                             <>
                               <Check className="w-4 h-4" />
-                              Copied!
+                              {t.dashboard.content.copied}
                             </>
                           ) : (
                             <>
                               <Copy className="w-4 h-4" />
-                              Copy
+                              {t.dashboard.content.copy}
                             </>
                           )}
                         </button>
@@ -4066,17 +4141,17 @@ function ContentInner() {
                               {isDetectingAI ? (
                                 <>
                                   <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                                  Analyzing AI Content...
+                                  {t.dashboard.content.analyzingAiContent}
                                 </>
                               ) : aiDetectionResults ? (
                                 <>
                                   <MessageSquare className="w-4 h-4 text-blue-600" />
-                                  AI Content Analysis
+                                  {t.dashboard.content.aiContentAnalysis}
                                 </>
                               ) : (
                                 <>
                                   <MessageSquare className="w-4 h-4 text-gray-400" />
-                                  AI Detection
+                                  {t.dashboard.content.aiDetection}
                                 </>
                               )}
                             </h3>
@@ -4093,7 +4168,7 @@ function ContentInner() {
                                   ? 'bg-yellow-100 text-yellow-700'
                                   : 'bg-green-100 text-green-700'
                               }`}>
-                                {aiDetectionResults.aiPercentage}% AI
+                                {aiDetectionResults.aiPercentage}% {t.dashboard.content.ai}
                               </div>
                             </div>
                           )}
@@ -4107,15 +4182,15 @@ function ContentInner() {
                             <div className="grid grid-cols-3 gap-4 text-sm">
                               <div className="text-center p-2 bg-gray-50 rounded-lg">
                                 <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.burstiness?.toFixed(1) || 'N/A'}</div>
-                                <div className="text-xs text-gray-600">Burstiness</div>
+                                <div className="text-xs text-gray-600">{t.dashboard.content.burstiness}</div>
                               </div>
                               <div className="text-center p-2 bg-gray-50 rounded-lg">
                                 <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.clichés || 0}</div>
-                                <div className="text-xs text-gray-600">Clichés</div>
+                                <div className="text-xs text-gray-600">{t.dashboard.content.cliches}</div>
                               </div>
                               <div className="text-center p-2 bg-gray-50 rounded-lg">
                                 <div className="font-semibold text-gray-900">{aiDetectionResults.metrics.avgSentenceLength || 0}</div>
-                                <div className="text-xs text-gray-600">Avg Sentence</div>
+                                <div className="text-xs text-gray-600">{t.dashboard.content.avgSentence}</div>
                               </div>
                             </div>
                           )}
@@ -4124,7 +4199,7 @@ function ContentInner() {
                           {aiDetectionResults.topPhrases && aiDetectionResults.topPhrases.length > 0 && (
                             <div>
                               <h4 className="text-sm font-semibold text-gray-900 mb-2">
-                                Detected AI Phrases ({aiDetectionResults.topPhrases.length})
+                                {t.dashboard.content.detectedAiPhrases} ({aiDetectionResults.topPhrases.length})
                               </h4>
                               <div className="space-y-2 max-h-48 overflow-y-auto">
                                 {aiDetectionResults.topPhrases.slice(0, 10).map((phrase, idx) => (
@@ -4155,15 +4230,15 @@ function ContentInner() {
                           <div className="flex items-center gap-4 text-xs text-gray-600 pt-2 border-t border-gray-200">
                             <div className="flex items-center gap-1.5">
                               <span className="w-3 h-3 bg-red-200 rounded"></span>
-                              <span>High AI (90%+)</span>
+                              <span>{t.dashboard.content.highAi}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="w-3 h-3 bg-yellow-200 rounded"></span>
-                              <span>Medium AI (75-89%)</span>
+                              <span>{t.dashboard.content.mediumAi}</span>
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="w-3 h-3 bg-green-200 rounded"></span>
-                              <span>Low AI (60-74%)</span>
+                              <span>{t.dashboard.content.lowAi}</span>
                             </div>
                           </div>
 
@@ -4177,12 +4252,12 @@ function ContentInner() {
                               {isHumanizing ? (
                                 <>
                                   <Loader2 className="w-4 h-4 animate-spin" />
-                                  Humanizing Content...
+                                  {t.dashboard.content.humanizingContent}
                                 </>
                               ) : (
                                 <>
                                   <Sparkles className="w-4 h-4" />
-                                  Make it Human
+                                  {t.dashboard.content.makeItHuman}
                                 </>
                               )}
                             </button>
@@ -4200,7 +4275,7 @@ function ContentInner() {
             {synthesizedResponse && (
               <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
                 <div className="text-sm text-gray-600">
-                  Ready to proceed to image selection
+                  {t.dashboard.content.readyToProceed}
                 </div>
                 <div className="flex gap-3">
                   <button
@@ -4214,14 +4289,14 @@ function ContentInner() {
                     }}
                     className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
                   >
-                    Cancel
+                    {t.dashboard.content.cancel}
                   </button>
                   <button
                     onClick={handleApproveContent}
                     className="px-6 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-medium rounded-lg hover:from-emerald-600 hover:to-teal-700 transition-all flex items-center gap-2"
                   >
                     <CheckCircle className="w-4 h-4" />
-                    Approve & Continue
+                    {t.dashboard.content.approveAndContinue}
                   </button>
                 </div>
               </div>
@@ -4238,10 +4313,10 @@ function ContentInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <ImageIcon className="w-5 h-5 text-cyan-600" />
-                  Content Image
+                  {t.dashboard.content.contentImage}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Add an image to publish with your content
+                  {t.dashboard.content.addImageDesc}
                 </p>
               </div>
               <button
@@ -4266,11 +4341,11 @@ function ContentInner() {
                       onClick={() => setImageModalView('search')}
                       className="text-sm text-cyan-600 hover:text-cyan-700 font-medium flex items-center gap-1"
                     >
-                      ← Back
+                      {t.dashboard.content.back}
                     </button>
                   </div>
-                  <h4 className="text-base font-semibold text-gray-900">Upload from your computer</h4>
-                  <p className="text-sm text-gray-500">JPEG, PNG, or WebP, max 20MB.</p>
+                  <h4 className="text-base font-semibold text-gray-900">{t.dashboard.content.uploadFromComputer}</h4>
+                  <p className="text-sm text-gray-500">{t.dashboard.content.uploadHint}</p>
                   <input
                     ref={modalFileInputRef}
                     type="file"
@@ -4291,20 +4366,20 @@ function ContentInner() {
                       ) : (
                         <ImageIcon className="w-8 h-8" />
                       )}
-                      {uploadingManualImageInModal ? 'Uploading...' : 'Choose image (JPEG, PNG, WebP, max 20MB)'}
+                      {uploadingManualImageInModal ? t.dashboard.content.uploading : t.dashboard.content.chooseImage}
                     </button>
                   ) : (
                     <div className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 bg-gray-50">
                       <img src={uploadedImageUrl} alt="Uploaded" className="w-24 h-24 object-cover rounded-lg" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900">Image ready</p>
-                        <p className="text-xs text-gray-500">Uploaded from your computer · Click Confirm below to continue</p>
+                        <p className="text-sm font-medium text-gray-900">{t.dashboard.content.imageReady}</p>
+                        <p className="text-xs text-gray-500">{t.dashboard.content.uploadedFromComputer}</p>
                       </div>
                       <button
                         type="button"
                         onClick={clearModalImage}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Remove image"
+                        title={t.dashboard.content.removeImage}
                       >
                         <X className="w-5 h-5" />
                       </button>
@@ -4315,13 +4390,13 @@ function ContentInner() {
                 <>
               {/* Search Query */}
               <div className="space-y-2 mb-4">
-                <label className="text-sm font-medium text-gray-700">Search Query</label>
+                <label className="text-sm font-medium text-gray-700">{t.dashboard.content.searchQuery}</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={imageSearchQuery}
                     onChange={(e) => setImageSearchQuery(e.target.value)}
-                    placeholder="Enter search terms for images..."
+                    placeholder={t.dashboard.content.enterSearchTerms}
                     className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none transition-all text-sm text-gray-800"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !fetchingImages) {
@@ -4339,14 +4414,14 @@ function ContentInner() {
                     ) : (
                       <Search className="w-4 h-4" />
                     )}
-                    Search
+                    {t.dashboard.content.search}
                   </button>
                 </div>
               </div>
               
               {/* Quick suggestions */}
               <div className="flex flex-wrap gap-2 mb-6">
-                <span className="text-xs text-gray-400">Suggestions:</span>
+                <span className="text-xs text-gray-400">{t.dashboard.content.suggestions}:</span>
                 {aiVisibilityData?.keywords?.slice(0, 3).map((kw: string, i: number) => (
                   <button
                     key={i}
@@ -4360,7 +4435,7 @@ function ContentInner() {
                   onClick={() => setImageSearchQuery(aiVisibilityData?.responses?.[0]?.prompt || '')}
                   className="px-3 py-1 bg-purple-50 text-purple-700 rounded-lg text-xs hover:bg-purple-100 transition-colors font-medium"
                 >
-                  Use prompt
+                  {t.dashboard.content.usePrompt}
                 </button>
               </div>
 
@@ -4368,7 +4443,7 @@ function ContentInner() {
               {fetchingImages ? (
                 <div className="py-12 text-center">
                   <Loader2 className="w-10 h-10 animate-spin text-cyan-600 mx-auto mb-3" />
-                  <p className="text-gray-600">Searching for images...</p>
+                  <p className="text-gray-600">{t.dashboard.content.searchingImages}</p>
                 </div>
               ) : pixabayImages.length > 0 ? (
                 <div className="space-y-4">
@@ -4404,7 +4479,7 @@ function ContentInner() {
                   </div>
                   <div className="text-center pt-2 border-t border-gray-100">
                     <p className="text-xs text-gray-400">
-                      Images powered by{' '}
+                      {t.dashboard.content.imagesPoweredBy}{' '}
                       <a
                         href="https://pixabay.com"
                         target="_blank"
@@ -4419,7 +4494,7 @@ function ContentInner() {
               ) : (
                 <div className="py-12 text-center">
                   <ImageIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-500">Search for images to get started</p>
+                  <p className="text-gray-500">{t.dashboard.content.searchForImages}</p>
                 </div>
               )}
 
@@ -4431,7 +4506,7 @@ function ContentInner() {
                   className="flex items-center gap-2 w-full justify-center px-4 py-3 rounded-lg border-2 border-dashed border-gray-300 hover:border-cyan-400 hover:bg-cyan-50/50 text-gray-600 hover:text-cyan-700 transition-colors font-medium text-sm"
                 >
                   <ImageIcon className="w-5 h-5" />
-                  Upload option
+                  {t.dashboard.content.uploadOption}
                 </button>
               </div>
             </>
@@ -4444,10 +4519,10 @@ function ContentInner() {
                 {(selectedImage || uploadedImageUrl) ? (
                   <span className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 text-green-500" />
-                    Image selected {(uploadingImage || uploadingManualImageInModal) && '(uploading...)'}
+                    {t.dashboard.content.imageReady} {(uploadingImage || uploadingManualImageInModal) && t.dashboard.content.uploading}
                   </span>
                 ) : (
-                  'Select an image (Pixabay or upload) or cancel'
+                  t.dashboard.content.selectImageOrCancel
                 )}
               </div>
               <div className="flex gap-3">
@@ -4459,7 +4534,7 @@ function ContentInner() {
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
                 >
-                  Cancel
+                  {t.dashboard.content.cancel}
                 </button>
                 <button
                   onClick={handleConfirmImage}
@@ -4469,12 +4544,12 @@ function ContentInner() {
                   {(uploadingImage || uploadingManualImageInModal) ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Uploading...
+                      {t.dashboard.content.uploading}
                     </>
                   ) : (
                     <>
                       <CheckCircle className="w-4 h-4" />
-                      Confirm
+                      {t.dashboard.content.confirm}
                     </>
                   )}
                 </button>
@@ -4492,10 +4567,10 @@ function ContentInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <Sparkles className="w-5 h-5 text-purple-600" />
-                  Comparison: Original vs Humanized
+                  {t.dashboard.content.comparisonTitle}
                 </h3>
                 <p className="text-xs text-gray-600 mt-0.5">
-                  Review both versions side-by-side and choose which one to use
+                  {t.dashboard.content.reviewBothVersions}
                 </p>
               </div>
               <button
@@ -4514,7 +4589,7 @@ function ContentInner() {
                 <div className="border-r border-gray-200 flex flex-col overflow-hidden">
                   <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex-shrink-0">
                     <div className="flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-gray-900">Original Version</h4>
+                      <h4 className="text-sm font-semibold text-gray-900">{t.dashboard.content.originalVersion}</h4>
                       <span className="text-xs text-gray-500 px-2 py-1 bg-gray-200 rounded">
                         {aiDetectionResults?.aiPercentage || 0}% AI
                       </span>
@@ -4532,9 +4607,9 @@ function ContentInner() {
                   <div className="px-4 py-3 bg-green-50 border-b border-gray-200 flex-shrink-0">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                        Humanized Version
+                        {t.dashboard.content.humanizedVersion}
                         <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-medium">
-                          New
+                          {t.dashboard.content.new_}
                         </span>
                       </h4>
                     </div>
@@ -4553,14 +4628,14 @@ function ContentInner() {
                   onClick={handleRevertToOriginal}
                   className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
                 >
-                  Use Original
+                  {t.dashboard.content.useOriginal}
                 </button>
                 <button
                   onClick={handleUseHumanized}
                   className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center gap-2 text-sm font-medium"
                 >
                   <CheckCircle className="w-4 h-4" />
-                  Use Humanized
+                  {t.dashboard.content.useHumanized}
                 </button>
               </div>
             </div>
@@ -4576,10 +4651,10 @@ function ContentInner() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <Globe className="w-5 h-5 text-blue-600" />
-                  Select Publishing Platforms
+                  {t.dashboard.content.selectPublishingPlatforms}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Choose where to publish this content. Schemas will be auto-generated for each platform.
+                  {t.dashboard.content.choosePlatformDesc}
                 </p>
               </div>
               <button
@@ -4633,8 +4708,8 @@ function ContentInner() {
                       />
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-900">Selected Image</p>
-                      <p className="text-xs text-gray-500">Image will be published with content</p>
+                      <p className="text-sm font-medium text-gray-900">{t.dashboard.content.selectedImage}</p>
+                      <p className="text-xs text-gray-500">{t.dashboard.content.imageWillBePublished}</p>
                     </div>
                     <button
                       onClick={() => {
@@ -4643,7 +4718,7 @@ function ContentInner() {
                       }}
                       className="text-xs text-cyan-600 hover:text-cyan-700 font-medium"
                     >
-                      Change
+                      {t.dashboard.content.change}
                     </button>
                   </div>
                 </div>
@@ -4653,7 +4728,7 @@ function ContentInner() {
             {/* Footer with Approve Button */}
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
               <div className="text-sm text-gray-600">
-                {selectedPlatforms.length} platform{selectedPlatforms.length !== 1 ? 's' : ''} selected
+                {selectedPlatforms.length} {t.dashboard.content.platformsSelected}
               </div>
               <div className="flex gap-3">
                 <button
@@ -4663,7 +4738,7 @@ function ContentInner() {
                   }}
                   className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
                 >
-                  Back
+                  {t.dashboard.content.back}
                 </button>
                 <button
                   onClick={handleCreateSchemas}
@@ -4673,12 +4748,12 @@ function ContentInner() {
                   {creatingSchemas ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Creating Schemas...
+                      {t.dashboard.content.creatingSchemas}
                     </>
                   ) : (
                     <>
                       <Code className="w-4 h-4" />
-                      Approve & Generate Schemas
+                      {t.dashboard.content.approveAndGenerateSchemas}
                     </>
                   )}
                 </button>
@@ -4726,12 +4801,12 @@ function ContentInner() {
                   <span className="text-xl font-bold text-gray-900">{schemaProgress}%</span>
                 </div>
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-1">Creating Platform Schemas</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">{t.dashboard.content.creatingPlatformSchemas}</h3>
               <p className="text-sm text-gray-500">
                 {currentPlatform ? (
-                  <>Processing: <span className="font-medium text-blue-600">{currentPlatform}</span></>
+                  <>{t.dashboard.content.processing}: <span className="font-medium text-blue-600">{currentPlatform}</span></>
                 ) : (
-                  'Initializing...'
+                  t.dashboard.content.initializing
                 )}
               </p>
             </div>

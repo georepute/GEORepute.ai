@@ -38,17 +38,14 @@ interface Session {
   started_at: string;
 }
 
-interface PublishedContent {
+interface MissedPromptAction {
   id: string;
-  topic: string;
-  status: string;
+  project_id: string;
+  prompt_text: string;
+  status: 'content_created' | 'published' | 'dismissed';
   published_url?: string;
-  target_platform: string;
+  content_id?: string;
   created_at: string;
-  metadata?: {
-    sourceMissedPrompt?: string;
-    [key: string]: any;
-  };
 }
 
 export default function MissedPromptsPage() {
@@ -63,14 +60,15 @@ export default function MissedPromptsPage() {
   const [projectResponses, setProjectResponses] = useState<any[]>([]);
   const [loadingResponses, setLoadingResponses] = useState(false);
   const [viewResponseModal, setViewResponseModal] = useState<{ open: boolean; response: any; prompt: string } | null>(null);
-  const [publishedContent, setPublishedContent] = useState<PublishedContent[]>([]);
+  const [promptActions, setPromptActions] = useState<MissedPromptAction[]>([]);
+  const [showPublished, setShowPublished] = useState(false);
 
   // Fetch projects on mount
   useEffect(() => {
     fetchProjects();
   }, []);
 
-  // Fetch responses and published content when project is selected
+  // Fetch responses and prompt actions when project is selected
   useEffect(() => {
     if (selectedProject) {
       const latestCompleted = projectSessions.find(s => s.project_id === selectedProject.id && s.status === 'completed');
@@ -82,60 +80,83 @@ export default function MissedPromptsPage() {
           fetchProjectResponses(latestSession.id);
         }
       }
-      // Also fetch published content for this project's brand
-      fetchPublishedContent();
+      fetchPromptActions();
     }
   }, [selectedProject, projectSessions]);
 
-  // Fetch published content to check which prompts have been addressed
-  const fetchPublishedContent = async () => {
+  const fetchPromptActions = async () => {
     if (!selectedProject) return;
-    
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Fetch all published content for this user (including metadata for sourceMissedPrompt)
       const { data, error } = await supabase
-        .from('content_strategy')
-        .select('id, topic, status, published_url, target_platform, created_at, metadata')
-        .eq('user_id', user.id)
-        .eq('status', 'published')
-        .order('created_at', { ascending: false });
+        .from('missed_prompt_actions')
+        .select('*')
+        .eq('project_id', selectedProject.id)
+        .eq('user_id', user.id);
 
       if (error) {
-        console.error('Error fetching published content:', error);
+        console.error('Error fetching prompt actions:', error);
         return;
       }
-
-      setPublishedContent(data || []);
+      setPromptActions(data || []);
     } catch (error) {
-      console.error('Error fetching published content:', error);
+      console.error('Error fetching prompt actions:', error);
     }
   };
 
-  // Check if a prompt has published content
-  const getPublishedContentForPrompt = (prompt: string): PublishedContent | undefined => {
-    // Normalize the prompt for comparison
-    const normalizedPrompt = prompt.trim().toLowerCase();
-    
-    // Check if any published content matches this prompt
-    return publishedContent.find(content => {
-      // First check the sourceMissedPrompt in metadata (most reliable)
-      if (content.metadata?.sourceMissedPrompt) {
-        const normalizedSource = content.metadata.sourceMissedPrompt.trim().toLowerCase();
-        if (normalizedSource === normalizedPrompt) {
-          return true;
+  const getPromptAction = (prompt: string): MissedPromptAction | undefined => {
+    const normalized = prompt.trim().toLowerCase();
+    return promptActions.find(a => a.prompt_text.trim().toLowerCase() === normalized);
+  };
+
+  const markPromptDismissed = async (prompt: string) => {
+    if (!selectedProject) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Check if record already exists
+      const { data: existing } = await supabase
+        .from('missed_prompt_actions')
+        .select('id')
+        .eq('project_id', selectedProject.id)
+        .eq('prompt_text', prompt)
+        .maybeSingle();
+
+      if (existing) {
+        const { error } = await supabase
+          .from('missed_prompt_actions')
+          .update({ status: 'dismissed', updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+        if (error) {
+          console.error('Error dismissing prompt:', error);
+          toast.error('Failed to dismiss prompt');
+          return;
+        }
+      } else {
+        const { error } = await supabase
+          .from('missed_prompt_actions')
+          .insert({
+            project_id: selectedProject.id,
+            user_id: user.id,
+            prompt_text: prompt,
+            status: 'dismissed',
+          });
+        if (error) {
+          console.error('Error dismissing prompt:', error);
+          toast.error(t.dashboard.missedPromptsPage.failedToDismiss);
+          return;
         }
       }
-      
-      // Fallback: check if topic matches (for backward compatibility)
-      const normalizedTopic = content.topic.trim().toLowerCase();
-      // Check for exact match or if one contains the other (to handle slight variations)
-      return normalizedTopic === normalizedPrompt || 
-             normalizedTopic.includes(normalizedPrompt) || 
-             normalizedPrompt.includes(normalizedTopic);
-    });
+
+      toast.success(t.dashboard.missedPromptsPage.promptDismissed);
+      await fetchPromptActions();
+    } catch (error) {
+      console.error('Error dismissing prompt:', error);
+      toast.error(t.dashboard.missedPromptsPage.failedToDismiss);
+    }
   };
 
   const fetchProjects = async () => {
@@ -176,7 +197,7 @@ export default function MissedPromptsPage() {
       }
     } catch (error) {
       console.error('Error fetching projects:', error);
-      toast.error('Failed to load projects');
+      toast.error(t.dashboard.missedPromptsPage.failedToLoadProjects);
     } finally {
       setLoading(false);
     }
@@ -198,7 +219,7 @@ export default function MissedPromptsPage() {
       setProjectResponses(missedResponses);
     } catch (error) {
       console.error('Error fetching responses:', error);
-      toast.error('Failed to load missed prompts');
+      toast.error(t.dashboard.missedPromptsPage.failedToLoadPrompts);
       setProjectResponses([]);
     } finally {
       setLoadingResponses(false);
@@ -237,14 +258,17 @@ export default function MissedPromptsPage() {
     groupedByPrompt[promptKey].push(response);
   });
 
-  const uniquePrompts = new Set(Object.keys(groupedByPrompt));
+  const allPromptKeys = Object.keys(groupedByPrompt);
+  const activePrompts = allPromptKeys.filter(k => !getPromptAction(groupedByPrompt[k][0]?.prompt));
+  const addressedPrompts = allPromptKeys.filter(k => !!getPromptAction(groupedByPrompt[k][0]?.prompt));
+  const displayedPrompts = showPublished ? allPromptKeys : activePrompts;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">Missed Prompts</h1>
+          <h1 className="text-3xl font-bold text-gray-900">{t.dashboard.missedPromptsPage.title}</h1>
         </div>
 
         {/* Informative Banner */}
@@ -258,13 +282,12 @@ export default function MissedPromptsPage() {
             <div className="flex-1">
               <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-purple-600" />
-                Improve Your Visibility Where You Missed Opportunities
+                {t.dashboard.missedPromptsPage.bannerTitle}
               </h2>
               <p className="text-gray-700 mb-4 leading-relaxed text-base">
-                <strong className="text-gray-900">Missed Prompts help you improve your visibility</strong> by identifying 
-                exactly where AI platforms responded to user queries <strong className="text-gray-900">without mentioning your brand</strong>. 
-                These are critical opportunities you missed - moments when potential customers were searching for solutions 
-                you offer, but your brand wasn't part of the conversation.
+                <strong className="text-gray-900">{t.dashboard.missedPromptsPage.bannerDesc}</strong>{' '}
+                <strong className="text-gray-900">{t.dashboard.missedPromptsPage.bannerDescBold}</strong>.{' '}
+                {t.dashboard.missedPromptsPage.bannerDescFull}
               </p>
               <div className="grid md:grid-cols-3 gap-4 mt-5">
                 <div className="flex items-start gap-3 bg-white/60 rounded-lg p-3">
@@ -272,8 +295,8 @@ export default function MissedPromptsPage() {
                     <Target className="w-4 h-4 text-purple-600" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-900 mb-1">Find What You Missed</h3>
-                    <p className="text-xs text-gray-600">Discover queries where your brand should have been mentioned but wasn't</p>
+                    <h3 className="text-sm font-semibold text-gray-900 mb-1">{t.dashboard.missedPromptsPage.findWhatYouMissed}</h3>
+                    <p className="text-xs text-gray-600">{t.dashboard.missedPromptsPage.findWhatYouMissedDesc}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3 bg-white/60 rounded-lg p-3">
@@ -281,8 +304,8 @@ export default function MissedPromptsPage() {
                     <Sparkles className="w-4 h-4 text-blue-600" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-900 mb-1">Create Winning Content</h3>
-                    <p className="text-xs text-gray-600">Generate optimized, brand-focused responses that capture these opportunities</p>
+                    <h3 className="text-sm font-semibold text-gray-900 mb-1">{t.dashboard.missedPromptsPage.createWinningContent}</h3>
+                    <p className="text-xs text-gray-600">{t.dashboard.missedPromptsPage.createWinningContentDesc}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3 bg-white/60 rounded-lg p-3">
@@ -290,8 +313,8 @@ export default function MissedPromptsPage() {
                     <TrendingUp className="w-4 h-4 text-indigo-600" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-900 mb-1">Boost Your Visibility</h3>
-                    <p className="text-xs text-gray-600">Turn missed opportunities into increased brand presence in AI search results</p>
+                    <h3 className="text-sm font-semibold text-gray-900 mb-1">{t.dashboard.missedPromptsPage.boostVisibility}</h3>
+                    <p className="text-xs text-gray-600">{t.dashboard.missedPromptsPage.boostVisibilityDesc}</p>
                   </div>
                 </div>
               </div>
@@ -299,9 +322,7 @@ export default function MissedPromptsPage() {
                 <div className="flex items-start gap-2 text-sm text-gray-700">
                   <AlertCircle className="w-4 h-4 text-purple-600 flex-shrink-0 mt-0.5" />
                   <p>
-                    <strong className="text-gray-900">Get Started:</strong> Select your project below to see all missed prompts. 
-                    For each prompt, click "Generate New Content" to create optimized responses that put your brand back in the conversation 
-                    and improve your visibility where it matters most.
+                    <strong className="text-gray-900">{t.dashboard.missedPromptsPage.getStarted}</strong> {t.dashboard.missedPromptsPage.getStartedDesc}
                   </p>
                 </div>
               </div>
@@ -314,7 +335,7 @@ export default function MissedPromptsPage() {
           <div className="flex items-center gap-2 mb-4">
             <Target className="w-5 h-5 text-purple-600" />
             <label className="block text-sm font-semibold text-gray-900">
-              Select Project to View Missed Prompts
+              {t.dashboard.missedPromptsPage.selectProject}
             </label>
           </div>
           <div className="max-w-md">
@@ -326,7 +347,7 @@ export default function MissedPromptsPage() {
               }}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors bg-white text-gray-900"
             >
-              <option value="">-- Select a project --</option>
+              <option value="">{t.dashboard.missedPromptsPage.selectProjectPlaceholder}</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.brand_name} ({project.industry})
@@ -335,7 +356,7 @@ export default function MissedPromptsPage() {
             </select>
             {selectedProject && (
               <p className="mt-2 text-sm text-gray-600">
-                Viewing missed prompts for <strong>{selectedProject.brand_name}</strong>
+                {t.dashboard.missedPromptsPage.viewingFor} <strong>{selectedProject.brand_name}</strong>
               </p>
             )}
           </div>
@@ -345,7 +366,7 @@ export default function MissedPromptsPage() {
         {loadingResponses && (
           <div className="text-center py-12">
             <RefreshCw className="w-8 h-8 mx-auto mb-4 text-purple-600 animate-spin" />
-            <p className="text-gray-600">Loading missed prompts...</p>
+            <p className="text-gray-600">{t.dashboard.missedPromptsPage.loadingPrompts}</p>
           </div>
         )}
 
@@ -356,90 +377,117 @@ export default function MissedPromptsPage() {
               <div>
                 <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
                   <Search className="w-5 h-5 text-purple-600" />
-                  Missed Prompts
+                  {t.dashboard.missedPromptsPage.missedPrompts}
                 </h2>
                 <p className="text-sm text-gray-600 mt-1">
-                  Found <strong className="text-purple-600">{uniquePrompts.size}</strong> unique prompt{uniquePrompts.size !== 1 ? 's' : ''} where your brand was not mentioned
+                  <strong className="text-purple-600">{activePrompts.length}</strong> {activePrompts.length !== 1 ? t.dashboard.missedPromptsPage.pendingPrompts : t.dashboard.missedPromptsPage.pendingPrompt}
+                  {addressedPrompts.length > 0 && (
+                    <span className="text-green-600 ml-1">
+                      ({addressedPrompts.length} {t.dashboard.missedPromptsPage.addressed})
+                    </span>
+                  )}
                 </p>
               </div>
+              {addressedPrompts.length > 0 && (
+                <button
+                  onClick={() => setShowPublished(!showPublished)}
+                  className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  {showPublished ? t.dashboard.missedPromptsPage.hideAddressed : `${t.dashboard.missedPromptsPage.showAddressed} (${addressedPrompts.length})`}
+                </button>
+              )}
             </div>
 
             {projectResponses.length === 0 ? (
               <div className="text-center py-12 text-gray-500 bg-white rounded-lg border border-gray-200">
                 <Search className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                <p>No missed prompts found for this project</p>
-                <p className="text-sm mt-2">All prompts mentioned your brand!</p>
+                <p>{t.dashboard.missedPromptsPage.noMissedPrompts}</p>
+                <p className="text-sm mt-2">{t.dashboard.missedPromptsPage.allMentioned}</p>
               </div>
             ) : (
               <div className="space-y-4">
-                {Object.entries(groupedByPrompt).map(([promptKey, responses]) => {
+                {displayedPrompts.map((promptKey) => {
+                  const responses = groupedByPrompt[promptKey];
                   const firstResponse = responses[0];
                   const uniquePrompt = firstResponse.prompt;
-                  const publishedForPrompt = getPublishedContentForPrompt(uniquePrompt);
-                  const isPublished = !!publishedForPrompt;
+                  const action = getPromptAction(uniquePrompt);
+                  const isAddressed = !!action;
 
                   return (
                     <div
                       key={promptKey}
                       className={`border rounded-lg p-4 transition-colors bg-white ${
-                        isPublished 
-                          ? 'border-green-200 bg-green-50/30' 
+                        isAddressed 
+                          ? 'border-green-200 bg-green-50/30 opacity-75' 
                           : 'border-gray-200 hover:bg-gray-50'
                       }`}
                     >
                       {/* Query Section */}
                       <div className="mb-4">
                         <div className="flex items-center justify-between mb-1">
-                          <div className="text-sm font-medium text-gray-700">Query:</div>
-                          {isPublished ? (
+                          <div className="text-sm font-medium text-gray-700">{t.dashboard.missedPromptsPage.query}</div>
+                          {isAddressed ? (
                             <div className="flex items-center gap-2">
                               <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-md">
                                 <CheckCircle className="w-3.5 h-3.5" />
-                                Published
+                                {action.status === 'published' ? t.dashboard.missedPromptsPage.publishedStatus : action.status === 'dismissed' ? t.dashboard.missedPromptsPage.dismissedStatus : t.dashboard.missedPromptsPage.contentCreatedStatus}
                               </span>
-                              {publishedForPrompt?.published_url && (
+                              {action.published_url && (
                                 <a
-                                  href={publishedForPrompt.published_url}
+                                  href={action.published_url}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors"
-                                  title="View published content"
+                                  title={t.dashboard.missedPromptsPage.viewPublished}
                                 >
                                   <ExternalLink className="w-3 h-3" />
-                                  View
+                                  {t.dashboard.missedPromptsPage.viewBtn}
                                 </a>
                               )}
                             </div>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                // Store data in sessionStorage for the content generation page
-                                const editData = {
-                                  prompt: uniquePrompt,
-                                  responses: responses.map(r => ({
-                                    id: r.id,
-                                    platform: r.platform,
-                                    response: r.response,
-                                    response_metadata: r.response_metadata
-                                  })),
-                                  projectId: selectedProject?.id,
-                                  brandName: selectedProject?.brand_name,
-                                  industry: selectedProject?.industry,
-                                  keywords: selectedProject?.keywords || [],
-                                  competitors: selectedProject?.competitors || []
-                                };
-                                sessionStorage.setItem('editPromptData', JSON.stringify(editData));
-                                router.push('/dashboard/content?source=missed-prompts&step=content-generation');
-                              }}
-                              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors"
-                              title="Generate new optimized content for this prompt"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                              Generate New Content
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  const editData = {
+                                    prompt: uniquePrompt,
+                                    responses: responses.map(r => ({
+                                      id: r.id,
+                                      platform: r.platform,
+                                      response: r.response,
+                                      response_metadata: r.response_metadata
+                                    })),
+                                    projectId: selectedProject?.id,
+                                    brandName: selectedProject?.brand_name,
+                                    industry: selectedProject?.industry,
+                                    keywords: selectedProject?.keywords || [],
+                                    competitors: selectedProject?.competitors || []
+                                  };
+                                  sessionStorage.setItem('editPromptData', JSON.stringify(editData));
+                                  router.push('/dashboard/content?source=missed-prompts&step=content-generation');
+                                }}
+                                className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors"
+                                title={t.dashboard.missedPromptsPage.generateNewContentTooltip}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                {t.dashboard.missedPromptsPage.generateNewContent}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  markPromptDismissed(uniquePrompt);
+                                }}
+                                className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+                                title={t.dashboard.missedPromptsPage.dismissTooltip}
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           )}
                         </div>
                         <div className="text-sm text-gray-900 bg-gray-50 p-2 rounded">
@@ -449,13 +497,13 @@ export default function MissedPromptsPage() {
 
                       {/* Status Badge */}
                       <div className="flex items-center justify-end mb-4">
-                        {isPublished ? (
+                        {isAddressed ? (
                           <span className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-800">
-                            Content Published on {publishedForPrompt?.target_platform}
+                            {action.status === 'published' ? t.dashboard.missedPromptsPage.contentPublished : action.status === 'dismissed' ? t.dashboard.missedPromptsPage.dismissedStatus : t.dashboard.missedPromptsPage.contentCreatedStatus}
                           </span>
                         ) : (
                           <span className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800">
-                            Brand Not Mentioned
+                            {t.dashboard.missedPromptsPage.brandNotMentioned}
                           </span>
                         )}
                       </div>
@@ -484,7 +532,7 @@ export default function MissedPromptsPage() {
                                   setViewResponseModal({ open: true, response, prompt: uniquePrompt });
                                 }}
                                 className="flex-shrink-0 p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors cursor-pointer"
-                                title="View full response"
+                                title={t.dashboard.missedPromptsPage.viewFullResponse}
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
@@ -506,7 +554,7 @@ export default function MissedPromptsPage() {
             <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
               <div className="p-6 border-b border-gray-200 flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Full Response</h3>
+                  <h3 className="text-lg font-semibold text-gray-900">{t.dashboard.missedPromptsPage.fullResponse}</h3>
                   <p className="text-sm text-gray-600 mt-1">{viewResponseModal.prompt}</p>
                 </div>
                 <button
