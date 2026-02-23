@@ -1613,6 +1613,106 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
   console.log(`Option A: ${allQueries.length} queries across ${bucketCount} (lang×region) buckets (parallel generation)`);
   return allQueries.slice(0, N);
 }
+async function recordRunHistory(supabaseClient: any, projectId: string, sessionId: string) {
+  try {
+    const { data: allResponses } = await supabaseClient
+      .from('ai_platform_responses')
+      .select('platform, response_metadata')
+      .eq('session_id', sessionId);
+
+    if (!allResponses || allResponses.length === 0) return;
+
+    const totalQueries = allResponses.length;
+    const withMention = allResponses.filter((r: any) => r.response_metadata?.brand_mentioned === true);
+    const mentionRate = totalQueries > 0 ? (withMention.length / totalQueries) * 100 : 0;
+
+    const positive = withMention.filter((r: any) => (r.response_metadata?.sentiment_score || 0) > 0.3).length;
+    const negative = withMention.filter((r: any) => (r.response_metadata?.sentiment_score || 0) < -0.3).length;
+    const neutral = withMention.length - positive - negative;
+
+    // Per-platform scores
+    const platformMap: Record<string, { total: number; mentions: number }> = {};
+    for (const r of allResponses) {
+      if (!platformMap[r.platform]) platformMap[r.platform] = { total: 0, mentions: 0 };
+      platformMap[r.platform].total++;
+      if (r.response_metadata?.brand_mentioned) platformMap[r.platform].mentions++;
+    }
+    const platformScores: Record<string, number> = {};
+    for (const [p, v] of Object.entries(platformMap)) {
+      platformScores[p] = v.total > 0 ? Math.round((v.mentions / v.total) * 100) : 0;
+    }
+
+    const overallVisibility = mentionRate;
+
+    // Get previous run for delta calculation
+    const { data: prevRun } = await supabaseClient
+      .from('analysis_run_history')
+      .select('overall_visibility_score, brand_mention_rate')
+      .eq('project_id', projectId)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    const visibilityDelta = prevRun ? overallVisibility - (prevRun.overall_visibility_score || 0) : 0;
+    const mentionDelta = prevRun ? mentionRate - (prevRun.brand_mention_rate || 0) : 0;
+
+    // Count existing runs
+    const { count: runCount } = await supabaseClient
+      .from('analysis_run_history')
+      .select('id', { count: 'exact', head: true })
+      .eq('project_id', projectId);
+
+    // Check if a run history record already exists for this session (created by scheduled-analysis)
+    const { data: existingRun } = await supabaseClient
+      .from('analysis_run_history')
+      .select('id')
+      .eq('session_id', sessionId)
+      .limit(1)
+      .single();
+
+    if (existingRun) {
+      await supabaseClient.from('analysis_run_history').update({
+        overall_visibility_score: Math.round(overallVisibility * 100) / 100,
+        platform_scores: platformScores,
+        total_queries: totalQueries,
+        queries_with_brand_mention: withMention.length,
+        brand_mention_rate: Math.round(mentionRate * 100) / 100,
+        positive_mentions: positive,
+        neutral_mentions: neutral,
+        negative_mentions: negative,
+        visibility_delta: Math.round(visibilityDelta * 100) / 100,
+        mention_rate_delta: Math.round(mentionDelta * 100) / 100,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+      }).eq('id', existingRun.id);
+      console.log(`📊 Updated existing run history record: ${existingRun.id}`);
+    } else {
+      await supabaseClient.from('analysis_run_history').insert({
+        project_id: projectId,
+        session_id: sessionId,
+        run_number: (runCount || 0) + 1,
+        run_type: 'manual',
+        overall_visibility_score: Math.round(overallVisibility * 100) / 100,
+        platform_scores: platformScores,
+        total_queries: totalQueries,
+        queries_with_brand_mention: withMention.length,
+        brand_mention_rate: Math.round(mentionRate * 100) / 100,
+        positive_mentions: positive,
+        neutral_mentions: neutral,
+        negative_mentions: negative,
+        visibility_delta: Math.round(visibilityDelta * 100) / 100,
+        mention_rate_delta: Math.round(mentionDelta * 100) / 100,
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+      });
+      console.log(`📊 Created new run history record for session: ${sessionId}`);
+    }
+  } catch (err) {
+    console.error('Failed to record run history:', err);
+  }
+}
+
 function analyzeCrossPlatformResults(platformResults, brandName, competitors) {
   // Skip analysis if we have less than 2 platforms
   const platforms = Object.keys(platformResults);
@@ -2079,6 +2179,7 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
           last_analysis_at: new Date().toISOString()
         }).eq('id', projectId);
       }
+      await recordRunHistory(supabase, projectId, session.id);
     } catch (competitorError) {
       console.error('Error running competitor analysis:', competitorError);
       // If competitor analysis fails, mark session as completed anyway
@@ -2089,6 +2190,7 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
       await supabase.from('brand_analysis_projects').update({
         last_analysis_at: new Date().toISOString()
       }).eq('id', projectId);
+      await recordRunHistory(supabase, projectId, session.id);
     }
     
     return {
@@ -2339,6 +2441,7 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
             last_analysis_at: new Date().toISOString()
           }).eq('id', projectId);
         }
+        await recordRunHistory(supabase, projectId, sessionId);
       } catch (competitorError) {
         console.error('Error running competitor analysis:', competitorError);
         // If competitor analysis fails, mark session as completed anyway
@@ -2349,6 +2452,7 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
       await supabase.from('brand_analysis_projects').update({
         last_analysis_at: new Date().toISOString()
       }).eq('id', projectId);
+      await recordRunHistory(supabase, projectId, sessionId);
       }
     }
     return {
@@ -2386,7 +2490,7 @@ Deno.serve(async (req) => {
       'gemini',
       'perplexity',
       'groq'
-    ], sessionId, queries, batchStartIndex = 0, batchSize = 6, continueProcessing = false, language, action, languages: bodyLanguages, countries: bodyCountries } = body;
+    ], sessionId, queries, batchStartIndex = 0, batchSize = 6, continueProcessing = false, language, action, languages: bodyLanguages, countries: bodyCountries, rerunQueries } = body;
     
     // Handle resume action
     if (action === 'resume' && sessionId) {
@@ -2725,16 +2829,23 @@ Deno.serve(async (req) => {
     console.log(`   GSC: ${gscKeywords.length}`);
     console.log(`   Total (merged): ${allKeywords.length}`);
     
-    // Build query list from project query_mode and optional manual_queries (cap 50)
+    // Build query list: use rerunQueries if provided (scheduled re-run), otherwise generate/select
     const preferredLangForQueries = analysisLanguages.length > 0
       ? (analysisLanguages[0].toLowerCase().startsWith('he') ? 'he' : analysisLanguages[0].split('-')[0].toLowerCase() || 'en')
       : 'en';
-    const selectedQueriesForRun = await getQueriesForAnalysis(project, preferredLangForQueries, analysisLanguages, analysisCountries, allKeywords);
+    let selectedQueriesForRun: string[];
+    if (Array.isArray(rerunQueries) && rerunQueries.length > 0) {
+      selectedQueriesForRun = rerunQueries;
+      console.log(`♻️ Re-run mode: using ${selectedQueriesForRun.length} queries from previous session`);
+    } else {
+      selectedQueriesForRun = await getQueriesForAnalysis(project, preferredLangForQueries, analysisLanguages, analysisCountries, allKeywords);
+    }
     const totalQueries = availablePlatforms.length * selectedQueriesForRun.length;
-    console.log(`Query mode: ${project.query_mode || 'auto'}, ${selectedQueriesForRun.length} queries, ${availablePlatforms.length} platforms, ${totalQueries} total runs`);
+    console.log(`Query mode: ${rerunQueries ? 'rerun' : (project.query_mode || 'auto')}, ${selectedQueriesForRun.length} queries, ${availablePlatforms.length} platforms, ${totalQueries} total runs`);
+    const sessionLabel = rerunQueries ? 'Scheduled Re-run' : 'AI-Generated Queries Analysis';
     const { data: session, error: sessionError } = await supabase.from('brand_analysis_sessions').insert({
       project_id: projectId,
-      session_name: `AI-Generated Queries Analysis ${new Date().toLocaleDateString()}`,
+      session_name: `${sessionLabel} ${new Date().toLocaleDateString()}`,
       status: 'running',
       started_at: new Date().toISOString(),
       total_queries: totalQueries
