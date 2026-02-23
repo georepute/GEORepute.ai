@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Globe, TrendingUp, TrendingDown, MousePointerClick, Eye, Target, Map as MapIcon, Brain, RefreshCw, Check, X, AlertCircle, CheckCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { normalizeCountryForMerge } from '@/lib/utils/countryMerge';
 
 interface GSCIntegrationData {
   domain_url?: string;
@@ -48,10 +49,10 @@ export default function RegionalStrengthComparisonPage() {
   const [countries, setCountries] = useState<Country[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingDomains, setLoadingDomains] = useState(true);
-  const [dateRange, setDateRange] = useState(30);
   const [aiMatrixData, setAiMatrixData] = useState<AIMatrixCountry[]>([]);
   const [loadingAiMatrix, setLoadingAiMatrix] = useState(false);
   const [calculating, setCalculating] = useState(false);
+  const [calcProgress, setCalcProgress] = useState<{ processed: number; total: number; percentage: number; message?: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'ai' | 'google'>('ai');
 
   useEffect(() => {
@@ -63,7 +64,36 @@ export default function RegionalStrengthComparisonPage() {
       loadCountries();
       loadAIMatrixData();
     }
-  }, [selectedDomain, dateRange]);
+  }, [selectedDomain]);
+
+  // Poll progress when calculating
+  useEffect(() => {
+    if (!calculating || !selectedDomain) {
+      setCalcProgress(null);
+      return;
+    }
+
+    const pollProgress = async () => {
+      try {
+        const res = await fetch(`/api/global-visibility-matrix/progress?domainId=${selectedDomain}`);
+        const data = await res.json();
+        if (data.success && data.progress) {
+          setCalcProgress({
+            processed: data.progress.processed,
+            total: data.progress.total,
+            percentage: data.progress.percentage ?? 0,
+            message: data.progress.message,
+          });
+        }
+      } catch {
+        // Ignore poll errors
+      }
+    };
+
+    pollProgress();
+    const interval = setInterval(pollProgress, 800);
+    return () => clearInterval(interval);
+  }, [calculating, selectedDomain]);
 
   const loadDomains = async () => {
     try {
@@ -95,7 +125,7 @@ export default function RegionalStrengthComparisonPage() {
   const loadCountries = async () => {
     try {
       setLoading(true);
-      const startDate = getDateDaysAgo(dateRange);
+      const startDate = '2020-01-01'; // All-time
       const endDate = getDateDaysAgo(0);
       
       const response = await fetch(
@@ -104,16 +134,22 @@ export default function RegionalStrengthComparisonPage() {
       const data = await response.json();
       
       if (data.success) {
-        // Aggregate country data by grouping records
+        // Aggregate country data, merging Israel/Palestine (il, isr, ps, pse)
         const countryMap = new Map<string, Country>();
         (data.analytics || []).forEach((item: any) => {
-          const countryCode = item.country || 'UNKNOWN';
+          const rawCountry = item.country || 'UNKNOWN';
+          if (rawCountry === 'UNKNOWN') return;
+          const countryCode = normalizeCountryForMerge(rawCountry);
           if (countryMap.has(countryCode)) {
             const existing = countryMap.get(countryCode)!;
+            const imp1 = existing.impressions;
+            const imp2 = item.impressions || 0;
             existing.clicks += item.clicks || 0;
-            existing.impressions += item.impressions || 0;
+            existing.impressions += imp2;
             existing.ctr = existing.impressions > 0 ? existing.clicks / existing.impressions : 0;
-            existing.position = (existing.position + (item.position || 0)) / 2;
+            existing.position = existing.impressions > 0
+              ? (existing.position * imp1 + (item.position || 0) * imp2) / existing.impressions
+              : existing.position;
           } else {
             countryMap.set(countryCode, {
               id: countryCode,
@@ -137,6 +173,37 @@ export default function RegionalStrengthComparisonPage() {
     }
   };
 
+  const mergeIsraelInMatrixData = (rows: AIMatrixCountry[]): AIMatrixCountry[] => {
+    const map = new Map<string, AIMatrixCountry & Record<string, unknown>>();
+    rows.forEach((r) => {
+      const code = normalizeCountryForMerge(r.country_code || '');
+      if (!code) return;
+      const rec = r as AIMatrixCountry & Record<string, unknown>;
+      const existing = map.get(code);
+      if (!existing) {
+        map.set(code, { ...rec, country_code: code });
+      } else {
+        const imp1 = (existing.gsc_impressions as number) || 1;
+        const imp2 = (rec.gsc_impressions as number) || 0;
+        const totalImp = imp1 + imp2;
+        existing.gsc_clicks = ((existing.gsc_clicks as number) || 0) + ((rec.gsc_clicks as number) || 0);
+        existing.gsc_impressions = totalImp;
+        existing.organic_score = totalImp > 0 ? ((existing.organic_score || 0) * imp1 + (rec.organic_score || 0) * imp2) / totalImp : existing.organic_score;
+        existing.ai_visibility_score = Math.max(existing.ai_visibility_score || 0, rec.ai_visibility_score || 0);
+        existing.overall_visibility_score = totalImp > 0
+          ? ((existing.overall_visibility_score || 0) * imp1 + (rec.overall_visibility_score || 0) * imp2) / totalImp
+          : existing.overall_visibility_score;
+        existing.ai_platforms_present = [...new Set([...(existing.ai_platforms_present || []), ...(rec.ai_platforms_present || [])])];
+        existing.ai_mentioned_competitors = [...new Set([...(existing.ai_mentioned_competitors || []), ...(rec.ai_mentioned_competitors || [])])];
+        if (rec.ai_domain_found) existing.ai_domain_found = true;
+        const rPos = rec.ai_best_position;
+        const ePos = existing.ai_best_position;
+        if (rPos != null && (ePos == null || rPos < ePos)) existing.ai_best_position = rPos;
+      }
+    });
+    return Array.from(map.values());
+  };
+
   const loadAIMatrixData = async () => {
     try {
       setLoadingAiMatrix(true);
@@ -144,7 +211,9 @@ export default function RegionalStrengthComparisonPage() {
       const data = await response.json();
       
       if (data.success && data.data) {
-        setAiMatrixData(data.data);
+        // Merge Israel/Palestine (il, isr, ps, pse) on client for consistency
+        const merged = mergeIsraelInMatrixData(data.data);
+        setAiMatrixData(merged);
       } else {
         setAiMatrixData([]);
       }
@@ -197,6 +266,7 @@ export default function RegionalStrengthComparisonPage() {
       toast.error('Failed to calculate matrix', { id: 'calculate' });
     } finally {
       setCalculating(false);
+      setCalcProgress(null);
     }
   };
 
@@ -531,14 +601,14 @@ export default function RegionalStrengthComparisonPage() {
         </div>
 
         {/* Controls */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-              <label className="font-medium text-gray-700 text-sm">Domain:</label>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Domain</label>
               <select
                 value={selectedDomain}
                 onChange={(e) => setSelectedDomain(e.target.value)}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
               >
                 {domains.map((domain) => (
                   <option key={domain.id} value={domain.id}>
@@ -548,17 +618,15 @@ export default function RegionalStrengthComparisonPage() {
               </select>
             </div>
 
-            <div className="flex items-center gap-2">
-              <label className="font-medium text-gray-700 text-sm">Period:</label>
-              <select
-                value={dateRange}
-                onChange={(e) => setDateRange(Number(e.target.value))}
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+            <div className="flex items-end">
+              <button
+                onClick={calculateMatrix}
+                disabled={calculating || !selectedDomain}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                <option value={7}>Last 7 days</option>
-                <option value={30}>Last 30 days</option>
-                <option value={90}>Last 90 days</option>
-              </select>
+                <RefreshCw className={`w-4 h-4 ${calculating ? 'animate-spin' : ''}`} />
+                {calculating ? 'Calculating...' : 'Calculate All-Time Matrix'}
+              </button>
             </div>
           </div>
 
@@ -566,6 +634,21 @@ export default function RegionalStrengthComparisonPage() {
             <p className="text-xs text-gray-500 mt-2">
               Last synced: {new Date(selectedDomainData.last_synced_at).toLocaleString()}
             </p>
+          )}
+
+          {calculating && calcProgress && (
+            <div className="mt-4 pt-4 border-t border-gray-200 space-y-1">
+              <div className="flex justify-between text-sm text-gray-600">
+                <span>{calcProgress.message || 'Processing...'}</span>
+                <span>{calcProgress.percentage}%</span>
+              </div>
+              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-600 transition-all duration-300 ease-out"
+                  style={{ width: `${calcProgress.percentage}%` }}
+                />
+              </div>
+            </div>
           )}
         </div>
 
@@ -977,17 +1060,33 @@ export default function RegionalStrengthComparisonPage() {
                   <Brain className="w-8 h-8 text-purple-600" />
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">No AI Insights Available</h3>
-                <p className="text-gray-600 mb-4">
+                <p className="text-gray-600 mb-6">
                   Calculate the Global Visibility Matrix to see AI platform insights for this domain.
                 </p>
-                <button
-                  onClick={calculateMatrix}
-                  disabled={calculating || !selectedDomain}
-                  className="inline-flex items-center gap-2 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RefreshCw className={`w-5 h-5 ${calculating ? 'animate-spin' : ''}`} />
-                  {calculating ? 'Calculating...' : 'Calculate Matrix'}
-                </button>
+                <div className="flex flex-col items-center gap-4">
+                  <button
+                    onClick={calculateMatrix}
+                    disabled={calculating || !selectedDomain}
+                    className="inline-flex items-center gap-2 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw className={`w-5 h-5 ${calculating ? 'animate-spin' : ''}`} />
+                    {calculating ? 'Calculating...' : 'Calculate Matrix'}
+                  </button>
+                  {calculating && calcProgress && (
+                    <div className="w-full max-w-md space-y-1">
+                      <div className="flex justify-between text-sm text-gray-600">
+                        <span>{calcProgress.message || 'Processing...'}</span>
+                        <span>{calcProgress.percentage}%</span>
+                      </div>
+                      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-purple-600 transition-all duration-300 ease-out"
+                          style={{ width: `${calcProgress.percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </>

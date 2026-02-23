@@ -5,6 +5,52 @@ import { cookies } from 'next/headers';
 import { google } from 'googleapis';
 import { normalizeCountryForMerge } from '@/lib/utils/countryMerge';
 
+/** Unique key for gsc_analytics: domain_id, date, data_type, query, page, country, device, search_appearance */
+type GscAnalyticsRow = {
+  domain_id: string;
+  user_id: string;
+  date: string;
+  data_type: string;
+  query: string | null;
+  page: string | null;
+  country: string | null;
+  device: string | null;
+  search_appearance?: string | null;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+};
+
+/** Input row may have null date (filtered out before insert) */
+type GscAnalyticsRowInput = Omit<GscAnalyticsRow, 'date'> & { date: string | null };
+
+/** Deduplicate gsc_analytics rows by unique key, aggregating metrics (e.g. Palestine+Israel → Israel) */
+function deduplicateGscAnalytics(rows: GscAnalyticsRowInput[]): GscAnalyticsRow[] {
+  const map = new Map<string, GscAnalyticsRowInput & { positionSum: number }>();
+  for (const r of rows) {
+    const key = `${r.domain_id}|${r.date}|${r.data_type}|${r.query ?? ''}|${r.page ?? ''}|${r.country ?? ''}|${r.device ?? ''}|${r.search_appearance ?? ''}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.clicks += r.clicks;
+      existing.impressions += r.impressions;
+      existing.positionSum += r.position * r.impressions;
+    } else {
+      map.set(key, {
+        ...r,
+        positionSum: r.position * r.impressions,
+      });
+    }
+  }
+  return Array.from(map.values())
+    .map(({ positionSum, ...r }) => ({
+      ...r,
+      ctr: r.impressions > 0 ? r.clicks / r.impressions : 0,
+      position: r.impressions > 0 ? positionSum / r.impressions : 0,
+    }))
+    .filter((r): r is GscAnalyticsRow => r.date != null && r.date !== '');
+}
+
 /**
  * POST /api/integrations/google-search-console/analytics/sync
  * Fetch analytics from GSC and store in database
@@ -132,30 +178,34 @@ export async function POST(request: NextRequest) {
     
     if (dimensions.length === 1 && dimensions[0] === 'date') {
       // Store summary data in gsc_analytics table
-      const analyticsData = rows.map((row) => ({
-        domain_id: domainId,
-        user_id: session.user.id,
-        date: row.keys?.[0] || null,
-        clicks: row.clicks || 0,
-        impressions: row.impressions || 0,
-        ctr: row.ctr || 0,
-        position: row.position || 0,
-        data_type: 'summary',
-        query: null,
-        page: null,
-        country: null,
-        device: null,
-      }));
+      const analyticsData = deduplicateGscAnalytics(
+        rows.map((row) => ({
+          domain_id: domainId,
+          user_id: session.user.id,
+          date: row.keys?.[0] || null,
+          clicks: row.clicks || 0,
+          impressions: row.impressions || 0,
+          ctr: row.ctr || 0,
+          position: row.position || 0,
+          data_type: 'summary',
+          query: null,
+          page: null,
+          country: null,
+          device: null,
+          search_appearance: null,
+        }))
+      );
 
       if (analyticsData.length > 0) {
         // Delete existing summary data for this date range to avoid conflicts
-        await supabase
+        const { error: deleteError } = await supabase
           .from('gsc_analytics')
           .delete()
           .eq('domain_id', domainId)
           .eq('data_type', 'summary')
           .gte('date', analyticsStartDate)
           .lte('date', analyticsEndDate);
+        if (deleteError) throw deleteError;
 
         // Insert new data
         const { error: insertError } = await supabase
@@ -228,35 +278,38 @@ export async function POST(request: NextRequest) {
     } else if (dimensions.includes('country')) {
       // Store country data in gsc_analytics table
       // Merge Palestine into Israel (same territorial area, GSC reports separately)
-      const countryData = rows.map((row) => {
-        const rawCountry = row.keys?.[dimensions.indexOf('country')] || '';
-        const country = normalizeCountryForMerge(rawCountry);
-        return {
-          domain_id: domainId,
-          user_id: session.user.id,
-          date: row.keys?.[0] || analyticsEndDate,
-          country,
-          clicks: row.clicks || 0,
-          impressions: row.impressions || 0,
-          ctr: row.ctr || 0,
-          position: row.position || 0,
-          data_type: 'country',
-          query: null,
-          page: null,
-          device: null,
-          search_appearance: null,
-        };
-      });
+      const countryData = deduplicateGscAnalytics(
+        rows.map((row) => {
+          const rawCountry = row.keys?.[dimensions.indexOf('country')] || '';
+          const country = normalizeCountryForMerge(rawCountry);
+          return {
+            domain_id: domainId,
+            user_id: session.user.id,
+            date: row.keys?.[0] || analyticsEndDate,
+            country,
+            clicks: row.clicks || 0,
+            impressions: row.impressions || 0,
+            ctr: row.ctr || 0,
+            position: row.position || 0,
+            data_type: 'country',
+            query: null,
+            page: null,
+            device: null,
+            search_appearance: null,
+          };
+        })
+      );
 
       if (countryData.length > 0) {
         // Delete existing country data for this date range
-        await supabase
+        const { error: deleteError } = await supabase
           .from('gsc_analytics')
           .delete()
           .eq('domain_id', domainId)
           .eq('data_type', 'country')
           .gte('date', analyticsStartDate)
           .lte('date', analyticsEndDate);
+        if (deleteError) throw deleteError;
 
         // Insert new data
         const { error: insertError } = await supabase
@@ -268,31 +321,34 @@ export async function POST(request: NextRequest) {
       }
     } else if (dimensions.includes('device')) {
       // Store device data in gsc_analytics table
-      const deviceData = rows.map((row) => ({
-        domain_id: domainId,
-        user_id: session.user.id,
-        date: row.keys?.[0] || analyticsEndDate,
-        device: row.keys?.[dimensions.indexOf('device')] || '',
-        clicks: row.clicks || 0,
-        impressions: row.impressions || 0,
-        ctr: row.ctr || 0,
-        position: row.position || 0,
-        data_type: 'device',
-        query: null,
-        page: null,
-        country: null,
-        search_appearance: null,
-      }));
+      const deviceData = deduplicateGscAnalytics(
+        rows.map((row) => ({
+          domain_id: domainId,
+          user_id: session.user.id,
+          date: row.keys?.[0] || analyticsEndDate,
+          device: row.keys?.[dimensions.indexOf('device')] || '',
+          clicks: row.clicks || 0,
+          impressions: row.impressions || 0,
+          ctr: row.ctr || 0,
+          position: row.position || 0,
+          data_type: 'device',
+          query: null,
+          page: null,
+          country: null,
+          search_appearance: null,
+        }))
+      );
 
       if (deviceData.length > 0) {
         // Delete existing device data for this date range
-        await supabase
+        const { error: deleteError } = await supabase
           .from('gsc_analytics')
           .delete()
           .eq('domain_id', domainId)
           .eq('data_type', 'device')
           .gte('date', analyticsStartDate)
           .lte('date', analyticsEndDate);
+        if (deleteError) throw deleteError;
 
         // Insert new data
         const { error: insertError } = await supabase
@@ -305,31 +361,34 @@ export async function POST(request: NextRequest) {
     } else if (dimensions.includes('searchAppearance')) {
       // Store search appearance data in gsc_analytics table
       // Note: searchAppearance must be queried alone (not combined with other dimensions)
-      const searchAppearanceData = rows.map((row) => ({
-        domain_id: domainId,
-        user_id: session.user.id,
-        date: analyticsEndDate, // Use endDate since we can't group by date with searchAppearance
-        search_appearance: row.keys?.[0] || '', // First key is searchAppearance when queried alone
-        clicks: row.clicks || 0,
-        impressions: row.impressions || 0,
-        ctr: row.ctr || 0,
-        position: row.position || 0,
-        data_type: 'search_appearance',
-        query: null,
-        page: null,
-        country: null,
-        device: null,
-      }));
+      const searchAppearanceData = deduplicateGscAnalytics(
+        rows.map((row) => ({
+          domain_id: domainId,
+          user_id: session.user.id,
+          date: analyticsEndDate, // Use endDate since we can't group by date with searchAppearance
+          search_appearance: row.keys?.[0] || '', // First key is searchAppearance when queried alone
+          clicks: row.clicks || 0,
+          impressions: row.impressions || 0,
+          ctr: row.ctr || 0,
+          position: row.position || 0,
+          data_type: 'search_appearance',
+          query: null,
+          page: null,
+          country: null,
+          device: null,
+        }))
+      );
 
       if (searchAppearanceData.length > 0) {
         // Delete existing search appearance data for this date range
-        await supabase
+        const { error: deleteError } = await supabase
           .from('gsc_analytics')
           .delete()
           .eq('domain_id', domainId)
           .eq('data_type', 'search_appearance')
           .gte('date', analyticsStartDate)
           .lte('date', analyticsEndDate);
+        if (deleteError) throw deleteError;
 
         // Insert new data
         const { error: insertError } = await supabase

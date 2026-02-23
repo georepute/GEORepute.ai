@@ -46,8 +46,9 @@ CREATE INDEX IF NOT EXISTS idx_gsc_analytics_page ON gsc_analytics(page) WHERE p
 CREATE INDEX IF NOT EXISTS idx_gsc_analytics_device ON gsc_analytics(device) WHERE device IS NOT NULL;
 
 -- Composite unique constraint using expression index
+-- Includes search_appearance so multiple search appearance types per date are allowed
 CREATE UNIQUE INDEX IF NOT EXISTS idx_gsc_analytics_unique 
-  ON gsc_analytics(domain_id, date, data_type, COALESCE(query, ''), COALESCE(page, ''), COALESCE(country, ''), COALESCE(device, ''));
+  ON gsc_analytics(domain_id, date, data_type, COALESCE(query, ''), COALESCE(page, ''), COALESCE(country, ''), COALESCE(device, ''), COALESCE(search_appearance, ''));
 
 -- Enable RLS for gsc_analytics
 ALTER TABLE gsc_analytics ENABLE ROW LEVEL SECURITY;

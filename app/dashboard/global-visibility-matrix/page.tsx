@@ -49,6 +49,7 @@ export default function GlobalVisibilityMatrixPage() {
   const [aiResults, setAiResults] = useState<any>(null);
   const [detectedIndustry, setDetectedIndustry] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'ai' | 'google'>('ai');
+  const [calcProgress, setCalcProgress] = useState<{ processed: number; total: number; percentage: number; message?: string } | null>(null);
 
   useEffect(() => {
     loadDomains();
@@ -59,6 +60,35 @@ export default function GlobalVisibilityMatrixPage() {
       loadMatrixData();
     }
   }, [selectedDomain]);
+
+  // Poll progress when calculating
+  useEffect(() => {
+    if (!calculating || !selectedDomain) {
+      setCalcProgress(null);
+      return;
+    }
+
+    const pollProgress = async () => {
+      try {
+        const res = await fetch(`/api/global-visibility-matrix/progress?domainId=${selectedDomain}`);
+        const data = await res.json();
+        if (data.success && data.progress) {
+          setCalcProgress({
+            processed: data.progress.processed,
+            total: data.progress.total,
+            percentage: data.progress.percentage ?? 0,
+            message: data.progress.message,
+          });
+        }
+      } catch {
+        // Ignore poll errors
+      }
+    };
+
+    pollProgress();
+    const interval = setInterval(pollProgress, 800);
+    return () => clearInterval(interval);
+  }, [calculating, selectedDomain]);
 
   const loadDomains = async () => {
     try {
@@ -176,6 +206,7 @@ export default function GlobalVisibilityMatrixPage() {
       toast.error('Failed to calculate matrix', { id: 'calculate' });
     } finally {
       setCalculating(false);
+      setCalcProgress(null);
     }
   };
 
@@ -502,6 +533,20 @@ export default function GlobalVisibilityMatrixPage() {
             </button>
           </div>
         </div>
+        {calculating && calcProgress && (
+          <div className="mt-4 pt-4 border-t border-gray-200 space-y-1">
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>{calcProgress.message || 'Processing...'}</span>
+              <span>{calcProgress.percentage}%</span>
+            </div>
+            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary-600 transition-all duration-300 ease-out"
+                style={{ width: `${calcProgress.percentage}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -594,14 +639,30 @@ export default function GlobalVisibilityMatrixPage() {
               <p className="text-gray-600 mb-6">
                 Click "Calculate Matrix" to generate your AI visibility report.
               </p>
-              <button
-                onClick={calculateMatrix}
-                disabled={calculating || !selectedDomain}
-                className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
-              >
-                <RefreshCw className={`w-5 h-5 ${calculating ? 'animate-spin' : ''}`} />
-                {calculating ? 'Calculating...' : 'Calculate Matrix'}
-              </button>
+              <div className="flex flex-col items-center gap-4">
+                <button
+                  onClick={calculateMatrix}
+                  disabled={calculating || !selectedDomain}
+                  className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-5 h-5 ${calculating ? 'animate-spin' : ''}`} />
+                  {calculating ? 'Calculating...' : 'Calculate Matrix'}
+                </button>
+                {calculating && calcProgress && (
+                  <div className="w-full max-w-md space-y-1">
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>{calcProgress.message || 'Processing...'}</span>
+                      <span>{calcProgress.percentage}%</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-purple-600 transition-all duration-300 ease-out"
+                        style={{ width: `${calcProgress.percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <>
@@ -974,14 +1035,30 @@ export default function GlobalVisibilityMatrixPage() {
               <p className="text-gray-600 mb-6">
                 Click "Calculate Matrix" to generate your visibility report.
               </p>
-              <button
-                onClick={calculateMatrix}
-                disabled={calculating || !selectedDomain}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
-              >
-                <RefreshCw className={`w-5 h-5 ${calculating ? 'animate-spin' : ''}`} />
-                {calculating ? 'Calculating...' : 'Calculate Matrix'}
-              </button>
+              <div className="flex flex-col items-center gap-4">
+                <button
+                  onClick={calculateMatrix}
+                  disabled={calculating || !selectedDomain}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-5 h-5 ${calculating ? 'animate-spin' : ''}`} />
+                  {calculating ? 'Calculating...' : 'Calculate Matrix'}
+                </button>
+                {calculating && calcProgress && (
+                  <div className="w-full max-w-md space-y-1">
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>{calcProgress.message || 'Processing...'}</span>
+                      <span>{calcProgress.percentage}%</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 transition-all duration-300 ease-out"
+                        style={{ width: `${calcProgress.percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <>

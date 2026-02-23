@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { checkAIVisibility } from '@/lib/ai/geoCore'
+import { setProgress } from '@/lib/global-visibility-matrix/progress'
 
 interface CountryAIResult {
   country_code: string;
@@ -169,7 +170,8 @@ export async function POST(request: NextRequest) {
       endDate,
       gscData = {},
       platforms = ['chatgpt', 'claude', 'gemini', 'perplexity', 'groq'],
-      maxCountries = 20
+      maxCountries = 20,
+      progressKey = null as string | null,
     } = body
 
     if (!countryCodes || !Array.isArray(countryCodes) || countryCodes.length === 0) {
@@ -192,6 +194,17 @@ export async function POST(request: NextRequest) {
 
     // Limit the number of countries to check (cost control)
     const countriesToCheck = countryCodes.slice(0, maxCountries);
+    const totalCountries = countriesToCheck.length;
+
+    // Report progress: starting AI check
+    if (progressKey) {
+      setProgress(progressKey, {
+        phase: 'ai_check',
+        processed: 0,
+        total: totalCountries,
+        message: `Checking AI presence (0%)`,
+      });
+    }
 
     console.log(`\n${'='.repeat(80)}`);
     console.log(`🔍 AI PRESENCE CHECK STARTED`);
@@ -347,6 +360,17 @@ export async function POST(request: NextRequest) {
       };
 
       results.push(countryResult);
+
+      // Report progress after each country
+      if (progressKey) {
+        const processed = results.length;
+        setProgress(progressKey, {
+          phase: 'ai_check',
+          processed,
+          total: totalCountries,
+          message: `Checking AI presence (${Math.round((processed / totalCountries) * 100)}%)`,
+        });
+      }
 
       // Get competitor list (excluding our brand)
       const competitors = Array.from(allMentionedBrands).filter((b: string) => 

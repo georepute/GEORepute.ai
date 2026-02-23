@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import OpenAI from 'openai'
-import { normalizeCountryForMerge } from '@/lib/utils/countryMerge'
+import { setProgress, clearProgress, buildProgressKey } from '@/lib/global-visibility-matrix/progress'
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -327,7 +327,15 @@ export async function POST(request: NextRequest) {
       }, { status: 400 })
     }
 
+    const progressKey = buildProgressKey(session.user.id, domainId);
+
     // Step 1: Analyze domain to detect brand name and industry
+    setProgress(progressKey, {
+      phase: 'analyzing',
+      processed: 0,
+      total: 0,
+      message: 'Analyzing domain and detecting brand...',
+    });
     console.log('\n' + '='.repeat(80));
     console.log('🌐 STEP 1: DOMAIN ANALYSIS');
     console.log('='.repeat(80));
@@ -350,6 +358,12 @@ export async function POST(request: NextRequest) {
     const startDate = new Date('2020-01-01') // Start from beginning of time (or earliest possible)
 
     // Step 2: Fetch ALL GSC country data (all time)
+    setProgress(progressKey, {
+      phase: 'gsc_fetch',
+      processed: 0,
+      total: 0,
+      message: 'Fetching GSC country data...',
+    });
     console.log('\n' + '='.repeat(80));
     console.log('📍 STEP 2: FETCHING GSC COUNTRY DATA (ALL TIME)');
     console.log('='.repeat(80));
@@ -378,13 +392,12 @@ export async function POST(request: NextRequest) {
       }, { status: 404 })
     }
 
-    // Step 2: Aggregate GSC data by country (merge Palestine into Israel)
+    // Step 2: Aggregate GSC data by country
     const countryMap = new Map<string, CountryData>()
     
     gscData.analytics.forEach((item: any) => {
-      const rawCountry = item.country || 'UNKNOWN'
-      if (rawCountry === 'UNKNOWN') return
-      const countryCode = normalizeCountryForMerge(rawCountry)
+      const countryCode = item.country || 'UNKNOWN'
+      if (countryCode === 'UNKNOWN') return
       
       if (countryMap.has(countryCode)) {
         const existing = countryMap.get(countryCode)!
@@ -516,7 +529,8 @@ export async function POST(request: NextRequest) {
               endDate: endDate.toISOString().split('T')[0], // For database updates
               gscData: gscDataMap, // Pass pre-calculated GSC data
               platforms: ['chatgpt', 'claude', 'gemini', 'perplexity', 'groq'], // All 5 LLMs
-              maxCountries: 30 // Check top 30 countries
+              maxCountries: 30, // Check top 30 countries
+              progressKey, // For progress reporting
             })
           }
         );
@@ -672,6 +686,14 @@ export async function POST(request: NextRequest) {
     } else {
       console.log('✅ Final update complete - all quadrants adjusted for AI scores');
     }
+
+    setProgress(progressKey, {
+      phase: 'complete',
+      processed: finalCountries.length,
+      total: finalCountries.length,
+      message: 'Calculation complete',
+    });
+    clearProgress(progressKey);
 
     console.log('\n' + '='.repeat(80));
     console.log('✅ CALCULATION COMPLETE');
