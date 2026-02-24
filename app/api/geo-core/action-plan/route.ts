@@ -272,9 +272,9 @@ export async function POST(request: NextRequest) {
           total_executable_steps: executableSteps.length,
           automated_steps_count: automatedSteps.length,
           manual_steps_count: manualSteps.length,
-          // Store project info in execution_metadata since project_id/project_name columns don't exist
           project_id: projectId || null,
           project_name: projectName || null,
+          business_plan_data: result.businessPlanData || null,
         },
       };
 
@@ -322,7 +322,8 @@ export async function POST(request: NextRequest) {
         region: region,
         projectId: projectId || undefined,
         projectName: projectName || undefined,
-        saved: !!savedPlanId, // Indicate if plan was successfully saved
+        businessPlanData: result.businessPlanData || undefined,
+        saved: !!savedPlanId,
       },
       { status: 200 }
     );
@@ -385,6 +386,7 @@ export async function GET(request: NextRequest) {
       projectId: plan.project_id || undefined,
       projectName: plan.project_name || undefined,
       executionMetadata: plan.execution_metadata || {},
+      businessPlanData: plan.execution_metadata?.business_plan_data || undefined,
     }));
 
     return NextResponse.json({ plans: formattedPlans }, { status: 200 });
