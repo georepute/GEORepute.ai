@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Lightbulb,
@@ -20,15 +20,22 @@ import {
   RefreshCw,
   ArrowRight,
   X,
+  Download,
+  FileText,
+  Presentation,
+  DollarSign,
+  BarChart3,
+  Shield,
+  Flag,
 } from "lucide-react";
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useLanguage } from "@/lib/language-context";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
 import toast from "react-hot-toast";
 import { PlanProgress } from "./_components/PlanProgress";
+import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, ReferenceLine } from "recharts";
 
 interface ActionStep {
   step: string;
@@ -53,6 +60,14 @@ interface ActionStep {
   };
 }
 
+interface BusinessPlanData {
+  kpis: Array<{ name: string; current: string; target: string; timeframe: string; metric_type: string }>;
+  budget: { total_estimated: string; breakdown: Array<{ category: string; amount: number; percentage: number }> };
+  roi_projection: { monthly_projections: Array<{ month: number; investment: number; estimated_return: number; cumulative_roi: number }>; break_even_month: number; projected_annual_roi: string };
+  competitive_positioning: { summary: string; strengths: string[]; gaps: string[]; market_opportunity: string };
+  milestones: Array<{ month: number; title: string; goals: string[] }>;
+}
+
 interface ActionPlan {
   id: string;
   title: string;
@@ -70,6 +85,7 @@ interface ActionPlan {
   region?: string;
   projectId?: string;
   projectName?: string;
+  businessPlanData?: BusinessPlanData;
 }
 
 interface BrandProject {
@@ -104,6 +120,9 @@ export default function ActionPlansPage() {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState("");
   const [loadingGSCKeywords, setLoadingGSCKeywords] = useState(false);
+  const [planLanguage, setPlanLanguage] = useState<"en" | "he">("en");
+  const [exportingPdf, setExportingPdf] = useState<string | null>(null);
+  const [exportingPptx, setExportingPptx] = useState<string | null>(null);
 
   // Load existing plans and brand projects on mount
   useEffect(() => {
@@ -289,6 +308,7 @@ export default function ActionPlansPage() {
           category: plan.category || "General",
           createdAt: plan.createdAt ? new Date(plan.createdAt) : new Date(),
           expanded: false,
+          businessPlanData: plan.businessPlanData || execMetadata.business_plan_data || undefined,
         };
       });
 
@@ -300,8 +320,6 @@ export default function ActionPlansPage() {
       setLoadingPlans(false);
     }
   };
-
-  const { language } = useLanguage();
 
   const generateActionPlan = async () => {
     if (!objective.trim()) {
@@ -322,8 +340,8 @@ export default function ActionPlansPage() {
           targetKeywords: keywords.length > 0 ? keywords : undefined,
           domain: domain.trim() || undefined,
           channels: ['all'], // Always use all channels
-          projectId: selectedProjectId || undefined, // Pass selected project ID to use its crawler data
-          language: language || 'en',
+          projectId: selectedProjectId || undefined,
+          language: planLanguage,
         }),
       });
 
@@ -377,6 +395,7 @@ export default function ActionPlansPage() {
         category: data.category,
         createdAt: new Date(),
         expanded: true,
+        businessPlanData: data.businessPlanData || undefined,
       };
 
       // Reload plans from database to ensure we have the saved version
@@ -513,6 +532,480 @@ export default function ActionPlansPage() {
     } catch (error: any) {
       console.error("Error deleting plan:", error);
       toast.error(error.message || "Failed to delete action plan");
+    }
+  };
+
+  const CHART_COLORS = ['#9333ea', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
+
+  const exportPlanPDF = async (plan: ActionPlan) => {
+    const toastId = toast.loading("Generating PDF report...");
+    try {
+      const jsPDF = (await import('jspdf')).default;
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const margin = 15;
+      const contentW = pageW - margin * 2;
+
+      const PURPLE = { r: 147, g: 51, b: 234 };
+      const PURPLE_DARK = { r: 107, g: 33, b: 168 };
+      const GRAY_700 = { r: 55, g: 65, b: 81 };
+      const GRAY_500 = { r: 107, g: 114, b: 128 };
+      const GREEN = { r: 16, g: 185, b: 129 };
+      const RED = { r: 239, g: 68, b: 68 };
+      const AMBER = { r: 245, g: 158, b: 11 };
+
+      let logoDataUrl: string | null = null;
+      try {
+        const logoRes = await fetch('/logo.png');
+        const blob = await logoRes.blob();
+        logoDataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      } catch { /* continue without logo */ }
+
+      const addHeader = (pageNum: number, totalPages: number) => {
+        doc.setFillColor(PURPLE.r, PURPLE.g, PURPLE.b);
+        doc.rect(0, 0, pageW, 14, 'F');
+        if (logoDataUrl) { try { doc.addImage(logoDataUrl, 'PNG', margin, 2.5, 9, 9); } catch {} }
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.text('GEORepute.ai', margin + 12, 8.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.text('AI Visibility Intelligence Platform', pageW - margin, 8.5, { align: 'right' });
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.setFontSize(7);
+        doc.text(`Confidential - Generated by GEORepute.ai`, margin, pageH - 6);
+        doc.text(`Page ${pageNum} of ${totalPages}`, pageW / 2, pageH - 6, { align: 'center' });
+        doc.text(new Date().toLocaleDateString(), pageW - margin, pageH - 6, { align: 'right' });
+      };
+
+      const addSectionTitle = (title: string, y: number): number => {
+        doc.setFillColor(PURPLE.r, PURPLE.g, PURPLE.b);
+        doc.roundedRect(margin, y, contentW, 8, 2, 2, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(title, margin + 4, y + 5.5);
+        return y + 12;
+      };
+
+      // --- PAGE 1: Cover ---
+      doc.setFillColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+      doc.rect(0, 0, pageW, 50, 'F');
+      doc.setFillColor(PURPLE.r, PURPLE.g, PURPLE.b);
+      doc.rect(0, 50, pageW, 40, 'F');
+      if (logoDataUrl) { try { doc.addImage(logoDataUrl, 'PNG', margin, 12, 22, 22); } catch {} }
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(22);
+      doc.setFont('helvetica', 'bold');
+      doc.text('GEORepute.ai', margin + 28, 26);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text('AI Visibility Intelligence Platform', margin + 28, 34);
+      doc.setFontSize(28);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Business Action Plan', margin, 70);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'normal');
+      doc.text(plan.title, margin, 80);
+      doc.setFillColor(AMBER.r, AMBER.g, AMBER.b);
+      doc.rect(margin, 98, 40, 2, 'F');
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      doc.setFontSize(11);
+      doc.text(`Priority: ${plan.priority.toUpperCase()}`, margin, 115);
+      doc.text(`Category: ${plan.category}`, margin, 122);
+      doc.text(`Timeline: ${plan.timeline}`, margin, 129);
+      if (plan.projectName) doc.text(`Project: ${plan.projectName}`, margin, 136);
+      doc.text(`Generated: ${new Date().toLocaleDateString()}`, margin, plan.projectName ? 143 : 136);
+
+      // --- PAGE 2: Executive Summary ---
+      doc.addPage();
+      let y = 20;
+      addHeader(2, 6);
+      y = addSectionTitle('Executive Summary', y);
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Objective:', margin, y + 4);
+      doc.setFont('helvetica', 'normal');
+      const objLines = doc.splitTextToSize(plan.objective, contentW - 25);
+      doc.text(objLines, margin + 25, y + 4);
+      y += 4 + objLines.length * 4 + 4;
+      doc.setFont('helvetica', 'bold');
+      doc.text('AI Strategic Reasoning:', margin, y);
+      doc.setFont('helvetica', 'normal');
+      y += 4;
+      const reasonLines = doc.splitTextToSize(plan.reasoning, contentW);
+      doc.text(reasonLines, margin, y);
+      y += reasonLines.length * 4 + 6;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Expected Outcome:', margin, y);
+      doc.setFont('helvetica', 'normal');
+      y += 4;
+      const outcomeLines = doc.splitTextToSize(plan.expectedOutcome, contentW);
+      doc.text(outcomeLines, margin, y);
+
+      if (plan.businessPlanData) {
+        const bpd = plan.businessPlanData;
+
+        // --- PAGE 3: KPIs ---
+        doc.addPage();
+        addHeader(3, 6);
+        y = addSectionTitle('KPIs & Goals', 20);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(255, 255, 255);
+        doc.setFillColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.rect(margin, y, contentW, 7, 'F');
+        const colW = contentW / 4;
+        doc.text('KPI', margin + 2, y + 5);
+        doc.text('Current', margin + colW + 2, y + 5);
+        doc.text('Target', margin + colW * 2 + 2, y + 5);
+        doc.text('Timeframe', margin + colW * 3 + 2, y + 5);
+        y += 7;
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.setFont('helvetica', 'normal');
+        bpd.kpis.forEach((kpi, i) => {
+          if (i % 2 === 0) { doc.setFillColor(248, 248, 255); doc.rect(margin, y, contentW, 7, 'F'); }
+          doc.text(kpi.name.substring(0, 30), margin + 2, y + 5);
+          doc.text(kpi.current, margin + colW + 2, y + 5);
+          doc.setTextColor(GREEN.r, GREEN.g, GREEN.b);
+          doc.text(kpi.target, margin + colW * 2 + 2, y + 5);
+          doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+          doc.text(kpi.timeframe, margin + colW * 3 + 2, y + 5);
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          y += 7;
+        });
+
+        // Budget breakdown table
+        y += 8;
+        y = addSectionTitle('Budget Breakdown', y);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.text(`Total Estimated: ${bpd.budget.total_estimated}`, margin, y + 5);
+        y += 10;
+        doc.setFontSize(8);
+        doc.setTextColor(255, 255, 255);
+        doc.setFillColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.rect(margin, y, contentW, 7, 'F');
+        doc.text('Category', margin + 2, y + 5);
+        doc.text('Amount', margin + contentW * 0.5 + 2, y + 5);
+        doc.text('Percentage', margin + contentW * 0.75 + 2, y + 5);
+        y += 7;
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.setFont('helvetica', 'normal');
+        bpd.budget.breakdown.forEach((item, i) => {
+          if (i % 2 === 0) { doc.setFillColor(248, 248, 255); doc.rect(margin, y, contentW, 7, 'F'); }
+          doc.text(item.category, margin + 2, y + 5);
+          doc.text(`$${item.amount}`, margin + contentW * 0.5 + 2, y + 5);
+          doc.text(`${item.percentage}%`, margin + contentW * 0.75 + 2, y + 5);
+          y += 7;
+        });
+
+        // --- PAGE 4: ROI & Competitive ---
+        doc.addPage();
+        addHeader(4, 6);
+        y = addSectionTitle('ROI Projection', 20);
+        doc.setFontSize(9);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.text(`Break-even Month: ${bpd.roi_projection.break_even_month}  |  Projected Annual ROI: ${bpd.roi_projection.projected_annual_roi}`, margin, y + 5);
+        y += 10;
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(255, 255, 255);
+        doc.setFillColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.rect(margin, y, contentW, 7, 'F');
+        const roiColW = contentW / 4;
+        doc.text('Month', margin + 2, y + 5);
+        doc.text('Investment', margin + roiColW + 2, y + 5);
+        doc.text('Est. Return', margin + roiColW * 2 + 2, y + 5);
+        doc.text('Cum. ROI', margin + roiColW * 3 + 2, y + 5);
+        y += 7;
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.setFont('helvetica', 'normal');
+        bpd.roi_projection.monthly_projections.forEach((mp, i) => {
+          if (i % 2 === 0) { doc.setFillColor(248, 248, 255); doc.rect(margin, y, contentW, 7, 'F'); }
+          doc.text(`Month ${mp.month}`, margin + 2, y + 5);
+          doc.setTextColor(RED.r, RED.g, RED.b);
+          doc.text(`$${mp.investment}`, margin + roiColW + 2, y + 5);
+          doc.setTextColor(GREEN.r, GREEN.g, GREEN.b);
+          doc.text(`$${mp.estimated_return}`, margin + roiColW * 2 + 2, y + 5);
+          doc.setTextColor(mp.cumulative_roi >= 0 ? GREEN.r : RED.r, mp.cumulative_roi >= 0 ? GREEN.g : RED.g, mp.cumulative_roi >= 0 ? GREEN.b : RED.b);
+          doc.text(`${mp.cumulative_roi}%`, margin + roiColW * 3 + 2, y + 5);
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          y += 7;
+        });
+
+        // Competitive Positioning
+        y += 8;
+        y = addSectionTitle('Competitive Positioning', y);
+        doc.setFontSize(9);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.setFont('helvetica', 'normal');
+        const summaryLines = doc.splitTextToSize(bpd.competitive_positioning.summary, contentW);
+        doc.text(summaryLines, margin, y + 4);
+        y += summaryLines.length * 4 + 6;
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(GREEN.r, GREEN.g, GREEN.b);
+        doc.text('Strengths:', margin, y);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        bpd.competitive_positioning.strengths.forEach((s) => { y += 4; doc.text(`  • ${s}`, margin, y); });
+        y += 6;
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(RED.r, RED.g, RED.b);
+        doc.text('Gaps:', margin, y);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        bpd.competitive_positioning.gaps.forEach((g) => { y += 4; doc.text(`  • ${g}`, margin, y); });
+        y += 6;
+        doc.setFont('helvetica', 'bold');
+        doc.text('Market Opportunity:', margin, y);
+        doc.setFont('helvetica', 'normal');
+        y += 4;
+        const oppLines = doc.splitTextToSize(bpd.competitive_positioning.market_opportunity, contentW);
+        doc.text(oppLines, margin, y);
+
+        // --- PAGE 5: Milestones ---
+        doc.addPage();
+        addHeader(5, 6);
+        y = addSectionTitle('Milestones & Timeline', 20);
+        doc.setFontSize(9);
+        bpd.milestones.forEach((ms) => {
+          doc.setFillColor(PURPLE.r, PURPLE.g, PURPLE.b);
+          doc.circle(margin + 4, y + 4, 3, 'F');
+          doc.setTextColor(255, 255, 255);
+          doc.setFontSize(6);
+          doc.text(`M${ms.month}`, margin + 2, y + 5.5);
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'bold');
+          doc.text(ms.title, margin + 12, y + 5);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          y += 8;
+          ms.goals.forEach((goal) => { doc.text(`  • ${goal}`, margin + 12, y); y += 4; });
+          y += 4;
+        });
+      }
+
+      // --- LAST PAGE: Action Steps ---
+      doc.addPage();
+      const stepsPage = doc.internal.pages.length - 1;
+      addHeader(stepsPage, stepsPage);
+      y = addSectionTitle('Action Steps', 20);
+      doc.setFontSize(8);
+      plan.steps.forEach((step, i) => {
+        if (y > pageH - 30) { doc.addPage(); addHeader(doc.internal.pages.length - 1, doc.internal.pages.length - 1); y = 20; }
+        const priorityColor = step.priority === 'high' ? RED : step.priority === 'medium' ? AMBER : GREEN;
+        doc.setFillColor(priorityColor.r, priorityColor.g, priorityColor.b);
+        doc.circle(margin + 2, y + 2, 2, 'F');
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text(`${i + 1}. ${step.step}`, margin + 7, y + 3);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        y += 6;
+        const descLines = doc.splitTextToSize(step.description, contentW - 10);
+        doc.text(descLines, margin + 7, y);
+        y += descLines.length * 3.5 + 2;
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        const meta = [step.channel, step.platform, `Impact: ${step.estimatedImpact}`].filter(Boolean).join(' | ');
+        doc.text(meta, margin + 7, y);
+        y += 6;
+      });
+
+      // Fix page numbers
+      const totalPages = doc.internal.pages.length - 1;
+      for (let i = 2; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.setFontSize(7);
+        doc.text(`Page ${i - 1} of ${totalPages - 1}`, pageW / 2, pageH - 6, { align: 'center' });
+      }
+
+      const fileName = `${plan.title.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 40)}_Report.pdf`;
+      doc.save(fileName);
+      toast.success("PDF report downloaded!", { id: toastId });
+    } catch (error: any) {
+      console.error("PDF export error:", error);
+      toast.error("Failed to generate PDF", { id: toastId });
+    }
+  };
+
+  const exportPlanPPTX = async (plan: ActionPlan) => {
+    const toastId = toast.loading("Generating PowerPoint...");
+    try {
+      const PptxGenJS = (await import('pptxgenjs')).default;
+      const pptx = new PptxGenJS();
+      pptx.author = 'GeoRepute.ai';
+      pptx.company = 'GeoRepute.ai';
+      pptx.title = `Business Plan - ${plan.title}`;
+      pptx.layout = 'LAYOUT_WIDE';
+
+      const purple = '9333ea';
+      const purpleDark = '6b21a8';
+      const darkGray = '374151';
+      const medGray = '6b7280';
+      const green = '10b981';
+      const red = 'ef4444';
+      const amber = 'f59e0b';
+
+      let logoDataUrl: string | null = null;
+      try {
+        const logoRes = await fetch('/logo.png');
+        const blob = await logoRes.blob();
+        logoDataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+      } catch { /* continue without logo */ }
+
+      // Slide 1: Title
+      const slide1 = pptx.addSlide();
+      slide1.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: '40%', fill: { color: purpleDark } });
+      slide1.addShape(pptx.ShapeType.rect, { x: 0, y: '40%', w: '100%', h: '15%', fill: { color: purple } });
+      if (logoDataUrl) { try { slide1.addImage({ data: logoDataUrl, x: 0.5, y: 0.3, w: 1.2, h: 1.2 }); } catch {} }
+      slide1.addText('GEORepute.ai', { x: 2, y: 0.5, w: 5, fontSize: 24, bold: true, color: 'FFFFFF' });
+      slide1.addText('AI Visibility Intelligence Platform', { x: 2, y: 1.1, w: 5, fontSize: 12, color: 'FFFFFF' });
+      slide1.addText('Business Action Plan', { x: 0.5, y: 2.3, w: 9, fontSize: 36, bold: true, color: 'FFFFFF' });
+      slide1.addText(plan.title, { x: 0.5, y: 3.2, w: 9, fontSize: 18, color: darkGray });
+      slide1.addText(`${plan.priority.toUpperCase()} Priority  |  ${plan.timeline}  |  ${plan.category}`, { x: 0.5, y: 4.0, w: 9, fontSize: 11, color: medGray });
+      slide1.addText(new Date().toLocaleDateString(), { x: 0.5, y: 4.5, w: 9, fontSize: 10, color: medGray });
+
+      // Slide 2: Executive Summary
+      const slide2 = pptx.addSlide();
+      slide2.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: purple } });
+      slide2.addText('Executive Summary', { x: 0.5, y: 0.1, w: 9, fontSize: 18, bold: true, color: 'FFFFFF' });
+      slide2.addText('Objective', { x: 0.5, y: 1.0, w: 2, fontSize: 12, bold: true, color: purple });
+      slide2.addText(plan.objective, { x: 0.5, y: 1.4, w: 12, fontSize: 10, color: darkGray, wrap: true });
+      slide2.addText('AI Strategic Reasoning', { x: 0.5, y: 2.4, w: 4, fontSize: 12, bold: true, color: purple });
+      slide2.addText(plan.reasoning, { x: 0.5, y: 2.8, w: 12, fontSize: 9, color: darkGray, wrap: true });
+      slide2.addText('Expected Outcome', { x: 0.5, y: 4.5, w: 4, fontSize: 12, bold: true, color: purple });
+      slide2.addText(plan.expectedOutcome, { x: 0.5, y: 4.9, w: 12, fontSize: 9, color: darkGray, wrap: true });
+
+      if (plan.businessPlanData) {
+        const bpd = plan.businessPlanData;
+
+        // Slide 3: KPIs
+        const slide3 = pptx.addSlide();
+        slide3.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: purple } });
+        slide3.addText('KPIs & Goals', { x: 0.5, y: 0.1, w: 9, fontSize: 18, bold: true, color: 'FFFFFF' });
+        const kpiRows: any[][] = [
+          [{ text: 'KPI', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }, { text: 'Current', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }, { text: 'Target', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }, { text: 'Timeframe', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }],
+        ];
+        bpd.kpis.forEach((kpi) => {
+          kpiRows.push([
+            { text: kpi.name, options: { fontSize: 9, color: darkGray } },
+            { text: kpi.current, options: { fontSize: 9, color: darkGray } },
+            { text: kpi.target, options: { fontSize: 9, color: green, bold: true } },
+            { text: kpi.timeframe, options: { fontSize: 9, color: medGray } },
+          ]);
+        });
+        slide3.addTable(kpiRows, { x: 0.5, y: 1.0, w: 12, fontSize: 10, border: { pt: 0.5, color: 'E5E7EB' }, colW: [4, 2.5, 2.5, 3] });
+
+        // Slide 4: Budget
+        const slide4 = pptx.addSlide();
+        slide4.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: purple } });
+        slide4.addText('Budget Breakdown', { x: 0.5, y: 0.1, w: 9, fontSize: 18, bold: true, color: 'FFFFFF' });
+        slide4.addText(`Total Estimated: ${bpd.budget.total_estimated}`, { x: 0.5, y: 0.9, w: 6, fontSize: 14, bold: true, color: darkGray });
+        const budgetRows: any[][] = [
+          [{ text: 'Category', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }, { text: 'Amount', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }, { text: 'Percentage', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }],
+        ];
+        bpd.budget.breakdown.forEach((item) => {
+          budgetRows.push([
+            { text: item.category, options: { fontSize: 10, color: darkGray } },
+            { text: `$${item.amount}`, options: { fontSize: 10, color: darkGray } },
+            { text: `${item.percentage}%`, options: { fontSize: 10, color: purple, bold: true } },
+          ]);
+        });
+        slide4.addTable(budgetRows, { x: 0.5, y: 1.5, w: 12, fontSize: 10, border: { pt: 0.5, color: 'E5E7EB' }, colW: [5, 3.5, 3.5] });
+
+        // Slide 5: ROI Projection
+        const slide5 = pptx.addSlide();
+        slide5.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: purple } });
+        slide5.addText('ROI Projection', { x: 0.5, y: 0.1, w: 9, fontSize: 18, bold: true, color: 'FFFFFF' });
+        slide5.addText(`Break-even: Month ${bpd.roi_projection.break_even_month}  |  Projected Annual ROI: ${bpd.roi_projection.projected_annual_roi}`, { x: 0.5, y: 0.9, w: 12, fontSize: 12, bold: true, color: darkGray });
+        const roiRows: any[][] = [
+          [{ text: 'Month', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }, { text: 'Investment', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }, { text: 'Est. Return', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }, { text: 'Cumulative ROI', options: { bold: true, color: 'FFFFFF', fill: { color: purpleDark } } }],
+        ];
+        bpd.roi_projection.monthly_projections.forEach((mp) => {
+          roiRows.push([
+            { text: `Month ${mp.month}`, options: { fontSize: 10, color: darkGray } },
+            { text: `$${mp.investment}`, options: { fontSize: 10, color: red } },
+            { text: `$${mp.estimated_return}`, options: { fontSize: 10, color: green } },
+            { text: `${mp.cumulative_roi}%`, options: { fontSize: 10, color: mp.cumulative_roi >= 0 ? green : red, bold: true } },
+          ]);
+        });
+        slide5.addTable(roiRows, { x: 0.5, y: 1.5, w: 12, fontSize: 10, border: { pt: 0.5, color: 'E5E7EB' }, colW: [3, 3, 3, 3] });
+
+        // Slide 6: Competitive Positioning
+        const slide6 = pptx.addSlide();
+        slide6.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: purple } });
+        slide6.addText('Competitive Positioning', { x: 0.5, y: 0.1, w: 9, fontSize: 18, bold: true, color: 'FFFFFF' });
+        slide6.addText(bpd.competitive_positioning.summary, { x: 0.5, y: 1.0, w: 12, fontSize: 11, color: darkGray, wrap: true });
+        slide6.addText('Strengths', { x: 0.5, y: 2.2, w: 3, fontSize: 14, bold: true, color: green });
+        bpd.competitive_positioning.strengths.forEach((s, i) => {
+          slide6.addText(`• ${s}`, { x: 0.8, y: 2.7 + i * 0.35, w: 5, fontSize: 10, color: darkGray });
+        });
+        const gapStartY = 2.7 + bpd.competitive_positioning.strengths.length * 0.35 + 0.3;
+        slide6.addText('Gaps', { x: 0.5, y: gapStartY, w: 3, fontSize: 14, bold: true, color: red });
+        bpd.competitive_positioning.gaps.forEach((g, i) => {
+          slide6.addText(`• ${g}`, { x: 0.8, y: gapStartY + 0.4 + i * 0.35, w: 5, fontSize: 10, color: darkGray });
+        });
+        const oppY = gapStartY + 0.4 + bpd.competitive_positioning.gaps.length * 0.35 + 0.3;
+        slide6.addText('Market Opportunity', { x: 0.5, y: oppY, w: 4, fontSize: 14, bold: true, color: purple });
+        slide6.addText(bpd.competitive_positioning.market_opportunity, { x: 0.5, y: oppY + 0.4, w: 12, fontSize: 10, color: darkGray, wrap: true });
+
+        // Slide 7: Milestones
+        const slide7 = pptx.addSlide();
+        slide7.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: purple } });
+        slide7.addText('Milestones & Timeline', { x: 0.5, y: 0.1, w: 9, fontSize: 18, bold: true, color: 'FFFFFF' });
+        let msY = 1.0;
+        bpd.milestones.forEach((ms) => {
+          slide7.addShape(pptx.ShapeType.ellipse, { x: 0.5, y: msY, w: 0.5, h: 0.5, fill: { color: purple } });
+          slide7.addText(`M${ms.month}`, { x: 0.5, y: msY + 0.05, w: 0.5, h: 0.4, fontSize: 9, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle' });
+          slide7.addText(ms.title, { x: 1.3, y: msY, w: 5, fontSize: 13, bold: true, color: darkGray });
+          ms.goals.forEach((goal, gi) => {
+            slide7.addText(`• ${goal}`, { x: 1.5, y: msY + 0.4 + gi * 0.3, w: 10, fontSize: 9, color: medGray });
+          });
+          msY += 0.5 + ms.goals.length * 0.3 + 0.3;
+        });
+      }
+
+      // Action Steps Slides
+      const stepsPerSlide = 4;
+      for (let i = 0; i < plan.steps.length; i += stepsPerSlide) {
+        const slideSteps = pptx.addSlide();
+        slideSteps.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: '100%', h: 0.6, fill: { color: purple } });
+        slideSteps.addText(`Action Steps (${i + 1}-${Math.min(i + stepsPerSlide, plan.steps.length)})`, { x: 0.5, y: 0.1, w: 9, fontSize: 18, bold: true, color: 'FFFFFF' });
+        let stepY = 1.0;
+        plan.steps.slice(i, i + stepsPerSlide).forEach((step, si) => {
+          const priorityCol = step.priority === 'high' ? red : step.priority === 'medium' ? amber : green;
+          slideSteps.addShape(pptx.ShapeType.ellipse, { x: 0.5, y: stepY, w: 0.35, h: 0.35, fill: { color: priorityCol } });
+          slideSteps.addText(`${i + si + 1}`, { x: 0.5, y: stepY, w: 0.35, h: 0.35, fontSize: 10, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle' });
+          slideSteps.addText(step.step, { x: 1.1, y: stepY - 0.05, w: 11, fontSize: 12, bold: true, color: darkGray });
+          slideSteps.addText(step.description, { x: 1.1, y: stepY + 0.3, w: 11, fontSize: 9, color: medGray, wrap: true });
+          const metaText = [step.channel, step.platform, step.estimatedImpact].filter(Boolean).join(' | ');
+          slideSteps.addText(metaText, { x: 1.1, y: stepY + 0.8, w: 11, fontSize: 8, color: purple });
+          stepY += 1.3;
+        });
+      }
+
+      const fileName = `${plan.title.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 40)}_Presentation.pptx`;
+      await pptx.writeFile({ fileName });
+      toast.success("PowerPoint downloaded!", { id: toastId });
+    } catch (error: any) {
+      console.error("PPTX export error:", error);
+      toast.error("Failed to generate PowerPoint", { id: toastId });
     }
   };
 
@@ -717,6 +1210,20 @@ export default function ActionPlansPage() {
                   </p>
                 </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Generate content in
+                </label>
+                <select
+                  value={planLanguage}
+                  onChange={(e) => setPlanLanguage(e.target.value as "en" | "he")}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent bg-white"
+                >
+                  <option value="en">English</option>
+                  <option value="he">Hebrew</option>
+                </select>
+              </div>
 
               <Button
                 onClick={generateActionPlan}
@@ -937,6 +1444,24 @@ export default function ActionPlansPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          {plan.businessPlanData && (
+                            <>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); exportPlanPDF(plan); }}
+                                className="text-purple-500 hover:text-purple-700 p-2 hover:bg-purple-50 rounded-lg transition-colors"
+                                title="Export PDF"
+                              >
+                                <FileText className="w-5 h-5" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); exportPlanPPTX(plan); }}
+                                className="text-blue-500 hover:text-blue-700 p-2 hover:bg-blue-50 rounded-lg transition-colors"
+                                title="Export PowerPoint"
+                              >
+                                <Presentation className="w-5 h-5" />
+                              </button>
+                            </>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1141,6 +1666,238 @@ export default function ActionPlansPage() {
                             })}
                           </div>
                         </div>
+
+                        {/* Business Plan Dashboard */}
+                        {plan.businessPlanData && (
+                          <div className="border-t border-gray-200">
+                            <div className="p-6 border-b border-gray-200">
+                              <h4 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2">
+                                <BarChart3 className="w-5 h-5 text-purple-600" />
+                                Business Plan
+                              </h4>
+                              <p className="text-xs text-gray-500 mb-4">AI-generated metrics, projections, and strategic analysis</p>
+
+                              {/* KPIs & Goals */}
+                              <div className="mb-6">
+                                <h5 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+                                  <Target className="w-4 h-4 text-green-600" />
+                                  KPIs & Goals
+                                </h5>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {plan.businessPlanData.kpis.map((kpi, i) => (
+                                    <div key={i} className="bg-white border border-gray-200 rounded-lg p-3">
+                                      <div className="text-xs font-medium text-gray-500 mb-1">{kpi.name}</div>
+                                      <div className="flex items-end justify-between mb-2">
+                                        <div>
+                                          <span className="text-lg font-bold text-gray-900">{kpi.current}</span>
+                                          <span className="text-xs text-gray-400 mx-1">&rarr;</span>
+                                          <span className="text-sm font-semibold text-green-600">{kpi.target}</span>
+                                        </div>
+                                      </div>
+                                      <div className="text-xs text-gray-400">{kpi.timeframe}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Budget & ROI Row */}
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                                {/* Budget Breakdown */}
+                                <div>
+                                  <h5 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+                                    <DollarSign className="w-4 h-4 text-amber-600" />
+                                    Budget Breakdown
+                                    <span className="text-xs font-normal text-gray-500 ml-1">({plan.businessPlanData.budget.total_estimated})</span>
+                                  </h5>
+                                  <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                    <ResponsiveContainer width="100%" height={200}>
+                                      <PieChart>
+                                        <Pie
+                                          data={plan.businessPlanData.budget.breakdown}
+                                          cx="50%"
+                                          cy="50%"
+                                          outerRadius={70}
+                                          dataKey="amount"
+                                          nameKey="category"
+                                          label={({ category, percentage }) => `${category} ${percentage}%`}
+                                          labelLine={false}
+                                        >
+                                          {plan.businessPlanData.budget.breakdown.map((_, i) => (
+                                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                                          ))}
+                                        </Pie>
+                                        <Tooltip formatter={(value: number) => `$${value}`} />
+                                      </PieChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </div>
+
+                                {/* ROI Projection */}
+                                <div>
+                                  <h5 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+                                    <TrendingUp className="w-4 h-4 text-blue-600" />
+                                    ROI Projection
+                                    <span className="text-xs font-normal text-gray-500 ml-1">(Break-even: Month {plan.businessPlanData.roi_projection.break_even_month})</span>
+                                  </h5>
+                                  <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                    <ResponsiveContainer width="100%" height={200}>
+                                      <LineChart data={plan.businessPlanData.roi_projection.monthly_projections}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                        <XAxis dataKey="month" tickFormatter={(m) => `M${m}`} fontSize={11} />
+                                        <YAxis fontSize={11} />
+                                        <Tooltip formatter={(value: number, name: string) => [name === 'cumulative_roi' ? `${value}%` : `$${value}`, name === 'investment' ? 'Investment' : name === 'estimated_return' ? 'Return' : 'ROI %']} />
+                                        <Legend formatter={(value) => value === 'investment' ? 'Investment' : value === 'estimated_return' ? 'Return' : 'ROI %'} />
+                                        <Line type="monotone" dataKey="investment" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="estimated_return" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                        <ReferenceLine y={0} stroke="#9ca3af" strokeDasharray="3 3" />
+                                      </LineChart>
+                                    </ResponsiveContainer>
+                                    <div className="text-center mt-2 text-xs text-gray-500">
+                                      Projected Annual ROI: <span className="font-bold text-green-600">{plan.businessPlanData.roi_projection.projected_annual_roi}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Competitive Positioning & Milestones Row */}
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                                {/* Competitive Positioning */}
+                                <div>
+                                  <h5 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+                                    <Shield className="w-4 h-4 text-purple-600" />
+                                    Competitive Positioning
+                                  </h5>
+                                  <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+                                    <p className="text-sm text-gray-700">{plan.businessPlanData.competitive_positioning.summary}</p>
+                                    <div>
+                                      <div className="text-xs font-semibold text-green-700 mb-1">Strengths</div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {plan.businessPlanData.competitive_positioning.strengths.map((s, i) => (
+                                          <span key={i} className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full">{s}</span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-xs font-semibold text-red-700 mb-1">Gaps</div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {plan.businessPlanData.competitive_positioning.gaps.map((g, i) => (
+                                          <span key={i} className="px-2 py-0.5 bg-red-100 text-red-800 text-xs rounded-full">{g}</span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                    <div className="border-t border-gray-100 pt-2">
+                                      <div className="text-xs font-semibold text-blue-700 mb-1">Market Opportunity</div>
+                                      <p className="text-xs text-gray-600">{plan.businessPlanData.competitive_positioning.market_opportunity}</p>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Milestones */}
+                                <div>
+                                  <h5 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-1.5">
+                                    <Flag className="w-4 h-4 text-amber-600" />
+                                    Milestones
+                                  </h5>
+                                  <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                    <div className="relative">
+                                      {plan.businessPlanData.milestones.map((ms, i) => (
+                                        <div key={i} className="flex gap-3 mb-4 last:mb-0">
+                                          <div className="flex flex-col items-center">
+                                            <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                              M{ms.month}
+                                            </div>
+                                            {i < plan.businessPlanData!.milestones.length - 1 && (
+                                              <div className="w-0.5 flex-1 bg-purple-200 mt-1" />
+                                            )}
+                                          </div>
+                                          <div className="flex-1 pb-1">
+                                            <div className="text-sm font-semibold text-gray-900">{ms.title}</div>
+                                            <ul className="mt-1 space-y-0.5">
+                                              {ms.goals.map((goal, gi) => (
+                                                <li key={gi} className="text-xs text-gray-600 flex items-start gap-1">
+                                                  <span className="text-purple-400 mt-0.5">&#8226;</span>
+                                                  {goal}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Channel & Priority Distribution */}
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Channel Distribution */}
+                                <div>
+                                  <h5 className="text-sm font-bold text-gray-800 mb-3">Channel Distribution</h5>
+                                  <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                    <ResponsiveContainer width="100%" height={180}>
+                                      <BarChart data={(() => {
+                                        const channelMap: Record<string, number> = {};
+                                        plan.steps.forEach(s => { if (s.channel) channelMap[s.channel] = (channelMap[s.channel] || 0) + 1; });
+                                        return Object.entries(channelMap).map(([name, count]) => ({ name: name.replace('_', ' '), count }));
+                                      })()}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                        <XAxis dataKey="name" fontSize={10} />
+                                        <YAxis allowDecimals={false} fontSize={11} />
+                                        <Tooltip />
+                                        <Bar dataKey="count" fill="#9333ea" radius={[4, 4, 0, 0]} />
+                                      </BarChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </div>
+
+                                {/* Priority Distribution */}
+                                <div>
+                                  <h5 className="text-sm font-bold text-gray-800 mb-3">Priority Distribution</h5>
+                                  <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                    <ResponsiveContainer width="100%" height={180}>
+                                      <PieChart>
+                                        <Pie
+                                          data={[
+                                            { name: 'High', value: plan.steps.filter(s => s.priority === 'high').length, fill: '#ef4444' },
+                                            { name: 'Medium', value: plan.steps.filter(s => s.priority === 'medium').length, fill: '#f59e0b' },
+                                            { name: 'Low', value: plan.steps.filter(s => s.priority === 'low').length, fill: '#10b981' },
+                                          ].filter(d => d.value > 0)}
+                                          cx="50%"
+                                          cy="50%"
+                                          outerRadius={65}
+                                          dataKey="value"
+                                          label={({ name, value }) => `${name}: ${value}`}
+                                        >
+                                          {[
+                                            { name: 'High', value: plan.steps.filter(s => s.priority === 'high').length, fill: '#ef4444' },
+                                            { name: 'Medium', value: plan.steps.filter(s => s.priority === 'medium').length, fill: '#f59e0b' },
+                                            { name: 'Low', value: plan.steps.filter(s => s.priority === 'low').length, fill: '#10b981' },
+                                          ].filter(d => d.value > 0).map((entry, i) => (
+                                            <Cell key={i} fill={entry.fill} />
+                                          ))}
+                                        </Pie>
+                                        <Tooltip />
+                                        <Legend />
+                                      </PieChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Export Buttons */}
+                              <div className="mt-6 pt-4 border-t border-gray-200 flex items-center gap-3">
+                                <Button onClick={() => exportPlanPDF(plan)} variant="primary" size="sm">
+                                  <FileText className="w-4 h-4 mr-1.5" />
+                                  Export PDF Report
+                                </Button>
+                                <Button onClick={() => exportPlanPPTX(plan)} variant="primary" size="sm" className="bg-blue-600 hover:bg-blue-700">
+                                  <Presentation className="w-4 h-4 mr-1.5" />
+                                  Export Presentation
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </Card>

@@ -4974,6 +4974,51 @@ function AIVisibilityContent() {
                 </div>
               </div>
 
+              {/* Revenue Opportunity Alert */}
+              {(() => {
+                const missedHighIntent = projectResponses.filter(r => 
+                  !r.response_metadata?.brand_mentioned && 
+                  (r.response_metadata?.intent_score >= 45 || r.response_metadata?.revenue_potential === 'high' || r.response_metadata?.revenue_potential === 'medium')
+                );
+                const totalHighIntent = projectResponses.filter(r => 
+                  r.response_metadata?.intent_score >= 45 || r.response_metadata?.revenue_potential === 'high' || r.response_metadata?.revenue_potential === 'medium'
+                );
+                if (missedHighIntent.length === 0) return null;
+                const missedPct = totalHighIntent.length > 0 ? Math.round((missedHighIntent.length / totalHighIntent.length) * 100) : 0;
+                return (
+                  <div className="bg-gradient-to-r from-red-50 to-orange-50 border border-red-200 rounded-xl p-5 mb-4">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <span className="text-2xl">💰</span>
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-lg font-bold text-red-900 mb-1">Revenue at Risk</h3>
+                        <p className="text-sm text-red-800 mb-3">
+                          Your brand is <strong>missing from {missedHighIntent.length} high-intent buyer queries</strong> ({missedPct}% of commercial queries). 
+                          These are searches from people actively looking to purchase — every missed query is a lost revenue opportunity.
+                        </p>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="bg-white/70 rounded-lg p-3 text-center">
+                            <div className="text-2xl font-bold text-red-700">{missedHighIntent.length}</div>
+                            <div className="text-xs text-red-600">Missed Buyer Queries</div>
+                          </div>
+                          <div className="bg-white/70 rounded-lg p-3 text-center">
+                            <div className="text-2xl font-bold text-orange-700">{missedPct}%</div>
+                            <div className="text-xs text-orange-600">Commercial Gap Rate</div>
+                          </div>
+                          <div className="bg-white/70 rounded-lg p-3 text-center">
+                            <div className="text-2xl font-bold text-amber-700">
+                              {missedHighIntent.filter(r => r.response_metadata?.competitors_found?.length > 0).length}
+                            </div>
+                            <div className="text-xs text-amber-600">Won by Competitors</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Viewing historical session banner */}
               {isViewingHistory && activeSession && (
                 <div className="mb-4 flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
@@ -5319,8 +5364,33 @@ function AIVisibilityContent() {
                                     </div>
                                   </div>
 
-                                  {/* Status Badge */}
-                                  <div className="flex items-center justify-end mb-4">
+                                  {/* Status Badge + Intent Score */}
+                                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {/* Commercial Intent Badge */}
+                                      {firstResponse.response_metadata?.intent && (
+                                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                          firstResponse.response_metadata.revenue_potential === 'high' ? 'bg-red-100 text-red-800' :
+                                          firstResponse.response_metadata.revenue_potential === 'medium' ? 'bg-orange-100 text-orange-800' :
+                                          firstResponse.response_metadata.revenue_potential === 'low' ? 'bg-yellow-100 text-yellow-800' :
+                                          'bg-gray-100 text-gray-600'
+                                        }`}>
+                                          {firstResponse.response_metadata.revenue_potential === 'high' ? '🔥' :
+                                           firstResponse.response_metadata.revenue_potential === 'medium' ? '⚡' :
+                                           firstResponse.response_metadata.revenue_potential === 'low' ? '💡' : 'ℹ️'}{' '}
+                                          {firstResponse.response_metadata.intent === 'transactional' ? 'Purchase Intent' :
+                                           firstResponse.response_metadata.intent === 'commercial_investigation' ? 'Buyer Research' :
+                                           firstResponse.response_metadata.intent === 'consideration' ? 'Considering' :
+                                           'Informational'}
+                                        </span>
+                                      )}
+                                      {/* Revenue opportunity for missed high-intent */}
+                                      {resultsView === 'missed' && firstResponse.response_metadata?.intent_score >= 45 && (
+                                        <span className="px-2 py-1 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+                                          💰 Revenue at risk — you are invisible to this buyer
+                                        </span>
+                                      )}
+                                    </div>
                                     <span className={`px-2 py-1 rounded text-xs font-medium ${
                                       resultsView === 'mentioned'
                                         ? 'bg-green-100 text-green-800'
@@ -7365,6 +7435,63 @@ function AIVisibilityContent() {
                   {viewResponseModal.response.response}
                 </div>
               </div>
+
+              {/* Brand Detection Verification & Intent */}
+              {viewResponseModal.response.response_metadata && (
+                <div className="space-y-3 mb-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                      viewResponseModal.response.response_metadata.brand_mentioned
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {viewResponseModal.response.response_metadata.brand_mentioned ? '✓ Brand Mentioned' : '✗ Brand Not Mentioned'}
+                    </span>
+                    {viewResponseModal.response.response_metadata.intent && (
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        viewResponseModal.response.response_metadata.revenue_potential === 'high' ? 'bg-red-100 text-red-800' :
+                        viewResponseModal.response.response_metadata.revenue_potential === 'medium' ? 'bg-orange-100 text-orange-800' :
+                        viewResponseModal.response.response_metadata.revenue_potential === 'low' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        Intent: {viewResponseModal.response.response_metadata.intent.replace('_', ' ')} ({viewResponseModal.response.response_metadata.intent_score}/100)
+                      </span>
+                    )}
+                  </div>
+                  {viewResponseModal.response.response_metadata.verified_mention_text && (
+                    <div className="bg-green-50 border border-green-200 rounded p-3">
+                      <div className="text-xs font-medium text-green-800 mb-1">Verified brand text found in response:</div>
+                      <div className="text-xs text-green-700 mb-1.5">
+                        Found in: {viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'Claude (Anthropic)' :
+                         viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'ChatGPT (OpenAI)' :
+                         viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'Gemini (Google)' :
+                         viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'Perplexity' :
+                         viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'Groq' :
+                         viewResponseModal.response.platform || 'Unknown'}
+                      </div>
+                      <div className="text-sm text-green-900">
+                        &ldquo;{viewResponseModal.response.response_metadata.verified_mention_text}&rdquo;
+                      </div>
+                    </div>
+                  )}
+                  {!viewResponseModal.response.response_metadata.brand_mentioned && viewResponseModal.response.response_metadata.intent_score >= 45 && (
+                    <div className="bg-red-50 border border-red-200 rounded p-3">
+                      <div className="text-xs font-bold text-red-800 mb-1">💰 Revenue Opportunity Lost</div>
+                      <div className="text-sm text-red-700">
+                        {viewResponseModal.response.response_metadata.opportunity_label || 'This is a high-intent buyer query where your brand is invisible.'}
+                      </div>
+                    </div>
+                  )}
+                  {viewResponseModal.response.response_metadata.competitors_found?.length > 0 && !viewResponseModal.response.response_metadata.brand_mentioned && (
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                      <div className="text-xs font-bold text-amber-800 mb-1">⚠️ Competitors visible instead</div>
+                      <div className="text-sm text-amber-700">
+                        {viewResponseModal.response.response_metadata.competitors_found.join(', ')} {viewResponseModal.response.response_metadata.competitors_found.length === 1 ? 'is' : 'are'} mentioned while your brand is not.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="p-6 border-t border-gray-200">
               <button

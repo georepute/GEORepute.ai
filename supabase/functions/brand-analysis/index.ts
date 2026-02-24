@@ -353,7 +353,7 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'gpt-4o-mini',
+            model: 'gpt-5.2',
             messages: [
               {
                 role: 'system',
@@ -364,7 +364,7 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
                 content: prompt
               }
             ],
-            max_tokens: 4000,
+            max_completion_tokens: 4000,
             temperature: 0.7
           })
         });
@@ -388,7 +388,7 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'claude-3-haiku-20240307',
+            model: 'claude-sonnet-4-5',
             max_tokens: 4000,
             system: systemMessage,
             messages: [
@@ -416,8 +416,8 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
           ? `${systemMessage}\n\n${prompt}`
           : prompt;
         
-        // Try gemini-2.0-flash first (v1 API, optimized for cost and latency)
-        let response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+        // Try gemini-3.1-pro-preview first (v1beta API)
+        let response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -438,10 +438,10 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
             }
           })
         });
-        // If that fails, try gemini-1.5-flash (v1 API, faster and cheaper)
+        // If that fails, fall back to gemini-2.0-flash (v1 API)
         if (!response.ok) {
-          console.log('Gemini 2.0 Flash failed, trying gemini-1.5-flash (v1)...');
-          response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+          console.log('Gemini 3.1 Pro failed, trying gemini-2.0-flash (v1)...');
+          response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
@@ -463,9 +463,9 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
             })
           });
         }
-        // If that also fails, try gemini-1.5-pro with v1 API
+        // If that also fails, try gemini-1.5-pro (v1 API)
         if (!response.ok) {
-          console.log('Gemini 1.5 Flash failed, trying gemini-1.5-pro (v1)...');
+          console.log('Gemini 2.0 Flash failed, trying gemini-1.5-pro (v1)...');
           response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key=${apiKey}`, {
             method: 'POST',
             headers: {
@@ -507,7 +507,7 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
     }
     if (platform === 'perplexity' && apiKey) {
       try {
-        // Use 'sonar' - the official model from Perplexity docs
+        // Use 'sonar-pro' - Pro model from Perplexity
         let response = await fetchWithRetry('https://api.perplexity.ai/chat/completions', {
           method: 'POST',
           headers: {
@@ -515,7 +515,7 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'sonar',
+            model: 'sonar-pro',
             messages: [
               {
                 role: 'system',
@@ -530,7 +530,33 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
             temperature: 0.7
           })
         });
-        // If that fails, try sonar-small-online
+        // If that fails, try sonar (online)
+        if (!response.ok) {
+          console.log('Perplexity sonar-pro failed, trying sonar...');
+          response = await fetchWithRetry('https://api.perplexity.ai/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: 'sonar',
+              messages: [
+                {
+                  role: 'system',
+                  content: systemMessage
+                },
+                {
+                  role: 'user',
+                  content: prompt
+                }
+              ],
+              max_tokens: 4000,
+              temperature: 0.7
+            })
+          });
+        }
+        // If that also fails, try sonar-small-online
         if (!response.ok) {
           console.log('Perplexity sonar failed, trying sonar-small-online...');
           response = await fetchWithRetry('https://api.perplexity.ai/chat/completions', {
@@ -776,36 +802,92 @@ async function analyzeBrandMention(response, brandName, competitors = []) {
   if (!response || !brandName) return null;
   const lowerResponse = response.toLowerCase();
   const lowerBrandName = brandName.toLowerCase();
-  // Enhanced brand detection - check for variations and partial matches
+
+  // Common words that should never count as a brand match on their own
+  const commonWords = new Set([
+    'the','a','an','and','or','but','in','on','at','to','for','of','with','by','from','up','about','into','through','during','before','after',
+    'above','below','between','out','off','over','under','again','further','then','once','here','there','when','where','why','how','all',
+    'both','each','few','more','most','other','some','such','no','nor','not','only','own','same','so','than','too','very','can','will',
+    'just','should','now','also','new','one','two','way','may','like','time','has','look','find','use','her','his','its','our','what',
+    'make','get','go','good','great','best','top','high','big','long','right','well','back','old','first','last','next','still','even',
+    'any','day','work','part','take','come','made','live','run','set','try','ask','need','keep','let','help','show','start','call','move',
+    'play','turn','give','point','read','change','small','large','hand','home','world','life','group','number','open','close','real',
+    'free','full','clear','end','side','data','plan','service','system','software','tool','tools','platform','app','web','digital',
+    'online','cloud','mobile','tech','technology','media','social','business','company','market','marketing','management','project',
+    'solution','solutions','product','products','team','user','users','customer','customers','client','clients','support','review',
+    'design','development','build','code','test','search','content','brand','site','pro','plus','smart','blue','green','red','black',
+    'white','light','dark','global','local','fast','easy','simple','power','energy','star','sun','moon','fire','air','water','earth',
+    'net','link','core','hub','lab','labs','bit','max','key','box'
+  ]);
+
+  // Build strict brand variations: full name, no-space, no-special-char only
+  // Individual words are only included if the brand is a single word
+  const brandWords = lowerBrandName.split(/\s+/).filter(Boolean);
   const brandVariations = [
     lowerBrandName,
     lowerBrandName.replace(/\s+/g, ''),
-    lowerBrandName.replace(/[^\w\s]/g, ''),
-    ...lowerBrandName.split(' ') // Individual words
-  ].filter((v)=>v.length > 2); // Only consider variations longer than 2 characters
-  const brandMentioned = brandVariations.some((variation)=>lowerResponse.includes(variation));
+    lowerBrandName.replace(/[^\w\s]/g, '').trim(),
+  ];
+  // Only add individual words if brand is a single word or if the word is long+unique enough
+  if (brandWords.length === 1) {
+    brandVariations.push(brandWords[0]);
+  } else {
+    // For multi-word brands, only add words that are >= 5 chars AND not common
+    for (const word of brandWords) {
+      if (word.length >= 5 && !commonWords.has(word)) {
+        brandVariations.push(word);
+      }
+    }
+  }
+  // Dedupe and filter out very short strings
+  const uniqueBrandVariations = [...new Set(brandVariations)].filter((v) => v.length > 2);
+
+  // Use word-boundary matching to avoid partial matches inside other words
+  const brandMentioned = uniqueBrandVariations.some((variation) => {
+    // For short variations (<=4 chars), require word boundaries
+    if (variation.length <= 4) {
+      const regex = new RegExp(`\\b${variation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      return regex.test(response);
+    }
+    return lowerResponse.includes(variation);
+  });
   // Find competitor mentions with more context
   const competitorsFound = [];
   const competitorContexts = {};
   if (competitors && competitors.length > 0) {
     for (const competitor of competitors){
       const lowerCompetitor = competitor.toLowerCase();
-      // Enhanced competitor detection - check for variations
+      const compWords = lowerCompetitor.split(/\s+/).filter(Boolean);
       const competitorVariations = [
         lowerCompetitor,
         lowerCompetitor.replace(/\s+/g, ''),
-        lowerCompetitor.replace(/[^\w\s]/g, ''),
-        ...lowerCompetitor.split(' ') // Individual words
-      ].filter((v)=>v.length > 2);
-      const competitorMentioned = competitorVariations.some((variation)=>lowerResponse.includes(variation));
+        lowerCompetitor.replace(/[^\w\s]/g, '').trim(),
+      ];
+      if (compWords.length === 1) {
+        competitorVariations.push(compWords[0]);
+      } else {
+        for (const word of compWords) {
+          if (word.length >= 5 && !commonWords.has(word)) {
+            competitorVariations.push(word);
+          }
+        }
+      }
+      const uniqueCompVariations = [...new Set(competitorVariations)].filter((v) => v.length > 2);
+      const competitorMentioned = uniqueCompVariations.some((variation) => {
+        if (variation.length <= 4) {
+          const regex = new RegExp(`\\b${variation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+          return regex.test(response);
+        }
+        return lowerResponse.includes(variation);
+      });
       if (competitorMentioned) {
         competitorsFound.push(competitor);
         // Find context for competitor mentions
         const sentences = response.split(/[.!?]+/).filter((s)=>s.trim().length > 0);
-        const competitorSentences = sentences.filter((s)=>competitorVariations.some((variation)=>s.toLowerCase().includes(variation)));
+        const competitorSentences = sentences.filter((s)=>uniqueCompVariations.some((variation)=>s.toLowerCase().includes(variation)));
         if (competitorSentences.length > 0) {
           // Detect comparison language
-          const directComparisonSentences = competitorSentences.filter((s)=>brandVariations.some((brandVar)=>s.toLowerCase().includes(brandVar)) && (s.toLowerCase().includes(' vs ') || s.toLowerCase().includes(' versus ') || s.toLowerCase().includes(' compared to ') || s.toLowerCase().includes(' better than ') || s.toLowerCase().includes(' worse than ') || s.toLowerCase().includes(' similar to ') || s.toLowerCase().includes(' like ') || s.toLowerCase().includes(' alternative to ') || s.toLowerCase().includes(' include ') || s.toLowerCase().includes(' such as ') || s.toLowerCase().includes(' along with ') || s.toLowerCase().includes(' alongside ')));
+          const directComparisonSentences = competitorSentences.filter((s)=>uniqueBrandVariations.some((brandVar)=>s.toLowerCase().includes(brandVar)) && (s.toLowerCase().includes(' vs ') || s.toLowerCase().includes(' versus ') || s.toLowerCase().includes(' compared to ') || s.toLowerCase().includes(' better than ') || s.toLowerCase().includes(' worse than ') || s.toLowerCase().includes(' similar to ') || s.toLowerCase().includes(' like ') || s.toLowerCase().includes(' alternative to ') || s.toLowerCase().includes(' include ') || s.toLowerCase().includes(' such as ') || s.toLowerCase().includes(' along with ') || s.toLowerCase().includes(' alongside ')));
           // Enhanced sentiment detection
           const positiveWords = [
             'better',
@@ -839,22 +921,22 @@ async function analyzeBrandMention(response, brandName, competitors = []) {
           const competitorPositive = positiveWords.some((word)=>competitorSentences.some((s)=>{
               const sentence = s.toLowerCase();
               const wordIndex = sentence.indexOf(word);
-              const competitorIndex = competitorVariations.map((v)=>sentence.indexOf(v)).find((i)=>i !== -1) || -1;
+              const competitorIndex = uniqueCompVariations.map((v)=>sentence.indexOf(v)).find((i)=>i !== -1) || -1;
               // Check if positive word is near competitor mention (within 10 words)
               return wordIndex !== -1 && competitorIndex !== -1 && Math.abs(wordIndex - competitorIndex) < 50;
             }));
           const competitorNegative = negativeWords.some((word)=>competitorSentences.some((s)=>{
               const sentence = s.toLowerCase();
               const wordIndex = sentence.indexOf(word);
-              const competitorIndex = competitorVariations.map((v)=>sentence.indexOf(v)).find((i)=>i !== -1) || -1;
+              const competitorIndex = uniqueCompVariations.map((v)=>sentence.indexOf(v)).find((i)=>i !== -1) || -1;
               return wordIndex !== -1 && competitorIndex !== -1 && Math.abs(wordIndex - competitorIndex) < 50;
             }));
           // Determine if competitor is positioned as better or worse than the brand
           let comparisonResult = 'neutral';
           if (directComparisonSentences.length > 0) {
             const comparisonSentence = directComparisonSentences[0].toLowerCase();
-            const brandIndex = brandVariations.map((v)=>comparisonSentence.indexOf(v)).find((i)=>i !== -1) || -1;
-            const competitorIndex = competitorVariations.map((v)=>comparisonSentence.indexOf(v)).find((i)=>i !== -1) || -1;
+            const brandIndex = uniqueBrandVariations.map((v)=>comparisonSentence.indexOf(v)).find((i)=>i !== -1) || -1;
+            const competitorIndex = uniqueCompVariations.map((v)=>comparisonSentence.indexOf(v)).find((i)=>i !== -1) || -1;
             if (brandIndex !== -1 && competitorIndex !== -1) {
               const brandFirst = brandIndex < competitorIndex;
               if (comparisonSentence.includes('better than') || comparisonSentence.includes('superior to')) {
@@ -873,14 +955,14 @@ async function analyzeBrandMention(response, brandName, competitors = []) {
           competitorContexts[competitor] = {
             mentions: competitorSentences.length,
             context: competitorSentences[0].trim(),
-            position: sentences.findIndex((s)=>competitorVariations.some((v)=>s.toLowerCase().includes(v))) + 1,
-            mentioned_with_brand: competitorSentences.some((s)=>brandVariations.some((v)=>s.toLowerCase().includes(v))),
+            position: sentences.findIndex((s)=>uniqueCompVariations.some((v)=>s.toLowerCase().includes(v))) + 1,
+            mentioned_with_brand: competitorSentences.some((s)=>uniqueBrandVariations.some((v)=>s.toLowerCase().includes(v))),
             direct_comparison: directComparisonSentences.length > 0,
             comparison_result: comparisonResult,
             sentiment: competitorPositive && !competitorNegative ? 'positive' : competitorNegative && !competitorPositive ? 'negative' : 'mixed',
             all_contexts: competitorSentences.map((s)=>s.trim()).slice(0, 3),
             in_ranking_list: isInList,
-            ranking_position: isInList ? sentences.findIndex((s)=>competitorVariations.some((v)=>s.toLowerCase().includes(v))) + 1 : null
+            ranking_position: isInList ? sentences.findIndex((s)=>uniqueCompVariations.some((v)=>s.toLowerCase().includes(v))) + 1 : null
           };
         }
       }
@@ -903,7 +985,7 @@ async function analyzeBrandMention(response, brandName, competitors = []) {
   let mentionContext = null;
   let allBrandMentions = [];
   for(let i = 0; i < sentences.length; i++){
-    if (brandVariations.some((variation)=>sentences[i].toLowerCase().includes(variation))) {
+    if (uniqueBrandVariations.some((variation)=>sentences[i].toLowerCase().includes(variation))) {
       if (mentionPosition === null) {
         mentionPosition = i + 1;
         mentionContext = sentences[i].trim();
@@ -1021,7 +1103,34 @@ async function analyzeBrandMention(response, brandName, competitors = []) {
     'workflow',
     'collaboration'
   ];
-  const featureMentions = sentences.filter((s)=>brandVariations.some((variation)=>s.toLowerCase().includes(variation)) && featureKeywords.some((keyword)=>s.toLowerCase().includes(keyword))).map((s)=>s.trim()).slice(0, 3); // Up to 3 feature mentions
+  const featureMentions = sentences.filter((s)=>uniqueBrandVariations.some((variation)=>s.toLowerCase().includes(variation)) && featureKeywords.some((keyword)=>s.toLowerCase().includes(keyword))).map((s)=>s.trim()).slice(0, 3);
+  // Extract the sentence containing the brand mention for verification
+  let verifiedMentionText: string | null = null;
+  if (brandMentioned) {
+    for (const variation of uniqueBrandVariations) {
+      const idx = lowerResponse.indexOf(variation);
+      if (idx !== -1) {
+        // Find sentence boundaries around the mention
+        const textBefore = response.substring(0, idx);
+        const textAfter = response.substring(idx);
+        const sentenceStart = Math.max(
+          textBefore.lastIndexOf('. ') + 2,
+          textBefore.lastIndexOf('? ') + 2,
+          textBefore.lastIndexOf('! ') + 2,
+          textBefore.lastIndexOf('\n') + 1,
+          0
+        );
+        const afterMatch = textAfter.search(/[.!?\n]/);
+        const sentenceEnd = afterMatch !== -1 ? idx + afterMatch + 1 : Math.min(response.length, idx + variation.length + 100);
+        verifiedMentionText = response.substring(sentenceStart, sentenceEnd).trim();
+        if (verifiedMentionText.length > 300) {
+          verifiedMentionText = verifiedMentionText.substring(0, 300) + '...';
+        }
+        break;
+      }
+    }
+  }
+
   return {
     brand_mentioned: brandMentioned,
     mention_position: mentionPosition,
@@ -1029,13 +1138,14 @@ async function analyzeBrandMention(response, brandName, competitors = []) {
     competitors_found: competitorsFound,
     competitor_contexts: competitorContexts,
     mention_context: mentionContext,
+    verified_mention_text: verifiedMentionText,
     all_brand_mentions: allBrandMentions.slice(0, 5),
     feature_mentions: featureMentions,
     total_brand_mentions: allBrandMentions.length,
     total_competitor_mentions: competitorsFound.reduce((acc, comp)=>acc + (competitorContexts[comp]?.mentions || 0), 0),
     comparative_analysis: competitorsFound.length > 0 && brandMentioned,
     query_relevance: queryRelevance,
-    brand_variations_detected: brandVariations.filter((v)=>lowerResponse.includes(v)),
+    brand_variations_detected: uniqueBrandVariations.filter((v)=>lowerResponse.includes(v)),
     competitor_variations_detected: competitors.reduce((acc, comp)=>{
       const variations = [
         comp.toLowerCase(),
@@ -1048,6 +1158,55 @@ async function analyzeBrandMention(response, brandName, competitors = []) {
     }, {})
   };
 }
+// Classify query commercial intent and estimate revenue opportunity
+function classifyQueryIntent(query: string): { intent: string; intent_score: number; revenue_potential: string; opportunity_label: string } {
+  const lowerQuery = query.toLowerCase();
+
+  // High commercial intent signals
+  const buySignals = ['buy', 'purchase', 'pricing', 'price', 'cost', 'quote', 'demo', 'trial', 'subscribe', 'sign up', 'signup', 'get started', 'order', 'plan', 'plans', 'tier', 'license', 'pay', 'payment', 'checkout', 'billing', 'upgrade', 'downgrade', 'affordable', 'cheap', 'expensive', 'worth it', 'worth the money', 'roi', 'return on investment', 'investment', 'budget'];
+  const comparisonSignals = ['vs', 'versus', 'compared to', 'comparison', 'compare', 'better than', 'best', 'top', 'alternative', 'alternatives', 'switch', 'switching', 'migrate', 'migration', 'replace', 'instead of', 'or', 'which one', 'which is', 'should i choose', 'should i use', 'should i pick', 'recommend', 'recommendation', 'rated', 'ranking', 'review', 'reviews'];
+  const evaluationSignals = ['reliable', 'trusted', 'support', 'uptime', 'security', 'compliant', 'compliance', 'enterprise', 'scalable', 'integrate', 'integration', 'api', 'features', 'pros and cons', 'advantages', 'disadvantages', 'limitations', 'drawbacks'];
+  const informationalSignals = ['what is', 'what are', 'how does', 'how to', 'explain', 'definition', 'meaning', 'guide', 'tutorial', 'learn', 'understand', 'basics', 'beginner', 'introduction', 'overview', 'history', 'why do', 'why is', 'difference between'];
+
+  const hasBuy = buySignals.some(s => lowerQuery.includes(s));
+  const hasComparison = comparisonSignals.some(s => lowerQuery.includes(s));
+  const hasEvaluation = evaluationSignals.some(s => lowerQuery.includes(s));
+  const hasInformational = informationalSignals.some(s => lowerQuery.includes(s));
+
+  // Score: 0-100, higher = more commercial intent
+  let score = 30; // base
+  if (hasBuy) score += 40;
+  if (hasComparison) score += 25;
+  if (hasEvaluation) score += 15;
+  if (hasInformational && !hasBuy && !hasComparison) score -= 20;
+
+  score = Math.max(0, Math.min(100, score));
+
+  let intent: string;
+  let revenuePotential: string;
+  let opportunityLabel: string;
+
+  if (score >= 70) {
+    intent = 'transactional';
+    revenuePotential = 'high';
+    opportunityLabel = 'Direct revenue opportunity — buyer is ready to purchase';
+  } else if (score >= 45) {
+    intent = 'commercial_investigation';
+    revenuePotential = 'medium';
+    opportunityLabel = 'Decision-stage — buyer is comparing options';
+  } else if (score >= 25) {
+    intent = 'consideration';
+    revenuePotential = 'low';
+    opportunityLabel = 'Early-stage — potential buyer exploring solutions';
+  } else {
+    intent = 'informational';
+    revenuePotential = 'minimal';
+    opportunityLabel = 'Informational — no immediate purchase intent';
+  }
+
+  return { intent, intent_score: score, revenue_potential: revenuePotential, opportunity_label: opportunityLabel };
+}
+
 async function fetchWebsiteContent(url) {
   if (!url) return '';
   try {
@@ -1201,29 +1360,37 @@ ${keywordContext}
 ${competitorContext}
 ${websiteContext}
 
-Based on the brand's industry, website content, and keywords, generate highly relevant search queries that potential customers would actually use. Make sure all queries are directly relevant to what this brand offers.
+Based on the brand's industry, website content, and keywords, generate highly relevant search queries that potential BUYERS would actually use. Focus on queries with COMMERCIAL INTENT — these are the searches people make when they are actively considering a purchase, comparing solutions, or ready to buy.
 
-Generate queries in these categories around the given brand, and industry, which could be actually/potentially searched by some real actual users.
-1. General product searches (8 queries) like for a management tool brand, those could be "What are the best project management software options?" or "Top CRM tools in 2024."
-2. Problem-solving searches (8 queries), like for a management tool brand, those could be "How can I better manage my team's projects?" or "What's a good solution for customer tracking?"
-3. Comparison searches (8 queries), like for a management tool brand, those could be "What's the difference between project management and task management?" or "Free vs paid CRM - is it worth upgrading?"
-4. Feature-specific searches (8 queries), like for a management tool brand, those could be "Software with built-in time tracking features." or "CRM with email integration capabilities."
-5. Use case searches (8 queries), like for a management tool brand, those could be "Project management solutions for small teams." or "CRM systems designed for startups."
-6. Alternative searches (5 queries), like for a management tool brand, those could be "What are some alternatives to expensive project management software?" or "Open source project management tools worth trying."
-7. Review/recommendation related searches (5 queries), like for a management tool brand, those could be "What are the best-rated project management tools?" or "Recommended CRM software for small businesses."
+Generate queries in these categories. Prioritize purchase-intent and decision-stage queries:
 
-- Queries should be 1-3 sentences long
+1. PURCHASE-READY searches (8 queries) — Queries from users ready to buy or sign up:
+   Examples: "Best ${industry} software to buy right now", "Which ${industry} tool should I switch to?", "Top rated ${industry} platform for my business"
+2. COMPARISON & DECISION searches (8 queries) — Head-to-head comparisons and decision-stage queries:
+   Examples: "${industry} tool A vs tool B which is better?", "Is it worth paying for premium ${industry} software?", "Best value ${industry} solution for the price"
+3. PROBLEM-TO-SOLUTION searches (6 queries) — Users with a pain point looking for a product to solve it:
+   Examples: "I need a better way to handle ${industry} tasks", "What's the fastest ${industry} solution?", "How to fix ${industry} problems with automation"
+4. ROI & PRICING searches (6 queries) — Cost-benefit and budget-driven queries:
+   Examples: "${industry} software pricing comparison", "Is ${industry} tool worth the investment?", "Affordable ${industry} solutions that actually work", "Free vs paid ${industry} — what do I get for my money?"
+5. VENDOR EVALUATION searches (6 queries) — Due-diligence queries before purchase:
+   Examples: "${industry} software reviews from real users", "Most trusted ${industry} platform", "Which ${industry} companies have the best support?", "${industry} tool reliability and uptime"
+6. USE CASE / SEGMENT searches (6 queries) — Queries by specific buyer segments:
+   Examples: "Best ${industry} for startups in 2026", "${industry} for enterprise teams", "${industry} tools for agencies", "Which ${industry} is best for small business?"
+7. ALTERNATIVE & SWITCHING searches (5 queries) — Users looking to switch from a current solution:
+   Examples: "Better alternatives to my current ${industry} tool", "Switching ${industry} providers — what to consider", "Top ${industry} alternatives for migration"
+8. COMPETITIVE INTELLIGENCE searches (5 queries) — Queries that benchmark the market:
+   Examples: "Who is the market leader in ${industry}?", "Fastest growing ${industry} companies", "Which ${industry} platforms are gaining market share?"
+
+CRITICAL RULES:
+- Every query must reflect BUYER INTENT — the person searching is spending money or making a business decision
+- Queries should be 1-3 sentences long, conversational, as if asking an AI assistant for a recommendation
 - Format each query as a proper sentence or question with capitalization and punctuation
-- Make the queries conversational, as if asking a real person or AI assistant
-- Use natural language that real users would type
-- Include variations with years (2024, 2025) but just in 3-4 queries
-- Include budget-conscious queries ("free", "cheap", "affordable") in few queries
-- Include business size variations ("small business", "enterprise", "startup") if applies, but in few queries
-- NO direct brand mentions
-- Focus on problems users are trying to solve
-- Include both formal and casual language styles
+- NO direct brand mentions — these are generic searches
+- Include variations with years (2025, 2026) in 3-4 queries
+- Include business size/budget variations naturally
 - ENSURE all queries are directly relevant to the brand's actual products/services
 - Use language and terms found on the brand's website when possible
+- Think like a buyer, not a researcher — focus on DECISION queries, not informational ones
 
 IMPORTANT: Return EXACTLY ${maxQueries} queries in a valid JSON array format. No markdown formatting, no backticks, just a clean JSON array of strings.`;
     const response = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
@@ -2066,6 +2233,9 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
                 totalMentions++;
                 console.log(`✓ Brand mentioned in response to: "${query}"`);
               }
+              // Classify query commercial intent
+              const queryIntent = classifyQueryIntent(query);
+              const enrichedAnalysis = analysis ? { ...analysis, ...queryIntent } : queryIntent;
               // Store the response with metadata
               await supabase.from('ai_platform_responses').insert({
                 project_id: projectId,
@@ -2073,7 +2243,7 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
                 platform: platform,
                 prompt: query,
                 response: response,
-                response_metadata: analysis
+                response_metadata: enrichedAnalysis
               });
               completedQueries++;
               // Update session progress periodically (not on every query to reduce DB writes)
@@ -2303,13 +2473,15 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
           const extractedSources = extractSourcesFromResponse(response);
           const analysis = await analyzeBrandMention(response, project.brand_name, project.competitors || []);
           if (analysis && extractedSources.length > 0) analysis.sources = extractedSources;
+          const queryIntent = classifyQueryIntent(query);
+          const enrichedAnalysis = analysis ? { ...analysis, ...queryIntent } : queryIntent;
           await supabase.from('ai_platform_responses').insert({
             project_id: projectId,
             session_id: sessionId,
             platform,
             prompt: query,
             response,
-            response_metadata: analysis
+            response_metadata: enrichedAnalysis
           });
           return { stored: true, brandMentioned: analysis?.brand_mentioned };
         });
