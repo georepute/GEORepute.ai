@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Lightbulb,
@@ -20,15 +20,29 @@ import {
   RefreshCw,
   ArrowRight,
   X,
+  FileDown,
+  FileText,
+  Brain,
+  Calendar,
+  BarChart3,
+  FolderOpen,
+  Layers,
+  Sparkles,
 } from "lucide-react";
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import Image from "next/image";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useRouter } from "next/navigation";
 import { useLanguage } from "@/lib/language-context";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
 import toast from "react-hot-toast";
 import { PlanProgress } from "./_components/PlanProgress";
+import { BusinessPlanView } from "./_components/BusinessPlanView";
+import { PlanMetrics } from "./_components/PlanMetrics";
+import { exportPlanToPDF, exportClientFilePDF } from "./_components/exportBusinessPlan";
+import { StrategicIntelligence } from "./_components/StrategicIntelligence";
+import { AnnualPlanView, type AnnualPlan, type QuarterlyItem } from "./_components/AnnualPlanView";
+import { KPIDashboard } from "./_components/KPIDashboard";
+import { ClientFile } from "./_components/ClientFile";
 
 interface ActionStep {
   step: string;
@@ -83,181 +97,144 @@ interface BrandProject {
   competitors?: string[];
 }
 
+type TabKey = "intelligence" | "annual_plan" | "action_plans" | "kpi" | "client_file";
+
+const TABS: { key: TabKey; label: string; icon: any; description: string }[] = [
+  { key: "intelligence", label: "Strategic Intelligence", icon: Brain, description: "Intelligence reports & analysis" },
+  { key: "annual_plan", label: "12-Month Plan", icon: Calendar, description: "Quarterly execution structure" },
+  { key: "action_plans", label: "Action Plans", icon: Zap, description: "Execution engine" },
+  { key: "kpi", label: "KPI Dashboard", icon: BarChart3, description: "Performance tracking" },
+  { key: "client_file", label: "Client File", icon: FolderOpen, description: "Structured file" },
+];
+
+const EXECUTION_CATEGORIES = [
+  "Content Development",
+  "SEO Implementation",
+  "AI Visibility Expansion",
+  "Authority & PR Strategy",
+  "Funnel Optimization",
+  "Conversion Improvements",
+  "Market Expansion Initiatives",
+];
+
+const PLATFORMS = [
+  "Website", "Blog", "Google Business", "YouTube", "LinkedIn",
+  "X", "Instagram", "Facebook", "PR Networks", "External Authority Platforms",
+  "Reddit", "Medium", "Quora", "Email",
+];
+
 export default function ActionPlansPage() {
   const router = useRouter();
   const supabase = createClientComponentClient();
+  const { language } = useLanguage();
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<TabKey>("intelligence");
+
+  // Plans state
   const [plans, setPlans] = useState<ActionPlan[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(true);
-  const [objective, setObjective] = useState("");
-  const [domain, setDomain] = useState("");
   const [executingStep, setExecutingStep] = useState<string | null>(null);
-  
+
   // Brand project selection state
   const [brandProjects, setBrandProjects] = useState<BrandProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<BrandProject | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(false);
-  const [crawlingDomain, setCrawlingDomain] = useState(false);
-  
-  // Keywords state
+
+  // Intelligence state
+  const [intelligenceData, setIntelligenceData] = useState<any>(null);
+  const [loadingIntelligence, setLoadingIntelligence] = useState(false);
+
+  // Annual plan state
+  const [annualPlan, setAnnualPlan] = useState<AnnualPlan | null>(null);
+  const [loadingAnnualPlan, setLoadingAnnualPlan] = useState(false);
+  const [annualPlanSavedAt, setAnnualPlanSavedAt] = useState<string | null>(null);
+
+  // Generation form state (used in quick generate)
+  const [objective, setObjective] = useState("");
+  const [domain, setDomain] = useState("");
   const [keywords, setKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState("");
   const [loadingGSCKeywords, setLoadingGSCKeywords] = useState(false);
+  const [crawlingDomain, setCrawlingDomain] = useState(false);
 
-  // Load existing plans and brand projects on mount
+  // Export state
+  const [exportPlanId, setExportPlanId] = useState<string | null>(null);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     loadPlans();
     loadBrandProjects();
   }, []);
 
-  // Load brand analysis projects from database
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setExportPlanId(null);
+      }
+    };
+    if (exportPlanId) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [exportPlanId]);
+
+  // ──────────────────────────────────────────────
+  // Data Loading
+  // ──────────────────────────────────────────────
+
   const loadBrandProjects = async () => {
     setLoadingProjects(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-
       const { data, error } = await supabase
-        .from('brand_analysis_projects')
-        .select('id, brand_name, industry, website_url, company_description, company_image_url, keywords, competitors')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error loading brand projects:', error);
-        return;
-      }
-
-      setBrandProjects(data || []);
-    } catch (error: any) {
-      console.error('Error loading brand projects:', error);
+        .from("brand_analysis_projects")
+        .select("id, brand_name, industry, website_url, company_description, company_image_url, keywords, competitors")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      if (!error) setBrandProjects(data || []);
+    } catch (err) {
+      console.error("Error loading brand projects:", err);
     } finally {
       setLoadingProjects(false);
     }
   };
 
-  // Load keywords from project (manual + GSC)
   const loadProjectKeywords = async (projectId: string) => {
     setLoadingGSCKeywords(true);
     try {
-      const project = brandProjects.find(p => p.id === projectId);
+      const project = brandProjects.find((p) => p.id === projectId);
       if (!project) return;
-
-      // Start with manual keywords from project
-      const manualKeywords = project.keywords || [];
-      let allKeywords = [...manualKeywords];
-
-      // Fetch GSC keywords if available
+      let allKeywords = [...(project.keywords || [])];
       try {
         const gscResponse = await fetch(`/api/brand-analysis/${projectId}/gsc-keywords`);
         const gscData = await gscResponse.json();
-        
-        if (gscData.success && gscData.keywords && gscData.keywords.length > 0) {
-          // Extract keyword strings from GSC data (they have keyword, clicks, impressions, etc.)
+        if (gscData.success && gscData.keywords?.length > 0) {
           const gscKeywordStrings = gscData.keywords.map((kw: any) => kw.keyword);
-          // Merge with manual keywords, avoiding duplicates
-          const uniqueKeywords = new Set([...allKeywords, ...gscKeywordStrings]);
-          allKeywords = Array.from(uniqueKeywords);
+          allKeywords = Array.from(new Set([...allKeywords, ...gscKeywordStrings]));
         }
-      } catch (error) {
-        console.log('GSC keywords not available or error fetching:', error);
-        // Continue with just manual keywords if GSC fails
-      }
-
+      } catch { /* GSC not available */ }
       setKeywords(allKeywords);
-    } catch (error) {
-      console.error('Error loading project keywords:', error);
-      // Fallback to just manual keywords
-      const project = brandProjects.find(p => p.id === projectId);
+    } catch (err) {
+      const project = brandProjects.find((p) => p.id === projectId);
       setKeywords(project?.keywords || []);
     } finally {
       setLoadingGSCKeywords(false);
     }
   };
 
-  // Handle project selection
-  const handleProjectSelect = async (projectId: string | null) => {
-    setSelectedProjectId(projectId);
-    if (projectId) {
-      const project = brandProjects.find(p => p.id === projectId);
-      if (project) {
-        setSelectedProject(project);
-        // Auto-fill domain from project
-        if (project.website_url) {
-          setDomain(project.website_url);
-        }
-        // Load keywords from project
-        await loadProjectKeywords(projectId);
-      }
-    } else {
-      setSelectedProject(null);
-      setDomain("");
-      setKeywords([]); // Clear keywords when no project selected
-    }
-  };
-
-  // Handle crawling a new domain
-  const handleCrawlNewDomain = async () => {
-    if (!domain.trim()) {
-      toast.error("Please enter a domain to crawl");
-      return;
-    }
-
-    setCrawlingDomain(true);
-    try {
-      const crawlResponse = await fetch("/api/crawl-website", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: domain }),
-      });
-
-      const crawlData = await crawlResponse.json();
-
-      if (crawlResponse.ok && crawlData.success) {
-        // Update selected project with crawled data (create a temporary project object)
-        const crawledProject: BrandProject = {
-          id: 'temp-' + Date.now(),
-          brand_name: crawlData.metadata?.title || domain.split('.')[0],
-          industry: 'Unknown',
-          website_url: domain,
-          company_description: crawlData.description || '',
-          company_image_url: crawlData.imageUrl || null,
-        };
-        
-        setSelectedProject(crawledProject);
-        setSelectedProjectId(null); // Clear selected project ID since this is a new crawl
-        toast.success("Website crawled successfully!");
-      } else {
-        toast.error(crawlData.error || "Failed to crawl website");
-      }
-    } catch (error: any) {
-      console.error("Error crawling domain:", error);
-      toast.error("Failed to crawl website");
-    } finally {
-      setCrawlingDomain(false);
-    }
-  };
-
   const loadPlans = async () => {
     setLoadingPlans(true);
     try {
-      const response = await fetch('/api/geo-core/action-plan');
-      
-      if (!response.ok) {
-        throw new Error("Failed to load action plans");
-      }
-
+      const response = await fetch("/api/geo-core/action-plan");
+      if (!response.ok) throw new Error("Failed to load action plans");
       const data = await response.json();
-      console.log("📋 Loaded plans data:", data.plans?.map((p: any) => ({ id: p.id, title: p.title, projectName: p.projectName, projectId: p.projectId })));
-      
+
       const loadedPlans: ActionPlan[] = (data.plans || []).map((plan: any) => {
-        console.log("🔍 Processing plan:", plan.id, "projectName:", plan.projectName, "projectId:", plan.projectId);
-        // Extract project info from execution_metadata if not in main fields
         const execMetadata = plan.executionMetadata || {};
-        const projectId = plan.projectId || execMetadata.project_id || undefined;
-        const projectName = plan.projectName || execMetadata.project_name || undefined;
-        
         return {
           id: plan.id,
           title: plan.title,
@@ -265,8 +242,8 @@ export default function ActionPlansPage() {
           channels: plan.channels || [],
           domain: plan.domain,
           region: plan.region,
-          projectId: projectId,
-          projectName: projectName,
+          projectId: plan.projectId || execMetadata.project_id,
+          projectName: plan.projectName || execMetadata.project_name,
           steps: (plan.steps || []).map((step: any) => ({
             step: step.step || step.title || "",
             description: step.description || "",
@@ -277,10 +254,7 @@ export default function ActionPlansPage() {
             channel: step.channel,
             platform: step.platform,
             executionType: step.executionType,
-            executionMetadata: step.executionMetadata || {
-              executionStatus: "pending",
-              autoExecute: false,
-            },
+            executionMetadata: step.executionMetadata || { executionStatus: "pending", autoExecute: false },
           })),
           reasoning: plan.reasoning || "",
           expectedOutcome: plan.expectedOutcome || "",
@@ -291,866 +265,1115 @@ export default function ActionPlansPage() {
           expanded: false,
         };
       });
-
       setPlans(loadedPlans);
-    } catch (error: any) {
-      console.error("Error loading plans:", error);
+    } catch (err) {
+      console.error("Error loading plans:", err);
       toast.error("Failed to load action plans");
     } finally {
       setLoadingPlans(false);
     }
   };
 
-  const { language } = useLanguage();
+  const loadIntelligence = async (projectId: string) => {
+    setLoadingIntelligence(true);
+    try {
+      const response = await fetch(`/api/reports/strategic-intelligence?projectId=${projectId}`);
+      if (!response.ok) throw new Error("Failed to load intelligence data");
+      const data = await response.json();
+      setIntelligenceData(data);
+      return data;
+    } catch (err) {
+      console.error("Error loading intelligence:", err);
+      toast.error("Failed to load strategic intelligence");
+      return null;
+    } finally {
+      setLoadingIntelligence(false);
+    }
+  };
+
+  // Load a stored annual plan for a project and attach quarter KPIs from intelligence
+  const loadStoredAnnualPlan = async (projectId: string, intelligence: any) => {
+    try {
+      const res = await fetch(`/api/geo-core/annual-plan?projectId=${projectId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.plan) {
+        const plan = attachQuarterKPIs(data.plan, intelligence);
+        setAnnualPlan(plan);
+        setAnnualPlanSavedAt(data.generatedAt || data.plan.generatedAt || null);
+      }
+    } catch (err) {
+      console.error("Error loading stored annual plan:", err);
+    }
+  };
+
+  // Attach real quarter KPIs computed from the current intelligence data
+  const attachQuarterKPIs = (plan: AnnualPlan, intelligence: any): AnnualPlan => {
+    if (!intelligence) return plan;
+    const scores = intelligence.scores || {};
+    const reports = intelligence.reports || {};
+    return {
+      ...plan,
+      quarters: plan.quarters.map((q, qIdx) => ({
+        ...q,
+        kpis: buildRealQuarterKPIs(q.quarter, scores, reports, qIdx),
+      })),
+    };
+  };
+
+  // ──────────────────────────────────────────────
+  // Project Selection
+  // ──────────────────────────────────────────────
+
+  const handleProjectSelect = async (projectId: string | null) => {
+    setSelectedProjectId(projectId);
+    if (projectId) {
+      const project = brandProjects.find((p) => p.id === projectId);
+      if (project) {
+        setSelectedProject(project);
+        if (project.website_url) setDomain(project.website_url);
+        await loadProjectKeywords(projectId);
+        const intelligence = await loadIntelligence(projectId);
+        // Load stored annual plan after intelligence (KPIs need intelligence scores)
+        await loadStoredAnnualPlan(projectId, intelligence);
+      }
+    } else {
+      setSelectedProject(null);
+      setDomain("");
+      setKeywords([]);
+      setIntelligenceData(null);
+      setAnnualPlan(null);
+      setAnnualPlanSavedAt(null);
+    }
+  };
+
+  // ──────────────────────────────────────────────
+  // Annual Plan Generation
+  // ──────────────────────────────────────────────
+
+  const generateAnnualPlan = async (forceRegenerate = false) => {
+    if (!intelligenceData) {
+      toast.error("Please load strategic intelligence first");
+      return;
+    }
+    if (!selectedProjectId) {
+      toast.error("Please select a brand project first");
+      return;
+    }
+
+    // Always switch to annual plan tab
+    setActiveTab("annual_plan");
+
+    // If a plan already exists and not forcing regeneration, just show it
+    if (annualPlan && !forceRegenerate) return;
+
+    setLoadingAnnualPlan(true);
+
+    try {
+      const response = await fetch("/api/geo-core/annual-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: selectedProjectId,
+          intelligenceContext: intelligenceData,
+          domain: intelligenceData.project.website || domain,
+          language: language || "en",
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to generate plan");
+
+      // Attach KPIs computed from current intelligence (not stored — always fresh)
+      const plan = attachQuarterKPIs(data.plan, intelligenceData);
+      setAnnualPlan(plan);
+      setAnnualPlanSavedAt(data.plan.generatedAt || new Date().toISOString());
+      toast.success("12-Month Strategic Plan generated and saved!");
+    } catch (err: any) {
+      console.error("Error generating annual plan:", err);
+      toast.error(err.message || "Failed to generate annual plan");
+    } finally {
+      setLoadingAnnualPlan(false);
+    }
+  };
+
+  const determinePlatforms = (step: any): string[] => {
+    const platforms: string[] = [];
+    const pl = (step.platform || "").toLowerCase();
+    const ch = (step.channel || "").toLowerCase();
+
+    if (pl.includes("linkedin") || ch.includes("linkedin")) platforms.push("LinkedIn");
+    if (pl.includes("reddit") || ch.includes("reddit")) platforms.push("Reddit");
+    if (pl.includes("medium") || ch.includes("medium")) platforms.push("Medium");
+    if (pl.includes("quora") || ch.includes("quora")) platforms.push("Quora");
+    if (pl.includes("youtube") || ch.includes("youtube") || ch.includes("video")) platforms.push("YouTube");
+    if (pl.includes("facebook") || ch.includes("facebook")) platforms.push("Facebook");
+    if (pl.includes("instagram") || ch.includes("instagram")) platforms.push("Instagram");
+    if (pl.includes("twitter") || ch.includes("twitter") || pl.includes("x") || ch.includes("x ")) platforms.push("X");
+    if (pl.includes("wordpress") || pl.includes("shopify") || ch.includes("blog")) platforms.push("Blog");
+    if (ch.includes("seo") || ch.includes("website")) platforms.push("Website");
+    if (ch.includes("pr") || ch.includes("outreach")) platforms.push("PR Networks");
+    if (pl.includes("google_business") || ch.includes("gbp") || ch.includes("local")) platforms.push("Google Business");
+    if (ch.includes("email")) platforms.push("Email");
+
+    if (platforms.length === 0) {
+      if (step.executionType === "content_generation") platforms.push("Blog", "Website");
+      else platforms.push("Website");
+    }
+
+    return [...new Set(platforms)];
+  };
+
+  // Builds quarter KPIs from ONLY real measured data — no synthetic targets
+  const buildRealQuarterKPIs = (
+    quarter: string,
+    scores: Record<string, number>,
+    reports: any,
+    qIdx: number
+  ): { metric: string; target: string; baseline: string }[] => {
+    const kpis: { metric: string; target: string; baseline: string }[] = [];
+
+    // Use actual measured values as baselines; targets are derived from the same real data
+    if (scores.aiVisibility > 0) {
+      kpis.push({
+        metric: "AI Visibility Score",
+        baseline: `${scores.aiVisibility}/100 (measured)`,
+        target: qIdx === 0 ? "Run full AI analysis" : qIdx === 1 ? "Address top blind spots" : qIdx === 2 ? "Expand to all platforms" : "Maintain and optimize",
+      });
+    }
+    if (scores.seoPresence > 0 && reports?.seoAnalysis?.details) {
+      const d = reports.seoAnalysis.details;
+      kpis.push({
+        metric: "SEO Presence",
+        baseline: `Avg pos ${d.avgPosition}, ${d.totalImpressions?.toLocaleString()} impr (measured)`,
+        target: qIdx === 0 ? "Fix opportunity queries" : qIdx === 1 ? "Close weak CTR gaps" : qIdx === 2 ? "Reach top 10 on key queries" : "Consolidate rankings",
+      });
+    }
+    if (scores.shareOfAttention > 0 && reports?.shareOfAttention?.details) {
+      const d = reports.shareOfAttention.details;
+      kpis.push({
+        metric: "Share of Attention",
+        baseline: `AI: ${d.aiMentionShare}%, Organic: ${d.organicShare}% (measured)`,
+        target: qIdx === 0 ? "Establish presence on weakest platforms" : qIdx === 1 ? "Grow AI share" : qIdx === 2 ? "Exceed competitors" : "Defend position",
+      });
+    }
+    if (reports?.riskMatrix?.available && reports.riskMatrix.details) {
+      const d = reports.riskMatrix.details;
+      kpis.push({
+        metric: "Blind Spots",
+        baseline: `${d.totalBlindSpots} blind spots (${d.highPriority} high priority) (measured)`,
+        target: qIdx === 0 ? "Address all high-priority blind spots" : qIdx === 1 ? "Reduce medium priority" : qIdx === 2 ? "Close all critical gaps" : "Monitor and maintain",
+      });
+    }
+    if (reports?.gapAnalysis?.available && reports.gapAnalysis.details) {
+      const d = reports.gapAnalysis.details;
+      const aiRisk = d.bandDistribution?.ai_risk || 0;
+      if (aiRisk > 0) {
+        kpis.push({
+          metric: "AI vs Google Gap",
+          baseline: `${aiRisk} queries at AI risk (measured)`,
+          target: qIdx === 0 ? "Identify root causes" : qIdx === 1 ? "Create AI-targeted content" : qIdx === 2 ? "Reduce ai_risk count" : "Eliminate remaining gaps",
+        });
+      }
+    }
+    return kpis;
+  };
+
+  // ──────────────────────────────────────────────
+  // Annual Plan Item Toggle
+  // ──────────────────────────────────────────────
+
+  const handleToggleAnnualItem = (quarterId: string, itemId: string) => {
+    if (!annualPlan) return;
+    setAnnualPlan({
+      ...annualPlan,
+      quarters: annualPlan.quarters.map((q) =>
+        q.quarter === quarterId
+          ? { ...q, items: q.items.map((item) => item.id === itemId ? { ...item, selected: !item.selected } : item) }
+          : q
+      ),
+    });
+  };
+
+  const handleGenerateFromSelected = async (selectedItems: QuarterlyItem[]) => {
+    setLoading(true);
+    setActiveTab("action_plans");
+    try {
+      const objective = `Execute ${selectedItems.length} strategic items: ${selectedItems.map((i) => i.title).join("; ")}. Categories: ${[...new Set(selectedItems.map((i) => i.category))].join(", ")}. Platforms: ${[...new Set(selectedItems.flatMap((i) => i.platforms))].join(", ")}.`;
+
+      const response = await fetch("/api/geo-core/action-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          objective,
+          targetKeywords: keywords.length > 0 ? keywords : intelligenceData?.project?.keywords || [],
+          domain: domain || intelligenceData?.project?.website,
+          channels: ["all"],
+          projectId: selectedProjectId,
+          language: language || "en",
+          intelligenceContext: intelligenceData || undefined,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to generate action plans");
+
+      await loadPlans();
+      toast.success("Execution action plans generated!");
+    } catch (err: any) {
+      console.error("Error generating action plans:", err);
+      toast.error(err.message || "Failed to generate execution plans");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ──────────────────────────────────────────────
+  // Quick Action Plan Generation (legacy flow)
+  // ──────────────────────────────────────────────
 
   const generateActionPlan = async () => {
     if (!objective.trim()) {
       toast.error("Please enter an objective");
       return;
     }
-
     setLoading(true);
     try {
-      // Action plan generation using Claude Sonnet 4.5 (Hebrew when language toggle is HE)
-      const response = await fetch('/api/geo-core/action-plan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      const response = await fetch("/api/geo-core/action-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          objective: objective,
-          targetKeywords: keywords.length > 0 ? keywords : undefined,
-          domain: domain.trim() || undefined,
-          channels: ['all'], // Always use all channels
-          projectId: selectedProjectId || undefined, // Pass selected project ID to use its crawler data
-          language: language || 'en',
+          objective,
+          targetKeywords: keywords.length > 0 ? keywords : intelligenceData?.project?.keywords || undefined,
+          domain: domain.trim() || intelligenceData?.project?.website || undefined,
+          channels: ["all"],
+          projectId: selectedProjectId || undefined,
+          language: language || "en",
+          intelligenceContext: intelligenceData || undefined,
         }),
       });
-
       const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to generate action plan");
 
-      if (!response.ok) {
-        console.error('API Error:', data);
-        throw new Error(data.error || 'Failed to generate action plan');
-      }
-
-      // Check if plan was saved successfully
-      if (!data.saved) {
-        toast.error("Plan generated but failed to save. It may not persist after refresh.");
-        console.warn("Action plan was not saved to database");
-      }
-
-      console.log("📝 Creating new plan with project info:", {
-        projectId: data.projectId || selectedProjectId,
-        projectName: data.projectName || selectedProject?.brand_name,
-        selectedProject: selectedProject?.brand_name
-      });
-
-      const newPlan: ActionPlan = {
-        id: data.planId || Date.now().toString(),
-        title: data.title,
-        objective: data.objective,
-        channels: data.channels || [],
-        domain: data.domain,
-        region: data.region,
-        projectId: data.projectId || selectedProjectId || undefined,
-        projectName: data.projectName || selectedProject?.brand_name || undefined,
-        steps: (data.steps || []).map((step: any) => ({
-          step: step.step || step.title || "",
-          description: step.description || "",
-          priority: step.priority || "medium",
-          estimatedImpact: step.estimatedImpact || step.estimatedTime || "Not specified",
-          completed: step.completed || false,
-          id: step.id,
-          channel: step.channel,
-          platform: step.platform,
-          executionType: step.executionType,
-          executionMetadata: step.executionMetadata || {
-            executionStatus: "pending",
-            autoExecute: false,
-          },
-        })),
-        reasoning: data.reasoning,
-        expectedOutcome: data.expectedOutcome,
-        timeline: data.timeline,
-        priority: data.priority,
-        category: data.category,
-        createdAt: new Date(),
-        expanded: true,
-      };
-
-      // Reload plans from database to ensure we have the saved version
       await loadPlans();
-      
-      // If plan was saved, show success. Otherwise show warning.
-      if (data.saved) {
-        toast.success("AI Action plan generated and saved!");
-      } else {
-        toast.success("AI Action plan generated!");
-        toast.error("Warning: Plan may not persist after refresh. Check console for details.");
-      }
-      
+      toast.success(data.saved ? "AI Action plan generated and saved!" : "AI Action plan generated!");
       setObjective("");
-      setDomain("");
-      setKeywords([]);
-      setSelectedProjectId(null);
-      setSelectedProject(null);
-    } catch (error: any) {
-      console.error("Action plan error:", error);
-      toast.error(error.message || "Failed to generate action plan. Check console for details.");
+    } catch (err: any) {
+      console.error("Action plan error:", err);
+      toast.error(err.message || "Failed to generate action plan");
     } finally {
       setLoading(false);
     }
   };
 
+  // ──────────────────────────────────────────────
+  // Plan Operations
+  // ──────────────────────────────────────────────
+
   const togglePlan = (planId: string) => {
-    setPlans(
-      plans.map((p) =>
-        p.id === planId ? { ...p, expanded: !p.expanded } : p
-      )
-    );
+    setPlans(plans.map((p) => (p.id === planId ? { ...p, expanded: !p.expanded } : p)));
   };
 
   const toggleStep = async (planId: string, stepIndex: number) => {
-    // Update local state immediately for responsive UI
     const updatedPlans = plans.map((p) =>
       p.id === planId
-        ? {
-            ...p,
-            steps: p.steps.map((s, idx) =>
-              idx === stepIndex ? { ...s, completed: !s.completed } : s
-            ),
-          }
+        ? { ...p, steps: p.steps.map((s, idx) => (idx === stepIndex ? { ...s, completed: !s.completed } : s)) }
         : p
     );
     setPlans(updatedPlans);
 
-    // Persist to database
     const plan = updatedPlans.find((p) => p.id === planId);
     if (plan) {
       try {
-        const response = await fetch('/api/geo-core/action-plan', {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            planId: plan.id,
-            steps: plan.steps,
-          }),
+        const response = await fetch("/api/geo-core/action-plan", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ planId: plan.id, steps: plan.steps }),
         });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || 'Failed to update step');
-        }
-      } catch (error: any) {
-        console.error("Error updating step:", error);
+        if (!response.ok) throw new Error("Failed to update step");
+      } catch {
         toast.error("Failed to save step completion");
-        // Revert local state on error
         setPlans(plans);
       }
     }
   };
 
-  const executeStep = (planId: string, stepId: string) => {
-    if (!stepId) {
-      toast.error("Step ID is missing");
-      return;
-    }
+  // Navigate to content generator from an annual plan item (content_generation type)
+  const handleAnnualItemGenerateContent = (item: QuarterlyItem) => {
+    // Map platform display names → content generator platform IDs
+    const platformName = (item.platforms?.[0] || item.where || "").toLowerCase();
+    let platform = "medium";
+    if (platformName.includes("linkedin")) platform = "linkedin";
+    else if (platformName.includes("reddit")) platform = "reddit";
+    else if (platformName.includes("medium")) platform = "medium";
+    else if (platformName.includes("quora")) platform = "quora";
+    else if (platformName.includes("blog") || platformName.includes("website") || platformName.includes("shopify") || platformName.includes("wordpress")) platform = "shopify";
+    else if (platformName.includes("twitter") || platformName.includes("x")) platform = "twitter";
+    else if (platformName.includes("instagram")) platform = "instagram";
+    else if (platformName.includes("facebook")) platform = "facebook";
+    else if (platformName.includes("github")) platform = "github";
+    else if (item.channel === "seo") platform = "shopify";
 
-    // Find the step to get its metadata
-    const plan = plans.find(p => p.id === planId);
+    const isBlog = platform === "shopify";
+    const contentType = isBlog ? "blog_article" : platform === "linkedin" ? "linkedin_post" : "post";
+
+    const params = new URLSearchParams();
+    params.append("topic", item.title || item.description.slice(0, 80));
+    params.append("platform", platform);
+    if (item.kpis?.length) params.append("keywords", item.kpis.join(","));
+    params.append("contentType", contentType);
+
+    router.push(isBlog ? `/dashboard/blog?${params}` : `/dashboard/content-generator?${params}`);
+  };
+
+  const executeStep = (planId: string, stepId: string) => {
+    if (!stepId) { toast.error("Step ID is missing"); return; }
+    const plan = plans.find((p) => p.id === planId);
     const step = plan?.steps.find((s: any) => s.id === stepId);
-    
-    if (!step) {
-      toast.error("Step not found");
-      return;
-    }
+    if (!step) { toast.error("Step not found"); return; }
 
     const execMetadata = step.executionMetadata || {};
     const platform = (execMetadata.platform || step.platform || "").toLowerCase();
     const contentType = (execMetadata.contentType || "").toLowerCase();
     const isBlogStep = platform === "shopify" || platform === "wordpress" || platform === "wordpress_self_hosted" || contentType === "blog_article";
 
-    const params = new URLSearchParams({
-      actionPlanId: planId,
-      stepId: stepId,
-    });
+    const params = new URLSearchParams({ actionPlanId: planId, stepId });
     if (execMetadata.topic) params.append("topic", execMetadata.topic);
     if (execMetadata.platform) params.append("platform", execMetadata.platform);
-    if (execMetadata.keywords && Array.isArray(execMetadata.keywords)) {
-      params.append("keywords", execMetadata.keywords.join(","));
-    }
+    if (execMetadata.keywords?.length) params.append("keywords", execMetadata.keywords.join(","));
     if (execMetadata.contentType) params.append("contentType", execMetadata.contentType);
 
-    // Blog/shopify/wordpress steps → Blog page for blog generation; others → Content generator
-    if (isBlogStep) {
-      router.push(`/dashboard/blog?${params.toString()}`);
-    } else {
-      router.push(`/dashboard/content-generator?${params.toString()}`);
-    }
+    router.push(isBlogStep ? `/dashboard/blog?${params}` : `/dashboard/content-generator?${params}`);
   };
 
   const deletePlan = async (planId: string) => {
-    if (!confirm("Are you sure you want to delete this action plan?")) {
-      return;
-    }
-
+    if (!confirm("Are you sure you want to delete this action plan?")) return;
     try {
-      const response = await fetch(`/api/geo-core/action-plan?planId=${planId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to delete plan');
-      }
-
-      // Remove from local state
+      const response = await fetch(`/api/geo-core/action-plan?planId=${planId}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Failed to delete plan");
       setPlans(plans.filter((p) => p.id !== planId));
       toast.success("Action plan deleted successfully");
-    } catch (error: any) {
-      console.error("Error deleting plan:", error);
-      toast.error(error.message || "Failed to delete action plan");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete action plan");
     }
   };
+
+  const handleExportPDF = async (plan: ActionPlan) => {
+    setExportPlanId(null);
+    const loadingToast = toast.loading("Generating PDF...");
+    try {
+      await exportPlanToPDF(plan);
+      toast.success("PDF exported successfully!", { id: loadingToast });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to export PDF", { id: loadingToast });
+    }
+  };
+
+  const handleCrawlNewDomain = async () => {
+    if (!domain.trim()) { toast.error("Please enter a domain to crawl"); return; }
+    setCrawlingDomain(true);
+    try {
+      const crawlResponse = await fetch("/api/crawl-website", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: domain }) });
+      const crawlData = await crawlResponse.json();
+      if (crawlResponse.ok && crawlData.success) {
+        setSelectedProject({
+          id: "temp-" + Date.now(),
+          brand_name: crawlData.metadata?.title || domain.split(".")[0],
+          industry: "Unknown",
+          website_url: domain,
+          company_description: crawlData.description || "",
+          company_image_url: crawlData.imageUrl || null,
+        });
+        setSelectedProjectId(null);
+        toast.success("Website crawled successfully!");
+      } else {
+        toast.error(crawlData.error || "Failed to crawl website");
+      }
+    } catch { toast.error("Failed to crawl website"); }
+    finally { setCrawlingDomain(false); }
+  };
+
+  // ──────────────────────────────────────────────
+  // Client File Data
+  // ──────────────────────────────────────────────
+
+  const getClientFileSections = () => {
+    const sections = [
+      {
+        id: "raw_data",
+        title: "Raw Scan Data",
+        description: "Domain crawl data, GSC metrics, AI platform responses",
+        icon: null,
+        status: (intelligenceData?.dataCompleteness?.gscData || intelligenceData?.dataCompleteness?.aiVisibility) ? "available" as const : "missing" as const,
+        itemCount: intelligenceData ? Object.values(intelligenceData.dataCompleteness || {}).filter(Boolean).length : 0,
+        lastUpdated: intelligenceData?.generatedAt || null,
+      },
+      {
+        id: "strategic_reports",
+        title: "Strategic Reports",
+        description: "10 intelligence outputs",
+        icon: null,
+        status: intelligenceData ? (intelligenceData.dataCompleteness?.completenessScore >= 60 ? "available" as const : "partial" as const) : "missing" as const,
+        itemCount: intelligenceData ? Object.values(intelligenceData.reports || {}).filter((r: any) => r?.available).length : 0,
+        lastUpdated: intelligenceData?.generatedAt || null,
+      },
+      {
+        id: "annual_plan",
+        title: "Annual Strategic Plan",
+        description: "12-month quarterly execution structure",
+        icon: null,
+        status: annualPlan ? "available" as const : "missing" as const,
+        itemCount: annualPlan ? annualPlan.quarters.flatMap((q) => q.items).length : 0,
+        lastUpdated: annualPlan?.generatedAt || null,
+      },
+      {
+        id: "selected_items",
+        title: "Selected Execution Items",
+        description: "Items selected from annual plan",
+        icon: null,
+        status: annualPlan?.quarters.some((q) => q.items.some((i) => i.selected)) ? "available" as const : "missing" as const,
+        itemCount: annualPlan ? annualPlan.quarters.flatMap((q) => q.items).filter((i) => i.selected).length : 0,
+        lastUpdated: null,
+      },
+      {
+        id: "action_plans",
+        title: "Auto-Generated Action Plans",
+        description: "Execution plans with task breakdowns",
+        icon: null,
+        status: plans.length > 0 ? "available" as const : "missing" as const,
+        itemCount: plans.length,
+        lastUpdated: plans.length > 0 ? plans[0].createdAt.toISOString() : null,
+      },
+      {
+        id: "kpi_dashboard",
+        title: "KPI Dashboard",
+        description: "Performance metrics and tracking",
+        icon: null,
+        status: intelligenceData ? "partial" as const : "missing" as const,
+        itemCount: intelligenceData ? 6 : 0,
+        lastUpdated: intelligenceData?.generatedAt || null,
+      },
+      {
+        id: "progress_log",
+        title: "Progress Log",
+        description: "Historical action log",
+        icon: null,
+        status: plans.some((p) => p.steps.some((s) => s.completed)) ? "partial" as const : "missing" as const,
+        itemCount: plans.reduce((acc, p) => acc + p.steps.filter((s) => s.completed).length, 0),
+        lastUpdated: null,
+      },
+      {
+        id: "quarterly_updates",
+        title: "Quarterly Updates",
+        description: "Performance reviews and adjustments",
+        icon: null,
+        status: "missing" as const,
+        itemCount: 0,
+        lastUpdated: null,
+      },
+    ];
+    return sections;
+  };
+
+  const handleClientFileViewSection = (sectionId: string) => {
+    const tabMap: Record<string, TabKey> = {
+      raw_data: "intelligence",
+      strategic_reports: "intelligence",
+      annual_plan: "annual_plan",
+      selected_items: "annual_plan",
+      action_plans: "action_plans",
+      kpi_dashboard: "kpi",
+      progress_log: "action_plans",
+      quarterly_updates: "kpi",
+    };
+    setActiveTab(tabMap[sectionId] || "intelligence");
+  };
+
+  const handleExportAllClientFile = async () => {
+    if (!selectedProject) {
+      toast.error("Please select a project first");
+      return;
+    }
+    const loadingToast = toast.loading("Generating full client file PDF…");
+    try {
+      await exportClientFilePDF({
+        project: {
+          name:        selectedProject.brand_name || "Brand",
+          industry:    selectedProject.industry || "—",
+          website:     selectedProject.website_url || undefined,
+          description: selectedProject.company_description || undefined,
+          keywords:    selectedProject.keywords?.length ? selectedProject.keywords : undefined,
+        },
+        intelligenceData: intelligenceData ?? undefined,
+        annualPlan:       annualPlan       ?? undefined,
+        actionPlans:      selectedProjectId
+                           ? plans.filter((p) => p.projectId === selectedProjectId)
+                           : plans,
+      });
+      toast.success("Client file PDF exported!", { id: loadingToast });
+    } catch (err: any) {
+      console.error("Client file export error:", err);
+      toast.error(err.message || "Failed to export client file", { id: loadingToast });
+    }
+  };
+
+  // ──────────────────────────────────────────────
+  // Filtered plans for the selected project
+  // ──────────────────────────────────────────────
+
+  const filteredPlans = selectedProjectId
+    ? plans.filter((p) => p.projectId === selectedProjectId)
+     : [];
+
+  // ──────────────────────────────────────────────
+  // Helpers
+  // ──────────────────────────────────────────────
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case "high":
-        return "bg-red-100 text-red-800 border-red-300";
-      case "medium":
-        return "bg-yellow-100 text-yellow-800 border-yellow-300";
-      case "low":
-        return "bg-green-100 text-green-800 border-green-300";
-      default:
-        return "bg-gray-100 text-gray-800 border-gray-300";
+      case "high": return "bg-red-100 text-red-800 border-red-300";
+      case "medium": return "bg-yellow-100 text-yellow-800 border-yellow-300";
+      case "low": return "bg-green-100 text-green-800 border-green-300";
+      default: return "bg-gray-100 text-gray-800 border-gray-300";
     }
   };
+
+  // ──────────────────────────────────────────────
+  // Render
+  // ──────────────────────────────────────────────
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-accent-500 to-primary-500 rounded-xl flex items-center justify-center">
-            <Lightbulb className="w-6 h-6 text-white" />
+      <div className="mb-6">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-12 h-12 bg-gradient-to-br from-violet-600 to-indigo-600 rounded-xl flex items-center justify-center">
+            <Layers className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">
-              AI Action Plans
-            </h1>
-            <p className="text-gray-600 mt-1">
-              Dynamic, AI-generated strategies with step-by-step execution
-            </p>
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-r from-accent-50 to-primary-50 border border-accent-200 rounded-lg p-4 flex items-start gap-3">
-          <Zap className="w-5 h-5 text-accent-600 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-sm text-gray-700">
-              <span className="font-semibold">Strategic AI Orchestrator</span>:
-              Uses OpenAI GPT-4 Turbo to analyze your goals and generate actionable plans with reasoning,
-              priorities, and expected outcomes.
+            <h1 className="text-3xl font-bold text-gray-900">Action Plans</h1>
+            <p className="text-gray-600 text-sm">
+              Strategic Intelligence & Annual Execution Engine
             </p>
           </div>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6">
-        {/* LEFT: Generation Panel */}
-        <div className="lg:col-span-1">
-          <Card className="p-6 sticky top-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-              <Target className="w-5 h-5 text-accent-600" />
-              Generate Plan
-            </h2>
+      {/* Project Selector Bar */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">
+              Brand Project
+            </label>
+            <select
+              value={selectedProjectId || ""}
+              onChange={(e) => handleProjectSelect(e.target.value || null)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent bg-white text-sm"
+              disabled={loadingProjects}
+            >
+              <option value="">Select a brand project...</option>
+              {brandProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.brand_name} ({project.industry})
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <div className="space-y-4">
-              {/* Brand Project Selector - First */}
+          {selectedProject && (
+            <div className="flex items-center gap-3">
+              {selectedProject.company_image_url && (
+                <img
+                  src={selectedProject.company_image_url}
+                  alt={selectedProject.brand_name}
+                  className="w-10 h-10 rounded-lg object-cover"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Brand Project
-                </label>
-                <select
-                  value={selectedProjectId || ""}
-                  onChange={(e) => handleProjectSelect(e.target.value || null)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent bg-white"
-                  disabled={loadingProjects}
-                >
-                  <option value="">-- Select a project --</option>
-                  {brandProjects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.brand_name} ({project.industry})
-                    </option>
-                  ))}
-                </select>
-                {loadingProjects && (
-                  <p className="text-xs text-gray-500 mt-1">Loading projects...</p>
+                <div className="font-semibold text-gray-900 text-sm">
+                  {selectedProject.brand_name}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {selectedProject.industry} · {selectedProject.website_url}
+                </div>
+              </div>
+              {loadingIntelligence && (
+                <div className="w-5 h-5 border-2 border-violet-600 border-t-transparent rounded-full animate-spin" />
+              )}
+            </div>
+          )}
+
+          {intelligenceData && (
+            <div className="flex items-center gap-2 ml-auto">
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Brand Health</div>
+                <div className={`text-lg font-bold ${
+                  (intelligenceData.reports.executiveBrief?.overallHealth || 0) >= 60
+                    ? "text-green-600"
+                    : (intelligenceData.reports.executiveBrief?.overallHealth || 0) >= 35
+                    ? "text-amber-600"
+                    : "text-red-600"
+                }`}>
+                  {intelligenceData.reports.executiveBrief?.overallHealth || 0}/100
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Data</div>
+                <div className="text-lg font-bold text-violet-600">
+                  {intelligenceData.dataCompleteness?.completenessScore || 0}%
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tab Navigation */}
+      <div className="bg-white rounded-xl border border-gray-200 mb-6 overflow-hidden">
+        <div className="flex overflow-x-auto">
+          {TABS.map((tab) => {
+            const IconComp = tab.icon;
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all ${
+                  isActive
+                    ? "border-violet-600 text-violet-700 bg-violet-50/50"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                <IconComp className={`w-4 h-4 ${isActive ? "text-violet-600" : ""}`} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      <div className="min-h-[400px]">
+        {/* Strategic Intelligence Tab */}
+        {activeTab === "intelligence" && (
+          <StrategicIntelligence
+            data={intelligenceData}
+            loading={loadingIntelligence}
+            onGeneratePlan={generateAnnualPlan}
+          />
+        )}
+
+        {/* 12-Month Plan Tab */}
+        {activeTab === "annual_plan" && (
+          <div className="space-y-4">
+            {/* Annual plan toolbar */}
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-indigo-600" />
+                  12-Month Strategic Plan
+                </h2>
+                {annualPlanSavedAt && !loadingAnnualPlan && (
+                  <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-semibold rounded-full">
+                    Saved {new Date(annualPlanSavedAt).toLocaleDateString()}
+                  </span>
                 )}
               </div>
+              {intelligenceData && (
+                <div className="flex items-center gap-2">
+                  {!annualPlan && !loadingAnnualPlan && (
+                    <button
+                      onClick={() => generateAnnualPlan(false)}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Generate Plan
+                    </button>
+                  )}
+                  {annualPlan && !loadingAnnualPlan && (
+                    <button
+                      onClick={() => generateAnnualPlan(true)}
+                      className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Regenerate
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            <AnnualPlanView
+              plan={annualPlan}
+              loading={loadingAnnualPlan}
+              onSelectItems={handleGenerateFromSelected}
+              onToggleItem={handleToggleAnnualItem}
+              onGenerateContent={handleAnnualItemGenerateContent}
+            />
+          </div>
+        )}
 
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Objective / Goal *
-                </label>
+        {/* Action Plans Tab */}
+        {activeTab === "action_plans" && (
+          <div className="space-y-6">
+            {/* Quick Generate Panel */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-violet-600" />
+                Quick Generate Action Plan
+              </h3>
+              <div className="flex gap-3 flex-wrap">
                 <textarea
                   value={objective}
                   onChange={(e) => setObjective(e.target.value)}
-                  placeholder="e.g., Improve local SEO rankings for my restaurant"
-                  rows={4}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent resize-none"
+                  placeholder="Enter objective or goal..."
+                  rows={2}
+                  className="flex-1 min-w-[300px] px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent resize-none text-sm"
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Domain
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={domain}
-                    onChange={(e) => {
-                      setDomain(e.target.value);
-                      // Clear selected project if user manually changes domain
-                      if (selectedProjectId) {
-                        setSelectedProjectId(null);
-                        setSelectedProject(null);
-                        setKeywords([]);
-                      }
-                    }}
-                    placeholder="e.g., example.com"
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-                  />
-                  <button
-                    onClick={handleCrawlNewDomain}
-                    disabled={crawlingDomain || !domain.trim()}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    title="Crawl this domain"
-                  >
-                    {crawlingDomain ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Globe className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Select a project above or crawl a new domain
-                </p>
-              </div>
-
-              {/* Keywords Section - Only show when project is selected */}
-              {selectedProjectId && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Target Keywords
-                    {loadingGSCKeywords && (
-                      <span className="ml-2 text-xs text-gray-500">(Loading GSC keywords...)</span>
-                    )}
-                  </label>
-                  
-                  {/* Display keywords as tags */}
-                  {keywords.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                      {keywords.map((keyword, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center gap-1 px-3 py-1 bg-white border border-gray-300 rounded-full text-sm"
-                        >
-                          <span className="text-gray-700">{keyword}</span>
-                          <button
-                            onClick={() => {
-                              setKeywords(keywords.filter((_, i) => i !== index));
-                            }}
-                            className="ml-1 text-gray-400 hover:text-red-500 transition-colors"
-                            title="Remove keyword"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Add new keyword input */}
+                <div className="flex flex-col gap-2">
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      value={newKeyword}
-                      onChange={(e) => setNewKeyword(e.target.value)}
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && newKeyword.trim()) {
-                          if (!keywords.includes(newKeyword.trim())) {
-                            setKeywords([...keywords, newKeyword.trim()]);
-                            setNewKeyword("");
-                          } else {
-                            toast.error("Keyword already exists");
-                          }
-                        }
-                      }}
-                      placeholder="Add keyword and press Enter"
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                      value={domain}
+                      onChange={(e) => setDomain(e.target.value)}
+                      placeholder="Domain (optional)"
+                      className="w-48 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent text-sm"
                     />
                     <button
-                      onClick={() => {
-                        if (newKeyword.trim() && !keywords.includes(newKeyword.trim())) {
-                          setKeywords([...keywords, newKeyword.trim()]);
-                          setNewKeyword("");
-                        } else if (keywords.includes(newKeyword.trim())) {
-                          toast.error("Keyword already exists");
-                        }
-                      }}
-                      className="px-4 py-2 bg-accent-600 text-white rounded-lg hover:bg-accent-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      disabled={!newKeyword.trim()}
+                      onClick={handleCrawlNewDomain}
+                      disabled={crawlingDomain || !domain.trim()}
+                      className="p-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+                      title="Crawl domain"
                     >
-                      Add
+                      {crawlingDomain ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
                     </button>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Keywords from project: {selectedProject?.keywords?.length || 0} manual
-                    {loadingGSCKeywords ? " (loading GSC...)" : ""}
-                  </p>
+                  <Button
+                    onClick={generateActionPlan}
+                    disabled={loading || !objective.trim()}
+                    variant="primary"
+                    size="sm"
+                  >
+                    {loading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Lightbulb className="w-4 h-4 mr-2" />
+                        Generate Plan
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Keywords */}
+              {keywords.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-gray-100">
+                  <span className="text-xs text-gray-500 mr-1 self-center">Keywords:</span>
+                  {keywords.slice(0, 10).map((kw, idx) => (
+                    <span key={idx} className="px-2 py-0.5 bg-violet-50 text-violet-700 text-xs rounded-full border border-violet-200">
+                      {kw}
+                      <button
+                        onClick={() => setKeywords(keywords.filter((_, i) => i !== idx))}
+                        className="ml-1 text-violet-400 hover:text-red-500"
+                      >
+                        <X className="w-2.5 h-2.5 inline" />
+                      </button>
+                    </span>
+                  ))}
+                  {keywords.length > 10 && (
+                    <span className="text-xs text-gray-400">+{keywords.length - 10} more</span>
+                  )}
                 </div>
               )}
+            </div>
 
-              <Button
-                onClick={generateActionPlan}
-                disabled={loading || !objective.trim()}
-                variant="primary"
-                className="w-full"
-                size="lg"
-              >
-                {loading ? (
+            {/* Loading States */}
+            {loadingPlans && (
+              <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
+                <div className="w-12 h-12 border-4 border-violet-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                <p className="text-gray-700 font-medium">Loading action plans...</p>
+              </div>
+            )}
+
+            {loading && !loadingPlans && (
+              <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
+                <div className="w-12 h-12 border-4 border-violet-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                <p className="text-gray-700 font-medium">AI crafting your action plan...</p>
+                <p className="text-sm text-gray-500 mt-1">Analyzing strategy and generating steps</p>
+              </div>
+            )}
+
+            {/* Empty State */}
+            {filteredPlans.length === 0 && !loading && !loadingPlans && (
+              <div className="bg-gray-50 rounded-lg p-12 text-center border-2 border-dashed border-gray-300">
+                <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                {!selectedProjectId ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                    Generating...
+                    <p className="text-gray-700 font-medium mb-2">No project selected</p>
+                    <p className="text-sm text-gray-500">
+                      Select a brand project from the dropdown above to view its action plans.
+                    </p>
                   </>
                 ) : (
                   <>
-                    <Lightbulb className="w-4 h-4 mr-2" />
-                    Generate AI Action Plan
+                    <p className="text-gray-600 mb-2">No action plans for this project yet</p>
+                    <p className="text-sm text-gray-500">
+                      {intelligenceData
+                        ? "Generate a 12-month plan from the Strategic Intelligence tab and select items for execution, or use Quick Generate above."
+                        : "Run strategic intelligence for this project first, then generate action plans."}
+                    </p>
                   </>
                 )}
-              </Button>
-
-              <div className="text-xs text-gray-500 text-center">
-                ⚡ Powered by OpenAI GPT-4 Turbo
-              </div>
-            </div>
-
-            {/* Stats */}
-            {plans.length > 0 && (
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Total Plans</span>
-                    <span className="font-bold text-gray-900">
-                      {plans.length}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">High Priority</span>
-                    <span className="font-bold text-red-600">
-                      {plans.filter((p) => p.priority === "high").length}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">Avg. Steps</span>
-                    <span className="font-bold text-gray-900">
-                      {plans.length > 0
-                        ? Math.round(
-                            plans.reduce((acc, p) => acc + p.steps.length, 0) /
-                              plans.length
-                          )
-                        : 0}
-                    </span>
-                  </div>
-                </div>
               </div>
             )}
-          </Card>
-        </div>
 
-        {/* RIGHT: Plans List */}
-        <div className="lg:col-span-2">
-          {loadingPlans && (
-            <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
-              <div className="w-12 h-12 border-4 border-accent-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-gray-700 font-medium">
-                Loading your action plans...
-              </p>
-            </div>
-          )}
-
-          {plans.length === 0 && !loading && !loadingPlans && (
-            <>
-              {selectedProject ? (
-                // Show Crawler Info Card when project is selected
-                <div className="bg-white rounded-lg border border-gray-200 p-6">
-                  <div className="flex items-start gap-4 mb-4">
-                    {selectedProject.company_image_url ? (
-                      <img 
-                        src={selectedProject.company_image_url} 
-                        alt={selectedProject.brand_name}
-                        className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                          const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
-                    ) : null}
-                    <div className={`w-16 h-16 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 ${selectedProject.company_image_url ? 'hidden' : ''}`}>
-                      <span className="text-2xl font-bold text-purple-600">
-                        {selectedProject.brand_name.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-xl font-bold text-gray-900 mb-1">{selectedProject.brand_name}</h3>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm font-medium rounded capitalize">
-                          {selectedProject.industry}
-                        </span>
-                      </div>
-                      {selectedProject.website_url && (
-                        <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
-                          <Globe className="w-4 h-4" />
-                          <a 
-                            href={selectedProject.website_url.startsWith('http') ? selectedProject.website_url : `https://${selectedProject.website_url}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-accent-600 hover:underline"
-                          >
-                            {selectedProject.website_url}
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Company Description */}
-                  {selectedProject.company_description && (
-                    <div className="border-t border-gray-200 pt-4">
-                      <h4 className="text-sm font-semibold text-gray-900 mb-2">About {selectedProject.brand_name}</h4>
-                      <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
-                        {selectedProject.company_description}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                // Show empty state when no project is selected
-                <div className="bg-gray-50 rounded-lg p-12 text-center border-2 border-dashed border-gray-300">
-                  <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600 mb-2">No action plans yet</p>
-                  <p className="text-sm text-gray-500">
-                    Select a brand project and enter your objective to generate a strategic plan
-                  </p>
-                </div>
-              )}
-            </>
-          )}
-
-          {loading && (
-            <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
-              <div className="w-12 h-12 border-4 border-accent-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-gray-700 font-medium">
-                AI crafting your action plan...
-              </p>
-              <p className="text-sm text-gray-500 mt-1">
-                Analyzing strategy and generating steps
-              </p>
-            </div>
-          )}
-
-          {plans.length > 0 && !loading && !loadingPlans && (
-            <div className="space-y-4">
-              {plans.map((plan, idx) => (
-                <motion.div
-                  key={plan.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.1 }}
-                >
-                  <Card className="overflow-hidden">
-                    {/* Plan Header */}
-                    <div className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div
-                          className="flex-1 cursor-pointer hover:bg-gray-50 transition-colors rounded-lg p-2 -m-2"
-                          onClick={() => togglePlan(plan.id)}
-                        >
-                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            <div
-                              className={`px-2 py-1 rounded-full border text-xs font-semibold ${getPriorityColor(
-                                plan.priority
-                              )}`}
-                            >
-                              {plan.priority.toUpperCase()}
-                            </div>
-                            {plan.projectName ? (
-                              <div className="px-2 py-1 rounded-full bg-green-100 text-green-800 text-xs font-semibold flex items-center gap-1">
-                                <Target className="w-3 h-3" />
-                                {plan.projectName}
-                              </div>
-                            ) : plan.projectId ? (
-                              <div className="px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 text-xs font-semibold flex items-center gap-1">
-                                <Target className="w-3 h-3" />
-                                Project #{plan.projectId.substring(0, 8)}
-                              </div>
-                            ) : null}
-                            <div className="px-2 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-semibold">
-                              {plan.category}
-                            </div>
-                            {plan.channels && plan.channels.length > 0 && (
-                              <>
-                                {plan.channels.map((channel: string) => (
-                                  <div
-                                    key={channel}
-                                    className="px-2 py-1 rounded-full bg-purple-100 text-purple-800 text-xs font-semibold"
-                                  >
-                                    {channel.replace('_', ' ')}
-                                  </div>
-                                ))}
-                              </>
-                            )}
-                          </div>
-                          <h3 className="text-lg font-bold text-gray-900 mb-2">
-                            {plan.title}
-                          </h3>
-                          <div className="flex items-center gap-4 text-sm text-gray-600">
-                            <div className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              {plan.timeline}
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <CheckCircle2 className="w-4 h-4" />
-                              {
-                                plan.steps.filter((s) => s.completed).length
-                              }/{plan.steps.length} completed
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deletePlan(plan.id);
-                            }}
-                            className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete plan"
-                          >
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                          <button
+            {/* Plans List */}
+            {filteredPlans.length > 0 && !loading && !loadingPlans && (
+              <div className="space-y-4">
+                {filteredPlans.map((plan, idx) => (
+                  <motion.div
+                    key={plan.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.05 }}
+                  >
+                    <Card className="overflow-hidden">
+                      {/* Plan Header */}
+                      <div className="p-5">
+                        <div className="flex items-start justify-between">
+                          <div
+                            className="flex-1 cursor-pointer hover:bg-gray-50 transition-colors rounded-lg p-2 -m-2"
                             onClick={() => togglePlan(plan.id)}
-                            className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-lg transition-colors"
                           >
-                            {plan.expanded ? (
-                              <ChevronUp className="w-5 h-5" />
-                            ) : (
-                              <ChevronDown className="w-5 h-5" />
-                            )}
-                          </button>
+                            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                              <div className={`px-2 py-0.5 rounded-full border text-xs font-semibold ${getPriorityColor(plan.priority)}`}>
+                                {plan.priority.toUpperCase()}
+                              </div>
+                              {plan.projectName && (
+                                <div className="px-2 py-0.5 rounded-full bg-green-100 text-green-800 text-xs font-semibold flex items-center gap-1">
+                                  <Target className="w-3 h-3" />
+                                  {plan.projectName}
+                                </div>
+                              )}
+                              <div className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-semibold">
+                                {plan.category}
+                              </div>
+                              {plan.channels?.map((channel: string) => (
+                                <div key={channel} className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-xs font-semibold">
+                                  {channel.replace("_", " ")}
+                                </div>
+                              ))}
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-900 mb-1">{plan.title}</h3>
+                            <div className="flex items-center gap-4 text-sm text-gray-600">
+                              <div className="flex items-center gap-1">
+                                <Clock className="w-4 h-4" />
+                                {plan.timeline}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <CheckCircle2 className="w-4 h-4" />
+                                {plan.steps.filter((s) => s.completed).length}/{plan.steps.length} completed
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="relative" ref={exportPlanId === plan.id ? exportDropdownRef : null}>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setExportPlanId(exportPlanId === plan.id ? null : plan.id); }}
+                                className="text-gray-500 hover:text-primary-600 p-2 hover:bg-primary-50 rounded-lg transition-colors flex items-center gap-1"
+                                title="Export"
+                              >
+                                <FileDown className="w-4 h-4" />
+                                <ChevronDown className={`w-3 h-3 transition-transform ${exportPlanId === plan.id ? "rotate-180" : ""}`} />
+                              </button>
+                              {exportPlanId === plan.id && (
+                                <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleExportPDF(plan); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors"
+                                  >
+                                    <FileText className="w-4 h-4" />
+                                    Export as PDF
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); deletePlan(plan.id); }}
+                              className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => togglePlan(plan.id)}
+                              className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              {plan.expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Expanded Content */}
-                    {plan.expanded && (
-                      <div className="border-t border-gray-200">
-                        {/* Progress Dashboard */}
-                        <div className="p-6 border-b border-gray-200">
-                          <PlanProgress plan={plan} />
-                        </div>
-                        
-                        {/* AI Reasoning */}
-                        <div className="p-6 bg-gradient-to-r from-accent-50 to-primary-50 border-b border-gray-200">
-                          <div className="flex items-start gap-2 mb-3">
-                            <Zap className="w-4 h-4 text-accent-600 mt-0.5 flex-shrink-0" />
-                            <div>
-                              <div className="text-xs font-semibold text-accent-900 mb-1">
-                                AI Strategic Reasoning
+                      {/* Expanded Content */}
+                      {plan.expanded && (
+                        <div className="border-t border-gray-200">
+                          <div className="p-5 border-b border-gray-200 space-y-4">
+                            <PlanProgress plan={plan} />
+                            <PlanMetrics plan={plan} compact />
+                          </div>
+
+                          <div className="p-5 border-b border-gray-200 bg-gray-50/50" id={`business-plan-${plan.id}`}>
+                            <BusinessPlanView plan={plan} />
+                          </div>
+
+                          <div className="p-5 bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-gray-200">
+                            <div className="flex items-start gap-2 mb-3">
+                              <Zap className="w-4 h-4 text-violet-600 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <div className="text-xs font-semibold text-violet-900 mb-1">AI Strategic Reasoning</div>
+                                <p className="text-sm text-gray-700">{plan.reasoning}</p>
                               </div>
-                              <p className="text-sm text-gray-700">
-                                {plan.reasoning}
-                              </p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <TrendingUp className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <div className="text-xs font-semibold text-green-900 mb-1">Expected Outcome</div>
+                                <p className="text-sm text-gray-700">{plan.expectedOutcome}</p>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex items-start gap-2">
-                            <TrendingUp className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
-                            <div>
-                              <div className="text-xs font-semibold text-green-900 mb-1">
-                                Expected Outcome
-                              </div>
-                              <p className="text-sm text-gray-700">
-                                {plan.expectedOutcome}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
 
-                        {/* Action Steps */}
-                        <div className="p-6">
-                          <h4 className="text-sm font-bold text-gray-900 mb-4">
-                            Action Steps
-                          </h4>
-                          <div className="space-y-3">
-                            {plan.steps.map((step, stepIdx) => {
-                              const stepId = step.id || `step-${stepIdx}`;
-                              const executionStatus = step.executionMetadata?.executionStatus || "pending";
-                              const isExecuting = executingStep === `${plan.id}-${stepId}`;
-                              const canExecute = step.executionType === "content_generation" && step.executionMetadata?.autoExecute;
-                              
-                              return (
-                                <div
-                                  key={stepIdx}
-                                  className={`border rounded-lg p-4 transition-all ${
-                                    step.completed || executionStatus === 'published'
-                                      ? "bg-green-50 border-green-200"
-                                      : executionStatus === 'review'
-                                      ? "bg-blue-50 border-blue-200"
-                                      : "bg-white border-gray-200 hover:border-accent-300"
-                                  }`}
-                                >
-                                  <div className="flex items-start gap-3">
-                                    <button
-                                      onClick={() =>
-                                        toggleStep(plan.id, stepIdx)
-                                      }
-                                      className="mt-0.5 flex-shrink-0"
-                                      disabled={executionStatus === 'published'}
-                                    >
-                                      {step.completed || executionStatus === 'published' ? (
-                                        <CheckCircle2 className="w-5 h-5 text-green-600" />
-                                      ) : (
-                                        <Circle className="w-5 h-5 text-gray-400 hover:text-accent-600 transition-colors" />
-                                      )}
-                                    </button>
-                                    <div className="flex-1">
-                                      <div className="flex items-start justify-between gap-2 mb-2">
-                                        <div className="flex-1">
-                                          <h5
-                                            className={`font-semibold text-sm ${
-                                              step.completed || executionStatus === 'published'
-                                                ? "text-green-900 line-through"
-                                                : "text-gray-900"
-                                            }`}
-                                          >
-                                            {stepIdx + 1}. {step.step}
-                                          </h5>
-                                          {(step.channel || step.platform) && (
-                                            <div className="flex items-center gap-2 mt-1">
-                                              {step.channel && (
-                                                <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">
-                                                  {step.channel}
-                                                </span>
-                                              )}
-                                              {step.platform && (
-                                                <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">
-                                                  {step.platform}
-                                                </span>
-                                              )}
-                                            </div>
-                                          )}
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                          <div
-                                            className={`px-2 py-0.5 rounded-full border text-xs font-semibold flex-shrink-0 ${getPriorityColor(
-                                              step.priority
-                                            )}`}
-                                          >
-                                            {step.priority}
+                          {/* Action Steps */}
+                          <div className="p-5">
+                            <h4 className="text-sm font-bold text-gray-900 mb-3">Action Steps</h4>
+                            <div className="space-y-2.5">
+                              {plan.steps.map((step, stepIdx) => {
+                                const stepId = step.id || `step-${stepIdx}`;
+                                const executionStatus = step.executionMetadata?.executionStatus || "pending";
+                                const isExecuting = executingStep === `${plan.id}-${stepId}`;
+                                const canExecute = step.executionType === "content_generation" && step.executionMetadata?.autoExecute;
+
+                                return (
+                                  <div
+                                    key={stepIdx}
+                                    className={`border rounded-lg p-3.5 transition-all ${
+                                      step.completed || executionStatus === "published"
+                                        ? "bg-green-50 border-green-200"
+                                        : executionStatus === "review"
+                                        ? "bg-blue-50 border-blue-200"
+                                        : "bg-white border-gray-200 hover:border-violet-300"
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-3">
+                                      <button onClick={() => toggleStep(plan.id, stepIdx)} className="mt-0.5 flex-shrink-0" disabled={executionStatus === "published"}>
+                                        {step.completed || executionStatus === "published" ? (
+                                          <CheckCircle2 className="w-5 h-5 text-green-600" />
+                                        ) : (
+                                          <Circle className="w-5 h-5 text-gray-400 hover:text-violet-600 transition-colors" />
+                                        )}
+                                      </button>
+                                      <div className="flex-1">
+                                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                                          <div className="flex-1">
+                                            <h5 className={`font-semibold text-sm ${step.completed || executionStatus === "published" ? "text-green-900 line-through" : "text-gray-900"}`}>
+                                              {stepIdx + 1}. {step.step}
+                                            </h5>
+                                            {(step.channel || step.platform) && (
+                                              <div className="flex items-center gap-1.5 mt-1">
+                                                {step.channel && <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">{step.channel}</span>}
+                                                {step.platform && <span className="text-xs px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">{step.platform}</span>}
+                                              </div>
+                                            )}
                                           </div>
-                                          {executionStatus === 'published' && (
-                                            <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-semibold rounded-full">
-                                              Published
-                                            </span>
-                                          )}
-                                          {executionStatus === 'review' && (
-                                            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-semibold rounded-full">
-                                              Review
-                                            </span>
-                                          )}
+                                          <div className="flex items-center gap-1.5">
+                                            <div className={`px-2 py-0.5 rounded-full border text-xs font-semibold flex-shrink-0 ${getPriorityColor(step.priority)}`}>
+                                              {step.priority}
+                                            </div>
+                                            {executionStatus === "published" && (
+                                              <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-semibold rounded-full">Published</span>
+                                            )}
+                                            {executionStatus === "review" && (
+                                              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-semibold rounded-full">Review</span>
+                                            )}
+                                          </div>
                                         </div>
-                                      </div>
-                                      <p className="text-sm text-gray-600 mb-2">
-                                        {step.description}
-                                      </p>
-                                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                                        <div className="flex items-center gap-2 text-xs">
-                                          <span className="text-gray-500">
-                                            Impact:
-                                          </span>
-                                          <span className="font-semibold text-green-700">
-                                            {step.estimatedImpact}
-                                          </span>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                          {canExecute && executionStatus === 'pending' && (
-                                            <Button
-                                              onClick={() => executeStep(plan.id, stepId)}
-                                              disabled={isExecuting}
-                                              variant="primary"
-                                              size="sm"
-                                            >
-                                              {isExecuting ? (
-                                                <>
-                                                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />
-                                                  Generating...
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <Play className="w-3 h-3 mr-1" />
-                                                  Generate Content
-                                                </>
-                                              )}
-                                            </Button>
-                                          )}
-                                          {executionStatus === 'review' && step.executionMetadata?.linkedContentId && (
-                                            <Button
-                                              onClick={() => router.push(`/dashboard/content?contentId=${step.executionMetadata?.linkedContentId}`)}
-                                              variant="primary"
-                                              size="sm"
-                                            >
-                                              <ExternalLink className="w-3 h-3 mr-1" />
-                                              Review Content
-                                            </Button>
-                                          )}
-                                          {executionStatus === 'published' && step.executionMetadata?.publishedUrl && (
-                                            <a
-                                              href={step.executionMetadata.publishedUrl}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="text-xs text-accent-600 hover:text-accent-700 flex items-center gap-1"
-                                            >
-                                              View Published <ExternalLink className="w-3 h-3" />
-                                            </a>
-                                          )}
+                                        <p className="text-sm text-gray-600 mb-1.5">{step.description}</p>
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                          <div className="flex items-center gap-2 text-xs">
+                                            <span className="text-gray-500">Impact:</span>
+                                            <span className="font-semibold text-green-700">{step.estimatedImpact}</span>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            {canExecute && executionStatus === "pending" && (
+                                              <Button onClick={() => executeStep(plan.id, stepId)} disabled={isExecuting} variant="primary" size="sm">
+                                                {isExecuting ? (
+                                                  <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />Generating...</>
+                                                ) : (
+                                                  <><Play className="w-3 h-3 mr-1" />Generate Content</>
+                                                )}
+                                              </Button>
+                                            )}
+                                            {executionStatus === "review" && step.executionMetadata?.linkedContentId && (
+                                              <Button onClick={() => router.push(`/dashboard/content?contentId=${step.executionMetadata?.linkedContentId}`)} variant="primary" size="sm">
+                                                <ExternalLink className="w-3 h-3 mr-1" />Review
+                                              </Button>
+                                            )}
+                                            {executionStatus === "published" && step.executionMetadata?.publishedUrl && (
+                                              <a href={step.executionMetadata.publishedUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-violet-600 hover:text-violet-700 flex items-center gap-1">
+                                                View Published <ExternalLink className="w-3 h-3" />
+                                              </a>
+                                            )}
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
                                   </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-          )}
-        </div>
+                      )}
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* KPI Dashboard Tab */}
+        {activeTab === "kpi" && (
+          <KPIDashboard
+            intelligenceData={intelligenceData}
+            planProgress={
+              plans.length > 0
+                ? {
+                    totalPlans: plans.length,
+                    completedSteps: plans.reduce((a, p) => a + p.steps.filter((s: any) => s.completed).length, 0),
+                    totalSteps: plans.reduce((a, p) => a + p.steps.length, 0),
+                  }
+                : undefined
+            }
+          />
+        )}
+
+        {/* Client File Tab */}
+        {activeTab === "client_file" && (
+          <ClientFile
+            projectName={selectedProject?.brand_name || "No Project Selected"}
+            sections={getClientFileSections()}
+            onExportAll={handleExportAllClientFile}
+            onViewSection={handleClientFileViewSection}
+          />
+        )}
       </div>
     </div>
   );
 }
-
