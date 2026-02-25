@@ -193,6 +193,44 @@ export interface ActionPlanOutput {
   timeline: string;
   priority: "high" | "medium" | "low";
   category: string;
+  businessPlanData?: {
+    kpis: Array<{
+      name: string;
+      current: string;
+      target: string;
+      timeframe: string;
+      metric_type: string;
+    }>;
+    budget: {
+      total_estimated: string;
+      breakdown: Array<{
+        category: string;
+        amount: number;
+        percentage: number;
+      }>;
+    };
+    roi_projection: {
+      monthly_projections: Array<{
+        month: number;
+        investment: number;
+        estimated_return: number;
+        cumulative_roi: number;
+      }>;
+      break_even_month: number;
+      projected_annual_roi: string;
+    };
+    competitive_positioning: {
+      summary: string;
+      strengths: string[];
+      gaps: string[];
+      market_opportunity: string;
+    };
+    milestones: Array<{
+      month: number;
+      title: string;
+      goals: string[];
+    }>;
+  };
 }
 
 export interface CompetitorAnalysisInput {
@@ -1289,6 +1327,13 @@ Required JSON structure:
 - Plan: title (MUST be specific, e.g. "Multi-Channel Marketing Plan for [objective or main keyword]" — never use the generic "Action Plan"), objective, channels, seo_geo_classification ("SEO" or "GEO"), target_keyword_phrase, expected_timeline_months (use 4-6 for most plans; this is the expected duration in months), safety_buffer_months (1-2), first_page_estimate_months (or null for GEO), context_explanation (2-3 sentences).
 - Steps: each with id (step-1, step-2...), title, description, estimatedTime, priority (high/medium/low), dependencies (array), channel, platform, executionType ("content_generation"|"audit"|"analysis"|"manual"), executionMetadata. For content_generation: platform, topic, keywords (array), contentType (article|post|answer|newsletter|linkedin_article|linkedin_post|blog_article), articles_per_topic (1-3), word_count_per_article (500-1500), autoExecute (true|false). For audit: autoExecute false, requiresTools array.
 - Root: reasoning, expectedOutcome, timeline (MUST state expected duration in months, e.g. "4-6 months for initial impact" — consistent with expected_timeline_months; not random), priority, category.
+- businessPlanData (REQUIRED): A full business plan section with these sub-objects:
+  - kpis: array of 4-6 KPIs, each with name, current (estimated current value), target (goal value), timeframe, metric_type (one of: traffic, conversion, revenue, engagement, visibility, retention)
+  - budget: { total_estimated: string (e.g. "$2,500/month"), breakdown: array of { category, amount (number), percentage (number) } }
+  - roi_projection: { monthly_projections: array of 6 objects for months 1-6 each with { month, investment (number), estimated_return (number), cumulative_roi (number as percentage) }, break_even_month (number), projected_annual_roi (string like "180%") }
+  - competitive_positioning: { summary (2-3 sentences), strengths (3-4 items), gaps (2-3 items), market_opportunity (1-2 sentences) }
+  - milestones: array of 3-4 milestones each with { month (number), title, goals (array of 2-3 short strings) }
+  Base all estimates on realistic industry benchmarks for the given objective, domain, and industry.
 
 Respond with ONLY valid JSON (no markdown). Escape quotes in strings as \\" and newlines as \\n. Example step shape:
 {"id":"step-1","title":"...","description":"...","estimatedTime":"2-3 hours","priority":"high","dependencies":[],"channel":"content","platform":"reddit","executionType":"content_generation","executionMetadata":{"platform":"reddit","topic":"...","keywords":[],"contentType":"post","articles_per_topic":1,"word_count_per_article":500,"autoExecute":true}}`;
@@ -1297,8 +1342,8 @@ Respond with ONLY valid JSON (no markdown). Escape quotes in strings as \\" and 
     "You are a business growth and revenue strategist. Create action plans that are sales-driven and conversion-focused. Use outcome-focused language (revenue, conversion, qualified leads, trust, authority). Respond with valid JSON only—no markdown, no code fences. Escape double quotes as \\\" and newlines as \\n in string values."
     + (input.language === "he" ? " Write all user-facing text (title, objective, step titles, descriptions, context_explanation, reasoning, expectedOutcome, timeline) in HEBREW (עברית) only. Keep JSON keys in English." : "");
 
-  const maxTokensClaude = 4096;
-  const maxTokensOpenAI = 3000;
+  const maxTokensClaude = input.language === "he" ? 12000 : 8192;
+  const maxTokensOpenAI = input.language === "he" ? 6000 : 4096;
 
   const parseActionPlanResponse = (rawContent: string): { result: Record<string, any>; parseFailed: boolean } => {
     let cleaned = rawContent.replace(/^```json?\s*|\s*```$/g, "").trim();
@@ -1310,6 +1355,9 @@ Respond with ONLY valid JSON (no markdown). Escape quotes in strings as \\" and 
       return { result, parseFailed: false };
     } catch (parseErr: any) {
       parseFailed = true;
+      console.error("Action plan JSON parse error:", parseErr.message);
+      console.error("Raw response length:", rawContent.length, "chars. First 500 chars:", rawContent.substring(0, 500));
+      console.error("Last 200 chars:", rawContent.substring(rawContent.length - 200));
       const positionMatch = parseErr.message?.match(/position (\d+)/);
       const pos = positionMatch ? parseInt(positionMatch[1], 10) : -1;
       if (pos > 0 && pos < cleaned.length) {
@@ -1334,8 +1382,10 @@ Respond with ONLY valid JSON (no markdown). Escape quotes in strings as \\" and 
         repaired += stack.reverse().join('');
         try {
           result = JSON.parse(repaired);
+          console.log("Action plan JSON repaired successfully after truncation");
           return { result, parseFailed: true };
         } catch {
+          console.error("Action plan JSON repair also failed");
           result = { title: "Action Plan", objective: input.objective, steps: [], reasoning: "", expectedOutcome: "", timeline: "", priority: "medium", category: "Multi-Channel Marketing" };
           return { result, parseFailed: true };
         }
@@ -1405,6 +1455,7 @@ Respond with ONLY valid JSON (no markdown). Escape quotes in strings as \\" and 
       timeline: (result.timeline && result.timeline !== "Not specified") ? result.timeline : timelineFallback,
       priority: result.priority || "medium",
       category: result.category || "Multi-Channel Marketing",
+      businessPlanData: result.businessPlanData || undefined,
     };
   } catch (error) {
     console.error("Action plan generation error:", error);

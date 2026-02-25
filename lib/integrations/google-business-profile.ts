@@ -11,6 +11,8 @@ export interface GBPConfig {
   expiresAt: number;
 }
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export class GoogleBusinessProfileService {
   private oauth2Client;
 
@@ -29,6 +31,29 @@ export class GoogleBusinessProfileService {
   }
 
   /**
+   * Execute an API call with rate-limit awareness:
+   * disables the built-in gaxios retry for 429s (which is too aggressive)
+   * and does a single manual retry after a longer wait.
+   */
+  private async withRateLimitRetry<T>(
+    fn: () => Promise<T>,
+    label: string,
+    retryDelayMs = 10_000,
+  ): Promise<T> {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const is429 = err?.code === 429 || err?.status === 429 || err?.response?.status === 429;
+      if (!is429) throw err;
+
+      console.warn(`⏳ ${label}: rate-limited (429). Waiting ${retryDelayMs / 1000}s before retry…`);
+      await sleep(retryDelayMs);
+
+      return await fn();
+    }
+  }
+
+  /**
    * Get list of locations for this user
    */
   async getLocations(): Promise<any[]> {
@@ -36,9 +61,13 @@ export class GoogleBusinessProfileService {
       const mybusiness = google.mybusinessaccountmanagement({
         version: 'v1',
         auth: this.oauth2Client,
-      });
+        retryConfig: { retry: 0 },
+      } as any);
 
-      const accountsResponse = await mybusiness.accounts.list();
+      const accountsResponse = await this.withRateLimitRetry(
+        () => mybusiness.accounts.list(),
+        'accounts.list',
+      );
       const accounts = accountsResponse.data.accounts || [];
 
       if (accounts.length === 0) {
@@ -48,15 +77,21 @@ export class GoogleBusinessProfileService {
       const locations: any[] = [];
       for (const account of accounts) {
         try {
+          await sleep(1000);
+
           const mybusinessInfo = google.mybusinessbusinessinformation({
             version: 'v1',
             auth: this.oauth2Client,
-          });
-
-          const locationsResponse = await mybusinessInfo.accounts.locations.list({
-            parent: account.name,
-            readMask: 'name,title,categories,storefrontAddress,phoneNumbers,websiteUri,regularHours',
+            retryConfig: { retry: 0 },
           } as any);
+
+          const locationsResponse = await this.withRateLimitRetry(
+            () => mybusinessInfo.accounts.locations.list({
+              parent: account.name,
+              readMask: 'name,title,categories,storefrontAddress,phoneNumbers,websiteUri,regularHours',
+            } as any),
+            `locations.list(${account.name})`,
+          );
 
           const accountLocations = locationsResponse.data.locations || [];
           locations.push(...accountLocations.map((loc: any) => ({
@@ -70,8 +105,8 @@ export class GoogleBusinessProfileService {
             categories: loc.categories?.map((c: any) => c.displayName),
             hours: loc.regularHours,
           })));
-        } catch (error) {
-          console.error(`Error fetching locations for account ${account.name}:`, error);
+        } catch (error: any) {
+          console.error(`Error fetching locations for account ${account.name}:`, error?.message || error);
         }
       }
 

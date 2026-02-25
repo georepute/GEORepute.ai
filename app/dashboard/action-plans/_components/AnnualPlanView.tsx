@@ -326,25 +326,42 @@ export function AnnualPlanView({
             Execution Categories
           </h4>
           {categoryData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie
-                  data={categoryData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                >
-                  {categoryData.map((entry, index) => (
-                    <Cell key={index} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+            <div className="flex flex-col sm:flex-row gap-4 items-start">
+              <div className="w-full sm:w-[200px] flex-shrink-0">
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie
+                      data={categoryData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {categoryData.map((entry, index) => (
+                        <Cell key={index} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex-1 min-w-0 space-y-1.5">
+                {categoryData.map((entry, index) => (
+                  <div key={index} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: entry.color }}
+                      />
+                      <span className="text-gray-700 truncate">{entry.name}</span>
+                    </span>
+                    <span className="font-semibold text-gray-900 flex-shrink-0">{entry.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
           ) : (
             <div className="h-[200px] flex items-center justify-center text-gray-400 text-sm">
               No category data

@@ -113,6 +113,8 @@ interface Project {
   queries_per_platform?: number;
   query_mode?: 'auto' | 'manual' | 'auto_manual';
   manual_queries?: Array<{ text: string; language?: string; country?: string }>;
+  analysis_frequency?: 'manual' | 'daily' | 'weekly' | 'monthly';
+  next_scheduled_at?: string;
 }
 
 interface Session {
@@ -208,6 +210,7 @@ function AIVisibilityContent() {
   const [queriesPerPlatform, setQueriesPerPlatform] = useState<number>(50);
   const [queryMode, setQueryMode] = useState<'auto' | 'manual' | 'auto_manual'>('auto');
   const [manualQueries, setManualQueries] = useState<Array<{ text: string; language?: string; country?: string }>>([]);
+  const [analysisFrequency, setAnalysisFrequency] = useState<'manual' | 'daily' | 'weekly' | 'monthly'>('manual');
   const [newManualQueryText, setNewManualQueryText] = useState('');
   const [newManualQueryLanguage, setNewManualQueryLanguage] = useState('en-US');
   const [newManualQueryCountry, setNewManualQueryCountry] = useState('');
@@ -222,6 +225,8 @@ function AIVisibilityContent() {
   const [brandSummary, setBrandSummary] = useState<any>(null);
   const [loadingBrandSummary, setLoadingBrandSummary] = useState(false);
   const [resultsView, setResultsView] = useState<'mentioned' | 'missed'>('mentioned');
+  const [runHistory, setRunHistory] = useState<any[]>([]);
+  const [loadingRunHistory, setLoadingRunHistory] = useState(false);
   const [showCompletionNotification, setShowCompletionNotification] = useState(false);
   const [showAnalysisStartNotification, setShowAnalysisStartNotification] = useState(false);
   const [showAnalysisStartModal, setShowAnalysisStartModal] = useState(false);
@@ -571,6 +576,28 @@ function AIVisibilityContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject?.id, activeTab, viewMode, selectedProject?.brand_summary, projectSessions]);
 
+  // Fetch run history when switching to trends tab
+  useEffect(() => {
+    if (viewMode === 'details' && selectedProject && activeTab === 'trends') {
+      const fetchRunHistory = async () => {
+        setLoadingRunHistory(true);
+        try {
+          const res = await fetch(`/api/analysis-history?projectId=${selectedProject.id}`);
+          const data = await res.json();
+          if (data.success) {
+            setRunHistory(data.runs || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch run history:', err);
+        } finally {
+          setLoadingRunHistory(false);
+        }
+      };
+      fetchRunHistory();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject?.id, activeTab, viewMode]);
+
   // Debug: Log modal state changes
   useEffect(() => {
     if (viewResponseModal) {
@@ -742,6 +769,9 @@ function AIVisibilityContent() {
       setSelectedProject(project);
       if (project.queries_per_platform != null) {
         setQueriesPerPlatform(Math.min(50, Math.max(1, project.queries_per_platform)));
+      }
+      if (project.analysis_frequency) {
+        setAnalysisFrequency(project.analysis_frequency);
       }
       
       // Fetch sessions
@@ -1109,6 +1139,7 @@ function AIVisibilityContent() {
           queriesPerPlatform: Math.min(50, Math.max(1, queriesPerPlatform)),
           queryMode,
           manualQueries,
+          analysisFrequency,
         }),
       });
 
@@ -1203,6 +1234,7 @@ function AIVisibilityContent() {
     setQueriesPerPlatform(50);
     setQueryMode('auto');
     setManualQueries([]);
+    setAnalysisFrequency('manual');
     setNewManualQueryText('');
     setNewManualQueryLanguage('en-US');
     setNewManualQueryCountry('');
@@ -3923,9 +3955,9 @@ function AIVisibilityContent() {
                                 className="w-full h-full object-contain"
                                 style={{ imageRendering: 'auto' }}
                                 onError={(e) => {
-                                  // Fallback to initial if image fails to load
-                                  e.currentTarget.style.display = 'none';
-                                  const fallback = e.currentTarget.parentElement?.nextElementSibling as HTMLElement;
+                                  const parent = e.currentTarget.parentElement;
+                                  if (parent) parent.style.display = 'none';
+                                  const fallback = parent?.nextElementSibling as HTMLElement;
                                   if (fallback) fallback.style.display = 'flex';
                                 }}
                               />
@@ -4666,9 +4698,9 @@ function AIVisibilityContent() {
                         className="w-full h-full object-contain"
                         style={{ imageRendering: 'auto' }}
                         onError={(e) => {
-                          // Fallback to initial if image fails to load
-                          e.currentTarget.style.display = 'none';
-                          const fallback = e.currentTarget.parentElement?.nextElementSibling as HTMLElement;
+                          const parent = e.currentTarget.parentElement;
+                          if (parent) parent.style.display = 'none';
+                          const fallback = parent?.nextElementSibling as HTMLElement;
                           if (fallback) fallback.style.display = 'flex';
                         }}
                       />
@@ -4818,6 +4850,24 @@ function AIVisibilityContent() {
                 </div>
               </div>
             )}
+
+            {/* Analysis Frequency */}
+            {selectedProject.analysis_frequency && selectedProject.analysis_frequency !== 'manual' && (
+              <div className="border-t border-gray-200 pt-4 mt-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-gray-700">Analysis Frequency:</span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 border border-purple-200 rounded-lg text-sm font-medium text-purple-700 capitalize">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.015 4.356v4.992" /></svg>
+                    {selectedProject.analysis_frequency}
+                  </span>
+                  {selectedProject.next_scheduled_at && (
+                    <span className="text-xs text-gray-500">
+                      Next run: {new Date(selectedProject.next_scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -4924,6 +4974,51 @@ function AIVisibilityContent() {
                 </div>
               </div>
 
+              {/* Revenue Opportunity Alert */}
+              {(() => {
+                const missedHighIntent = projectResponses.filter(r => 
+                  !r.response_metadata?.brand_mentioned && 
+                  (r.response_metadata?.intent_score >= 45 || r.response_metadata?.revenue_potential === 'high' || r.response_metadata?.revenue_potential === 'medium')
+                );
+                const totalHighIntent = projectResponses.filter(r => 
+                  r.response_metadata?.intent_score >= 45 || r.response_metadata?.revenue_potential === 'high' || r.response_metadata?.revenue_potential === 'medium'
+                );
+                if (missedHighIntent.length === 0) return null;
+                const missedPct = totalHighIntent.length > 0 ? Math.round((missedHighIntent.length / totalHighIntent.length) * 100) : 0;
+                return (
+                  <div className="bg-gradient-to-r from-red-50 to-orange-50 border border-red-200 rounded-xl p-5 mb-4">
+                    <div className="flex items-start gap-4">
+                      <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <span className="text-2xl">💰</span>
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-lg font-bold text-red-900 mb-1">Revenue at Risk</h3>
+                        <p className="text-sm text-red-800 mb-3">
+                          Your brand is <strong>missing from {missedHighIntent.length} high-intent buyer queries</strong> ({missedPct}% of commercial queries). 
+                          These are searches from people actively looking to purchase — every missed query is a lost revenue opportunity.
+                        </p>
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="bg-white/70 rounded-lg p-3 text-center">
+                            <div className="text-2xl font-bold text-red-700">{missedHighIntent.length}</div>
+                            <div className="text-xs text-red-600">Missed Buyer Queries</div>
+                          </div>
+                          <div className="bg-white/70 rounded-lg p-3 text-center">
+                            <div className="text-2xl font-bold text-orange-700">{missedPct}%</div>
+                            <div className="text-xs text-orange-600">Commercial Gap Rate</div>
+                          </div>
+                          <div className="bg-white/70 rounded-lg p-3 text-center">
+                            <div className="text-2xl font-bold text-amber-700">
+                              {missedHighIntent.filter(r => r.response_metadata?.competitors_found?.length > 0).length}
+                            </div>
+                            <div className="text-xs text-amber-600">Won by Competitors</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Viewing historical session banner */}
               {isViewingHistory && activeSession && (
                 <div className="mb-4 flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
@@ -4960,6 +5055,7 @@ function AIVisibilityContent() {
                     { id: 'competitors', label: t.dashboard.aiVisibility.competitors, icon: Target },
                     { id: 'sources', label: t.dashboard.aiVisibility.sources, icon: Globe },
                     { id: 'analytics', label: t.dashboard.sidebar.analytics, icon: Activity },
+                    { id: 'trends', label: 'Visibility Trends', icon: TrendingUp },
                     { id: 'keywords', label: t.dashboard.aiVisibility.keywords, icon: Search },
                   ].map((tab) => {
                     const Icon = tab.icon;
@@ -5268,8 +5364,33 @@ function AIVisibilityContent() {
                                     </div>
                                   </div>
 
-                                  {/* Status Badge */}
-                                  <div className="flex items-center justify-end mb-4">
+                                  {/* Status Badge + Intent Score */}
+                                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {/* Commercial Intent Badge */}
+                                      {firstResponse.response_metadata?.intent && (
+                                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                          firstResponse.response_metadata.revenue_potential === 'high' ? 'bg-red-100 text-red-800' :
+                                          firstResponse.response_metadata.revenue_potential === 'medium' ? 'bg-orange-100 text-orange-800' :
+                                          firstResponse.response_metadata.revenue_potential === 'low' ? 'bg-yellow-100 text-yellow-800' :
+                                          'bg-gray-100 text-gray-600'
+                                        }`}>
+                                          {firstResponse.response_metadata.revenue_potential === 'high' ? '🔥' :
+                                           firstResponse.response_metadata.revenue_potential === 'medium' ? '⚡' :
+                                           firstResponse.response_metadata.revenue_potential === 'low' ? '💡' : 'ℹ️'}{' '}
+                                          {firstResponse.response_metadata.intent === 'transactional' ? 'Purchase Intent' :
+                                           firstResponse.response_metadata.intent === 'commercial_investigation' ? 'Buyer Research' :
+                                           firstResponse.response_metadata.intent === 'consideration' ? 'Considering' :
+                                           'Informational'}
+                                        </span>
+                                      )}
+                                      {/* Revenue opportunity for missed high-intent */}
+                                      {resultsView === 'missed' && firstResponse.response_metadata?.intent_score >= 45 && (
+                                        <span className="px-2 py-1 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+                                          💰 Revenue at risk — you are invisible to this buyer
+                                        </span>
+                                      )}
+                                    </div>
                                     <span className={`px-2 py-1 rounded text-xs font-medium ${
                                       resultsView === 'mentioned'
                                         ? 'bg-green-100 text-green-800'
@@ -6273,6 +6394,261 @@ function AIVisibilityContent() {
                       </div>
                     </div>
                   )}
+                  {activeTab === 'trends' && (
+                    <div className="p-6 space-y-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">Visibility Trends</h3>
+                          <p className="text-sm text-gray-500 mt-1">
+                            Track how your brand visibility changes across analysis runs.
+                            {selectedProject?.analysis_frequency && selectedProject.analysis_frequency !== 'manual' && (
+                              <span className="ml-1 text-purple-600">
+                                Auto-runs: {selectedProject.analysis_frequency}
+                                {selectedProject.next_scheduled_at && ` (next: ${new Date(selectedProject.next_scheduled_at).toLocaleDateString()})`}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                        {selectedProject?.analysis_frequency === 'manual' && (
+                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                            Manual mode — set frequency in Platform Selection to enable auto re-runs
+                          </span>
+                        )}
+                      </div>
+
+                      {loadingRunHistory ? (
+                        <div className="text-center py-16 text-gray-500">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4" />
+                          <p>Loading trends data...</p>
+                        </div>
+                      ) : runHistory.length === 0 ? (
+                        <div className="text-center py-16 text-gray-500">
+                          <TrendingUp className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                          <p className="font-medium">No trends data yet</p>
+                          <p className="text-sm mt-2">Run your first analysis to start tracking visibility over time.</p>
+                          <p className="text-xs mt-1 text-gray-400">Each completed analysis creates a data point for comparison.</p>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Summary Cards */}
+                          {runHistory.length >= 2 && (() => {
+                            const latest = runHistory[runHistory.length - 1];
+                            const first = runHistory[0];
+                            const previous = runHistory[runHistory.length - 2];
+                            const overallChange = (latest.overall_visibility_score || 0) - (first.overall_visibility_score || 0);
+                            const recentChange = (latest.overall_visibility_score || 0) - (previous.overall_visibility_score || 0);
+                            return (
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4 border border-purple-200">
+                                  <p className="text-xs text-purple-600 font-medium uppercase">Overall Change</p>
+                                  <p className={`text-2xl font-bold mt-1 ${overallChange > 0 ? 'text-green-600' : overallChange < 0 ? 'text-red-600' : 'text-gray-700'}`}>
+                                    {overallChange > 0 ? '+' : ''}{overallChange.toFixed(1)}%
+                                  </p>
+                                  <p className="text-xs text-gray-500 mt-1">Since first run ({runHistory.length} runs total)</p>
+                                </div>
+                                <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 border border-blue-200">
+                                  <p className="text-xs text-blue-600 font-medium uppercase">Latest vs Previous</p>
+                                  <p className={`text-2xl font-bold mt-1 ${recentChange > 0 ? 'text-green-600' : recentChange < 0 ? 'text-red-600' : 'text-gray-700'}`}>
+                                    {recentChange > 0 ? '+' : ''}{recentChange.toFixed(1)}%
+                                  </p>
+                                  <p className="text-xs text-gray-500 mt-1">Run #{latest.run_number} vs #{previous.run_number}</p>
+                                </div>
+                                <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-4 border border-green-200">
+                                  <p className="text-xs text-green-600 font-medium uppercase">Current Score</p>
+                                  <p className="text-2xl font-bold mt-1 text-gray-900">{(latest.overall_visibility_score || 0).toFixed(1)}%</p>
+                                  <p className="text-xs text-gray-500 mt-1">Brand mention rate</p>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Visibility Score Over Time Chart */}
+                          <div className="bg-white rounded-xl border border-gray-200 p-6">
+                            <h4 className="text-sm font-semibold text-gray-900 mb-4">Visibility Score Over Time</h4>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <LineChart data={runHistory.map((run) => ({
+                                name: `Run #${run.run_number}`,
+                                date: new Date(run.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                                visibility: Number((run.overall_visibility_score || 0).toFixed(1)),
+                                mentionRate: Number((run.brand_mention_rate || 0).toFixed(1)),
+                              }))}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                                <YAxis tick={{ fontSize: 12 }} domain={[0, 100]} unit="%" />
+                                <Tooltip
+                                  contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
+                                  formatter={(value: number) => [`${value}%`]}
+                                />
+                                <Legend />
+                                <Line
+                                  type="monotone"
+                                  dataKey="visibility"
+                                  name="Visibility Score"
+                                  stroke="#9333ea"
+                                  strokeWidth={2}
+                                  dot={{ r: 5, fill: '#9333ea' }}
+                                  activeDot={{ r: 7 }}
+                                />
+                                <Line
+                                  type="monotone"
+                                  dataKey="mentionRate"
+                                  name="Mention Rate"
+                                  stroke="#3b82f6"
+                                  strokeWidth={2}
+                                  dot={{ r: 5, fill: '#3b82f6' }}
+                                  activeDot={{ r: 7 }}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          {/* Per-Platform Breakdown Chart */}
+                          {runHistory.length > 0 && runHistory[runHistory.length - 1].platform_scores && (
+                            <div className="bg-white rounded-xl border border-gray-200 p-6">
+                              <h4 className="text-sm font-semibold text-gray-900 mb-4">Platform Visibility (Latest Run)</h4>
+                              <ResponsiveContainer width="100%" height={250}>
+                                <BarChart data={Object.entries(runHistory[runHistory.length - 1].platform_scores || {}).map(([platform, score]) => ({
+                                  platform: platform.charAt(0).toUpperCase() + platform.slice(1),
+                                  score: Number(score),
+                                }))}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                  <XAxis dataKey="platform" tick={{ fontSize: 12 }} />
+                                  <YAxis tick={{ fontSize: 12 }} domain={[0, 100]} unit="%" />
+                                  <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} formatter={(value: number) => [`${value}%`]} />
+                                  <Bar dataKey="score" name="Visibility %" fill="#9333ea" radius={[4, 4, 0, 0]}>
+                                    {Object.entries(runHistory[runHistory.length - 1].platform_scores || {}).map((_entry, index) => (
+                                      <Cell key={`cell-${index}`} fill={['#9333ea', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'][index % 5]} />
+                                    ))}
+                                  </Bar>
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+
+                          {/* Per-Platform Trends (Multi-line) */}
+                          {runHistory.length >= 2 && (() => {
+                            const allPlatforms = new Set<string>();
+                            runHistory.forEach(run => {
+                              if (run.platform_scores) Object.keys(run.platform_scores).forEach(p => allPlatforms.add(p));
+                            });
+                            const platforms = Array.from(allPlatforms);
+                            if (platforms.length === 0) return null;
+                            const chartData = runHistory.map(run => {
+                              const point: any = {
+                                name: `Run #${run.run_number}`,
+                                date: new Date(run.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+                              };
+                              platforms.forEach(p => { point[p] = run.platform_scores?.[p] ?? 0; });
+                              return point;
+                            });
+                            const colors = ['#9333ea', '#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+                            return (
+                              <div className="bg-white rounded-xl border border-gray-200 p-6">
+                                <h4 className="text-sm font-semibold text-gray-900 mb-4">Platform Trends Over Time</h4>
+                                <ResponsiveContainer width="100%" height={300}>
+                                  <LineChart data={chartData}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                                    <YAxis tick={{ fontSize: 12 }} domain={[0, 100]} unit="%" />
+                                    <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} formatter={(value: number) => [`${value}%`]} />
+                                    <Legend />
+                                    {platforms.map((p, i) => (
+                                      <Line
+                                        key={p}
+                                        type="monotone"
+                                        dataKey={p}
+                                        name={p.charAt(0).toUpperCase() + p.slice(1)}
+                                        stroke={colors[i % colors.length]}
+                                        strokeWidth={2}
+                                        dot={{ r: 4 }}
+                                      />
+                                    ))}
+                                  </LineChart>
+                                </ResponsiveContainer>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Sentiment Breakdown Over Time */}
+                          {runHistory.length >= 2 && (
+                            <div className="bg-white rounded-xl border border-gray-200 p-6">
+                              <h4 className="text-sm font-semibold text-gray-900 mb-4">Sentiment Breakdown Over Time</h4>
+                              <ResponsiveContainer width="100%" height={250}>
+                                <BarChart data={runHistory.map(run => ({
+                                  name: `#${run.run_number}`,
+                                  positive: run.positive_mentions || 0,
+                                  neutral: run.neutral_mentions || 0,
+                                  negative: run.negative_mentions || 0,
+                                }))}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                                  <YAxis tick={{ fontSize: 12 }} />
+                                  <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }} />
+                                  <Legend />
+                                  <Bar dataKey="positive" name="Positive" stackId="a" fill="#10b981" />
+                                  <Bar dataKey="neutral" name="Neutral" stackId="a" fill="#6b7280" />
+                                  <Bar dataKey="negative" name="Negative" stackId="a" fill="#ef4444" />
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+
+                          {/* Run History Table */}
+                          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                            <div className="px-6 py-4 border-b border-gray-200">
+                              <h4 className="text-sm font-semibold text-gray-900">Run History</h4>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Run</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Visibility</th>
+                                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Mentions</th>
+                                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Change</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                  {[...runHistory].reverse().map((run) => (
+                                    <tr key={run.id} className="hover:bg-gray-50">
+                                      <td className="px-4 py-3 font-medium text-gray-900">#{run.run_number}</td>
+                                      <td className="px-4 py-3 text-gray-600">
+                                        {new Date(run.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                          run.run_type === 'scheduled'
+                                            ? 'bg-blue-100 text-blue-700'
+                                            : 'bg-gray-100 text-gray-700'
+                                        }`}>
+                                          {run.run_type === 'scheduled' ? 'Scheduled' : 'Manual'}
+                                        </span>
+                                      </td>
+                                      <td className="px-4 py-3 text-right font-medium">{(run.overall_visibility_score || 0).toFixed(1)}%</td>
+                                      <td className="px-4 py-3 text-right text-gray-600">
+                                        {run.queries_with_brand_mention || 0}/{run.total_queries || 0}
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                        {run.visibility_delta !== 0 ? (
+                                          <span className={`font-medium ${run.visibility_delta > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {run.visibility_delta > 0 ? '+' : ''}{(run.visibility_delta || 0).toFixed(1)}%
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-400">—</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {activeTab === 'keywords' && (
                     <KeywordsTab selectedProject={selectedProject} />
                   )}
@@ -7059,6 +7435,63 @@ function AIVisibilityContent() {
                   {viewResponseModal.response.response}
                 </div>
               </div>
+
+              {/* Brand Detection Verification & Intent */}
+              {viewResponseModal.response.response_metadata && (
+                <div className="space-y-3 mb-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                      viewResponseModal.response.response_metadata.brand_mentioned
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {viewResponseModal.response.response_metadata.brand_mentioned ? '✓ Brand Mentioned' : '✗ Brand Not Mentioned'}
+                    </span>
+                    {viewResponseModal.response.response_metadata.intent && (
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        viewResponseModal.response.response_metadata.revenue_potential === 'high' ? 'bg-red-100 text-red-800' :
+                        viewResponseModal.response.response_metadata.revenue_potential === 'medium' ? 'bg-orange-100 text-orange-800' :
+                        viewResponseModal.response.response_metadata.revenue_potential === 'low' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        Intent: {viewResponseModal.response.response_metadata.intent.replace('_', ' ')} ({viewResponseModal.response.response_metadata.intent_score}/100)
+                      </span>
+                    )}
+                  </div>
+                  {viewResponseModal.response.response_metadata.verified_mention_text && (
+                    <div className="bg-green-50 border border-green-200 rounded p-3">
+                      <div className="text-xs font-medium text-green-800 mb-1">Verified brand text found in response:</div>
+                      <div className="text-xs text-green-700 mb-1.5">
+                        Found in: {viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'Claude (Anthropic)' :
+                         viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'ChatGPT (OpenAI)' :
+                         viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'Gemini (Google)' :
+                         viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'Perplexity' :
+                         viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'Groq' :
+                         viewResponseModal.response.platform || 'Unknown'}
+                      </div>
+                      <div className="text-sm text-green-900">
+                        &ldquo;{viewResponseModal.response.response_metadata.verified_mention_text}&rdquo;
+                      </div>
+                    </div>
+                  )}
+                  {!viewResponseModal.response.response_metadata.brand_mentioned && viewResponseModal.response.response_metadata.intent_score >= 45 && (
+                    <div className="bg-red-50 border border-red-200 rounded p-3">
+                      <div className="text-xs font-bold text-red-800 mb-1">💰 Revenue Opportunity Lost</div>
+                      <div className="text-sm text-red-700">
+                        {viewResponseModal.response.response_metadata.opportunity_label || 'This is a high-intent buyer query where your brand is invisible.'}
+                      </div>
+                    </div>
+                  )}
+                  {viewResponseModal.response.response_metadata.competitors_found?.length > 0 && !viewResponseModal.response.response_metadata.brand_mentioned && (
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                      <div className="text-xs font-bold text-amber-800 mb-1">⚠️ Competitors visible instead</div>
+                      <div className="text-sm text-amber-700">
+                        {viewResponseModal.response.response_metadata.competitors_found.join(', ')} {viewResponseModal.response.response_metadata.competitors_found.length === 1 ? 'is' : 'are'} mentioned while your brand is not.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="p-6 border-t border-gray-200">
               <button
@@ -7495,6 +7928,31 @@ function AIVisibilityContent() {
                     <option key={n} value={n}>{n} queries per platform</option>
                   ))}
                 </select>
+              </div>
+
+              {/* Analysis Frequency */}
+              <div className="border-t border-gray-200 pt-6">
+                <label className="block text-sm font-medium text-gray-900 mb-2">
+                  Analysis Frequency
+                </label>
+                <p className="text-sm text-gray-500 mb-3">
+                  Schedule automatic re-runs to track how your brand visibility changes over time. Re-runs use the same queries, platforms, and settings for accurate comparison.
+                </p>
+                <select
+                  value={analysisFrequency}
+                  onChange={(e) => setAnalysisFrequency(e.target.value as 'manual' | 'daily' | 'weekly' | 'monthly')}
+                  className="w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg bg-white text-gray-900 text-sm"
+                >
+                  <option value="manual">Manual only (no auto re-runs)</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+                {analysisFrequency !== 'manual' && (
+                  <p className="text-xs text-purple-600 mt-2">
+                    Your analysis will automatically re-run every {analysisFrequency === 'daily' ? 'day' : analysisFrequency === 'weekly' ? 'week' : 'month'} using the same queries. View trends in the Analytics tab.
+                  </p>
+                )}
               </div>
 
               {/* Select AI Platforms */}

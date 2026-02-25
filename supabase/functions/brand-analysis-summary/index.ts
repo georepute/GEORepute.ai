@@ -19,6 +19,16 @@ function extractDomain(url: string): string | null {
   try { return new URL(url).origin; } catch { return null; }
 }
 
+function extractHostname(url: string): string | null {
+  try { return new URL(url).hostname; } catch { return null; }
+}
+
+function getGoogleFaviconUrl(url: string, size = 128): string | null {
+  const domain = extractHostname(url);
+  if (!domain) return null;
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}`;
+}
+
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -56,18 +66,7 @@ async function getSiteMetadata(url: string) {
     getMatch(/<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["'][^>]*>/i) ||
     getMatch(/<meta[^>]+name=["']twitter:description["'][^>]*content=["']([^"']+)["'][^>]*>/i);
 
-  let icon: string | null = null;
-  const iconMatch = /<link[^>]+rel=["'](?:shortcut icon|icon|apple-touch-icon[^"']*)["'][^>]*href=["']([^"']+)["'][^>]*>/i.exec(html);
-  if (iconMatch) {
-    const href = iconMatch[1];
-    icon = href.startsWith('http') ? href : new URL(href, extractDomain(url) || url).toString();
-  } else {
-    try {
-      icon = new URL('/favicon.ico', extractDomain(url) || url).toString();
-    } catch {
-      icon = null;
-    }
-  }
+  const icon = getGoogleFaviconUrl(url) || null;
 
   return { title, description, icon };
 }
@@ -121,18 +120,9 @@ function getSiteMetadataFromHtml(html: string, url: string) {
     getMatch(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)["'][^>]*>/i) ||
     getMatch(/<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']+)["'][^>]*>/i) ||
     getMatch(/<meta[^>]+name=["']twitter:description["'][^>]*content=["']([^"']+)["'][^>]*>/i);
-  let icon: string | null = null;
-  const iconMatch = /<link[^>]+rel=["'](?:shortcut icon|icon|apple-touch-icon[^"']*)["'][^>]*href=["']([^"']+)["'][^>]*>/i.exec(html);
-  if (iconMatch) {
-    const href = iconMatch[1];
-    icon = href.startsWith('http') ? href : new URL(href, extractDomain(url) || url).toString();
-  } else {
-    try {
-      icon = new URL('/favicon.ico', extractDomain(url) || url).toString();
-    } catch {
-      icon = null;
-    }
-  }
+
+  const icon = getGoogleFaviconUrl(url) || null;
+
   return { title, description, icon };
 }
 
@@ -152,7 +142,7 @@ async function searchBrandInformation(brandName: string, website: string, indust
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'sonar',
+        model: 'sonar-pro',
         messages: [
           {
             role: 'system',

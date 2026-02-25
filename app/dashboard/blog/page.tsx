@@ -324,7 +324,7 @@ function BlogPageContent() {
 
   const handleGenerateContent = async () => {
     if (!topic.trim()) {
-      toast.error("Please enter a topic for your blog post");
+      toast.error(t.dashboard.blogPage.enterTopic);
       return;
     }
 
@@ -382,13 +382,13 @@ function BlogPageContent() {
         setImageSearchQuery(topic.trim());
         setShowImageModal(true);
         
-        toast.success("Blog content generated! Now select a featured image.");
+        toast.success(t.dashboard.blogPage.contentGenerated);
       } else {
         throw new Error("No content generated");
       }
     } catch (error: any) {
       console.error("Content generation error:", error);
-      toast.error("Failed to generate content: " + (error.message || "Unknown error"));
+      toast.error(t.dashboard.blogPage.failedToGenerate + ": " + (error.message || ""));
     } finally {
       setGeneratingContent(false);
     }
@@ -397,7 +397,7 @@ function BlogPageContent() {
   // Fetch images from Pixabay
   const handleFetchImages = async () => {
     if (!imageSearchQuery || imageSearchQuery.trim().length === 0) {
-      toast.error("Please enter a search query");
+      toast.error(t.dashboard.blogPage.enterSearchQuery);
       return;
     }
 
@@ -423,11 +423,11 @@ function BlogPageContent() {
       if (data.images && data.images.length > 0) {
         setPixabayImages(data.images);
       } else {
-        toast.error("No images found. Try a different search query.");
+        toast.error(t.dashboard.blogPage.noImagesFound);
       }
     } catch (err) {
       console.error("Error fetching images:", err);
-      toast.error(err instanceof Error ? err.message : "Failed to fetch images");
+      toast.error(err instanceof Error ? err.message : t.dashboard.blogPage.failedToFetchImages);
     } finally {
       setFetchingImages(false);
     }
@@ -463,7 +463,7 @@ function BlogPageContent() {
       return urlData.publicUrl;
     } catch (err) {
       console.error("Failed to upload image:", err);
-      toast.error("Failed to upload image to storage");
+      toast.error(t.dashboard.blogPage.failedToUpload);
       return null;
     } finally {
       setUploadingImage(false);
@@ -475,14 +475,14 @@ function BlogPageContent() {
     setSelectedImage(image);
 
     // Upload image to Supabase Storage
-    toast.loading("Uploading image...", { id: "image-upload" });
+    toast.loading(t.dashboard.blogPage.uploadingImage, { id: "image-upload" });
     const publicUrl = await uploadImageToStorage(image.largeImageURL, image.id);
 
     if (publicUrl) {
       setPost({ ...post, imageUrl: publicUrl });
-      toast.success("Image uploaded and selected!", { id: "image-upload" });
+      toast.success(t.dashboard.blogPage.imageUploadedSelected, { id: "image-upload" });
     } else {
-      toast.error("Failed to upload image", { id: "image-upload" });
+      toast.error(t.dashboard.blogPage.failedToUploadImage, { id: "image-upload" });
     }
   };
 
@@ -492,18 +492,18 @@ function BlogPageContent() {
     if (!file) return;
     const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
     if (!validTypes.includes(file.type)) {
-      toast.error("Please choose a JPEG, PNG, or WebP image.");
+      toast.error(t.dashboard.blogPage.chooseValidImage);
       e.target.value = "";
       return;
     }
     const maxSize = 20 * 1024 * 1024;
     if (file.size > maxSize) {
-      toast.error("Image must be under 20MB.");
+      toast.error(t.dashboard.blogPage.imageTooLarge);
       e.target.value = "";
       return;
     }
     setUploadingManualImage(true);
-    toast.loading("Uploading image...", { id: "blog-image-upload" });
+    toast.loading(t.dashboard.blogPage.uploadingImage, { id: "blog-image-upload" });
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -513,12 +513,12 @@ function BlogPageContent() {
       if (data.url) {
         setUploadedImageUrl(data.url);
         setPost({ ...post, imageUrl: data.url });
-        setSelectedImage({ id: "manual", tags: "Uploaded from computer", user: "You" });
-        toast.success("Image uploaded to storage. Click \"Use Selected Image\" to confirm.", { id: "blog-image-upload" });
+        setSelectedImage({ id: "manual", tags: t.dashboard.blogPage.uploadFromComputer, user: "You" });
+        toast.success(t.dashboard.blogPage.imageUploadedSelected, { id: "blog-image-upload" });
       }
     } catch (err) {
       console.error("Manual image upload:", err);
-      toast.error(err instanceof Error ? err.message : "Upload failed", { id: "blog-image-upload" });
+      toast.error(err instanceof Error ? err.message : t.dashboard.blogPage.failedToUpload, { id: "blog-image-upload" });
     } finally {
       setUploadingManualImage(false);
       e.target.value = "";
@@ -536,13 +536,13 @@ function BlogPageContent() {
   const handleConfirmImage = () => {
     const hasImage = selectedImage || uploadedImageUrl || post.imageUrl;
     if (!hasImage) {
-      toast.error("Please select an image or skip");
+      toast.error(t.dashboard.blogPage.chooseImageForPost);
       return;
     }
     if (uploadedImageUrl && !post.imageUrl) setPost({ ...post, imageUrl: uploadedImageUrl });
     setShowImageModal(false);
     setImageModalView("search");
-    toast.success("Featured image set! Review your blog post below.");
+    toast.success(t.dashboard.blogPage.imageSet);
   };
 
   // Skip image selection
@@ -551,7 +551,7 @@ function BlogPageContent() {
     setSelectedImage(null);
     setShowImageModal(false);
     setImageModalView("search");
-    toast.success("Image skipped. You can add one later.");
+    toast.success(t.dashboard.blogPage.imageSkipped);
   };
 
   const handleStartOver = () => {
@@ -577,11 +577,11 @@ function BlogPageContent() {
 
   const handleSendToPublication = async () => {
     if (!post.title.trim()) {
-      toast.error("Please enter a title");
+      toast.error(t.dashboard.blogPage.enterTitle);
       return;
     }
     if (!post.content.trim()) {
-      toast.error("Please enter content");
+      toast.error(t.dashboard.blogPage.enterContent);
       return;
     }
 
@@ -594,7 +594,7 @@ function BlogPageContent() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        toast.error("Please log in to continue");
+        toast.error(t.dashboard.blogPage.pleaseLogin);
         sendingToPublicationRef.current = false;
         setSendingToPublication(false);
         return;
@@ -608,7 +608,7 @@ function BlogPageContent() {
       let structuredSEO = null;
 
       // Generate schema for the content
-      toast.loading("Generating SEO schema...", { id: "schema-generation" });
+      toast.loading(t.dashboard.blogPage.generatingSchema, { id: "schema-generation" });
       console.log("🔄 Generating schema for blog content...");
       
       const schemaResponse = await fetch("/api/geo-core/content-generate", {
@@ -633,11 +633,11 @@ function BlogPageContent() {
         structuredSEO = schemaResult.structuredSEO || null;
         console.log("✅ Schema generated:", JSON.stringify(schemaData, null, 2));
         console.log("✅ Structured SEO:", JSON.stringify(structuredSEO, null, 2));
-        toast.success("Schema generated!", { id: "schema-generation" });
+        toast.success(t.dashboard.blogPage.schemaGenerated, { id: "schema-generation" });
       } else {
         const errorData = await schemaResponse.json().catch(() => ({}));
         console.error("❌ Schema generation failed:", errorData);
-        toast.error("Schema generation failed: " + (errorData.error || "Unknown error"), { id: "schema-generation" });
+        toast.error(t.dashboard.blogPage.failedToGenerate + ": " + (errorData.error || ""), { id: "schema-generation" });
       }
 
       // Debug: Log what we're about to save
@@ -725,7 +725,7 @@ function BlogPageContent() {
 
       if (insertError) {
         console.error("Failed to save content:", insertError);
-        throw new Error("Failed to save content");
+        throw new Error(t.dashboard.blogPage.failedToSave);
       }
 
       // Store content data in sessionStorage for the publication page
@@ -743,7 +743,7 @@ function BlogPageContent() {
 
       sessionStorage.setItem('contentToPublish', JSON.stringify(publishData));
 
-      toast.success("Content saved with schema! Redirecting...");
+      toast.success(t.dashboard.blogPage.contentSaved);
       
       // Clear form and reset state
       setTopic("");
@@ -763,7 +763,7 @@ function BlogPageContent() {
       router.push('/dashboard/content');
     } catch (error: any) {
       console.error("Send to publication error:", error);
-      toast.error("Failed to send to publication: " + (error.message || "Unknown error"));
+      toast.error(t.dashboard.blogPage.failedToSend + ": " + (error.message || ""));
     } finally {
       sendingToPublicationRef.current = false;
       setSendingToPublication(false);
@@ -775,23 +775,23 @@ function BlogPageContent() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <RefreshCw className="w-8 h-8 mx-auto mb-4 text-purple-600 animate-spin" />
-          <p className="text-gray-600">Loading...</p>
+          <p className="text-gray-600">{t.dashboard.blogPage.loading}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
             <FileText className="w-8 h-8 text-purple-600" />
-            Blog Publishing
+            {t.dashboard.blogPage.title}
           </h1>
           <p className="text-gray-600 mt-2">
-            Create and publish blog posts to your connected platforms
+            {t.dashboard.blogPage.subtitle}
           </p>
         </div>
 
@@ -802,10 +802,10 @@ function BlogPageContent() {
               <Store className="w-8 h-8 text-white" />
             </div>
             <h2 className="text-xl font-semibold text-gray-900 mb-2">
-              Connect Your Blog Platform
+              {t.dashboard.blogPage.connectTitle}
             </h2>
             <p className="text-gray-600 mb-6 max-w-md mx-auto">
-              Connect your blog platform to start publishing blog posts directly from GeoRepute.ai
+              {t.dashboard.blogPage.connectDesc}
             </p>
             
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -814,27 +814,27 @@ function BlogPageContent() {
                 className="inline-flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
               >
                 <Image src="/shopify.svg" alt="Shopify" width={20} height={20} />
-                Connect Shopify
+                {t.dashboard.blogPage.connectShopify}
               </Link>
               <Link
                 href="/dashboard/settings?tab=integrations"
                 className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
               >
                 <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} />
-                Connect WordPress.com
+                {t.dashboard.blogPage.connectWordpress}
               </Link>
               <Link
                 href="/dashboard/settings?tab=integrations"
                 className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-medium"
               >
                 <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} />
-                Connect Self-Hosted WordPress
+                {t.dashboard.blogPage.connectSelfHosted}
               </Link>
             </div>
 
             <div className="mt-6 pt-6 border-t border-gray-200">
               <p className="text-sm text-gray-500">
-                Go to <Link href="/dashboard/settings?tab=integrations" className="text-purple-600 hover:underline font-medium">Settings → Integrations</Link> to connect your platforms
+                {t.dashboard.blogPage.goToSettings}
               </p>
             </div>
           </div>
@@ -847,7 +847,7 @@ function BlogPageContent() {
             <div className="lg:col-span-2 space-y-6">
               {/* Platform Selector - Always show both platforms */}
               <div className="bg-white border border-gray-200 rounded-lg p-4">
-                <p className="text-sm font-medium text-gray-700 mb-3">Publish to:</p>
+                <p className="text-sm font-medium text-gray-700 mb-3">{t.dashboard.blogPage.publishTo}</p>
                 <div className="flex flex-wrap gap-3">
                   {/* Shopify */}
                   {shopifyConnected ? (
@@ -871,7 +871,7 @@ function BlogPageContent() {
                       className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-green-400 hover:text-green-600 transition-colors"
                     >
                       <Image src="/shopify.svg" alt="Shopify" width={20} height={20} className="opacity-50" />
-                      <span className="font-medium">Connect Shopify</span>
+                      <span className="font-medium">{t.dashboard.blogPage.connectShopify}</span>
                     </Link>
                   )}
 
@@ -897,7 +897,7 @@ function BlogPageContent() {
                       className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
                     >
                       <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} className="opacity-50" />
-                      <span className="font-medium">Connect WordPress.com</span>
+                      <span className="font-medium">{t.dashboard.blogPage.connectWordpress}</span>
                     </Link>
                   )}
 
@@ -923,7 +923,7 @@ function BlogPageContent() {
                       className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
                     >
                       <Image src="/wordpress.svg" alt="WordPress" width={20} height={20} className="opacity-50" />
-                      <span className="font-medium">Connect Self-Hosted WordPress</span>
+                      <span className="font-medium">{t.dashboard.blogPage.connectSelfHosted}</span>
                     </Link>
                   )}
                 </div>
@@ -947,11 +947,11 @@ function BlogPageContent() {
                     <div>
                       {selectedPlatform === "shopify" && shopifyConnected ? (
                         <p className="text-sm font-medium text-green-900">
-                          Connected to Shopify: {shopName || shopDomain}
+                          {t.dashboard.blogPage.connectedTo} Shopify: {shopName || shopDomain}
                         </p>
                       ) : selectedPlatform === "wordpress" && wordpressConnected ? (
                         <p className="text-sm font-medium text-blue-900">
-                          Connected to WordPress.com: {wordpressSiteName || wordpressUsername}
+                          {t.dashboard.blogPage.connectedTo} WordPress.com: {wordpressSiteName || wordpressUsername}
                           {wordpressSiteUrl && (
                             <a 
                               href={wordpressSiteUrl} 
@@ -965,7 +965,7 @@ function BlogPageContent() {
                         </p>
                       ) : selectedPlatform === "wordpress_self_hosted" && wordpressSelfHostedConnected ? (
                         <p className="text-sm font-medium text-indigo-900">
-                          Connected to Self-Hosted WordPress: {wordpressSelfHostedSiteUrl}
+                          {t.dashboard.blogPage.connectedTo} WordPress: {wordpressSelfHostedSiteUrl}
                           {wordpressSelfHostedSiteUrl && (
                             <a 
                               href={wordpressSelfHostedSiteUrl} 
@@ -973,7 +973,7 @@ function BlogPageContent() {
                               rel="noopener noreferrer"
                               className="ml-2 text-indigo-600 hover:underline text-xs"
                             >
-                              (view site)
+                              ({t.dashboard.blogPage.viewSite})
                             </a>
                           )}
                         </p>
@@ -990,7 +990,7 @@ function BlogPageContent() {
                         : "text-blue-700 hover:text-blue-800"
                     }`}
                   >
-                    Manage
+                    {t.dashboard.blogPage.manage}
                   </Link>
                 </div>
               )}
@@ -1002,12 +1002,12 @@ function BlogPageContent() {
                     {!contentGenerated ? (
                       <>
                         <Sparkles className="w-5 h-5 text-purple-600" />
-                        Generate Blog Post
+                        {t.dashboard.blogPage.generateBlogPost}
                       </>
                     ) : (
                       <>
                         <Edit3 className="w-5 h-5 text-purple-600" />
-                        Review & Edit Content
+                        {t.dashboard.blogPage.reviewEditContent}
                       </>
                     )}
                   </h2>
@@ -1017,7 +1017,7 @@ function BlogPageContent() {
                       className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
                     >
                       <RefreshCw className="w-4 h-4" />
-                      Start Over
+                      {t.dashboard.blogPage.startOver}
                     </button>
                   )}
                 </div>
@@ -1029,49 +1029,49 @@ function BlogPageContent() {
                       {/* Topic */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Blog Topic *
+                          {t.dashboard.blogPage.blogTopic}
                         </label>
                         <input
                           type="text"
                           value={topic}
                           onChange={(e) => setTopic(e.target.value)}
-                          placeholder="e.g., How to Improve Your SEO Rankings in 2025"
+                          placeholder={t.dashboard.blogPage.topicPlaceholder}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          Enter the topic you want to write about
+                          {t.dashboard.blogPage.topicHint}
                         </p>
                       </div>
 
                       {/* Target Keywords */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Target Keywords <span className="text-gray-400 font-normal">(optional)</span>
+                          {t.dashboard.blogPage.targetKeywords}
                         </label>
                         <input
                           type="text"
                           value={targetKeywords}
                           onChange={(e) => setTargetKeywords(e.target.value)}
-                          placeholder="seo, rankings, search optimization"
+                          placeholder={t.dashboard.blogPage.keywordsPlaceholder}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                          Comma-separated keywords to include in your content
+                          {t.dashboard.blogPage.keywordsHint}
                         </p>
                       </div>
 
                       {/* Content language */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Generate content in
+                          {t.dashboard.blogPage.generateContentIn}
                         </label>
                         <select
                           value={contentGenerationLanguage}
                           onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
                         >
-                          <option value="en">English</option>
-                          <option value="he">Hebrew</option>
+                          <option value="en">{t.dashboard.blogPage.english}</option>
+                          <option value="he">{t.dashboard.blogPage.hebrew}</option>
                         </select>
                       </div>
 
@@ -1084,12 +1084,12 @@ function BlogPageContent() {
                         {generatingContent ? (
                           <>
                             <Loader2 className="w-5 h-5 animate-spin" />
-                            Generating Content...
+                            {t.dashboard.blogPage.generatingContent}
                           </>
                         ) : (
                           <>
                             <Sparkles className="w-5 h-5" />
-                            Generate Blog Content
+                            {t.dashboard.blogPage.generateBlogContent}
                           </>
                         )}
                       </button>
@@ -1102,13 +1102,13 @@ function BlogPageContent() {
                       {/* Title */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Post Title *
+                          {t.dashboard.blogPage.postTitle}
                         </label>
                         <input
                           type="text"
                           value={post.title}
                           onChange={(e) => setPost({ ...post, title: e.target.value })}
-                          placeholder="Enter your blog post title"
+                          placeholder={t.dashboard.blogPage.postTitlePlaceholder}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
                         />
                       </div>
@@ -1116,7 +1116,7 @@ function BlogPageContent() {
                       {/* Content - Rich Text Editor */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Content * <span className="text-gray-400 font-normal">(Use the toolbar to format)</span>
+                          {t.dashboard.blogPage.contentLabel}
                         </label>
                         <div className="border border-gray-300 rounded-lg overflow-hidden focus-within:border-purple-500 focus-within:ring-2 focus-within:ring-purple-500/20 transition-all">
                           <ReactQuill
@@ -1125,13 +1125,13 @@ function BlogPageContent() {
                             onChange={(content) => setPost({ ...post, content })}
                             modules={quillModules}
                             formats={quillFormats}
-                            placeholder="Write your blog post content here..."
+                            placeholder={t.dashboard.blogPage.contentPlaceholder}
                             className="bg-white"
                             style={{ minHeight: '350px' }}
                           />
                         </div>
                         <p className="text-xs text-gray-500 mt-1">
-                          Use the toolbar above to add headings, bold, lists, links, and more
+                          {t.dashboard.blogPage.toolbarHint}
                         </p>
                       </div>
 
@@ -1139,45 +1139,45 @@ function BlogPageContent() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Author
+                            {t.dashboard.blogPage.author}
                           </label>
                           <input
                             type="text"
                             value={post.author}
                             onChange={(e) => setPost({ ...post, author: e.target.value })}
-                            placeholder="Author name"
+                            placeholder={t.dashboard.blogPage.authorPlaceholder}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
                           />
                         </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Tags
+                            {t.dashboard.blogPage.tags}
                           </label>
                           <input
                             type="text"
                             value={post.tags}
                             onChange={(e) => setPost({ ...post, tags: e.target.value })}
-                            placeholder="seo, marketing, tips"
+                            placeholder={t.dashboard.blogPage.tagsPlaceholder}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
                           />
-                          <p className="text-xs text-gray-500 mt-1">Comma-separated</p>
+                          <p className="text-xs text-gray-500 mt-1">{t.dashboard.blogPage.commaSeparated}</p>
                         </div>
 
                         {/* Categories - WordPress only */}
                         {(selectedPlatform === "wordpress" || selectedPlatform === "wordpress_self_hosted") && (
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                              Categories
-                              <span className="ml-2 text-xs font-normal text-blue-600">(WordPress)</span>
+                              {t.dashboard.blogPage.categories}
+                              <span className="ml-2 text-xs font-normal text-blue-600">({t.dashboard.blogPage.wordpress})</span>
                             </label>
                             <input
                               type="text"
                               value={post.categories || ""}
                               onChange={(e) => setPost({ ...post, categories: e.target.value })}
-                              placeholder="News, Tutorials, Reviews"
+                              placeholder={t.dashboard.blogPage.categoriesPlaceholder}
                               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
                             />
-                            <p className="text-xs text-gray-500 mt-1">Comma-separated. Categories are broader groupings for your posts.</p>
+                            <p className="text-xs text-gray-500 mt-1">{t.dashboard.blogPage.categoriesHint}</p>
                           </div>
                         )}
                       </div>
@@ -1185,13 +1185,13 @@ function BlogPageContent() {
                       {/* Featured Image */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Featured Image URL
+                          {t.dashboard.blogPage.featuredImageUrl}
                         </label>
                         <input
                           type="url"
                           value={post.imageUrl}
                           onChange={(e) => setPost({ ...post, imageUrl: e.target.value })}
-                          placeholder="https://example.com/image.jpg"
+                          placeholder={t.dashboard.blogPage.featuredImagePlaceholder}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
                         />
                       </div>
@@ -1199,12 +1199,12 @@ function BlogPageContent() {
                       {/* Summary/Excerpt */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Summary/Excerpt
+                          {t.dashboard.blogPage.summaryExcerpt}
                         </label>
                         <textarea
                           value={post.summary}
                           onChange={(e) => setPost({ ...post, summary: e.target.value })}
-                          placeholder="Brief summary of the post (appears in blog listings)"
+                          placeholder={t.dashboard.blogPage.summaryPlaceholder}
                           rows={3}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all resize-none"
                         />
@@ -1220,17 +1220,17 @@ function BlogPageContent() {
                           {sendingToPublication ? (
                             <>
                               <Loader2 className="w-5 h-5 animate-spin" />
-                              Sending...
+                              {t.dashboard.blogPage.sending}
                             </>
                           ) : (
                             <>
                               <ArrowRight className="w-5 h-5" />
-                              Send to Publication
+                              {t.dashboard.blogPage.sendToPublication}
                             </>
                           )}
                         </button>
                         <p className="text-xs text-gray-500 text-center mt-2">
-                          Review and approve your blog post before publishing
+                          {t.dashboard.blogPage.reviewBeforePublishing}
                         </p>
                       </div>
                     </>
@@ -1245,7 +1245,7 @@ function BlogPageContent() {
               {selectedPlatform === "shopify" && blogs.length > 1 && (
                 <div className="bg-white rounded-xl border border-gray-200 p-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Shopify Blog
+                    {t.dashboard.blogPage.selectShopifyBlog}
                   </label>
                   <select
                     value={selectedBlogId || ""}
@@ -1266,7 +1266,7 @@ function BlogPageContent() {
                 <div className="bg-white rounded-xl border border-gray-200 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <label className="block text-sm font-medium text-gray-700">
-                      WordPress.com Site
+                      {t.dashboard.blogPage.wordpressSite}
                     </label>
                     <button
                       onClick={loadWordPressSites}
@@ -1278,7 +1278,7 @@ function BlogPageContent() {
                       ) : (
                         <RefreshCw className="w-3 h-3" />
                       )}
-                      Refresh
+                      {t.dashboard.blogPage.refresh}
                     </button>
                   </div>
                   
@@ -1303,7 +1303,7 @@ function BlogPageContent() {
                           onClick={loadWordPressSites}
                           className="text-blue-600 hover:underline"
                         >
-                          Load sites
+                          {t.dashboard.blogPage.loadSites}
                         </button>
                       )}
                     </div>
@@ -1314,18 +1314,18 @@ function BlogPageContent() {
               {/* Recent Published Posts */}
               <div className="bg-white rounded-xl border border-gray-200">
                 <div className="px-4 py-3 border-b border-gray-200">
-                  <h3 className="font-semibold text-gray-900">Recent Posts</h3>
+                  <h3 className="font-semibold text-gray-900">{t.dashboard.blogPage.recentPosts}</h3>
                 </div>
                 <div className="p-4">
                   {loadingPosts ? (
                     <div className="text-center py-6">
                       <Loader2 className="w-6 h-6 mx-auto mb-2 text-gray-400 animate-spin" />
-                      <p className="text-sm text-gray-500">Loading...</p>
+                      <p className="text-sm text-gray-500">{t.dashboard.blogPage.loading}</p>
                     </div>
                   ) : publishedPosts.length === 0 ? (
                     <div className="text-center py-6">
                       <FileText className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                      <p className="text-sm text-gray-500">No posts published yet</p>
+                      <p className="text-sm text-gray-500">{t.dashboard.blogPage.noPostsYet}</p>
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -1374,24 +1374,24 @@ function BlogPageContent() {
               <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-xl border border-purple-200 p-4">
                 <h3 className="font-semibold text-purple-900 mb-3 flex items-center gap-2">
                   <Sparkles className="w-4 h-4" />
-                  Tips
+                  {t.dashboard.blogPage.tips}
                 </h3>
                 <ul className="space-y-2 text-sm text-purple-800">
                   <li className="flex items-start gap-2">
                     <span className="text-purple-400">•</span>
-                    Use keywords naturally in your title and content
+                    {t.dashboard.blogPage.tipKeywords}
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-purple-400">•</span>
-                    Add a featured image for better engagement
+                    {t.dashboard.blogPage.tipImage}
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-purple-400">•</span>
-                    Use tags to help categorize your content
+                    {t.dashboard.blogPage.tipTags}
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-purple-400">•</span>
-                    Write a compelling summary for blog listings
+                    {t.dashboard.blogPage.tipSummary}
                   </li>
                 </ul>
               </div>
@@ -1409,10 +1409,10 @@ function BlogPageContent() {
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2 text-lg">
                   <Camera className="w-5 h-5 text-purple-600" />
-                  Select Featured Image
+                  {t.dashboard.blogPage.selectFeaturedImage}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Choose an image for your blog post
+                  {t.dashboard.blogPage.chooseImageForPost}
                 </p>
               </div>
               <button
@@ -1433,10 +1433,10 @@ function BlogPageContent() {
                     onClick={() => setImageModalView("search")}
                     className="text-sm text-purple-600 hover:text-purple-700 font-medium flex items-center gap-1"
                   >
-                    ← Back to search
+                    ← {t.dashboard.blogPage.backToSearch}
                   </button>
-                  <h4 className="text-base font-semibold text-gray-900">Upload from your computer</h4>
-                  <p className="text-sm text-gray-500">JPEG, PNG, or WebP, max 20MB. Image is saved to your Supabase storage.</p>
+                  <h4 className="text-base font-semibold text-gray-900">{t.dashboard.blogPage.uploadFromComputer}</h4>
+                  <p className="text-sm text-gray-500">{t.dashboard.blogPage.uploadHint}</p>
                   <input
                     ref={blogImageFileInputRef}
                     type="file"
@@ -1457,7 +1457,7 @@ function BlogPageContent() {
                       ) : (
                         <ImageIcon className="w-8 h-8" />
                       )}
-                      {uploadingManualImage ? "Uploading..." : "Choose image (JPEG, PNG, WebP, max 20MB)"}
+                      {uploadingManualImage ? t.dashboard.blogPage.uploading : t.dashboard.blogPage.uploadHint}
                     </button>
                   ) : (
                     <div className="flex items-center gap-4 p-4 rounded-lg border-2 border-green-200 bg-green-50">
@@ -1465,14 +1465,14 @@ function BlogPageContent() {
                         <Image src={uploadedImageUrl} alt="Uploaded" fill className="object-cover" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-green-900">Image uploaded</p>
-                        <p className="text-xs text-green-700">Saved to Supabase storage. Click &quot;Use Selected Image&quot; below to confirm.</p>
+                        <p className="text-sm font-medium text-green-900">{t.dashboard.blogPage.imageUploaded}</p>
+                        <p className="text-xs text-green-700">{t.dashboard.blogPage.savedToStorage}</p>
                       </div>
                       <button
                         type="button"
                         onClick={clearBlogModalImage}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Remove image"
+                        title={t.dashboard.blogPage.removeImage}
                       >
                         <X className="w-5 h-5" />
                       </button>
@@ -1484,7 +1484,7 @@ function BlogPageContent() {
               {/* Search Input */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Search for images
+                  {t.dashboard.blogPage.searchForImages}
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -1492,7 +1492,7 @@ function BlogPageContent() {
                     value={imageSearchQuery}
                     onChange={(e) => setImageSearchQuery(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleFetchImages()}
-                    placeholder="Enter search terms for images..."
+                    placeholder={t.dashboard.blogPage.searchPlaceholder}
                     className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all text-sm text-gray-800"
                   />
                   <button
@@ -1503,12 +1503,12 @@ function BlogPageContent() {
                     {fetchingImages ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        Searching...
+                        {t.dashboard.blogPage.searching}
                       </>
                     ) : (
                       <>
                         <Search className="w-4 h-4" />
-                        Search
+                        {t.dashboard.blogPage.search}
                       </>
                     )}
                   </button>
@@ -1523,7 +1523,7 @@ function BlogPageContent() {
                   className="flex items-center justify-center gap-2 w-full py-3 rounded-lg border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50/50 text-gray-600 hover:text-purple-700 transition-colors font-medium text-sm"
                 >
                   <ImageIcon className="w-4 h-4" />
-                  Upload image from your computer
+                  {t.dashboard.blogPage.uploadFromComputerBtn}
                 </button>
               </div>
 
@@ -1531,7 +1531,7 @@ function BlogPageContent() {
               {fetchingImages ? (
                 <div className="text-center py-12">
                   <Loader2 className="w-10 h-10 animate-spin text-purple-600 mx-auto mb-3" />
-                  <p className="text-gray-600">Searching for images...</p>
+                  <p className="text-gray-600">{t.dashboard.blogPage.searchingForImages}</p>
                 </div>
               ) : pixabayImages.length > 0 ? (
                 <div className="space-y-4">
@@ -1567,23 +1567,23 @@ function BlogPageContent() {
                     ))}
                   </div>
                   <p className="text-xs text-gray-400 text-center">
-                    Images powered by{" "}
+                    {t.dashboard.blogPage.imagesPoweredBy}{" "}
                     <a
                       href="https://pixabay.com"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-purple-600 hover:underline"
                     >
-                      Pixabay
+                      {t.dashboard.blogPage.pixabay}
                     </a>
                   </p>
                 </div>
               ) : (
                 <div className="text-center py-12 text-gray-500">
                   <ImageIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                  <p>Search for images to see results</p>
+                  <p>{t.dashboard.blogPage.searchToSeeResults}</p>
                   <p className="text-sm text-gray-400 mt-1">
-                    Try keywords like "{topic || "your blog topic"}"
+                    {t.dashboard.blogPage.tryKeywords} &quot;{topic || "..."}&quot;
                   </p>
                 </div>
               )}
@@ -1601,9 +1601,9 @@ function BlogPageContent() {
                       />
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm font-medium text-green-900">Image Selected!</p>
+                      <p className="text-sm font-medium text-green-900">{t.dashboard.blogPage.imageSelected}</p>
                       <p className="text-xs text-green-700">
-                        {selectedImage?.tags || "Featured image"}
+                        {selectedImage?.tags || t.dashboard.blogPage.featuredImage}
                       </p>
                     </div>
                     <CheckCircle className="w-6 h-6 text-green-600" />
@@ -1620,7 +1620,7 @@ function BlogPageContent() {
                 onClick={handleSkipImage}
                 className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium"
               >
-                Skip for now
+                {t.dashboard.blogPage.skipForNow}
               </button>
               <button
                 onClick={handleConfirmImage}
@@ -1630,12 +1630,12 @@ function BlogPageContent() {
                 {uploadingImage || uploadingManualImage ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Uploading...
+                    {t.dashboard.blogPage.uploading}
                   </>
                 ) : (
                   <>
                     <CheckCircle className="w-4 h-4" />
-                    Use Selected Image
+                    {t.dashboard.blogPage.useSelectedImage}
                   </>
                 )}
               </button>
