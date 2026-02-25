@@ -146,12 +146,14 @@ export interface ActionPlanInput {
   region?: string;
   channels?: string[]; // ['all'] or specific channels like ['seo', 'social_media', 'content']
   language?: "en" | "he";
-  // GSC performance data
+  // GSC performance data (pre-aggregated by query/page before being passed in)
   gscKeywords?: GscKeywordData[];   // Top queries from gsc_keywords (project-linked)
-  gscQueries?: GscKeywordData[];    // Top queries from gsc_queries (domain-linked)
-  gscPages?: GscPageData[];         // Top pages from gsc_pages (domain-linked)
+  gscQueries?: GscKeywordData[];    // Top queries from gsc_queries (domain-linked, aggregated)
+  gscPages?: GscPageData[];         // Top pages from gsc_pages (domain-linked, aggregated)
   // AI visibility data from brand analysis sessions
   aiVisibilityData?: AiVisibilityPlatformData[];
+  // Aggregated session-level mention rate (mirrors AI Visibility page totals)
+  aiSessionSummary?: { total_queries: number; total_mentions: number };
 }
 
 export interface ActionPlanOutput {
@@ -1155,7 +1157,9 @@ export async function generateActionPlan(
     }
   }
 
-  // Build GSC performance context
+  // ── Build GSC performance context ──
+  // Input queries are pre-aggregated by query name (sum clicks/impressions, avg position).
+  // CTR is stored as a decimal (0.03 = 3%) in gsc_queries — multiply × 100 for display.
   const allGscKeywords = [
     ...(input.gscKeywords || []),
     ...(input.gscQueries || []),
@@ -1169,59 +1173,91 @@ export async function generateActionPlan(
 
   let gscContext = "";
   if (dedupedGscKeywords.length > 0 || (input.gscPages && input.gscPages.length > 0)) {
-    const topKws = dedupedGscKeywords.slice(0, 20);
+    // Sort by clicks desc for "top performing", by impressions desc for opportunities
+    const topKws = [...dedupedGscKeywords].sort((a, b) => b.clicks - a.clicks).slice(0, 15);
+    // Opportunity = high impressions but either low position (>15) or very low CTR (<2%)
     const weakKws = dedupedGscKeywords
       .filter(k => k.impressions > 50 && (k.position > 15 || k.ctr < 0.02))
+      .sort((a, b) => b.impressions - a.impressions)
       .slice(0, 10);
-    const topPages = (input.gscPages || []).slice(0, 10);
+    const topPages = (input.gscPages || []).sort((a, b) => b.clicks - a.clicks).slice(0, 8);
+
+    // Total summary stats
+    const totalClicks = dedupedGscKeywords.reduce((s, k) => s + k.clicks, 0);
+    const totalImpressions = dedupedGscKeywords.reduce((s, k) => s + k.impressions, 0);
+    const avgCTR = totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(1) : "0.0";
+    const avgPos = dedupedGscKeywords.length > 0
+      ? (dedupedGscKeywords.reduce((s, k) => s + k.position, 0) / dedupedGscKeywords.length).toFixed(1)
+      : "—";
 
     const fmtKw = (k: GscKeywordData) =>
-      `"${k.keyword}" (pos ${k.position.toFixed(1)}, ${k.impressions} impr, ${k.clicks} clicks, CTR ${(k.ctr * 100).toFixed(1)}%)`;
+      `  • "${k.keyword}" — pos ${k.position.toFixed(1)}, ${k.impressions.toLocaleString()} impr, ${k.clicks} clicks, CTR ${(k.ctr * 100).toFixed(1)}%`;
     const fmtPage = (p: GscPageData) =>
-      `${p.page} (pos ${p.position.toFixed(1)}, ${p.impressions} impr, ${p.clicks} clicks)`;
+      `  • ${p.page} — pos ${p.position.toFixed(1)}, ${p.impressions.toLocaleString()} impr, ${p.clicks} clicks, CTR ${(p.ctr * 100).toFixed(1)}%`;
 
     gscContext = `
-📊 GOOGLE SEARCH CONSOLE DATA (REAL PERFORMANCE):
-${topKws.length > 0 ? `Top performing queries:\n${topKws.map(fmtKw).join("\n")}` : ""}
-${topPages.length > 0 ? `\nTop performing pages:\n${topPages.map(fmtPage).join("\n")}` : ""}
-${weakKws.length > 0 ? `\nHigh-impression, weak-performing queries (opportunity keywords — high impressions but poor position/CTR, meaning Google sees you but users don't click):\n${weakKws.map(fmtKw).join("\n")}` : ""}
+📊 GOOGLE SEARCH CONSOLE DATA (REAL — pre-aggregated across all tracked dates):
+Summary: ${dedupedGscKeywords.length} unique queries tracked | Total clicks: ${totalClicks.toLocaleString()} | Total impressions: ${totalImpressions.toLocaleString()} | Overall CTR: ${avgCTR}% | Avg position: ${avgPos}
+${topKws.length > 0 ? `\nTop-performing queries (by clicks):\n${topKws.map(fmtKw).join("\n")}` : ""}
+${topPages.length > 0 ? `\nTop-performing pages (by clicks):\n${topPages.map(fmtPage).join("\n")}` : ""}
+${weakKws.length > 0 ? `\nHigh-opportunity queries (high impressions, weak position >15 or CTR <2% — Google shows you but users don't click):\n${weakKws.map(fmtKw).join("\n")}` : ""}
 
-USE THIS DATA TO:
-- Prioritize action steps around the opportunity keywords (weak-performing queries with high impressions) — these have the highest quick-win ROI.
-- Recommend content or SEO improvements for the weakest pages (low CTR, poor position) to convert existing impressions into clicks.
-- Build GEORepute.ai-specific steps: e.g. "Run AI Visibility check on [keyword] via GEORepute.ai", "Generate optimized article for [opportunity keyword] using GEORepute.ai Content Generator", "Set up brand monitoring for [top query] in GEORepute.ai AI Visibility dashboard".
+⚡ MANDATORY ACTIONS based on this GSC data:
+- Create at least ONE content_generation step that directly targets the highest-opportunity query above (the one with most impressions but poor position/CTR).
+- Recommend a title tag / meta description optimisation step for the weakest-CTR pages to convert existing impressions to clicks.
+- Include a GEORepute.ai step: "Run AI Visibility check on [top query] using GEORepute.ai to see if this keyword also appears in ChatGPT/Gemini/Perplexity results".
 `;
   }
 
-  // Build AI visibility context
+  // ── Build AI visibility context ──
+  // Use brand_mentioned === true flag (matches AI Visibility page exactly).
   let aiVisibilityContext = "";
   if (input.aiVisibilityData && input.aiVisibilityData.length > 0) {
-    const platforms = [...new Set(input.aiVisibilityData.map(r => r.platform))];
-    const gapSuggestions = input.aiVisibilityData
-      .filter(r => r.gap_suggestion)
-      .slice(0, 8)
-      .map(r => `[${r.platform}] ${r.gap_suggestion}`);
+    const platforms = Array.from(new Set(input.aiVisibilityData.map(r => r.platform)));
 
+    // Overall mention rate from session summary (matches AI Visibility page score)
+    const sessionTotal = input.aiSessionSummary?.total_queries || input.aiVisibilityData.length;
+    const sessionMentions = input.aiSessionSummary?.total_mentions
+      ?? input.aiVisibilityData.filter(r => r.response_metadata?.brand_mentioned === true).length;
+    const overallMentionRate = sessionTotal > 0
+      ? ((sessionMentions / sessionTotal) * 100).toFixed(1)
+      : "0.0";
+
+    // Per-platform breakdown
     const platformSummaries = platforms.map(platform => {
-      const platformResponses = input.aiVisibilityData!.filter(r => r.platform === platform);
-      const mentionCount = platformResponses.filter(r =>
-        r.response && r.response.length > 10
-      ).length;
-      return `${platform}: ${mentionCount}/${platformResponses.length} queries returned results`;
+      const rows = input.aiVisibilityData!.filter(r => r.platform === platform);
+      const mentioned = rows.filter(r => r.response_metadata?.brand_mentioned === true).length;
+      const rate = rows.length > 0 ? ((mentioned / rows.length) * 100).toFixed(0) : "0";
+      return `  • ${platform}: ${mentioned}/${rows.length} queries mention brand (${rate}%)`;
     });
 
-    aiVisibilityContext = `
-🤖 AI VISIBILITY DATA (FROM GEOREPUTE.AI BRAND ANALYSIS):
-Platforms analyzed: ${platforms.join(", ")}
-Platform coverage:
-${platformSummaries.join("\n")}
-${gapSuggestions.length > 0 ? `\nAI vs Google Gap Suggestions (from previous analysis):\n${gapSuggestions.join("\n")}` : ""}
+    // Queries where brand is NOT mentioned — direct blind spots for the AI action steps
+    const missingQueries = input.aiVisibilityData
+      .filter(r => r.response_metadata?.brand_mentioned === false && r.prompt)
+      .slice(0, 8)
+      .map(r => `  • [${r.platform}] "${r.prompt}"`);
 
-USE THIS DATA TO:
-- Recommend GEORepute.ai platform features the user should leverage to fix visibility gaps (e.g. "Use GEORepute.ai Content Generator to create AI-optimized content for ChatGPT/Gemini/Perplexity visibility").
-- Suggest running deeper brand analysis on platforms with low coverage using GEORepute.ai.
-- Frame steps around improving brand mentions across AI platforms: create authoritative content, structured data, entity building.
-- Directly reference gap suggestions above as action items (e.g. "Address gap: [specific suggestion]").
+    // Gap suggestions from analysis
+    const gapSuggestions = input.aiVisibilityData
+      .filter(r => r.gap_suggestion)
+      .slice(0, 6)
+      .map(r => `  • [${r.platform}] ${r.gap_suggestion}`);
+
+    aiVisibilityContext = `
+🤖 AI VISIBILITY DATA (FROM GEOREPUTE.AI BRAND ANALYSIS — real data, matches AI Visibility page):
+Overall AI mention rate: ${sessionMentions}/${sessionTotal} queries (${overallMentionRate}%) — this is the brand's current AI visibility score.
+Platforms analyzed: ${platforms.join(", ")}
+
+Per-platform mention rates:
+${platformSummaries.join("\n")}
+${missingQueries.length > 0 ? `\nQueries where brand is NOT mentioned (direct AI visibility gaps — these are the exact blind spots to fix):\n${missingQueries.join("\n")}` : ""}
+${gapSuggestions.length > 0 ? `\nAI vs Google gap suggestions (from latest analysis):\n${gapSuggestions.join("\n")}` : ""}
+
+⚡ MANDATORY ACTIONS based on this AI visibility data:
+- Create at least ONE step targeting the specific queries above where the brand is not mentioned — generate AI-optimised content for those exact queries.
+- Include a step: "Use GEORepute.ai Content Generator to create authoritative content answering '[top missing query]' for ChatGPT/Gemini/Perplexity indexing."
+- For each platform with <30% mention rate, add a step to improve content coverage on that platform.
+- Address each gap suggestion above as a concrete action item (e.g. "Fix gap: [specific suggestion from above]").
 `;
   }
 
@@ -1428,7 +1464,360 @@ Respond with ONLY valid JSON (no markdown). Escape quotes in strings as \\" and 
 }
 
 // ================================================
-// 6. ADVANCED KEYWORD SCORING (STANDALONE)
+// 6. ANNUAL STRATEGIC PLAN GENERATION
+// ================================================
+
+export interface AnnualPlanQuarterItem {
+  id: string;
+  title: string;
+  description: string;
+  where: string;
+  whyCritical: string;
+  category: string;
+  platforms: string[];
+  kpis: string[];
+  estimatedROI: string;
+  priority: "high" | "medium" | "low";
+  channel: string;
+  executionType: "content_generation" | "audit" | "analysis" | "manual";
+  selected: false;
+}
+
+export interface AnnualPlanQuarter {
+  quarter: "Q1" | "Q2" | "Q3" | "Q4";
+  theme: string;
+  description: string;
+  estimatedROI: string;
+  items: AnnualPlanQuarterItem[];
+}
+
+export interface AnnualStrategicPlanOutput {
+  currentPosition: string;
+  twelveMonthObjective: string;
+  strategicGap: string;
+  coreFocusAreas: string[];
+  quarters: AnnualPlanQuarter[];
+  generatedAt: string;
+}
+
+export interface AnnualStrategicPlanInput {
+  project: {
+    name: string;
+    industry: string;
+    website?: string;
+    description?: string;
+    keywords?: string[];
+  };
+  intelligenceContext: any;
+  gscQueries?: GscKeywordData[];
+  gscPages?: GscPageData[];
+  aiVisibilityData?: AiVisibilityPlatformData[];
+  aiSessionSummary?: { total_queries: number; total_mentions: number };
+  language?: "en" | "he";
+}
+
+export async function generateAnnualStrategicPlan(
+  input: AnnualStrategicPlanInput
+): Promise<AnnualStrategicPlanOutput> {
+  const { project, intelligenceContext, language } = input;
+  const scores = intelligenceContext?.scores || {};
+  const reports = intelligenceContext?.reports || {};
+
+  // ── AI Visibility Context (same logic as generateActionPlan) ──
+  let aiVisibilityContext = "";
+  if (input.aiVisibilityData && input.aiVisibilityData.length > 0) {
+    const platforms = Array.from(new Set(input.aiVisibilityData.map(r => r.platform)));
+    const sessionTotal = input.aiSessionSummary?.total_queries || input.aiVisibilityData.length;
+    const sessionMentions = input.aiSessionSummary?.total_mentions
+      ?? input.aiVisibilityData.filter(r => r.response_metadata?.brand_mentioned === true).length;
+    const overallRate = sessionTotal > 0 ? ((sessionMentions / sessionTotal) * 100).toFixed(1) : "0.0";
+
+    const platformSummaries = platforms.map(platform => {
+      const rows = input.aiVisibilityData!.filter(r => r.platform === platform);
+      const mentioned = rows.filter(r => r.response_metadata?.brand_mentioned === true).length;
+      const rate = rows.length > 0 ? ((mentioned / rows.length) * 100).toFixed(0) : "0";
+      return `  • ${platform}: ${mentioned}/${rows.length} mention brand (${rate}%)`;
+    });
+
+    const missingQueries = input.aiVisibilityData
+      .filter(r => r.response_metadata?.brand_mentioned === false && r.prompt)
+      .slice(0, 10)
+      .map(r => `  • [${r.platform}] "${r.prompt}"`);
+
+    const gapSuggestions = input.aiVisibilityData
+      .filter(r => r.gap_suggestion)
+      .slice(0, 6)
+      .map(r => `  • [${r.platform}] ${r.gap_suggestion}`);
+
+    aiVisibilityContext = `
+🤖 AI VISIBILITY (real data — matches AI Visibility page):
+Overall mention rate: ${sessionMentions}/${sessionTotal} queries = ${overallRate}% (AI Visibility Score: ${Math.round(scores.aiVisibility || 0)}/100)
+Platforms: ${platforms.join(", ")}
+Per-platform breakdown:
+${platformSummaries.join("\n")}
+${missingQueries.length > 0 ? `\nQueries where brand is NOT mentioned (exact blind spots to fix with content):\n${missingQueries.join("\n")}` : ""}
+${gapSuggestions.length > 0 ? `\nAI vs Google gap suggestions:\n${gapSuggestions.join("\n")}` : ""}`;
+  }
+
+  // ── GSC Context (pre-aggregated, same logic as generateActionPlan) ──
+  let gscContext = "";
+  const gscAll = [...(input.gscQueries || [])];
+  if (gscAll.length > 0 || (input.gscPages && input.gscPages.length > 0)) {
+    const totalClicks = gscAll.reduce((s, k) => s + k.clicks, 0);
+    const totalImpressions = gscAll.reduce((s, k) => s + k.impressions, 0);
+    const avgCTR = totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(1) : "0.0";
+    const avgPos = gscAll.length > 0
+      ? (gscAll.reduce((s, k) => s + k.position, 0) / gscAll.length).toFixed(1) : "—";
+
+    const topKws = [...gscAll].sort((a, b) => b.clicks - a.clicks).slice(0, 12);
+    const weakKws = gscAll
+      .filter(k => k.impressions > 50 && (k.position > 15 || k.ctr < 0.02))
+      .sort((a, b) => b.impressions - a.impressions)
+      .slice(0, 10);
+    const topPages = (input.gscPages || []).sort((a, b) => b.clicks - a.clicks).slice(0, 6);
+
+    const fmtKw = (k: GscKeywordData) =>
+      `  • "${k.keyword}" — pos ${k.position.toFixed(1)}, ${k.impressions.toLocaleString()} impr, ${k.clicks} clicks, CTR ${(k.ctr * 100).toFixed(1)}%`;
+    const fmtPg = (p: GscPageData) =>
+      `  • ${p.page} — pos ${p.position.toFixed(1)}, ${p.impressions.toLocaleString()} impr, ${p.clicks} clicks`;
+
+    gscContext = `
+📊 GOOGLE SEARCH CONSOLE (real data — all time, pre-aggregated):
+${gscAll.length} unique queries | Clicks: ${totalClicks.toLocaleString()} | Impressions: ${totalImpressions.toLocaleString()} | CTR: ${avgCTR}% | Avg pos: ${avgPos}
+${topKws.length > 0 ? `\nTop queries by clicks:\n${topKws.map(fmtKw).join("\n")}` : ""}
+${topPages.length > 0 ? `\nTop pages by clicks:\n${topPages.map(fmtPg).join("\n")}` : ""}
+${weakKws.length > 0 ? `\nHigh-opportunity queries (≥50 impr, pos>15 or CTR<2% — Google shows the site but users don't click):\n${weakKws.map(fmtKw).join("\n")}` : ""}`;
+  }
+
+  // ── Intelligence summary from reports ──
+  const intelligenceSummary = [
+    scores.aiVisibility > 0 ? `AI Visibility: ${scores.aiVisibility}/100` : null,
+    scores.seoPresence > 0 ? `SEO Presence: ${scores.seoPresence}/100` : null,
+    scores.riskExposure > 0 ? `Risk/Blind Spots: ${scores.riskExposure}/100` : null,
+    scores.opportunityScore > 0 ? `Opportunity Score: ${scores.opportunityScore}/100` : null,
+    reports.riskMatrix?.available && reports.riskMatrix.details?.totalBlindSpots > 0
+      ? `Blind Spots: ${reports.riskMatrix.details.totalBlindSpots} total (${reports.riskMatrix.details.highPriority} high priority)`
+      : null,
+    reports.gapAnalysis?.available && reports.gapAnalysis.details?.bandDistribution?.ai_risk > 0
+      ? `AI-risk queries: ${reports.gapAnalysis.details.bandDistribution.ai_risk} (high-ranking on Google but missing from AI)`
+      : null,
+    reports.riskMatrix?.details?.topBlindSpots?.length > 0
+      ? `Top blind spots: ${reports.riskMatrix.details.topBlindSpots.slice(0, 5).map((b: any) => `"${b.query}"`).join(", ")}`
+      : null,
+  ].filter(Boolean).join("\n");
+
+  const languageInstruction = language === "he"
+    ? `\n## CRITICAL: Write ALL human-readable text values in HEBREW only. Keep JSON keys in English.\n`
+    : "";
+
+  const prompt = `You are a GEORepute.ai senior growth strategist. Generate a comprehensive, data-driven 12-month strategic execution plan for the brand below. Each quarter must have 6-8 SPECIFIC, ACTIONABLE items that directly reference the real performance data provided.
+
+BRAND: ${project.name}
+INDUSTRY: ${project.industry}
+WEBSITE: ${project.website || "N/A"}
+${project.description ? `DESCRIPTION: ${project.description}` : ""}
+${project.keywords?.length ? `BRAND KEYWORDS: ${project.keywords.slice(0, 10).join(", ")}` : ""}
+${languageInstruction}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CURRENT INTELLIGENCE SCORES:
+${intelligenceSummary || "Limited data available — generate foundational actions."}
+${aiVisibilityContext}
+${gscContext}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+QUARTERLY PHASES:
+• Q1 (Jan–Mar): FOUNDATION — Fix critical gaps, establish measurement baselines, address highest-priority blind spots
+• Q2 (Apr–Jun): EXPANSION — Scale what works, create content for opportunity keywords, grow AI platform presence  
+• Q3 (Jul–Sep): AUTHORITY — Build domain authority, dominate mid-funnel queries, establish brand in AI search
+• Q4 (Oct–Dec): OPTIMIZATION — Convert, A/B test, defend rankings, maximize ROI from earlier investments
+
+EXECUTION CATEGORIES (use EXACTLY one per item):
+Content Development | SEO Implementation | AI Visibility Expansion | Authority & PR Strategy | Funnel Optimization | Conversion Improvements | Market Expansion Initiatives
+
+AVAILABLE PLATFORMS: Website, Blog, Google Business, YouTube, LinkedIn, X, Instagram, Facebook, PR Networks, External Authority Platforms, Reddit, Medium, Quora, Email
+
+CHANNELS: seo | content | social_media | email | pr | ai_visibility | paid
+
+EXECUTION TYPES: content_generation | audit | analysis | manual
+
+REQUIREMENTS FOR EACH ITEM:
+1. title: Short, action-oriented (max 8 words)
+2. description: 2-3 sentences explaining exactly what to do and expected impact
+3. where: Specific platform(s) where the action happens
+4. whyCritical: Reference SPECIFIC data points (e.g., "query 'X' has 2,345 impressions but only 0.5% CTR", "brand not mentioned in [platform] for query 'Y'")
+5. category: One of the execution categories above
+6. platforms: Array of specific platforms from the available list
+7. kpis: Array of 2-3 target keyword strings or metric names
+8. estimatedROI: Specific expected outcome (e.g., "Improve CTR from 0.5% to 2%+ on 'X' query")
+9. priority: high/medium/low — Q1 should have mostly high priority
+10. channel: One of the channel values above
+11. executionType: One of the execution type values above
+
+CRITICAL: Items must be SPECIFIC to this brand's data. Reference actual query names, scores, and numbers from the data above. Do NOT generate generic marketing advice.
+
+Respond with ONLY valid JSON (no markdown, no code fences):
+{
+  "currentPosition": "2-3 sentence description of current state referencing actual scores",
+  "twelveMonthObjective": "Specific 12-month goal with measurable targets",
+  "strategicGap": "What is missing / most critical to address, referencing actual data",
+  "coreFocusAreas": ["area1", "area2", "area3", "area4"],
+  "quarters": [
+    {
+      "quarter": "Q1",
+      "theme": "Foundation & Critical Gap Closure",
+      "description": "2 sentence description of Q1 strategic focus",
+      "estimatedROI": "Expected outcomes from Q1 actions",
+      "items": [
+        {
+          "id": "q1-1",
+          "title": "Action title here",
+          "description": "What to do and expected impact...",
+          "where": "Specific platform",
+          "whyCritical": "Reference to specific data point...",
+          "category": "AI Visibility Expansion",
+          "platforms": ["Blog", "LinkedIn"],
+          "kpis": ["target keyword 1", "metric"],
+          "estimatedROI": "Specific expected result",
+          "priority": "high",
+          "channel": "ai_visibility",
+          "executionType": "content_generation"
+        }
+      ]
+    }
+  ]
+}`;
+
+  const systemContent = `You are a data-driven growth strategist. Generate 12-month strategic plans that are specific, measurable, and grounded in real performance data. Every action item must reference specific numbers, query names, or scores from the data provided. Respond with valid JSON only — no markdown, no code fences.${language === "he" ? " Write all user-facing text values in HEBREW only. Keep JSON keys in English." : ""}`;
+
+  const callLLM = async (): Promise<string> => {
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    if (anthropicKey) {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-5-20250929",
+          max_tokens: 8000,
+          system: systemContent,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.content?.[0]?.text?.trim();
+        if (text) {
+          console.log(`✅ Annual plan generated with Claude (${text.length} chars)`);
+          return text;
+        }
+      } else {
+        const errText = await res.text();
+        console.warn(`⚠️ Claude failed for annual plan (${res.status}): ${errText.slice(0, 200)}, falling back to GPT-4o`);
+      }
+    }
+    // GPT-4o supports up to 16 384 output tokens — sufficient for the full quarterly plan
+    const res = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: systemContent },
+        { role: "user", content: prompt },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.7,
+      max_tokens: 8000,
+    });
+    const text = res.choices[0].message.content?.trim() || "{}";
+    console.log(`✅ Annual plan generated with GPT-4o (${text.length} chars)`);
+    return text;
+  };
+
+  // Attempt to repair truncated JSON using bracket-matching (same approach as action-plan route)
+  const repairJson = (raw: string): any => {
+    const cleaned = raw.replace(/^```json?\s*|\s*```$/g, "").trim();
+    try {
+      return JSON.parse(cleaned);
+    } catch (firstErr: any) {
+      console.warn("Annual plan JSON parse failed, attempting repair...");
+      const posMatch = (firstErr as Error).message?.match(/position (\d+)/);
+      const pos = posMatch ? parseInt(posMatch[1], 10) : -1;
+      if (pos > 0) {
+        let partial = cleaned.substring(0, pos);
+        const opens = (partial.match(/"/g) || []).length;
+        if (opens % 2 !== 0) partial += '"';
+        const stack: string[] = [];
+        let inStr = false, esc = false;
+        for (const c of partial) {
+          if (esc) { esc = false; continue; }
+          if (c === "\\" && inStr) { esc = true; continue; }
+          if (c === '"') { inStr = !inStr; continue; }
+          if (!inStr) {
+            if (c === "{") stack.push("}");
+            else if (c === "[") stack.push("]");
+            else if (c === "}" || c === "]") stack.pop();
+          }
+        }
+        try {
+          return JSON.parse(partial + stack.reverse().join(""));
+        } catch {
+          console.error("Annual plan JSON repair failed — returning empty result");
+          return {};
+        }
+      }
+      return {};
+    }
+  };
+
+  try {
+    const raw = await callLLM();
+    const result = repairJson(raw);
+
+    const quarters: AnnualPlanQuarter[] = (["Q1", "Q2", "Q3", "Q4"] as const).map((qName, qIdx) => {
+      const q = result.quarters?.find((q: any) => q.quarter === qName) || result.quarters?.[qIdx] || {};
+      const items: AnnualPlanQuarterItem[] = (q.items || []).map((item: any, iIdx: number) => ({
+        id: item.id || `${qName.toLowerCase()}-${iIdx + 1}`,
+        title: item.title || "",
+        description: item.description || "",
+        where: item.where || item.channel || "",
+        whyCritical: item.whyCritical || item.description || "",
+        category: item.category || "Content Development",
+        platforms: Array.isArray(item.platforms) ? item.platforms : [item.where || "Website"],
+        kpis: Array.isArray(item.kpis) ? item.kpis : [],
+        estimatedROI: item.estimatedROI || "",
+        priority: (["high", "medium", "low"].includes(item.priority) ? item.priority : "medium") as "high" | "medium" | "low",
+        channel: item.channel || "content",
+        executionType: (["content_generation", "audit", "analysis", "manual"].includes(item.executionType)
+          ? item.executionType : "manual") as "content_generation" | "audit" | "analysis" | "manual",
+        selected: false,
+      }));
+
+      return {
+        quarter: qName,
+        theme: q.theme || `Q${qIdx + 1} Strategy`,
+        description: q.description || "",
+        estimatedROI: q.estimatedROI || "",
+        items,
+      };
+    });
+
+    return {
+      currentPosition: result.currentPosition || `${project.name} — ${project.industry}`,
+      twelveMonthObjective: result.twelveMonthObjective || `Grow ${project.name}'s digital visibility and brand presence.`,
+      strategicGap: result.strategicGap || "Strategic assessment requires more data.",
+      coreFocusAreas: Array.isArray(result.coreFocusAreas) ? result.coreFocusAreas : ["AI Visibility", "SEO", "Content", "Authority"],
+      quarters,
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error("Annual strategic plan generation error:", error);
+    throw new Error("Failed to generate annual strategic plan");
+  }
+}
+
+// ================================================
+// 7. ADVANCED KEYWORD SCORING (STANDALONE)
 // ================================================
 
 /**
