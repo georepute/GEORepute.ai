@@ -197,10 +197,12 @@ export interface ClientFilePDFData {
   intelligenceData?: any;
   annualPlan?: any;
   actionPlans?: ActionPlan[];
+  businessDevMarkets?: any[];
+  competitorResearchPlans?: any[];
 }
 
 export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void> {
-  const { project, intelligenceData, annualPlan, actionPlans = [] } = data;
+  const { project, intelligenceData, annualPlan, actionPlans = [], businessDevMarkets = [], competitorResearchPlans = [] } = data;
   const scores  = intelligenceData?.scores  || {};
   const reports = intelligenceData?.reports || {};
 
@@ -387,15 +389,18 @@ export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void
   doc.setDrawColor(PURPLE.r, PURPLE.g, PURPLE.b); doc.setLineWidth(0.5);
   doc.line(margin, tocStartY + 2, margin + 30, tocStartY + 2);
 
+  let tocNum = 5;
   const tocItems = [
     ["1", "Strategic Intelligence Overview"],
     ["2", "AI Visibility Analysis"],
     ["3", "SEO & Organic Performance"],
     ["4", "Strategic Blind Spots"],
     ["5", "AI vs Google Gap Analysis"],
-    ...(reports.shareOfAttention?.available ? [["6", "Market Share of Attention"]] : []),
-    ...(annualPlan ? [["7", "12-Month Strategic Plan"]] : []),
-    ...(actionPlans.length > 0 ? [["8", "Action Plans"]] : []),
+    ...(reports.shareOfAttention?.available ? [[String(++tocNum), "Market Share of Attention"]] : []),
+    ...(annualPlan ? [[String(++tocNum), "12-Month Strategic Plan"]] : []),
+    ...(actionPlans.length > 0 ? [[String(++tocNum), "Action Plans"]] : []),
+    ...(businessDevMarkets.length > 0 ? [[String(++tocNum), "Business Development"]] : []),
+    ...(competitorResearchPlans.length > 0 ? [[String(++tocNum), "Competitor Research"]] : []),
   ];
   doc.setFontSize(8.5); doc.setFont("helvetica", "normal"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
   tocItems.forEach((item, i) => {
@@ -744,6 +749,196 @@ export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void
           [["#", "Step", "Priority", "Done"],
            ...(plan.steps as ActionStep[]).map((s, si) => [
              String(si + 1), s.step, s.priority, s.completed ? "✓" : "—",
+           ])],
+          [10, 115, 22, 17], margin, true, [235, 225, 255]
+        );
+      }
+      yPos += 4;
+    });
+  }
+
+  // ── Section 9: Business Development ───────────────────────────────────────
+  if (businessDevMarkets.length > 0) {
+    businessDevMarkets.forEach((m: any, mi: number) => {
+      doc.addPage(); header(); yPos = contentTop;
+      secHead(`9 · Business Development — ${m.country}`, 99, 102, 241);
+
+      doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+      doc.text(`Market: ${m.region || "Nationwide"}  |  Language: ${m.language_name}`, margin + 2, yPos);
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      yPos += 6;
+
+      const strat = m.strategy;
+      if (!strat) {
+        doc.setFontSize(8); doc.setFont("helvetica", "italic"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.text("Strategy not yet generated", margin + 2, yPos);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        return;
+      }
+
+      // Summary & key metrics
+      subHead("Strategic Summary");
+      doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
+      wrap(strat.summary || "—", margin + 2, cW - 4, 4.5);
+      yPos += 2;
+      doc.setFont("helvetica", "bold"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+      doc.text(`Priority: ${strat.priority || "—"}  |  Est. Reach: ${strat.estimatedReach || "—"}  |  Time to Market: ${strat.timeToMarket || "—"}`, margin + 2, yPos);
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      yPos += 6;
+
+      if (strat.marketSizeEstimate) {
+        subHead("Market Size Estimate");
+        wrap(strat.marketSizeEstimate, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      // Opportunities
+      if (strat.opportunities?.length) {
+        subHead("Opportunities");
+        strat.opportunities.forEach((opp: string, oi: number) => {
+          wrap(`${oi + 1}. ${opp}`, margin + 4, cW - 6, 4);
+          yPos += 1;
+        });
+        yPos += 2;
+      }
+
+      // Key Channels
+      if (strat.keyChannels?.length) {
+        subHead("Key Channels");
+        strat.keyChannels.forEach((ch: string) => {
+          wrap(`• ${ch}`, margin + 4, cW - 6, 4);
+          yPos += 1;
+        });
+        yPos += 2;
+      }
+
+      // Content Approach
+      if (strat.contentApproach) {
+        subHead("Content Approach");
+        wrap(strat.contentApproach, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      // Local SEO Tactics
+      if (strat.localSEOTactics?.length) {
+        subHead("Local SEO Tactics");
+        strat.localSEOTactics.forEach((t: string) => {
+          wrap(`• ${t}`, margin + 4, cW - 6, 4);
+          yPos += 1;
+        });
+        yPos += 2;
+      }
+
+      // AI Visibility Tactics
+      if (strat.aiVisibilityTactics?.length) {
+        subHead("AI Visibility Tactics");
+        strat.aiVisibilityTactics.forEach((t: string) => {
+          wrap(`• ${t}`, margin + 4, cW - 6, 4);
+          yPos += 1;
+        });
+        yPos += 2;
+      }
+
+      // Keyword Clusters
+      if (strat.keywordClusters?.length) {
+        subHead("Keyword Clusters");
+        strat.keywordClusters.forEach((kc: any) => {
+          pageBreak(14);
+          doc.setFont("helvetica", "bold"); doc.setFontSize(7.5);
+          doc.text(`${kc.cluster} (${kc.intent || "—"})`, margin + 2, yPos);
+          doc.setFont("helvetica", "normal");
+          yPos += 5;
+          const kwText = (kc.keywords || []).slice(0, 8).join(", ");
+          wrap(kwText, margin + 4, cW - 6, 4);
+          yPos += 2;
+        });
+        yPos += 2;
+      }
+
+      // Content Ideas
+      if (strat.contentIdeas?.length) {
+        subHead("Content Ideas");
+        strat.contentIdeas.forEach((ci: any, ciIdx: number) => {
+          pageBreak(12);
+          doc.setFont("helvetica", "bold"); doc.setFontSize(7);
+          doc.text(`${ciIdx + 1}. [${ci.format || "—"}] ${ci.topic || "—"}`, margin + 2, yPos);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+          doc.text(`Platform: ${ci.platform || "—"}${ci.angle ? `  |  ${ci.angle}` : ""}`, margin + 4, yPos + 4);
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          yPos += 8;
+        });
+        yPos += 2;
+      }
+
+      // Language Considerations
+      if (strat.languageConsiderations) {
+        subHead("Language Considerations");
+        wrap(strat.languageConsiderations, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      // Competitive Insights
+      if (strat.competitiveInsights) {
+        subHead("Competitive Insights");
+        wrap(strat.competitiveInsights, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      // KPI Targets
+      if (strat.kpiTargets?.length) {
+        subHead("KPI Targets");
+        tableRows(
+          [["Metric", "Target", "Timeframe"], ...(strat.kpiTargets as any[]).map((k: any) => [k.metric || "—", k.target || "—", k.timeframe || "—"])],
+          [90, 45, 39], margin, true, [235, 225, 255]
+        );
+      }
+    });
+  }
+
+  // ── Competitor Research ────────────────────────────────────────────────────
+  if (competitorResearchPlans.length > 0) {
+    doc.addPage(); header(); yPos = contentTop;
+    secHead(`Competitor Research (${competitorResearchPlans.length} plan${competitorResearchPlans.length > 1 ? "s" : ""})`, 99, 102, 241);
+
+    competitorResearchPlans.forEach((plan: any, pi: number) => {
+      doc.setFontSize(9.5); doc.setFont("helvetica", "bold");
+      const planTitleLines = doc.splitTextToSize(`${pi + 1}. ${plan.title || "Competitor Action Plan"}`, cW - 6) as string[];
+      const planH = Math.max(10, planTitleLines.length * 7 + 4);
+      yPos += 6;
+      pageBreak(planH + 4);
+      doc.setFillColor(245, 240, 255);
+      doc.roundedRect(margin, yPos, cW, planH, 1.5, 1.5, "F");
+      doc.setTextColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+      planTitleLines.forEach((line: string, li: number) => {
+        doc.text(line, margin + 3, yPos + 6 + li * 7);
+      });
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      yPos += planH + 4;
+
+      doc.setFontSize(7.5); doc.setFont("helvetica", "normal"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+      wrap(`Objective: ${plan.objective || "—"}`, margin + 2, cW - 4, 4.5);
+      yPos += 1.5;
+      wrap(`Timeline: ${plan.timeline || "—"}  |  Priority: ${plan.priority || "—"}  |  Category: ${plan.category || "Competitor Research"}`, margin + 2, cW - 4, 4.5);
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      yPos += 2;
+
+      if (plan.reasoning) {
+        subHead("Strategic Reasoning");
+        wrap(plan.reasoning, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+      if (plan.expectedOutcome) {
+        subHead("Expected Outcome");
+        wrap(plan.expectedOutcome, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      if (plan.steps?.length) {
+        subHead("Action Steps");
+        tableRows(
+          [["#", "Step", "Priority", "Done"],
+           ...(plan.steps as ActionStep[]).map((s: any, si: number) => [
+             String(si + 1), s.step || "—", s.priority || "—", s.completed ? "✓" : "—",
            ])],
           [10, 115, 22, 17], margin, true, [235, 225, 255]
         );

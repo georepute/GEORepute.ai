@@ -51,7 +51,7 @@ export default function DashboardLayout({
   const { isRtl, t } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<string[]>([t.dashboard.sidebar.analytics, "Strategy Reports"]); // Track expanded parent items
+  const [expandedItems, setExpandedItems] = useState<string[]>(["analytics", "strategyReports"]); // Track expanded parent items (stable keys)
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { role, capabilities, loading: permissionsLoading } = usePermissions();
@@ -92,11 +92,11 @@ export default function DashboardLayout({
       .slice(0, 2);
   };
 
-  const toggleExpanded = (itemName: string) => {
+  const toggleExpanded = (expandKey: string) => {
     setExpandedItems(prev => 
-      prev.includes(itemName) 
-        ? prev.filter(name => name !== itemName)
-        : [...prev, itemName]
+      prev.includes(expandKey) 
+        ? prev.filter(k => k !== expandKey)
+        : [...prev, expandKey]
     );
   };
 
@@ -108,6 +108,7 @@ export default function DashboardLayout({
       name: t.dashboard.sidebar.contentGenerator, 
       icon: Sparkles, 
       requiredCapability: "canManageContent",
+      expandKey: "contentGenerator",
       children: [
         { name: t.dashboard.sidebar.newContent, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.missedPrompts, href: "/dashboard/missed-prompts", icon: FileText, requiredCapability: "canManageContent" },
@@ -125,6 +126,7 @@ export default function DashboardLayout({
       name: t.dashboard.sidebar.assetsHub, 
       icon: Package, 
       requiredCapability: "canViewAnalytics",
+      expandKey: "assetsHub",
       children: [
         { name: t.dashboard.sidebar.googleSearchConsole, href: "/dashboard/google-search-console", icon: Search, requiredCapability: "canViewAnalytics" },
         { name: t.dashboard.sidebar.googleMaps, href: "/dashboard/google-maps", icon: Map, requiredCapability: "canViewAnalytics" },
@@ -134,36 +136,40 @@ export default function DashboardLayout({
       name: t.dashboard.sidebar.analytics, 
       icon: BarChart3, 
       requiredCapability: "canViewAnalytics",
+      expandKey: "analytics",
       children: [
-        { name: "Keyword Forecast Analytics", href: "/dashboard/analytics", icon: TrendingUp, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.keywordForecastAnalytics, href: "/dashboard/analytics", icon: TrendingUp, requiredCapability: "canViewAnalytics" },
         { name: t.dashboard.sidebar.gscAnalytics, href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
         { name: t.dashboard.sidebar.biReports, href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" },
       ]
     },
     { 
-      name: "Core Reports", 
+      name: t.dashboard.sidebar.coreReports, 
       icon: Activity, 
       requiredCapability: "canViewReports",
+      expandKey: "coreReports",
       children: [
-        { name: "AI Search Presence", href: "/dashboard/ai-search-presence", icon: Brain, requiredCapability: "canViewReports" },
-        { name: "AI vs Google Gap", href: "/dashboard/ai-vs-google-gap", icon: Activity, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.aiSearchPresence, href: "/dashboard/ai-search-presence", icon: Brain, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.aiVsGoogleGap, href: "/dashboard/ai-vs-google-gap", icon: Activity, requiredCapability: "canViewReports" },
       ]
     },
     { 
-      name: "Strategy Reports", 
+      name: t.dashboard.sidebar.strategyReports, 
       icon: Crosshair, 
       requiredCapability: "canViewReports",
+      expandKey: "strategyReports",
       children: [
-        { name: "Strategic Blind Spots", href: "/dashboard/strategic-blind-spots", icon: Target, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.strategicBlindSpots, href: "/dashboard/strategic-blind-spots", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
     { 
-      name: "Global Reports", 
+      name: t.dashboard.sidebar.globalReports, 
       icon: Globe, 
       requiredCapability: "canViewReports",
+      expandKey: "globalReports",
       children: [
-        { name: "Regional Strength Comparison", href: "/dashboard/regional-strength-comparison", icon: Map, requiredCapability: "canViewReports" },
-        { name: "Global Visibility Matrix", href: "/dashboard/global-visibility-matrix", icon: Target, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.regionalStrengthComparison, href: "/dashboard/regional-strength-comparison", icon: Map, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.globalVisibilityMatrix, href: "/dashboard/global-visibility-matrix", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
     // { name: t.dashboard.sidebar.learning, href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
@@ -231,12 +237,12 @@ export default function DashboardLayout({
           <nav className="flex-1 px-3 py-4 overflow-y-auto">
             <ul className="space-y-1">
               {navigation.map((item) => (
-                <li key={item.name}>
+                <li key={item.expandKey || item.href || item.name}>
                   {item.children ? (
                     // Parent item with children
                     <div>
                       <button
-                        onClick={() => toggleExpanded(item.name)}
+                        onClick={() => toggleExpanded(item.expandKey!)}
                         className={`w-full flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
                           sidebarCollapsed ? "justify-center" : ""
                         }`}
@@ -246,7 +252,7 @@ export default function DashboardLayout({
                         {!sidebarCollapsed && (
                           <>
                             <span className="font-medium flex-1 text-left">{item.name}</span>
-                            {expandedItems.includes(item.name) ? (
+                            {expandedItems.includes(item.expandKey!) ? (
                               <ChevronUp className="w-4 h-4" />
                             ) : (
                               <ChevronDown className="w-4 h-4" />
@@ -255,7 +261,7 @@ export default function DashboardLayout({
                         )}
                       </button>
                       {/* Child items */}
-                      {!sidebarCollapsed && expandedItems.includes(item.name) && (
+                      {!sidebarCollapsed && expandedItems.includes(item.expandKey!) && (
                         <ul className="mt-1 ml-4 space-y-1">
                           {item.children.map((child) => (
                             <li key={child.name}>
