@@ -6,6 +6,8 @@ export interface NavigationItem {
   icon: any;
   requiredCapability?: keyof RoleCapabilities;
   children?: NavigationItem[];
+  /** Stable key for expand/collapse state (language-independent) */
+  expandKey?: string;
 }
 
 export function filterNavigationByRole(

@@ -14,6 +14,7 @@ import {
   Download,
   Eye,
   Shield,
+  Building2,
 } from "lucide-react";
 
 interface ClientFileSection {
@@ -73,6 +74,13 @@ const SECTION_TEMPLATES: {
     description:
       "Detailed task breakdowns, timelines, sub-tasks, and platform mappings",
     icon: Zap,
+  },
+  {
+    id: "business_dev",
+    title: "Business Development",
+    description:
+      "Market expansion strategies by country, region, and language",
+    icon: Building2,
   },
   {
     id: "kpi_dashboard",

@@ -197,10 +197,11 @@ export interface ClientFilePDFData {
   intelligenceData?: any;
   annualPlan?: any;
   actionPlans?: ActionPlan[];
+  businessDevMarkets?: any[];
 }
 
 export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void> {
-  const { project, intelligenceData, annualPlan, actionPlans = [] } = data;
+  const { project, intelligenceData, annualPlan, actionPlans = [], businessDevMarkets = [] } = data;
   const scores  = intelligenceData?.scores  || {};
   const reports = intelligenceData?.reports || {};
 
@@ -396,6 +397,7 @@ export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void
     ...(reports.shareOfAttention?.available ? [["6", "Market Share of Attention"]] : []),
     ...(annualPlan ? [["7", "12-Month Strategic Plan"]] : []),
     ...(actionPlans.length > 0 ? [["8", "Action Plans"]] : []),
+    ...(businessDevMarkets.length > 0 ? [["9", "Business Development"]] : []),
   ];
   doc.setFontSize(8.5); doc.setFont("helvetica", "normal"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
   tocItems.forEach((item, i) => {
@@ -749,6 +751,144 @@ export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void
         );
       }
       yPos += 4;
+    });
+  }
+
+  // ── Section 9: Business Development ───────────────────────────────────────
+  if (businessDevMarkets.length > 0) {
+    businessDevMarkets.forEach((m: any, mi: number) => {
+      doc.addPage(); header(); yPos = contentTop;
+      secHead(`9 · Business Development — ${m.country}`, 99, 102, 241);
+
+      doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+      doc.text(`Market: ${m.region || "Nationwide"}  |  Language: ${m.language_name}`, margin + 2, yPos);
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      yPos += 6;
+
+      const strat = m.strategy;
+      if (!strat) {
+        doc.setFontSize(8); doc.setFont("helvetica", "italic"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+        doc.text("Strategy not yet generated", margin + 2, yPos);
+        doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+        return;
+      }
+
+      // Summary & key metrics
+      subHead("Strategic Summary");
+      doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
+      wrap(strat.summary || "—", margin + 2, cW - 4, 4.5);
+      yPos += 2;
+      doc.setFont("helvetica", "bold"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+      doc.text(`Priority: ${strat.priority || "—"}  |  Est. Reach: ${strat.estimatedReach || "—"}  |  Time to Market: ${strat.timeToMarket || "—"}`, margin + 2, yPos);
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      yPos += 6;
+
+      if (strat.marketSizeEstimate) {
+        subHead("Market Size Estimate");
+        wrap(strat.marketSizeEstimate, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      // Opportunities
+      if (strat.opportunities?.length) {
+        subHead("Opportunities");
+        strat.opportunities.forEach((opp: string, oi: number) => {
+          wrap(`${oi + 1}. ${opp}`, margin + 4, cW - 6, 4);
+          yPos += 1;
+        });
+        yPos += 2;
+      }
+
+      // Key Channels
+      if (strat.keyChannels?.length) {
+        subHead("Key Channels");
+        strat.keyChannels.forEach((ch: string) => {
+          wrap(`• ${ch}`, margin + 4, cW - 6, 4);
+          yPos += 1;
+        });
+        yPos += 2;
+      }
+
+      // Content Approach
+      if (strat.contentApproach) {
+        subHead("Content Approach");
+        wrap(strat.contentApproach, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      // Local SEO Tactics
+      if (strat.localSEOTactics?.length) {
+        subHead("Local SEO Tactics");
+        strat.localSEOTactics.forEach((t: string) => {
+          wrap(`• ${t}`, margin + 4, cW - 6, 4);
+          yPos += 1;
+        });
+        yPos += 2;
+      }
+
+      // AI Visibility Tactics
+      if (strat.aiVisibilityTactics?.length) {
+        subHead("AI Visibility Tactics");
+        strat.aiVisibilityTactics.forEach((t: string) => {
+          wrap(`• ${t}`, margin + 4, cW - 6, 4);
+          yPos += 1;
+        });
+        yPos += 2;
+      }
+
+      // Keyword Clusters
+      if (strat.keywordClusters?.length) {
+        subHead("Keyword Clusters");
+        strat.keywordClusters.forEach((kc: any) => {
+          pageBreak(14);
+          doc.setFont("helvetica", "bold"); doc.setFontSize(7.5);
+          doc.text(`${kc.cluster} (${kc.intent || "—"})`, margin + 2, yPos);
+          doc.setFont("helvetica", "normal");
+          yPos += 5;
+          const kwText = (kc.keywords || []).slice(0, 8).join(", ");
+          wrap(kwText, margin + 4, cW - 6, 4);
+          yPos += 2;
+        });
+        yPos += 2;
+      }
+
+      // Content Ideas
+      if (strat.contentIdeas?.length) {
+        subHead("Content Ideas");
+        strat.contentIdeas.forEach((ci: any, ciIdx: number) => {
+          pageBreak(12);
+          doc.setFont("helvetica", "bold"); doc.setFontSize(7);
+          doc.text(`${ciIdx + 1}. [${ci.format || "—"}] ${ci.topic || "—"}`, margin + 2, yPos);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+          doc.text(`Platform: ${ci.platform || "—"}${ci.angle ? `  |  ${ci.angle}` : ""}`, margin + 4, yPos + 4);
+          doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+          yPos += 8;
+        });
+        yPos += 2;
+      }
+
+      // Language Considerations
+      if (strat.languageConsiderations) {
+        subHead("Language Considerations");
+        wrap(strat.languageConsiderations, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      // Competitive Insights
+      if (strat.competitiveInsights) {
+        subHead("Competitive Insights");
+        wrap(strat.competitiveInsights, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      // KPI Targets
+      if (strat.kpiTargets?.length) {
+        subHead("KPI Targets");
+        tableRows(
+          [["Metric", "Target", "Timeframe"], ...(strat.kpiTargets as any[]).map((k: any) => [k.metric || "—", k.target || "—", k.timeframe || "—"])],
+          [90, 45, 39], margin, true, [235, 225, 255]
+        );
+      }
     });
   }
 

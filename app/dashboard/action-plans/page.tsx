@@ -28,6 +28,7 @@ import {
   FolderOpen,
   Layers,
   Sparkles,
+  Building2,
   Presentation,
   DollarSign,
   Shield,
@@ -47,6 +48,7 @@ import { StrategicIntelligence } from "./_components/StrategicIntelligence";
 import { AnnualPlanView, type AnnualPlan, type QuarterlyItem } from "./_components/AnnualPlanView";
 import { KPIDashboard } from "./_components/KPIDashboard";
 import { ClientFile } from "./_components/ClientFile";
+import { BusinessDevelopmentView } from "./_components/BusinessDevelopmentView";
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, ReferenceLine } from "recharts";
 import jsPDF from "jspdf";
 // @ts-ignore - pptxgenjs types may not be available
@@ -114,15 +116,19 @@ interface BrandProject {
   competitors?: string[];
 }
 
-type TabKey = "intelligence" | "annual_plan" | "action_plans" | "kpi" | "client_file";
+type TabKey = "intelligence" | "annual_plan" | "action_plans" | "kpi" | "client_file" | "business_dev";
 
-const TABS: { key: TabKey; label: string; icon: any; description: string }[] = [
-  { key: "intelligence", label: "Strategic Intelligence", icon: Brain, description: "Intelligence reports & analysis" },
-  { key: "annual_plan", label: "12-Month Plan", icon: Calendar, description: "Quarterly execution structure" },
-  { key: "action_plans", label: "Action Plans", icon: Zap, description: "Execution engine" },
-  { key: "kpi", label: "KPI Dashboard", icon: BarChart3, description: "Performance tracking" },
-  { key: "client_file", label: "Client File", icon: FolderOpen, description: "Structured file" },
-];
+function getTabs(t: { dashboard: { actionPlansPage: Record<string, string> } }) {
+  const ap = t.dashboard.actionPlansPage;
+  return [
+    { key: "intelligence" as TabKey, label: ap.strategicIntelligence, icon: Brain, description: ap.intelligenceDesc },
+    { key: "annual_plan" as TabKey, label: ap.twelveMonthPlan, icon: Calendar, description: ap.annualPlanDesc },
+    { key: "action_plans" as TabKey, label: ap.actionPlans, icon: Zap, description: ap.actionPlansDesc },
+    { key: "kpi" as TabKey, label: ap.kpiDashboard, icon: BarChart3, description: ap.kpiDesc },
+    { key: "business_dev" as TabKey, label: ap.businessDevelopment, icon: Building2, description: ap.businessDevDesc },
+    { key: "client_file" as TabKey, label: ap.clientFile, icon: FolderOpen, description: ap.clientFileDesc },
+  ];
+}
 
 const EXECUTION_CATEGORIES = [
   "Content Development",
@@ -143,7 +149,7 @@ const PLATFORMS = [
 export default function ActionPlansPage() {
   const router = useRouter();
   const supabase = createClientComponentClient();
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
 
   // Tab state
   const [activeTab, setActiveTab] = useState<TabKey>("intelligence");
@@ -168,6 +174,9 @@ export default function ActionPlansPage() {
   const [annualPlan, setAnnualPlan] = useState<AnnualPlan | null>(null);
   const [loadingAnnualPlan, setLoadingAnnualPlan] = useState(false);
   const [annualPlanSavedAt, setAnnualPlanSavedAt] = useState<string | null>(null);
+
+  // Business development markets (for Client File + PDF export)
+  const [businessDevMarkets, setBusinessDevMarkets] = useState<any[]>([]);
 
   // Generation form state (used in quick generate)
   const [objective, setObjective] = useState("");
@@ -198,6 +207,12 @@ export default function ActionPlansPage() {
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [exportPlanId]);
+
+  useEffect(() => {
+    if (activeTab === "client_file" && selectedProjectId) {
+      loadBusinessDevMarkets(selectedProjectId);
+    }
+  }, [activeTab, selectedProjectId]);
 
   // ──────────────────────────────────────────────
   // Data Loading
@@ -310,6 +325,25 @@ export default function ActionPlansPage() {
     }
   };
 
+  const loadBusinessDevMarkets = async (projectId: string): Promise<any[]> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from("business_dev_markets")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("project_id", projectId)
+        .order("created_at", { ascending: true });
+      const markets = !error ? (data ?? []) : [];
+      setBusinessDevMarkets(markets);
+      return markets;
+    } catch (err) {
+      console.error("Failed to load business dev markets:", err);
+      return [];
+    }
+  };
+
   // Load a stored annual plan for a project and attach quarter KPIs from intelligence
   const loadStoredAnnualPlan = async (projectId: string, intelligence: any) => {
     try {
@@ -355,6 +389,7 @@ export default function ActionPlansPage() {
         const intelligence = await loadIntelligence(projectId);
         // Load stored annual plan after intelligence (KPIs need intelligence scores)
         await loadStoredAnnualPlan(projectId, intelligence);
+        await loadBusinessDevMarkets(projectId);
       }
     } else {
       setSelectedProject(null);
@@ -363,6 +398,7 @@ export default function ActionPlansPage() {
       setIntelligenceData(null);
       setAnnualPlan(null);
       setAnnualPlanSavedAt(null);
+      setBusinessDevMarkets([]);
     }
   };
 
@@ -769,6 +805,15 @@ export default function ActionPlansPage() {
         lastUpdated: plans.length > 0 ? plans[0].createdAt.toISOString() : null,
       },
       {
+        id: "business_dev",
+        title: "Business Development",
+        description: "Market expansion strategies by country, region & language",
+        icon: null,
+        status: businessDevMarkets.length > 0 ? "available" as const : "missing" as const,
+        itemCount: businessDevMarkets.length,
+        lastUpdated: businessDevMarkets.length > 0 ? (businessDevMarkets[0]?.updated_at ?? businessDevMarkets[0]?.created_at) ?? null : null,
+      },
+      {
         id: "kpi_dashboard",
         title: "KPI Dashboard",
         description: "Performance metrics and tracking",
@@ -806,6 +851,7 @@ export default function ActionPlansPage() {
       annual_plan: "annual_plan",
       selected_items: "annual_plan",
       action_plans: "action_plans",
+      business_dev: "business_dev",
       kpi_dashboard: "kpi",
       progress_log: "action_plans",
       quarterly_updates: "kpi",
@@ -820,6 +866,9 @@ export default function ActionPlansPage() {
     }
     const loadingToast = toast.loading("Generating full client file PDF…");
     try {
+      const marketsForExport = selectedProjectId
+        ? await loadBusinessDevMarkets(selectedProjectId)
+        : businessDevMarkets;
       await exportClientFilePDF({
         project: {
           name:        selectedProject.brand_name || "Brand",
@@ -833,6 +882,7 @@ export default function ActionPlansPage() {
         actionPlans:      selectedProjectId
                            ? plans.filter((p) => p.projectId === selectedProjectId)
                            : plans,
+        businessDevMarkets: marketsForExport,
       });
       toast.success("Client file PDF exported!", { id: loadingToast });
     } catch (err: any) {
@@ -1426,7 +1476,7 @@ export default function ActionPlansPage() {
       {/* Tab Navigation */}
       <div className="bg-white rounded-xl border border-gray-200 mb-6 overflow-hidden">
         <div className="flex overflow-x-auto">
-          {TABS.map((tab) => {
+          {getTabs(t).map((tab) => {
             const IconComp = tab.icon;
             const isActive = activeTab === tab.key;
             return (
@@ -2105,6 +2155,14 @@ export default function ActionPlansPage() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Business Development Tab */}
+        {activeTab === "business_dev" && (
+          <BusinessDevelopmentView
+            project={selectedProject}
+            intelligenceData={intelligenceData}
+          />
         )}
 
         {/* KPI Dashboard Tab */}
