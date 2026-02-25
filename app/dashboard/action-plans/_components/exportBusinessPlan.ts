@@ -198,10 +198,11 @@ export interface ClientFilePDFData {
   annualPlan?: any;
   actionPlans?: ActionPlan[];
   businessDevMarkets?: any[];
+  competitorResearchPlans?: any[];
 }
 
 export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void> {
-  const { project, intelligenceData, annualPlan, actionPlans = [], businessDevMarkets = [] } = data;
+  const { project, intelligenceData, annualPlan, actionPlans = [], businessDevMarkets = [], competitorResearchPlans = [] } = data;
   const scores  = intelligenceData?.scores  || {};
   const reports = intelligenceData?.reports || {};
 
@@ -388,16 +389,18 @@ export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void
   doc.setDrawColor(PURPLE.r, PURPLE.g, PURPLE.b); doc.setLineWidth(0.5);
   doc.line(margin, tocStartY + 2, margin + 30, tocStartY + 2);
 
+  let tocNum = 5;
   const tocItems = [
     ["1", "Strategic Intelligence Overview"],
     ["2", "AI Visibility Analysis"],
     ["3", "SEO & Organic Performance"],
     ["4", "Strategic Blind Spots"],
     ["5", "AI vs Google Gap Analysis"],
-    ...(reports.shareOfAttention?.available ? [["6", "Market Share of Attention"]] : []),
-    ...(annualPlan ? [["7", "12-Month Strategic Plan"]] : []),
-    ...(actionPlans.length > 0 ? [["8", "Action Plans"]] : []),
-    ...(businessDevMarkets.length > 0 ? [["9", "Business Development"]] : []),
+    ...(reports.shareOfAttention?.available ? [[String(++tocNum), "Market Share of Attention"]] : []),
+    ...(annualPlan ? [[String(++tocNum), "12-Month Strategic Plan"]] : []),
+    ...(actionPlans.length > 0 ? [[String(++tocNum), "Action Plans"]] : []),
+    ...(businessDevMarkets.length > 0 ? [[String(++tocNum), "Business Development"]] : []),
+    ...(competitorResearchPlans.length > 0 ? [[String(++tocNum), "Competitor Research"]] : []),
   ];
   doc.setFontSize(8.5); doc.setFont("helvetica", "normal"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
   tocItems.forEach((item, i) => {
@@ -889,6 +892,58 @@ export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void
           [90, 45, 39], margin, true, [235, 225, 255]
         );
       }
+    });
+  }
+
+  // ── Competitor Research ────────────────────────────────────────────────────
+  if (competitorResearchPlans.length > 0) {
+    doc.addPage(); header(); yPos = contentTop;
+    secHead(`Competitor Research (${competitorResearchPlans.length} plan${competitorResearchPlans.length > 1 ? "s" : ""})`, 99, 102, 241);
+
+    competitorResearchPlans.forEach((plan: any, pi: number) => {
+      doc.setFontSize(9.5); doc.setFont("helvetica", "bold");
+      const planTitleLines = doc.splitTextToSize(`${pi + 1}. ${plan.title || "Competitor Action Plan"}`, cW - 6) as string[];
+      const planH = Math.max(10, planTitleLines.length * 7 + 4);
+      yPos += 6;
+      pageBreak(planH + 4);
+      doc.setFillColor(245, 240, 255);
+      doc.roundedRect(margin, yPos, cW, planH, 1.5, 1.5, "F");
+      doc.setTextColor(PURPLE_DARK.r, PURPLE_DARK.g, PURPLE_DARK.b);
+      planTitleLines.forEach((line: string, li: number) => {
+        doc.text(line, margin + 3, yPos + 6 + li * 7);
+      });
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      yPos += planH + 4;
+
+      doc.setFontSize(7.5); doc.setFont("helvetica", "normal"); doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
+      wrap(`Objective: ${plan.objective || "—"}`, margin + 2, cW - 4, 4.5);
+      yPos += 1.5;
+      wrap(`Timeline: ${plan.timeline || "—"}  |  Priority: ${plan.priority || "—"}  |  Category: ${plan.category || "Competitor Research"}`, margin + 2, cW - 4, 4.5);
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      yPos += 2;
+
+      if (plan.reasoning) {
+        subHead("Strategic Reasoning");
+        wrap(plan.reasoning, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+      if (plan.expectedOutcome) {
+        subHead("Expected Outcome");
+        wrap(plan.expectedOutcome, margin + 2, cW - 4, 4.5);
+        yPos += 2;
+      }
+
+      if (plan.steps?.length) {
+        subHead("Action Steps");
+        tableRows(
+          [["#", "Step", "Priority", "Done"],
+           ...(plan.steps as ActionStep[]).map((s: any, si: number) => [
+             String(si + 1), s.step || "—", s.priority || "—", s.completed ? "✓" : "—",
+           ])],
+          [10, 115, 22, 17], margin, true, [235, 225, 255]
+        );
+      }
+      yPos += 4;
     });
   }
 

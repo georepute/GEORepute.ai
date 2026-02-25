@@ -15,6 +15,7 @@ import {
   Eye,
   Shield,
   Building2,
+  Search,
 } from "lucide-react";
 
 interface ClientFileSection {
@@ -81,6 +82,13 @@ const SECTION_TEMPLATES: {
     description:
       "Market expansion strategies by country, region, and language",
     icon: Building2,
+  },
+  {
+    id: "competitor_research",
+    title: "Competitor Research",
+    description:
+      "Competitive analysis and action plans based on competitor research",
+    icon: Search,
   },
   {
     id: "kpi_dashboard",

@@ -33,6 +33,7 @@ import {
   DollarSign,
   Shield,
   Flag,
+  Search,
 } from "lucide-react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { useRouter } from "next/navigation";
@@ -49,6 +50,7 @@ import { AnnualPlanView, type AnnualPlan, type QuarterlyItem } from "./_componen
 import { KPIDashboard } from "./_components/KPIDashboard";
 import { ClientFile } from "./_components/ClientFile";
 import { BusinessDevelopmentView } from "./_components/BusinessDevelopmentView";
+import { CompetitorResearchView } from "./_components/CompetitorResearchView";
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, ReferenceLine } from "recharts";
 import jsPDF from "jspdf";
 // @ts-ignore - pptxgenjs types may not be available
@@ -116,7 +118,7 @@ interface BrandProject {
   competitors?: string[];
 }
 
-type TabKey = "intelligence" | "annual_plan" | "action_plans" | "kpi" | "client_file" | "business_dev";
+type TabKey = "intelligence" | "annual_plan" | "action_plans" | "kpi" | "client_file" | "business_dev" | "competitor_research";
 
 function getTabs(t: { dashboard: { actionPlansPage: Record<string, string> } }) {
   const ap = t.dashboard.actionPlansPage;
@@ -126,6 +128,7 @@ function getTabs(t: { dashboard: { actionPlansPage: Record<string, string> } }) 
     { key: "action_plans" as TabKey, label: ap.actionPlans, icon: Zap, description: ap.actionPlansDesc },
     { key: "kpi" as TabKey, label: ap.kpiDashboard, icon: BarChart3, description: ap.kpiDesc },
     { key: "business_dev" as TabKey, label: ap.businessDevelopment, icon: Building2, description: ap.businessDevDesc },
+    { key: "competitor_research" as TabKey, label: ap.competitorResearch ?? "Competitor Research", icon: Search, description: ap.competitorResearchDesc ?? "Competitive analysis & plans" },
     { key: "client_file" as TabKey, label: ap.clientFile, icon: FolderOpen, description: ap.clientFileDesc },
   ];
 }
@@ -177,6 +180,9 @@ export default function ActionPlansPage() {
 
   // Business development markets (for Client File + PDF export)
   const [businessDevMarkets, setBusinessDevMarkets] = useState<any[]>([]);
+  // Competitor research plans (for Client File + PDF export)
+  const [competitorResearchPlans, setCompetitorResearchPlans] = useState<any[]>([]);
+  const [competitorResearchLastUpdated, setCompetitorResearchLastUpdated] = useState<string | null>(null);
 
   // Generation form state (used in quick generate)
   const [objective, setObjective] = useState("");
@@ -211,6 +217,7 @@ export default function ActionPlansPage() {
   useEffect(() => {
     if (activeTab === "client_file" && selectedProjectId) {
       loadBusinessDevMarkets(selectedProjectId);
+      loadCompetitorResearch(selectedProjectId);
     }
   }, [activeTab, selectedProjectId]);
 
@@ -344,6 +351,26 @@ export default function ActionPlansPage() {
     }
   };
 
+  const loadCompetitorResearch = async (projectId: string): Promise<any[]> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from("competitor_research")
+        .select("competitors, action_plans, generated_at, updated_at")
+        .eq("user_id", user.id)
+        .eq("project_id", projectId)
+        .maybeSingle();
+      const plans = !error && data?.action_plans ? (Array.isArray(data.action_plans) ? data.action_plans : [data.action_plans]) : [];
+      setCompetitorResearchPlans(plans);
+      setCompetitorResearchLastUpdated(data?.updated_at ?? data?.generated_at ?? null);
+      return plans;
+    } catch (err) {
+      console.error("Failed to load competitor research:", err);
+      return [];
+    }
+  };
+
   // Load a stored annual plan for a project and attach quarter KPIs from intelligence
   const loadStoredAnnualPlan = async (projectId: string, intelligence: any) => {
     try {
@@ -390,6 +417,7 @@ export default function ActionPlansPage() {
         // Load stored annual plan after intelligence (KPIs need intelligence scores)
         await loadStoredAnnualPlan(projectId, intelligence);
         await loadBusinessDevMarkets(projectId);
+        await loadCompetitorResearch(projectId);
       }
     } else {
       setSelectedProject(null);
@@ -399,6 +427,8 @@ export default function ActionPlansPage() {
       setAnnualPlan(null);
       setAnnualPlanSavedAt(null);
       setBusinessDevMarkets([]);
+      setCompetitorResearchPlans([]);
+      setCompetitorResearchLastUpdated(null);
     }
   };
 
@@ -814,6 +844,15 @@ export default function ActionPlansPage() {
         lastUpdated: businessDevMarkets.length > 0 ? (businessDevMarkets[0]?.updated_at ?? businessDevMarkets[0]?.created_at) ?? null : null,
       },
       {
+        id: "competitor_research",
+        title: "Competitor Research",
+        description: "Competitive analysis and action plans from competitor research",
+        icon: null,
+        status: competitorResearchPlans.length > 0 ? "available" as const : "missing" as const,
+        itemCount: competitorResearchPlans.length,
+        lastUpdated: competitorResearchLastUpdated,
+      },
+      {
         id: "kpi_dashboard",
         title: "KPI Dashboard",
         description: "Performance metrics and tracking",
@@ -852,6 +891,7 @@ export default function ActionPlansPage() {
       selected_items: "annual_plan",
       action_plans: "action_plans",
       business_dev: "business_dev",
+      competitor_research: "competitor_research",
       kpi_dashboard: "kpi",
       progress_log: "action_plans",
       quarterly_updates: "kpi",
@@ -866,9 +906,10 @@ export default function ActionPlansPage() {
     }
     const loadingToast = toast.loading("Generating full client file PDF…");
     try {
-      const marketsForExport = selectedProjectId
-        ? await loadBusinessDevMarkets(selectedProjectId)
-        : businessDevMarkets;
+      const [marketsForExport, competitorPlansForExport] = await Promise.all([
+        selectedProjectId ? loadBusinessDevMarkets(selectedProjectId) : Promise.resolve(businessDevMarkets),
+        selectedProjectId ? loadCompetitorResearch(selectedProjectId) : Promise.resolve(competitorResearchPlans),
+      ]);
       await exportClientFilePDF({
         project: {
           name:        selectedProject.brand_name || "Brand",
@@ -883,6 +924,7 @@ export default function ActionPlansPage() {
                            ? plans.filter((p) => p.projectId === selectedProjectId)
                            : plans,
         businessDevMarkets: marketsForExport,
+        competitorResearchPlans: competitorPlansForExport,
       });
       toast.success("Client file PDF exported!", { id: loadingToast });
     } catch (err: any) {
@@ -2160,6 +2202,14 @@ export default function ActionPlansPage() {
         {/* Business Development Tab */}
         {activeTab === "business_dev" && (
           <BusinessDevelopmentView
+            project={selectedProject}
+            intelligenceData={intelligenceData}
+          />
+        )}
+
+        {/* Competitor Research Tab */}
+        {activeTab === "competitor_research" && (
+          <CompetitorResearchView
             project={selectedProject}
             intelligenceData={intelligenceData}
           />
