@@ -4983,41 +4983,7 @@ function AIVisibilityContent() {
                 const totalHighIntent = projectResponses.filter(r => 
                   r.response_metadata?.intent_score >= 45 || r.response_metadata?.revenue_potential === 'high' || r.response_metadata?.revenue_potential === 'medium'
                 );
-                if (missedHighIntent.length === 0) return null;
-                const missedPct = totalHighIntent.length > 0 ? Math.round((missedHighIntent.length / totalHighIntent.length) * 100) : 0;
-                return (
-                  <div className="bg-gradient-to-r from-red-50 to-orange-50 border border-red-200 rounded-xl p-5 mb-4">
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <span className="text-2xl">💰</span>
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-bold text-red-900 mb-1">Revenue at Risk</h3>
-                        <p className="text-sm text-red-800 mb-3">
-                          Your brand is <strong>missing from {missedHighIntent.length} high-intent buyer queries</strong> ({missedPct}% of commercial queries). 
-                          These are searches from people actively looking to purchase — every missed query is a lost revenue opportunity.
-                        </p>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="bg-white/70 rounded-lg p-3 text-center">
-                            <div className="text-2xl font-bold text-red-700">{missedHighIntent.length}</div>
-                            <div className="text-xs text-red-600">Missed Buyer Queries</div>
-                          </div>
-                          <div className="bg-white/70 rounded-lg p-3 text-center">
-                            <div className="text-2xl font-bold text-orange-700">{missedPct}%</div>
-                            <div className="text-xs text-orange-600">Commercial Gap Rate</div>
-                          </div>
-                          <div className="bg-white/70 rounded-lg p-3 text-center">
-                            <div className="text-2xl font-bold text-amber-700">
-                              {missedHighIntent.filter(r => r.response_metadata?.competitors_found?.length > 0).length}
-                            </div>
-                            <div className="text-xs text-amber-600">Won by Competitors</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
+              })}
 
               {/* Viewing historical session banner */}
               {isViewingHistory && activeSession && (
