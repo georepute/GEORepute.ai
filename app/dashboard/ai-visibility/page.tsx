@@ -4983,7 +4983,15 @@ function AIVisibilityContent() {
                 const totalHighIntent = projectResponses.filter(r => 
                   r.response_metadata?.intent_score >= 45 || r.response_metadata?.revenue_potential === 'high' || r.response_metadata?.revenue_potential === 'medium'
                 );
-              })}
+                if (missedHighIntent.length === 0) return null;
+                return (
+                  <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="text-sm font-medium text-amber-800">
+                      {missedHighIntent.length} high-intent prompt{missedHighIntent.length !== 1 ? 's' : ''} missed — consider optimizing visibility for these opportunities.
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Viewing historical session banner */}
               {isViewingHistory && activeSession && (
