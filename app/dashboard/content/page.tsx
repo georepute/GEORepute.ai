@@ -179,6 +179,7 @@ function ContentInner() {
     { id: 'facebook', name: 'Facebook', icon: '/facebook-color.svg', color: 'bg-blue-100 text-blue-700 border-blue-200' },
     { id: 'linkedin', name: 'LinkedIn', icon: '/linkedin.svg', color: 'bg-sky-100 text-sky-700 border-sky-200' },
     { id: 'instagram', name: 'Instagram', icon: '/instagram-1-svgrepo-com.svg', color: 'bg-pink-100 text-pink-700 border-pink-200' },
+    { id: 'x', name: 'X', icon: '/x-icon.svg', color: 'bg-gray-900 text-white border-gray-700' },
     { id: 'github', name: 'GitHub', icon: '/github-142.svg', color: 'bg-gray-800 text-white border-gray-700' },
     { id: 'shopify', name: 'Shopify', icon: '/shopify.svg', color: 'bg-green-100 text-green-700 border-green-200' },
     { id: 'wordpress', name: 'WordPress.com', icon: '/wordpress.svg', color: 'bg-blue-100 text-blue-700 border-blue-200' },
@@ -1851,7 +1852,7 @@ function ContentInner() {
     const totalPlatforms = selectedPlatforms.length;
     const responseData = aiVisibilityData.responses[0];
 
-    const PLATFORMS_WITH_IMAGE_SUPPORT = ['reddit', 'medium', 'quora', 'facebook', 'linkedin', 'instagram'];
+    const PLATFORMS_WITH_IMAGE_SUPPORT = ['reddit', 'medium', 'quora', 'facebook', 'linkedin', 'instagram', 'x'];
 
     for (let i = 0; i < selectedPlatforms.length; i++) {
       const platformId = selectedPlatforms[i];
@@ -3522,22 +3523,17 @@ function ContentInner() {
                   <div className="flex flex-col items-center justify-center py-8">
                     {(() => {
                       // Check multiple possible locations for image URL
-                      const imageUrl = 
+                      const rawImageUrl = 
                         viewContent.raw?.metadata?.imageUrl || 
                         viewContent.raw?.metadata?.imageData?.url ||
                         viewContent.raw?.metadata?.structuredSEO?.ogTags?.image ||
                         viewContent.raw?.metadata?.image?.url;
-                      
-                      console.log('🔍 Image check:', {
-                        hasRaw: !!viewContent.raw,
-                        hasMetadata: !!viewContent.raw?.metadata,
-                        imageUrl: viewContent.raw?.metadata?.imageUrl,
-                        imageDataUrl: viewContent.raw?.metadata?.imageData?.url,
-                        ogImage: viewContent.raw?.metadata?.structuredSEO?.ogTags?.image,
-                        imageUrl2: viewContent.raw?.metadata?.image?.url,
-                        finalImageUrl: imageUrl,
-                        fullMetadata: viewContent.raw?.metadata
-                      });
+                      // Treat placeholder or non-URL as no image (avoids GET /dashboard/default-image-url 404)
+                      const imageUrl = rawImageUrl &&
+                        rawImageUrl !== 'default-image-url' &&
+                        (rawImageUrl.startsWith('http://') || rawImageUrl.startsWith('https://') || rawImageUrl.startsWith('data:'))
+                        ? rawImageUrl
+                        : null;
                       
                       return imageUrl ? (
                         <div className="w-full max-w-2xl">
@@ -3563,6 +3559,7 @@ function ContentInner() {
                               <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Facebook</span>
                               <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">LinkedIn</span>
                               <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Instagram</span>
+                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">X</span>
                               <span className="px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs line-through">GitHub</span>
                             </div>
                           </div>

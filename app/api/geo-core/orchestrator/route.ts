@@ -10,6 +10,7 @@ import { publishToLinkedIn, LinkedInConfig } from "@/lib/integrations/linkedin";
 import { publishToInstagram, InstagramConfig } from "@/lib/integrations/instagram";
 import { publishToShopify, ShopifyConfig } from "@/lib/integrations/shopify";
 import { publishToWordPress, publishToSelfHostedWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
+import { publishToX, XConfig } from "@/lib/integrations/x";
 
 /**
  * Content Orchestrator API
@@ -261,6 +262,7 @@ export async function POST(request: NextRequest) {
           let mediumResult = null;
           let quoraResult = null;
           let facebookResult = null;
+          let xResult: { success: boolean; url?: string; tweetId?: string; error?: string } | null = null;
           let githubIntegration: any = null;
           let redditIntegration: any = null;
           let mediumIntegration: any = null;
@@ -1154,6 +1156,50 @@ export async function POST(request: NextRequest) {
             }
           }
 
+          // Auto-publish to X (Twitter) if platform is X
+          if (platform === "x") {
+            try {
+              const { data: xIntegration } = await supabase
+                .from("platform_integrations")
+                .select("*")
+                .eq("user_id", session.user.id)
+                .eq("platform", "x")
+                .eq("status", "connected")
+                .maybeSingle();
+
+              if (!xIntegration) {
+                console.warn("X publish skipped: no X integration found for user");
+                xResult = { success: false, error: "X account not connected. Connect in Settings → Integrations." };
+              } else if (!xIntegration.access_token) {
+                console.warn("X publish skipped: integration has no access_token");
+                xResult = { success: false, error: "X account not connected. Connect in Settings → Integrations." };
+              } else {
+                const xConfig: XConfig = {
+                  accessToken: xIntegration.access_token,
+                  refreshToken: xIntegration.refresh_token || undefined,
+                  username: xIntegration.platform_username || undefined,
+                  userId: xIntegration.platform_user_id || undefined,
+                };
+                let xContent = contentStrategy.generated_content || "";
+                xContent = xContent.replace(/<!-- SEO Schema.*?-->/gs, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").trim();
+                console.log("X publish: calling publishToX, content length:", xContent?.length);
+                xResult = await publishToX(xConfig, { text: xContent });
+                console.log("X publish result:", xResult?.success, xResult?.url || xResult?.error);
+                if (xResult.success && xResult.url) {
+                  publishUrl = xResult.url;
+                  console.log("✅ X (Twitter) publish successful:", publishUrl);
+                  await supabase
+                    .from("platform_integrations")
+                    .update({ last_used_at: new Date().toISOString() })
+                    .eq("id", xIntegration.id);
+                }
+              }
+            } catch (xError: any) {
+              console.error("X publish error:", xError);
+              xResult = { success: false, error: xError.message || "Failed to publish to X" };
+            }
+          }
+
           // Auto-publish to Shopify if platform is Shopify
           let shopifyResult: any = null;
           if (platform === "shopify") {
@@ -1364,6 +1410,12 @@ export async function POST(request: NextRequest) {
               url: facebookResult.url,
               postId: facebookResult.postId,
             } : null,
+            xResult: xResult ? {
+              success: xResult.success,
+              url: xResult.url,
+              tweetId: xResult.tweetId,
+              error: xResult.error,
+            } : null,
             wordpressResult: wordpressResult ? {
               success: wordpressResult.success,
               url: wordpressResult.url,
@@ -1375,7 +1427,7 @@ export async function POST(request: NextRequest) {
           const insertData: any = {
             user_id: session.user.id,
             content_strategy_id: contentId,
-            platform: platform === "github" ? "github" : platform === "reddit" ? "reddit" : platform === "medium" ? "medium" : platform === "quora" ? "quora" : platform === "facebook" ? "facebook" : platform === "wordpress_self_hosted" ? "wordpress_self_hosted" : platform,
+            platform: platform === "github" ? "github" : platform === "reddit" ? "reddit" : platform === "medium" ? "medium" : platform === "quora" ? "quora" : platform === "facebook" ? "facebook" : platform === "x" ? "x" : platform === "wordpress_self_hosted" ? "wordpress_self_hosted" : platform,
             published_at: new Date().toISOString(),
             platform_post_id: (platform === "github" ? gitHubResult?.discussionNumber?.toString() : 
                               platform === "reddit" ? redditResult?.postId :
@@ -1384,6 +1436,7 @@ export async function POST(request: NextRequest) {
                               platform === "facebook" ? facebookResult?.postId :
                               platform === "instagram" ? instagramResult?.postId :
                               platform === "linkedin" ? linkedInResult?.postId :
+                              platform === "x" ? xResult?.tweetId :
                               platform === "wordpress" ? wordpressResult?.postId?.toString() :
                               platform === "wordpress_self_hosted" ? wordpressSelfHostedResult?.postId?.toString() :
                               platformPostId) || null,
@@ -1394,9 +1447,10 @@ export async function POST(request: NextRequest) {
                            (facebookResult && !facebookResult.success && facebookResult.error) ||
                            (instagramResult && !instagramResult.success && instagramResult.error) ||
                            (linkedInResult && !linkedInResult.success && linkedInResult.error) ||
+                           (xResult && !xResult.success && xResult.error) ||
                            (wordpressResult && !wordpressResult.success && wordpressResult.error) ||
                            (wordpressSelfHostedResult && !wordpressSelfHostedResult.success && wordpressSelfHostedResult.error)) ? 
-                           (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error || instagramResult?.error || linkedInResult?.error || wordpressResult?.error || wordpressSelfHostedResult?.error) : null,
+                           (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error || instagramResult?.error || linkedInResult?.error || xResult?.error || wordpressResult?.error || wordpressSelfHostedResult?.error) : null,
             metadata: {
               ...contentStrategy.metadata, // Include all metadata including structuredSEO
               auto_published: true,
@@ -1468,6 +1522,12 @@ export async function POST(request: NextRequest) {
                 postId: linkedInResult.postId,
                 authorUrn: linkedInResult.authorUrn || linkedInIntegration?.metadata?.personUrn || linkedInIntegration?.platform_user_id, // Store author URN for metrics validation
                 error: linkedInResult.error,
+              } : null,
+              x: xResult ? {
+                success: xResult.success,
+                url: xResult.url,
+                tweetId: xResult.tweetId,
+                error: xResult.error,
               } : null,
             },
           };

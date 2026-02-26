@@ -89,6 +89,7 @@ function ContentGeneratorPageInner() {
     { id: "facebook", name: "Facebook", icon: "/facebook-color.svg" },
     { id: "linkedin", name: "LinkedIn", icon: "/linkedin.svg" },
     { id: "instagram", name: "Instagram", icon: "/instagram-1-svgrepo-com.svg" },
+    { id: "x", name: "X", icon: "/x-icon.svg" },
     { id: "github", name: "GitHub", icon: "/github-142.svg" },
     { id: "shopify", name: "Shopify", icon: "/shopify.svg" },
     { id: "wordpress", name: "WordPress.com", icon: "/wordpress.svg" },
@@ -126,6 +127,7 @@ function ContentGeneratorPageInner() {
     { value: "facebook", label: "Facebook", desc: cg.socialEngaging, icon: "/facebook-color.svg" },
     { value: "linkedin", label: "LinkedIn", desc: cg.professionalNetwork, icon: "/linkedin.svg" },
     { value: "instagram", label: "Instagram", desc: cg.visualSocial, icon: "/instagram-1-svgrepo-com.svg" },
+    { value: "x", label: "X", desc: cg.xShortForm, icon: "/x-icon.svg" },
   ];
 
   // Load brand voices on mount
@@ -722,7 +724,7 @@ function ContentGeneratorPageInner() {
     );
   };
 
-  const PLATFORMS_WITH_IMAGE_SUPPORT = ["reddit", "medium", "quora", "facebook", "linkedin", "instagram"];
+  const PLATFORMS_WITH_IMAGE_SUPPORT = ["reddit", "medium", "quora", "facebook", "linkedin", "instagram", "x"];
 
   // Create schema for all selected platforms when user approves (no schema at initial content generation)
   const handleCreateSchemasForPublish = async () => {

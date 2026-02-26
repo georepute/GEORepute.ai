@@ -141,7 +141,6 @@ export default function DashboardLayout({
       children: [
         { name: t.dashboard.sidebar.keywordForecastAnalytics, href: "/dashboard/analytics", icon: TrendingUp, requiredCapability: "canViewAnalytics" },
         { name: t.dashboard.sidebar.gscAnalytics, href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
-        { name: t.dashboard.sidebar.biReports, href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" },
       ]
     },
     { 
@@ -153,6 +152,8 @@ export default function DashboardLayout({
         { name: t.dashboard.sidebar.aiSearchPresence, href: "/dashboard/ai-search-presence", icon: Brain, requiredCapability: "canViewReports" },
         { name: t.dashboard.sidebar.aiVsGoogleGap, href: "/dashboard/ai-vs-google-gap", icon: Activity, requiredCapability: "canViewReports" },
         { name: t.dashboard.sidebar.marketShareOfAttention, href: "/dashboard/market-share-of-attention", icon: Trophy, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.geoVisibilityMarketCoverage, href: "/dashboard/geo-visibility-market-coverage", icon: Globe, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.opportunityBlindSpots, href: "/dashboard/opportunity-blind-spots", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
     { 

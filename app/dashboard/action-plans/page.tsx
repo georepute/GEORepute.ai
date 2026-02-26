@@ -162,7 +162,7 @@ export default function ActionPlansPage() {
   const [loading, setLoading] = useState(false);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [executingStep, setExecutingStep] = useState<string | null>(null);
-
+  
   // Brand project selection state
   const [brandProjects, setBrandProjects] = useState<BrandProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -272,7 +272,7 @@ export default function ActionPlansPage() {
       const response = await fetch("/api/geo-core/action-plan");
       if (!response.ok) throw new Error("Failed to load action plans");
       const data = await response.json();
-
+      
       const loadedPlans: ActionPlan[] = (data.plans || []).map((plan: any) => {
         const execMetadata = plan.executionMetadata || {};
         return {
@@ -776,7 +776,7 @@ export default function ActionPlansPage() {
         });
         setSelectedProjectId(null);
         toast.success("Website crawled successfully!");
-      } else {
+    } else {
         toast.error(crawlData.error || "Failed to crawl website");
       }
     } catch { toast.error("Failed to crawl website"); }
@@ -1450,21 +1450,21 @@ export default function ActionPlansPage() {
           <div className="flex-1 min-w-[200px]">
             <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">
               Brand Project
-            </label>
-            <select
-              value={selectedProjectId || ""}
-              onChange={(e) => handleProjectSelect(e.target.value || null)}
+                </label>
+                <select
+                  value={selectedProjectId || ""}
+                  onChange={(e) => handleProjectSelect(e.target.value || null)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-500 focus:border-transparent bg-white text-sm"
-              disabled={loadingProjects}
-            >
+                  disabled={loadingProjects}
+                >
               <option value="">Select a brand project...</option>
-              {brandProjects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.brand_name} ({project.industry})
-                </option>
-              ))}
-            </select>
-          </div>
+                  {brandProjects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.brand_name} ({project.industry})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
           {selectedProject && (
             <div className="flex items-center gap-3">
@@ -1479,7 +1479,7 @@ export default function ActionPlansPage() {
               <div>
                 <div className="font-semibold text-gray-900 text-sm">
                   {selectedProject.brand_name}
-                </div>
+              </div>
                 <div className="text-xs text-gray-500">
                   {selectedProject.industry} · {selectedProject.website_url}
                 </div>
@@ -1522,7 +1522,7 @@ export default function ActionPlansPage() {
             const IconComp = tab.icon;
             const isActive = activeTab === tab.key;
             return (
-              <button
+                  <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all ${
@@ -1533,11 +1533,11 @@ export default function ActionPlansPage() {
               >
                 <IconComp className={`w-4 h-4 ${isActive ? "text-violet-600" : ""}`} />
                 {tab.label}
-              </button>
+                  </button>
             );
           })}
-        </div>
-      </div>
+                </div>
+              </div>
 
       {/* Tab Content */}
       <div className="min-h-[400px]">
@@ -1578,15 +1578,15 @@ export default function ActionPlansPage() {
                     </button>
                   )}
                   {annualPlan && !loadingAnnualPlan && (
-                    <button
+                          <button
                       onClick={() => generateAnnualPlan(true)}
                       className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors"
                     >
                       <RefreshCw className="w-4 h-4" />
                       Regenerate
-                    </button>
+                          </button>
                   )}
-                </div>
+                        </div>
               )}
             </div>
             <AnnualPlanView
@@ -1596,8 +1596,8 @@ export default function ActionPlansPage() {
               onToggleItem={handleToggleAnnualItem}
               onGenerateContent={handleAnnualItemGenerateContent}
             />
-          </div>
-        )}
+                    </div>
+                  )}
 
         {/* Action Plans Tab */}
         {activeTab === "action_plans" && (
@@ -1645,26 +1645,26 @@ export default function ActionPlansPage() {
                       {crawlingDomain ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
                     </button>
                   </div>
-                  <Button
-                    onClick={generateActionPlan}
-                    disabled={loading || !objective.trim()}
-                    variant="primary"
+              <Button
+                onClick={generateActionPlan}
+                disabled={loading || !objective.trim()}
+                variant="primary"
                     size="sm"
-                  >
-                    {loading ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Lightbulb className="w-4 h-4 mr-2" />
+              >
+                {loading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Lightbulb className="w-4 h-4 mr-2" />
                         Generate Plan
-                      </>
-                    )}
-                  </Button>
-                </div>
+                  </>
+                )}
+              </Button>
               </div>
+            </div>
 
               {/* Keywords */}
               {keywords.length > 0 && (
@@ -1684,34 +1684,34 @@ export default function ActionPlansPage() {
                   {keywords.length > 10 && (
                     <span className="text-xs text-gray-400">+{keywords.length - 10} more</span>
                   )}
-                </div>
-              )}
-            </div>
-
-            {/* Loading States */}
-            {loadingPlans && (
-              <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
-                <div className="w-12 h-12 border-4 border-violet-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                <p className="text-gray-700 font-medium">Loading action plans...</p>
               </div>
             )}
+        </div>
+
+            {/* Loading States */}
+          {loadingPlans && (
+            <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
+                <div className="w-12 h-12 border-4 border-violet-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                <p className="text-gray-700 font-medium">Loading action plans...</p>
+            </div>
+          )}
 
             {loading && !loadingPlans && (
               <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
                 <div className="w-12 h-12 border-4 border-violet-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-gray-700 font-medium">AI crafting your action plan...</p>
                 <p className="text-sm text-gray-500 mt-1">Analyzing strategy and generating steps</p>
-              </div>
-            )}
+                        </div>
+                      )}
 
             {/* Empty State */}
             {filteredPlans.length === 0 && !loading && !loadingPlans && (
-              <div className="bg-gray-50 rounded-lg p-12 text-center border-2 border-dashed border-gray-300">
-                <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                <div className="bg-gray-50 rounded-lg p-12 text-center border-2 border-dashed border-gray-300">
+                  <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                 {!selectedProjectId ? (
                   <>
                     <p className="text-gray-700 font-medium mb-2">No project selected</p>
-                    <p className="text-sm text-gray-500">
+                  <p className="text-sm text-gray-500">
                       Select a brand project from the dropdown above to view its action plans.
                     </p>
                   </>
@@ -1725,67 +1725,67 @@ export default function ActionPlansPage() {
                     </p>
                   </>
                 )}
-              </div>
-            )}
+            </div>
+          )}
 
             {/* Plans List */}
             {filteredPlans.length > 0 && !loading && !loadingPlans && (
-              <div className="space-y-4">
+            <div className="space-y-4">
                 {filteredPlans.map((plan, idx) => (
-                  <motion.div
-                    key={plan.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
+                <motion.div
+                  key={plan.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                  >
-                    <Card className="overflow-hidden">
-                      {/* Plan Header */}
+                >
+                  <Card className="overflow-hidden">
+                    {/* Plan Header */}
                       <div className="p-5">
-                        <div className="flex items-start justify-between">
-                          <div
-                            className="flex-1 cursor-pointer hover:bg-gray-50 transition-colors rounded-lg p-2 -m-2"
-                            onClick={() => togglePlan(plan.id)}
-                          >
+                      <div className="flex items-start justify-between">
+                        <div
+                          className="flex-1 cursor-pointer hover:bg-gray-50 transition-colors rounded-lg p-2 -m-2"
+                          onClick={() => togglePlan(plan.id)}
+                        >
                             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                               <div className={`px-2 py-0.5 rounded-full border text-xs font-semibold ${getPriorityColor(plan.priority)}`}>
-                                {plan.priority.toUpperCase()}
-                              </div>
-                              {plan.projectName ? (
+                              {plan.priority.toUpperCase()}
+                            </div>
+                            {plan.projectName ? (
                                 <div className="px-2 py-0.5 rounded-full bg-green-100 text-green-800 text-xs font-semibold flex items-center gap-1">
-                                  <Target className="w-3 h-3" />
-                                  {plan.projectName}
-                                </div>
-                              ) : plan.projectId ? (
-                                <div className="px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 text-xs font-semibold flex items-center gap-1">
-                                  <Target className="w-3 h-3" />
-                                  Project #{plan.projectId.substring(0, 8)}
-                                </div>
-                              ) : null}
-                              <div className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-semibold">
-                                {plan.category}
+                                <Target className="w-3 h-3" />
+                                {plan.projectName}
                               </div>
+                            ) : plan.projectId ? (
+                                <div className="px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 text-xs font-semibold flex items-center gap-1">
+                                <Target className="w-3 h-3" />
+                                Project #{plan.projectId.substring(0, 8)}
+                              </div>
+                            ) : null}
+                              <div className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-semibold">
+                              {plan.category}
+                            </div>
                               {plan.channels?.map((channel: string) => (
                                 <div key={channel} className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 text-xs font-semibold">
                                   {channel.replace("_", " ")}
-                                </div>
-                              ))}
-                            </div>
+                                  </div>
+                                ))}
+                          </div>
                             <h3 className="text-lg font-bold text-gray-900 mb-1">{plan.title}</h3>
-                            <div className="flex items-center gap-4 text-sm text-gray-600">
-                              <div className="flex items-center gap-1">
-                                <Clock className="w-4 h-4" />
-                                {plan.timeline}
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <CheckCircle2 className="w-4 h-4" />
+                          <div className="flex items-center gap-4 text-sm text-gray-600">
+                            <div className="flex items-center gap-1">
+                              <Clock className="w-4 h-4" />
+                              {plan.timeline}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <CheckCircle2 className="w-4 h-4" />
                                 {plan.steps.filter((s) => s.completed).length}/{plan.steps.length} completed
-                              </div>
                             </div>
                           </div>
+                        </div>
                           <div className="flex items-center gap-1.5">
                             {plan.businessPlanData && (
                               <>
-                                <button
+                          <button
                                   onClick={(e) => { e.stopPropagation(); exportPlanPDF(plan); }}
                                   className="text-purple-500 hover:text-purple-700 p-2 hover:bg-purple-50 rounded-lg transition-colors"
                                   title="Export PDF"
@@ -1824,139 +1824,139 @@ export default function ActionPlansPage() {
                             </div>
                             <button
                               onClick={(e) => { e.stopPropagation(); deletePlan(plan.id); }}
-                              className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                            className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
                               title="Delete"
-                            >
+                          >
                               <Trash2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => togglePlan(plan.id)}
-                              className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
+                          </button>
+                          <button
+                            onClick={() => togglePlan(plan.id)}
+                            className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                          >
                               {plan.expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                            </button>
-                          </div>
+                          </button>
                         </div>
                       </div>
+                    </div>
 
-                      {/* Expanded Content */}
-                      {plan.expanded && (
-                        <div className="border-t border-gray-200">
+                    {/* Expanded Content */}
+                    {plan.expanded && (
+                      <div className="border-t border-gray-200">
                           <div className="p-5 border-b border-gray-200 space-y-4">
-                            <PlanProgress plan={plan} />
+                          <PlanProgress plan={plan} />
                             <PlanMetrics plan={plan} compact />
-                          </div>
-
+                        </div>
+                        
                           <div className="p-5 border-b border-gray-200 bg-gray-50/50" id={`business-plan-${plan.id}`}>
                             <BusinessPlanView plan={plan} />
                           </div>
 
                           <div className="p-5 bg-gradient-to-r from-violet-50 to-indigo-50 border-b border-gray-200">
-                            <div className="flex items-start gap-2 mb-3">
+                          <div className="flex items-start gap-2 mb-3">
                               <Zap className="w-4 h-4 text-violet-600 mt-0.5 flex-shrink-0" />
-                              <div>
+                            <div>
                                 <div className="text-xs font-semibold text-violet-900 mb-1">AI Strategic Reasoning</div>
                                 <p className="text-sm text-gray-700">{plan.reasoning}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-2">
-                              <TrendingUp className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
-                              <div>
-                                <div className="text-xs font-semibold text-green-900 mb-1">Expected Outcome</div>
-                                <p className="text-sm text-gray-700">{plan.expectedOutcome}</p>
-                              </div>
                             </div>
                           </div>
+                          <div className="flex items-start gap-2">
+                            <TrendingUp className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                            <div>
+                                <div className="text-xs font-semibold text-green-900 mb-1">Expected Outcome</div>
+                                <p className="text-sm text-gray-700">{plan.expectedOutcome}</p>
+                            </div>
+                          </div>
+                        </div>
 
-                          {/* Action Steps */}
+                        {/* Action Steps */}
                           <div className="p-5">
                             <h4 className="text-sm font-bold text-gray-900 mb-3">Action Steps</h4>
                             <div className="space-y-2.5">
-                              {plan.steps.map((step, stepIdx) => {
-                                const stepId = step.id || `step-${stepIdx}`;
-                                const executionStatus = step.executionMetadata?.executionStatus || "pending";
-                                const isExecuting = executingStep === `${plan.id}-${stepId}`;
-                                const canExecute = step.executionType === "content_generation" && step.executionMetadata?.autoExecute;
-
-                                return (
-                                  <div
-                                    key={stepIdx}
+                            {plan.steps.map((step, stepIdx) => {
+                              const stepId = step.id || `step-${stepIdx}`;
+                              const executionStatus = step.executionMetadata?.executionStatus || "pending";
+                              const isExecuting = executingStep === `${plan.id}-${stepId}`;
+                              const canExecute = step.executionType === "content_generation" && step.executionMetadata?.autoExecute;
+                              
+                              return (
+                                <div
+                                  key={stepIdx}
                                     className={`border rounded-lg p-3.5 transition-all ${
                                       step.completed || executionStatus === "published"
-                                        ? "bg-green-50 border-green-200"
+                                      ? "bg-green-50 border-green-200"
                                         : executionStatus === "review"
-                                        ? "bg-blue-50 border-blue-200"
+                                      ? "bg-blue-50 border-blue-200"
                                         : "bg-white border-gray-200 hover:border-violet-300"
-                                    }`}
-                                  >
-                                    <div className="flex items-start gap-3">
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-3">
                                       <button onClick={() => toggleStep(plan.id, stepIdx)} className="mt-0.5 flex-shrink-0" disabled={executionStatus === "published"}>
                                         {step.completed || executionStatus === "published" ? (
-                                          <CheckCircle2 className="w-5 h-5 text-green-600" />
-                                        ) : (
+                                        <CheckCircle2 className="w-5 h-5 text-green-600" />
+                                      ) : (
                                           <Circle className="w-5 h-5 text-gray-400 hover:text-violet-600 transition-colors" />
-                                        )}
-                                      </button>
-                                      <div className="flex-1">
+                                      )}
+                                    </button>
+                                    <div className="flex-1">
                                         <div className="flex items-start justify-between gap-2 mb-1.5">
-                                          <div className="flex-1">
+                                        <div className="flex-1">
                                             <h5 className={`font-semibold text-sm ${step.completed || executionStatus === "published" ? "text-green-900 line-through" : "text-gray-900"}`}>
-                                              {stepIdx + 1}. {step.step}
-                                            </h5>
-                                            {(step.channel || step.platform) && (
+                                            {stepIdx + 1}. {step.step}
+                                          </h5>
+                                          {(step.channel || step.platform) && (
                                               <div className="flex items-center gap-1.5 mt-1">
                                                 {step.channel && <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">{step.channel}</span>}
                                                 {step.platform && <span className="text-xs px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">{step.platform}</span>}
-                                              </div>
-                                            )}
-                                          </div>
+                                            </div>
+                                          )}
+                                        </div>
                                           <div className="flex items-center gap-1.5">
                                             <div className={`px-2 py-0.5 rounded-full border text-xs font-semibold flex-shrink-0 ${getPriorityColor(step.priority)}`}>
-                                              {step.priority}
-                                            </div>
+                                            {step.priority}
+                                          </div>
                                             {executionStatus === "published" && (
                                               <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-semibold rounded-full">Published</span>
                                             )}
                                             {executionStatus === "review" && (
                                               <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-semibold rounded-full">Review</span>
-                                            )}
-                                          </div>
+                                          )}
                                         </div>
+                                      </div>
                                         <p className="text-sm text-gray-600 mb-1.5">{step.description}</p>
-                                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                                          <div className="flex items-center gap-2 text-xs">
+                                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                                        <div className="flex items-center gap-2 text-xs">
                                             <span className="text-gray-500">Impact:</span>
                                             <span className="font-semibold text-green-700">{step.estimatedImpact}</span>
-                                          </div>
-                                          <div className="flex items-center gap-2">
+                                        </div>
+                                        <div className="flex items-center gap-2">
                                             {canExecute && executionStatus === "pending" && (
                                               <Button onClick={() => executeStep(plan.id, stepId)} disabled={isExecuting} variant="primary" size="sm">
-                                                {isExecuting ? (
+                                              {isExecuting ? (
                                                   <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />Generating...</>
-                                                ) : (
+                                              ) : (
                                                   <><Play className="w-3 h-3 mr-1" />Generate Content</>
-                                                )}
-                                              </Button>
-                                            )}
+                                              )}
+                                            </Button>
+                                          )}
                                             {executionStatus === "review" && step.executionMetadata?.linkedContentId && (
                                               <Button onClick={() => router.push(`/dashboard/content?contentId=${step.executionMetadata?.linkedContentId}`)} variant="primary" size="sm">
                                                 <ExternalLink className="w-3 h-3 mr-1" />Review
-                                              </Button>
-                                            )}
+                                            </Button>
+                                          )}
                                             {executionStatus === "published" && step.executionMetadata?.publishedUrl && (
                                               <a href={step.executionMetadata.publishedUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-violet-600 hover:text-violet-700 flex items-center gap-1">
-                                                View Published <ExternalLink className="w-3 h-3" />
-                                              </a>
-                                            )}
-                                          </div>
+                                              View Published <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                          )}
                                         </div>
                                       </div>
                                     </div>
                                   </div>
-                                );
-                              })}
-                            </div>
+                                </div>
+                              );
+                            })}
                           </div>
+                        </div>
 
                         {/* Business Plan Dashboard - inline charts when businessPlanData exists */}
                         {plan.businessPlanData && (
@@ -2191,12 +2191,12 @@ export default function ActionPlansPage() {
                         )}
                       </div>
                     )}
-                    </Card>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </div>
+                  </Card>
+                </motion.div>
+              ))}
+            </div>
+          )}
+        </div>
         )}
 
         {/* Business Development Tab */}

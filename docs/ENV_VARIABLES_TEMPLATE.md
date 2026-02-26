@@ -35,6 +35,21 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 CRON_SECRET=your_random_secret_for_cron_jobs
 
 # ============================================
+# X (Twitter) OAuth 2.0 – Auto-publish to X
+# ============================================
+# Create an app at https://developer.x.com/ and enable OAuth 2.0 with PKCE.
+# Add a callback URL: https://your-domain.com/api/auth/x/callback (and http://localhost:3000/... for dev).
+#
+# If you get 403 "Client Forbidden" / "client-not-enrolled": your app must be attached to a
+# Project with the right API access. In the portal: create a Project, add your app to it,
+# and ensure the project has "Appropriate Level of API Access" (e.g. Basic for posting).
+# https://developer.x.com/en/docs/projects/overview
+
+X_CLIENT_ID=your_x_client_id
+# Optional: use for confidential client (recommended in production)
+X_CLIENT_SECRET=your_x_client_secret
+
+# ============================================
 # Notes
 # ============================================
 # - Never commit .env.local to Git

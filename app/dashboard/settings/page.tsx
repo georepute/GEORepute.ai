@@ -1677,6 +1677,9 @@ NEXT_PUBLIC_GITHUB_CLIENT_ID=prod_client_id`}
       {/* Instagram Integration */}
       <InstagramIntegrationSettings />
 
+      {/* X (Twitter) Integration */}
+      <XIntegrationSettings />
+
       {/* Shopify Integration */}
       <ShopifyIntegrationSettings />
 
@@ -2957,6 +2960,151 @@ function InstagramIntegrationSettings() {
                 Disconnect
               </>
             )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// X (Twitter) Integration Component
+function XIntegrationSettings() {
+  const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [username, setUsername] = useState("");
+  const settingsReturnPath = "/dashboard/settings?tab=integrations";
+
+  useEffect(() => {
+    loadXConfig();
+    const urlParams = new URLSearchParams(window.location.search);
+    const xStatus = urlParams.get("x");
+    if (xStatus === "connected") {
+      const u = urlParams.get("username");
+      toast.success(`X (Twitter) connected successfully!${u ? ` @${u}` : ""}`);
+      loadXConfig();
+      window.history.replaceState({}, "", settingsReturnPath);
+    } else if (xStatus === "error") {
+      toast.error(`X connection failed: ${urlParams.get("message") || "Unknown error"}`);
+      window.history.replaceState({}, "", settingsReturnPath);
+    }
+  }, []);
+
+  const loadXConfig = async () => {
+    try {
+      const response = await fetch("/api/integrations/x");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.connected && data.config) {
+          setUsername(data.config.username || "");
+          setIsConnected(true);
+        } else {
+          setIsConnected(false);
+        }
+      }
+    } catch {
+      setIsConnected(false);
+    }
+  };
+
+  const handleConnect = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/integrations/x/auth-url?return_to=${encodeURIComponent(settingsReturnPath)}`
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to get auth URL");
+      }
+      const { authUrl } = await res.json();
+      if (authUrl) window.location.href = authUrl;
+      else toast.error("Failed to get authorization URL");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to connect");
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Disconnect X (Twitter)? You can reconnect anytime.")) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/integrations/x", { method: "DELETE" });
+      if (res.ok) {
+        toast.success("X disconnected");
+        setIsConnected(false);
+        setUsername("");
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to disconnect");
+      }
+    } catch (e: unknown) {
+      toast.error("Failed to disconnect");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div id="x-integration" className="bg-white border border-gray-200 rounded-lg p-6 mb-6 scroll-mt-20">
+      <div className="flex items-center gap-4 mb-6">
+        <Image src="/x-icon.svg" alt="X" width={48} height={48} className="w-12 h-12" />
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900">X (Twitter) Auto-Publishing</h3>
+          <p className="text-sm text-gray-600">
+            Publish content to your X (Twitter) account
+            {username && isConnected && ` - @${username}`}
+          </p>
+        </div>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isConnected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>
+          {isConnected ? "Connected" : "Not Connected"}
+        </span>
+      </div>
+      {!isConnected ? (
+        <div className="space-y-4">
+          <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+            <p className="text-xs text-gray-900">
+              <strong>Connect X:</strong> Authorize with X to post tweets when you publish content from the Content Generator.
+            </p>
+          </div>
+          <div className="flex flex-col items-center justify-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+            <Image src="/x-icon.svg" alt="X" width={64} height={64} className="w-16 h-16 mb-4" />
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">Connect with X</h4>
+            <p className="text-sm text-gray-600 mb-6 text-center max-w-md">
+              Sign in with X to publish your content as tweets. We request permission to post on your behalf.
+            </p>
+            <button
+              onClick={handleConnect}
+              disabled={loading}
+              className="px-8 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-semibold"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-5 h-5 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Image src="/x-icon.svg" alt="X" width={20} height={20} className="w-5 h-5" />
+                  Connect X
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="pt-4">
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-900">
+              <strong>Connected:</strong> @{username || "X account"}
+            </p>
+          </div>
+          <button
+            onClick={handleDisconnect}
+            disabled={loading}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? <><Loader className="w-4 h-4 animate-spin" /> Disconnecting...</> : <><XCircle className="w-4 h-4" /> Disconnect</>}
           </button>
         </div>
       )}
