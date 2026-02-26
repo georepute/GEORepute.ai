@@ -35,6 +35,7 @@ import {
   Server,
   Package,
   Map,
+  Trophy,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -151,6 +152,7 @@ export default function DashboardLayout({
       children: [
         { name: t.dashboard.sidebar.aiSearchPresence, href: "/dashboard/ai-search-presence", icon: Brain, requiredCapability: "canViewReports" },
         { name: t.dashboard.sidebar.aiVsGoogleGap, href: "/dashboard/ai-vs-google-gap", icon: Activity, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.marketShareOfAttention, href: "/dashboard/market-share-of-attention", icon: Trophy, requiredCapability: "canViewReports" },
       ]
     },
     { 

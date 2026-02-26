@@ -259,7 +259,6 @@ function getAvailableEngines(): { key: EngineKey; apiKey: string }[] {
 }
 
 // Get project linked to domain: brand_analysis_projects.domain_id = domains.id (FK)
-// Returns project or null. No fallbacks.
 function getProjectForDomain(
   projectsByDomainId: Map<string, { id: string; brand_name: string; website_url?: string }>,
   domainId: string
@@ -267,7 +266,9 @@ function getProjectForDomain(
   return projectsByDomainId.get(domainId) ?? null;
 }
 
-// Resolve project by domain_id (single query for POST handler)
+// Resolve project for POST handler:
+// Primary: brand_analysis_projects.domain_id = domains.id (FK)
+// Fallback: match website_url against domain name (for projects created before domain_id was added)
 async function resolveProjectByDomainId(
   supabase: any,
   userId: string,
@@ -280,7 +281,33 @@ async function resolveProjectByDomainId(
     .eq("domain_id", domainId)
     .limit(1)
     .maybeSingle();
-  return data;
+  if (data) return data;
+
+  // Fallback: project may not have domain_id set — match by website_url
+  const { data: domainRow } = await supabase
+    .from("domains")
+    .select("domain")
+    .eq("id", domainId)
+    .maybeSingle();
+  if (!domainRow?.domain) return null;
+
+  const targetDomain = domainRow.domain.toLowerCase().replace(/^www\./, "").trim();
+  const { data: allProjects } = await supabase
+    .from("brand_analysis_projects")
+    .select("id, brand_name, website_url")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  for (const p of allProjects || []) {
+    const pDomain = (p.website_url || "")
+      .replace(/https?:\/\//i, "")
+      .replace(/^www\./i, "")
+      .split("/")[0]
+      .trim()
+      .toLowerCase();
+    if (pDomain && pDomain === targetDomain) return p;
+  }
+  return null;
 }
 
 // ── GET: return domains with project link + data status + saved report ────────
@@ -320,20 +347,108 @@ export async function GET(request: NextRequest) {
 
     const domainIds = domains.map((d) => d.id);
 
-    // Fetch projects linked by domain_id (brand_analysis_projects.domain_id = domains.id)
+    // Fetch all user projects (primary match: domain_id = domains.id; fallback: website_url)
     const projectsByDomainId = new Map<string, { id: string; brand_name: string; website_url?: string }>();
+    let projectIds: string[] = [];
     if (domainIds.length > 0) {
-      const { data: projects } = await supabase
+      const { data: allProjects } = await supabase
         .from("brand_analysis_projects")
         .select("id, brand_name, website_url, domain_id")
         .eq("user_id", session.user.id)
-        .in("domain_id", domainIds);
-      for (const p of projects || []) {
-        if (p.domain_id) projectsByDomainId.set(p.domain_id, { id: p.id, brand_name: p.brand_name, website_url: p.website_url });
+        .order("created_at", { ascending: false });
+
+      for (const p of allProjects || []) {
+        if (p.domain_id && domainIds.includes(p.domain_id)) {
+          // Primary: linked via domain_id FK
+          projectsByDomainId.set(p.domain_id, { id: p.id, brand_name: p.brand_name, website_url: p.website_url });
+          projectIds.push(p.id);
+        }
+      }
+      // Fallback: for domains not yet matched, try matching by website_url
+      const unmatchedDomains = domains.filter(d => !projectsByDomainId.has(d.id));
+      if (unmatchedDomains.length > 0) {
+        for (const d of unmatchedDomains) {
+          const targetDomain = d.domain.toLowerCase().replace(/^www\./, "").trim();
+          for (const p of allProjects || []) {
+            if (projectsByDomainId.has(d.id)) break;
+            const pDomain = (p.website_url || "")
+              .replace(/https?:\/\//i, "")
+              .replace(/^www\./i, "")
+              .split("/")[0]
+              .trim()
+              .toLowerCase();
+            if (pDomain && pDomain === targetDomain) {
+              projectsByDomainId.set(d.id, { id: p.id, brand_name: p.brand_name, website_url: p.website_url });
+              projectIds.push(p.id);
+            }
+          }
+        }
+      }
+      projectIds = [...new Set(projectIds)];
+    }
+
+    // Batch fetch: sessions, GSC counts, AI response flags, reports (parallel)
+    const [sessionsRes, gscRes, aiRespRes, reportsRes] = await Promise.all([
+      projectIds.length > 0
+        ? supabase
+            .from("brand_analysis_sessions")
+            .select("id, project_id")
+            .in("project_id", projectIds)
+            .eq("status", "completed")
+            .order("started_at", { ascending: false })
+        : Promise.resolve({ data: [] }),
+      domainIds.length > 0
+        ? supabase
+            .from("gsc_queries")
+            .select("domain_id")
+            .in("domain_id", domainIds)
+            .eq("user_id", session.user.id)
+        : Promise.resolve({ data: [] }),
+      projectIds.length > 0
+        ? supabase
+            .from("ai_platform_responses")
+            .select("project_id, session_id")
+            .in("project_id", projectIds)
+        : Promise.resolve({ data: [] }),
+      projectIds.length > 0
+        ? supabase
+            .from("market_share_reports")
+            .select("*")
+            .eq("user_id", session.user.id)
+            .in("project_id", projectIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    // Latest session per project (sessions already ordered by started_at desc)
+    const latestSessionByProject = new Map<string, string>();
+    for (const s of sessionsRes.data || []) {
+      if (s.project_id && !latestSessionByProject.has(s.project_id)) {
+        latestSessionByProject.set(s.project_id, s.id);
       }
     }
 
-    // Enrich each domain with project, hasAiData, hasGscData, isGscVerified, report
+    // Projects that have AI responses in their latest session
+    const projectSessionPairs = new Set<string>();
+    for (const r of aiRespRes.data || []) {
+      if (r.project_id && r.session_id) {
+        projectSessionPairs.add(`${r.project_id}:${r.session_id}`);
+      }
+    }
+    const hasAiDataByProject = new Map<string, boolean>();
+    for (const [pid, sid] of latestSessionByProject) {
+      hasAiDataByProject.set(pid, projectSessionPairs.has(`${pid}:${sid}`));
+    }
+
+    // Domains that have GSC data
+    const gscDomainIds = new Set((gscRes.data || []).map((r: any) => r.domain_id).filter(Boolean));
+
+    // Reports by project_id (table has unique user_id+project_id)
+    const reportByProject = new Map<string, any>();
+    for (const r of reportsRes.data || []) {
+      if (r.project_id) reportByProject.set(r.project_id, r);
+    }
+
+    // Build enriched list (no per-domain DB calls)
     const enriched: Array<{
       id: string;
       domain: string;
@@ -344,27 +459,11 @@ export async function GET(request: NextRequest) {
       isGscVerified: boolean;
       missingRequirements: string[];
       report: any;
-    }> = [];
-
-    for (const d of domains) {
+    }> = domains.map((d) => {
       const isGscVerified = d.gsc_integration?.verification_status === "verified";
       const project = getProjectForDomain(projectsByDomainId, d.id);
-
-      let hasAiData = false;
-      if (project?.id) {
-        const { count } = await supabase
-          .from("ai_platform_responses")
-          .select("id", { count: "exact", head: true })
-          .eq("project_id", project.id);
-        hasAiData = (count || 0) > 0;
-      }
-
-      let hasGscData = false;
-      const { count: gscCount } = await supabase
-        .from("gsc_queries")
-        .select("id", { count: "exact", head: true })
-        .eq("domain_id", d.id);
-      hasGscData = (gscCount || 0) > 0;
+      const hasAiData = project?.id ? (hasAiDataByProject.get(project.id) ?? false) : false;
+      const hasGscData = gscDomainIds.has(d.id);
 
       const missingRequirements: string[] = [];
       if (!isGscVerified) missingRequirements.push("Domain must be GSC verified. Verify this domain in Google Search Console first.");
@@ -372,20 +471,9 @@ export async function GET(request: NextRequest) {
       else if (!hasAiData) missingRequirements.push("Run AI Visibility analysis first to collect AI engine responses.");
       if (!hasGscData) missingRequirements.push("Connect Google Search Console for this domain and sync data to get organic metrics.");
 
-      let report: any = null;
-      if (project?.id) {
-        const { data: saved } = await supabase
-          .from("market_share_reports")
-          .select("*")
-          .eq("user_id", session.user.id)
-          .eq("project_id", project.id)
-          .order("generated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        report = saved;
-      }
+      const report = project?.id ? (reportByProject.get(project.id) ?? null) : null;
 
-      enriched.push({
+      return {
         id: d.id,
         domain: d.domain,
         projectId: project?.id || null,
@@ -395,28 +483,64 @@ export async function GET(request: NextRequest) {
         isGscVerified,
         missingRequirements,
         report,
-      });
+      };
+    });
+
+    // If domainId provided, return that domain's report; else return first domain's report (avoids extra round-trip on initial load)
+    const found = domainId ? enriched.find(e => e.id === domainId) : enriched[0] ?? null;
+
+    // Fetch gsc_queries for all domains with GSC data (one batch query)
+    const gscQueriesByDomain = new Map<string, { query: string; impressions: number; clicks: number; position: number }[]>();
+    if (gscDomainIds.size > 0) {
+      const { data: gscRows } = await supabase
+        .from("gsc_queries")
+        .select("domain_id, query, impressions, clicks, position")
+        .in("domain_id", domainIds)
+        .eq("user_id", session.user.id)
+        .order("impressions", { ascending: false });
+      const domainQueryMaps = new Map<string, Map<string, { query: string; impressions: number; clicks: number; position: number; count: number }>>();
+      for (const row of gscRows || []) {
+        const did = row.domain_id;
+        if (!did) continue;
+        if (!domainQueryMaps.has(did)) domainQueryMaps.set(did, new Map());
+        const qMap = domainQueryMaps.get(did)!;
+        const key = (row.query || "").toLowerCase().trim();
+        if (!key) continue;
+        if (qMap.has(key)) {
+          const e = qMap.get(key)!;
+          e.impressions += row.impressions || 0;
+          e.clicks += row.clicks || 0;
+          e.count += 1;
+          e.position = (e.position * (e.count - 1) + (row.position || 0)) / e.count;
+        } else {
+          qMap.set(key, { query: row.query || "", impressions: row.impressions || 0, clicks: row.clicks || 0, position: row.position || 0, count: 1 });
+        }
+      }
+      for (const [did, qMap] of domainQueryMaps) {
+        const list = Array.from(qMap.values())
+          .sort((a, b) => b.impressions - a.impressions)
+          .slice(0, 200)
+          .map((q) => ({ query: q.query, impressions: q.impressions, clicks: q.clicks, position: Math.round(q.position * 10) / 10 }));
+        gscQueriesByDomain.set(did, list);
+      }
     }
 
-    // If domainId provided, return single domain's report
-    if (domainId) {
-      const found = enriched.find(e => e.id === domainId);
-      return NextResponse.json({
-        success: true,
-        data: {
-          domains: enriched,
-          report: found?.report || null,
-          selectedDomain: found || null,
-        },
-      });
-    }
+    type EnrichedItem = (typeof enriched)[number];
+    const attachGscQueries = (d: EnrichedItem): EnrichedItem => {
+      if (!d.report) return d;
+      const queries = gscQueriesByDomain.get(d.id) ?? [];
+      return { ...d, report: { ...d.report, gsc_queries: queries } };
+    };
+
+    const enrichedWithQueries = enriched.map(attachGscQueries);
+    const foundWithQueries = found ? (enrichedWithQueries.find((e) => e.id === found.id) ?? null) : null;
 
     return NextResponse.json({
       success: true,
       data: {
-        domains: enriched,
-        report: null,
-        selectedDomain: null,
+        domains: enrichedWithQueries,
+        report: foundWithQueries?.report ?? null,
+        selectedDomain: foundWithQueries,
       },
     });
   } catch (error: any) {
@@ -464,23 +588,42 @@ export async function POST(request: NextRequest) {
     const projectId = project.id;
     const brandName = extractBrandName(domainHost) || project.brand_name;
 
-    // ── Validate: AI data required ───────────────────────────────────────────
-    const { count: aiCount } = await supabase
-      .from("ai_platform_responses")
-      .select("id", { count: "exact", head: true })
-      .eq("project_id", projectId);
+    // ── Validate: AI data from completed session required ─────────────────────
+    // Match AI Visibility: latest completed session by started_at desc
+    const { data: latestSession } = await supabase
+      .from("brand_analysis_sessions")
+      .select("id, results_summary")
+      .eq("project_id", projectId)
+      .eq("status", "completed")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if ((aiCount || 0) === 0) {
+    if (!latestSession) {
       return NextResponse.json({
-        error: "No AI Visibility data found. Run AI Visibility analysis first to collect AI engine responses for this domain.",
+        error: "No completed AI Visibility session found. Run AI Visibility analysis and wait for it to complete for this project.",
       }, { status: 400 });
     }
 
-    // ── Validate: GSC data required ───────────────────────────────────────────
+    const { count: aiCount } = await supabase
+      .from("ai_platform_responses")
+      .select("id", { count: "exact", head: true })
+      .eq("project_id", projectId)
+      .eq("session_id", latestSession.id);
+
+    if ((aiCount || 0) === 0) {
+      return NextResponse.json({
+        error: "No AI Visibility responses found for the latest completed session. Run AI Visibility analysis again.",
+      }, { status: 400 });
+    }
+
+    // ── Validate: GSC data required (gsc_queries.domain_id = domains.id) ───────
+    // Match gsc-analytics queries API: domain_id + user_id (sync stores user_id of syncer)
     const { count: gscCount } = await supabase
       .from("gsc_queries")
       .select("id", { count: "exact", head: true })
-      .eq("domain_id", domainId);
+      .eq("domain_id", domainId)
+      .eq("user_id", session.user.id);
 
     if ((gscCount || 0) === 0) {
       return NextResponse.json({
@@ -488,26 +631,50 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // ── 1. Build query dataset from existing AI visibility data ─────────────
-    const { data: aiResponses } = await supabase
+    // ── 1. Build AI visibility data from latest completed session ─────────────
+    // Match AI Visibility: fetch all responses for session (no limit)
+    let aiResponses: any[] = [];
+    const { data: respData } = await supabase
       .from("ai_platform_responses")
       .select("prompt, platform, response_metadata, response, created_at")
       .eq("project_id", projectId)
-      .order("created_at", { ascending: false })
-      .limit(500);
+      .eq("session_id", latestSession.id)
+      .order("created_at", { ascending: false });
+    aiResponses = respData || [];
 
-    const storedQueries: string[] = Array.from(
-      new Set((aiResponses || []).map((r: any) => r.prompt).filter(Boolean))
-    );
-
-    // ── 2. Fetch GSC organic data ─────────────────────────────────────────────
-    const { data: gscData } = await supabase
+    // ── 2. Fetch GSC organic data (match gsc-analytics queries API exactly) ─────
+    // domain_id + user_id — same filters as /api/integrations/google-search-console/analytics/queries
+    const { data: gscRaw } = await supabase
       .from("gsc_queries")
       .select("query, impressions, clicks, position")
       .eq("domain_id", domainId)
-      .order("impressions", { ascending: false })
-      .limit(200);
-    const gscQueries: any[] = gscData || [];
+      .eq("user_id", session.user.id)
+      .order("impressions", { ascending: false });
+
+    // Aggregate by query (gsc_queries has one row per date per query)
+    const gscQueryMap = new Map<string, { query: string; impressions: number; clicks: number; position: number; count: number }>();
+    for (const row of gscRaw || []) {
+      const key = (row.query || "").toLowerCase().trim();
+      if (!key) continue;
+      if (gscQueryMap.has(key)) {
+        const e = gscQueryMap.get(key)!;
+        e.impressions += row.impressions || 0;
+        e.clicks += row.clicks || 0;
+        e.count += 1;
+        e.position = (e.position * (e.count - 1) + (row.position || 0)) / e.count;
+      } else {
+        gscQueryMap.set(key, {
+          query: row.query || "",
+          impressions: row.impressions || 0,
+          clicks: row.clicks || 0,
+          position: row.position || 0,
+          count: 1,
+        });
+      }
+    }
+    const gscQueries = Array.from(gscQueryMap.values())
+      .sort((a, b) => b.impressions - a.impressions)
+      .slice(0, 200);
 
     // ── 3. Calculate AI Mention Share from stored responses ──────────────────
     const AI_ENGINES: EngineKey[] = ["chatgpt", "claude", "gemini", "perplexity", "grok"];
@@ -517,59 +684,39 @@ export async function POST(request: NextRequest) {
       engineStats[eng] = { totalQueries: 0, mentions: 0, recommendations: 0, weightedScore: 0, isDefault: 0 };
     }
 
-    let hasStoredData = false;
+    // Normalize platform: "groq" (Groq) is often stored; we use "grok" (xAI) as display key
+    function normalizePlatform(p: string): EngineKey | null {
+      const lower = (p || "").toLowerCase();
+      if (["chatgpt", "claude", "gemini", "perplexity", "grok"].includes(lower)) return lower as EngineKey;
+      if (lower === "groq") return "grok";
+      return null;
+    }
+
     if (aiResponses && aiResponses.length > 0) {
-      hasStoredData = true;
       for (const resp of aiResponses) {
-        const eng = (resp.platform || "").toLowerCase() as EngineKey;
-        if (!engineStats[eng]) continue;
+        const eng = normalizePlatform(resp.platform);
+        if (!eng || !engineStats[eng]) continue;
         engineStats[eng].totalQueries++;
         const meta = resp.response_metadata || {};
         if (meta.brand_mentioned) {
           engineStats[eng].mentions++;
-          const pos: number | null = meta.rank_position ?? null;
+          // The brand-analysis edge function stores mention_position (not rank_position)
+          const pos: number | null = meta.mention_position ?? null;
           engineStats[eng].weightedScore += positionPoints(pos);
-          if (meta.is_recommended || meta.recommended) engineStats[eng].recommendations++;
-          if (meta.is_default) engineStats[eng].isDefault++;
-        }
-      }
-    }
-
-    // If not enough stored data, run fresh AI queries on a sample (fallback - should not happen after validation)
-    const availableEngines = getAvailableEngines();
-    const BATCH_SIZE = 8;
-
-    if (!hasStoredData && storedQueries.length === 0 && availableEngines.length > 0) {
-      const genericQueries = [
-        `best ${brandName} alternatives`,
-        `${brandName} review`,
-        `top ${brandName} competitors`,
-        `${brandName} vs competitors`,
-        `what is ${brandName}`,
-        `${brandName} features`,
-        `${brandName} pricing`,
-        `${brandName} use cases`,
-      ];
-
-      for (const eng of availableEngines) {
-        const batch = genericQueries.slice(0, BATCH_SIZE);
-        const results = await ENGINE_CALLERS[eng.key](batch, domainHost, eng.apiKey);
-        if (!results) continue;
-        engineStats[eng.key].totalQueries += batch.length;
-        for (const r of results) {
-          if (r.mentioned) {
-            engineStats[eng.key].mentions++;
-            engineStats[eng.key].weightedScore += positionPoints(r.position);
-            if (r.recommended) engineStats[eng.key].recommendations++;
-            if (r.is_default) engineStats[eng.key].isDefault++;
-          }
+          // Count as "recommended" if mentioned in position 1 or 2 (top result)
+          if (pos !== null && pos <= 2) engineStats[eng].recommendations++;
+          // Count as "default" if first-position mention
+          if (pos === 1) engineStats[eng].isDefault++;
         }
       }
     }
 
     // ── 4. Calculate AI Mention Share % ─────────────────────────────────────
-    const totalAIQueries = Object.values(engineStats).reduce((s, e) => s + e.totalQueries, 0);
-    const totalAIMentions = Object.values(engineStats).reduce((s, e) => s + e.mentions, 0);
+    // Match AI Visibility: totalQueries = results_summary?.total_queries || projectResponses.length
+    // totalMentions = all responses with brand_mentioned (no platform filter)
+    const sessionTotalQueries = latestSession.results_summary?.total_queries;
+    const totalAIQueries = (sessionTotalQueries != null && sessionTotalQueries > 0) ? sessionTotalQueries : aiResponses.length;
+    const totalAIMentions = aiResponses.filter((r) => r.response_metadata?.brand_mentioned === true).length;
     const totalAIWeightedScore = Object.values(engineStats).reduce((s, e) => s + e.weightedScore, 0);
     const totalRecommendations = Object.values(engineStats).reduce((s, e) => s + e.recommendations, 0);
 
@@ -593,24 +740,23 @@ export async function POST(request: NextRequest) {
       recommendations: engineStats[eng].recommendations,
     })).filter(e => e.totalQueries > 0);
 
-    // ── 5. Organic Proxy Share from GSC ─────────────────────────────────────
+    // ── 5. Organic Proxy Share from GSC (top-10 ranking queries) ─────────────
     let organicSharePct = 0;
-    let top3FrequencyPct = 0;
+    let top10FrequencyPct = 0;
     let impressionWeightedSharePct = 0;
     let totalImpressions = 0;
-    let top3Count = 0;
+    let top10Count = 0;
 
     if (gscQueries.length > 0) {
       totalImpressions = gscQueries.reduce((s: number, q: any) => s + (q.impressions || 0), 0);
-      const top3Queries = gscQueries.filter((q: any) => q.position <= 3);
-      top3Count = top3Queries.length;
-      top3FrequencyPct = gscQueries.length > 0 ? (top3Count / gscQueries.length) * 100 : 0;
+      const top10Queries = gscQueries.filter((q: any) => q.position <= 10);
+      top10Count = top10Queries.length;
+      top10FrequencyPct = gscQueries.length > 0 ? (top10Count / gscQueries.length) * 100 : 0;
 
-      const top3Impressions = top3Queries.reduce((s: number, q: any) => s + (q.impressions || 0), 0);
-      impressionWeightedSharePct = totalImpressions > 0 ? (top3Impressions / totalImpressions) * 100 : 0;
+      const top10Impressions = top10Queries.reduce((s: number, q: any) => s + (q.impressions || 0), 0);
+      impressionWeightedSharePct = totalImpressions > 0 ? (top10Impressions / totalImpressions) * 100 : 0;
 
-      // Better method: weight by impressions
-      organicSharePct = impressionWeightedSharePct > 0 ? impressionWeightedSharePct : top3FrequencyPct;
+      organicSharePct = impressionWeightedSharePct > 0 ? impressionWeightedSharePct : top10FrequencyPct;
     }
 
     // ── 6. Combined Market Share of Attention ───────────────────────────────
@@ -667,18 +813,20 @@ export async function POST(request: NextRequest) {
       total_ai_mentions: totalAIMentions,
       total_recommendations: totalRecommendations,
       total_gsc_queries: gscQueries.length,
-      top3_count: top3Count,
+      top10_count: top10Count,
       total_impressions: totalImpressions,
+      gsc_queries: gscQueries.map((q) => ({ query: q.query, impressions: q.impressions, clicks: q.clicks, position: Math.round(q.position * 10) / 10 })),
       engine_breakdown: engineBreakdown,
       intent_breakdown: intentBreakdown,
       generated_at: new Date().toISOString(),
     };
 
-    // Upsert report
+    // Upsert report (gsc_queries not stored in DB; included in response only)
+    const { gsc_queries: _gscQueries, ...payloadForDb } = reportPayload;
     const { data: upserted, error: upsertError } = await supabase
       .from("market_share_reports")
       .upsert(
-        { ...reportPayload },
+        { ...payloadForDb },
         { onConflict: "user_id,project_id" }
       )
       .select()
@@ -690,7 +838,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, data: { report: reportPayload } });
     }
 
-    return NextResponse.json({ success: true, data: { report: upserted || reportPayload } });
+    return NextResponse.json({ success: true, data: { report: { ...(upserted || payloadForDb), gsc_queries: reportPayload.gsc_queries } } });
   } catch (error: any) {
     console.error("market-share-of-attention POST error:", error);
     return NextResponse.json({ error: error?.message || "Failed to generate report" }, { status: 500 });

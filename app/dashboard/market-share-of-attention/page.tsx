@@ -74,6 +74,13 @@ interface IntentBucket {
   mentions: number;
 }
 
+interface GscQuery {
+  query: string;
+  impressions: number;
+  clicks: number;
+  position: number;
+}
+
 interface Report {
   brand_name: string;
   domain: string;
@@ -87,8 +94,10 @@ interface Report {
   total_ai_mentions: number;
   total_recommendations: number;
   total_gsc_queries: number;
-  top3_count: number;
+  top10_count: number;
+  top3_count?: number; // deprecated, use top10_count
   total_impressions: number;
+  gsc_queries?: GscQuery[];
   engine_breakdown: EngineBreakdown[];
   intent_breakdown: { commercial: IntentBucket; comparison: IntentBucket; informational: IntentBucket };
   generated_at: string;
@@ -156,36 +165,23 @@ export default function MarketShareOfAttentionPage() {
 
   const selectedDomain = domains.find(d => d.id === selectedDomainId);
   const canGenerate = selectedDomain?.isGscVerified && selectedDomain?.projectId && selectedDomain?.hasAiData && selectedDomain?.hasGscData;
-  const missingRequirements = selectedDomain?.missingRequirements || [];
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
-  const loadDomains = useCallback(async () => {
+  const loadData = useCallback(async (domainId?: string) => {
     try {
       setLoading(true);
-      const res = await fetch("/api/reports/market-share-of-attention");
+      const url = domainId
+        ? `/api/reports/market-share-of-attention?domainId=${encodeURIComponent(domainId)}`
+        : "/api/reports/market-share-of-attention";
+      const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
         const doms = data.data?.domains || [];
         setDomains(doms);
-        if (doms.length > 0 && !selectedDomainId) setSelectedDomainId(doms[0].id);
-      }
-    } catch {
-      toast.error("Failed to load domains");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const loadReportForDomain = useCallback(async (domainId: string) => {
-    if (!domainId) return;
-    try {
-      setLoading(true);
-      const res = await fetch(`/api/reports/market-share-of-attention?domainId=${encodeURIComponent(domainId)}`);
-      const data = await res.json();
-      if (data.success) {
-        setReport(data.data?.report || null);
-        if (data.data?.domains) setDomains(data.data.domains);
+        const sel = domainId || (doms[0]?.id ?? "");
+        setSelectedDomainId((prev) => (doms.length && !prev ? sel : prev));
+        setReport(data.data?.report ?? doms.find((d: DomainOption) => d.id === sel)?.report ?? null);
       }
     } catch {
       toast.error("Failed to load report");
@@ -193,6 +189,12 @@ export default function MarketShareOfAttentionPage() {
       setLoading(false);
     }
   }, []);
+
+  const handleDomainChange = useCallback((domainId: string) => {
+    setSelectedDomainId(domainId);
+    const d = domains.find((x) => x.id === domainId);
+    setReport(d?.report ?? null);
+  }, [domains]);
 
   const generateReport = async () => {
     if (!selectedDomainId || !canGenerate) return;
@@ -209,7 +211,7 @@ export default function MarketShareOfAttentionPage() {
       if (data.success) {
         setReport(data.data?.report || null);
         toast.success("Market Share of Attention report generated!");
-        loadDomains();
+        loadData(selectedDomainId);
       } else {
         toast.error(data.error || "Failed to generate report");
       }
@@ -221,8 +223,7 @@ export default function MarketShareOfAttentionPage() {
     }
   };
 
-  useEffect(() => { loadDomains(); }, [loadDomains]);
-  useEffect(() => { if (selectedDomainId) loadReportForDomain(selectedDomainId); }, [selectedDomainId, loadReportForDomain]);
+  useEffect(() => { loadData(); }, [loadData]);
 
   // ── Chart data ────────────────────────────────────────────────────────────
 
@@ -281,6 +282,43 @@ export default function MarketShareOfAttentionPage() {
       ]
     : [];
 
+  const overviewMetricsBarData = report
+    ? [
+        { metric: "AI Mention Share", value: report.ai_mention_share_pct, fill: "#0ea5e9" },
+        { metric: "AI Recommendation Share", value: report.ai_recommendation_share_pct, fill: "#8b5cf6" },
+        { metric: "Weighted AI Share", value: report.weighted_ai_share_pct, fill: "#f59e0b" },
+        { metric: "Organic Proxy Share", value: report.organic_share_pct, fill: "#10b981" },
+      ]
+    : [];
+
+  const engineMentionsBarData = report?.engine_breakdown?.map(e => ({
+    engine: e.label,
+    mentions: e.mentions,
+    totalQueries: e.totalQueries,
+    recommendations: e.recommendations,
+    fill: ENGINE_COLORS[e.engine] || "#6b7280",
+  })) || [];
+
+  const topGscQueriesBarData = (report?.gsc_queries || []).slice(0, 10).map(q => ({
+    query: q.query.length > 25 ? q.query.slice(0, 22) + "…" : q.query,
+    impressions: q.impressions,
+    clicks: q.clicks,
+    position: q.position,
+  }));
+
+  const intentPieData = intentBarData.map(d => ({
+    name: d.intent,
+    value: d.queries,
+    fill: d.intent === "Commercial" ? "#10b981" : d.intent === "Comparison" ? "#8b5cf6" : "#0ea5e9",
+  })).filter(d => d.value > 0);
+
+  const aiMentionPieData = report && report.total_ai_queries > 0
+    ? [
+        { name: "Mentioned", value: report.total_ai_mentions, fill: "#10b981" },
+        { name: "Not Mentioned", value: report.total_ai_queries - report.total_ai_mentions, fill: "#e5e7eb" },
+      ].filter(d => d.value > 0)
+    : [];
+
   // ── Empty / loading states ────────────────────────────────────────────────
 
   if (loading && !report) {
@@ -319,7 +357,7 @@ export default function MarketShareOfAttentionPage() {
             <div className="relative">
               <select
                 value={selectedDomainId}
-                onChange={e => setSelectedDomainId(e.target.value)}
+                onChange={e => handleDomainChange(e.target.value)}
                 className="pl-3 pr-8 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500 appearance-none"
               >
                 {domains.map(d => (
@@ -342,27 +380,32 @@ export default function MarketShareOfAttentionPage() {
       </div>
 
       {/* ── Missing requirements banner ── */}
-      {selectedDomainId && missingRequirements.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
-          <div className="flex gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="font-medium text-amber-800 mb-2">Setup required before generating report</p>
-              <p className="text-sm text-amber-700 mb-3">
-                This report needs both AI Visibility data and Google Search Console data. Please complete the following:
-              </p>
-              <ul className="list-disc list-inside space-y-1 text-sm text-amber-700">
-                {missingRequirements.map((msg, i) => (
-                  <li key={i}>{msg}</li>
-                ))}
-              </ul>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <a href="/dashboard/ai-visibility" className="text-sm font-medium text-amber-800 hover:text-amber-900 underline">AI Visibility →</a>
-                <a href="/dashboard/google-search-console" className="text-sm font-medium text-amber-800 hover:text-amber-900 underline">Google Search Console →</a>
-                <a href="/dashboard/domains" className="text-sm font-medium text-amber-800 hover:text-amber-900 underline">Domain Management →</a>
-              </div>
+      {selectedDomainId && selectedDomain && !canGenerate && (
+        <div className="flex flex-wrap gap-3">
+          {(!selectedDomain.isGscVerified || !selectedDomain.hasGscData) && (
+            <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+              <span className="text-sm text-amber-800">No GSC verified</span>
+              <a
+                href="/dashboard/google-search-console"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                Verify
+              </a>
             </div>
-          </div>
+          )}
+          {(!selectedDomain.projectId || !selectedDomain.hasAiData) && (
+            <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+              <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+              <span className="text-sm text-amber-800">No AI visibility analysis</span>
+              <a
+                href="/dashboard/ai-visibility"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                Run Analysis
+              </a>
+            </div>
+          )}
         </div>
       )}
 
@@ -450,7 +493,7 @@ export default function MarketShareOfAttentionPage() {
               iconBg="from-emerald-500 to-teal-600"
               label="Organic Proxy Share"
               value={`${report.organic_share_pct.toFixed(1)}%`}
-              badge={`${report.top3_count} top-3 rankings`}
+              badge={`${(report.top10_count ?? report.top3_count ?? 0)} top-10 rankings`}
               badgeClass="text-xs text-gray-500"
               sub="Impression-weighted GSC share"
             />
@@ -483,27 +526,39 @@ export default function MarketShareOfAttentionPage() {
                   <h3 className="font-semibold text-gray-900">Attention Dominance Split</h3>
                 </div>
                 <p className="text-xs text-gray-500 mb-4">How your brand captures attention across AI + Organic</p>
-                <ResponsiveContainer width="100%" height={260}>
-                  <PieChart>
-                    <Pie
-                      data={dominancePieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={70}
-                      outerRadius={110}
-                      paddingAngle={3}
-                      dataKey="value"
-                      label={({ name, value }) => `${name}: ${value.toFixed(1)}%`}
-                      labelLine={false}
-                    >
-                      {dominancePieData.map((entry, i) => (
-                        <Cell key={i} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
+                <div className="flex items-center gap-6">
+                  <div className="flex-shrink-0" style={{ width: 220, height: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={dominancePieData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={95}
+                          paddingAngle={3}
+                          dataKey="value"
+                        >
+                          {dominancePieData.map((entry, i) => (
+                            <Cell key={i} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex-1 space-y-3">
+                    {dominancePieData.map((entry, i) => (
+                      <div key={i} className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
+                          <span className="text-sm font-medium text-gray-700">{entry.name}</span>
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900 tabular-nums">{entry.value.toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {/* AI vs Organic Bar */}
@@ -528,27 +583,57 @@ export default function MarketShareOfAttentionPage() {
                 </ResponsiveContainer>
               </div>
 
-              {/* Score gauge card */}
-              <div className={`col-span-full border rounded-2xl p-6 ${scoreBg(report.market_share_score)}`}>
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-700 mb-1">Combined Market Share of Attention Formula</p>
-                    <div className="font-mono text-sm bg-white/70 rounded-lg px-3 py-2 inline-block border border-gray-200">
-                      (0.6 × AI Share) + (0.4 × Organic Share) = <strong>{report.market_share_score.toFixed(1)}%</strong>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2">
-                      = (0.6 × {report.ai_mention_share_pct.toFixed(1)}%) + (0.4 × {report.organic_share_pct.toFixed(1)}%)
-                    </p>
+              {/* AI Mention split pie */}
+              {aiMentionPieData.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Brain className="w-4 h-4 text-blue-600" />
+                    <h3 className="font-semibold text-gray-900">AI Queries: Mentioned vs Not Mentioned</h3>
                   </div>
-                  <div className="text-center">
-                    <div className={`text-5xl font-black ${scoreColor(report.market_share_score)}`}>
-                      {report.market_share_score.toFixed(1)}%
-                    </div>
-                    <div className={`text-sm font-semibold mt-1 ${scoreColor(report.market_share_score)}`}>
-                      {scoreLabel(report.market_share_score)}
-                    </div>
-                  </div>
+                  <p className="text-xs text-gray-500 mb-4">Brand mention distribution across all AI queries</p>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie
+                        data={aiMentionPieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={75}
+                        paddingAngle={2}
+                        dataKey="value"
+                        nameKey="name"
+                        label={({ name, value }) => `${name}: ${value}`}
+                      >
+                        {aiMentionPieData.map((entry, i) => (
+                          <Cell key={i} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v: number) => [`${v} queries`, "Count"]} />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
+              )}
+
+              {/* Overview metrics horizontal bar */}
+              <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <BarChart3 className="w-4 h-4 text-primary-600" />
+                  <h3 className="font-semibold text-gray-900">All Share Metrics</h3>
+                </div>
+                <p className="text-xs text-gray-500 mb-4">Comparison of all available share percentages</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={overviewMetricsBarData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+                    <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
+                    <YAxis type="category" dataKey="metric" width={140} tick={{ fontSize: 11 }} />
+                    <Tooltip formatter={(v: number) => [`${v.toFixed(1)}%`, "Value"]} />
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                      {overviewMetricsBarData.map((entry, i) => (
+                        <Cell key={i} fill={entry.fill} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
           )}
@@ -618,6 +703,54 @@ export default function MarketShareOfAttentionPage() {
                 )}
               </div>
 
+              {/* Engine mentions bar chart */}
+              {engineMentionsBarData.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Brain className="w-4 h-4 text-blue-600" />
+                    <h3 className="font-semibold text-gray-900">Mentions by Engine</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">Brand mentions per AI engine</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={engineMentionsBarData} barCategoryGap="20%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="engine" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Bar dataKey="mentions" name="Mentions" radius={[4, 4, 0, 0]}>
+                        {engineMentionsBarData.map((entry, i) => (
+                          <Cell key={i} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Engine recommendations bar chart */}
+              {engineMentionsBarData.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Star className="w-4 h-4 text-amber-600" />
+                    <h3 className="font-semibold text-gray-900">Recommendations by Engine</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">Best / Top / Leading mentions per engine</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={engineMentionsBarData} barCategoryGap="20%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="engine" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Bar dataKey="recommendations" name="Recommendations" radius={[4, 4, 0, 0]}>
+                        {engineMentionsBarData.map((entry, i) => (
+                          <Cell key={i} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
               {/* Engine breakdown cards */}
               {report.engine_breakdown.length > 0 && (
                 <div className="col-span-full grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -652,8 +785,8 @@ export default function MarketShareOfAttentionPage() {
                 </div>
                 <div className="space-y-4">
                   <MetricRow
-                    label="Top-3 Ranking Frequency"
-                    value={`${report.top3_count} queries`}
+                    label="Top-10 Ranking Frequency"
+                    value={`${report.top10_count ?? report.top3_count ?? 0} queries`}
                     sub={`out of ${report.total_gsc_queries} total GSC queries`}
                     color="text-emerald-600"
                   />
@@ -676,6 +809,33 @@ export default function MarketShareOfAttentionPage() {
                     <p className="text-xs text-amber-700">
                       No Google Search Console data found. Connect your domain to GSC in the Assets Hub to unlock organic proxy data.
                     </p>
+                  </div>
+                )}
+                {report.gsc_queries && report.gsc_queries.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">GSC Queries</h4>
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-50 text-left">
+                            <th className="px-3 py-2 font-medium text-gray-600">Query</th>
+                            <th className="px-3 py-2 font-medium text-gray-600 text-right">Impressions</th>
+                            <th className="px-3 py-2 font-medium text-gray-600 text-right">Clicks</th>
+                            <th className="px-3 py-2 font-medium text-gray-600 text-right">Position</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {report.gsc_queries.map((q, i) => (
+                            <tr key={i} className="border-t border-gray-100 hover:bg-gray-50/50">
+                              <td className="px-3 py-2 text-gray-900">{q.query}</td>
+                              <td className="px-3 py-2 text-right text-gray-600">{q.impressions.toLocaleString()}</td>
+                              <td className="px-3 py-2 text-right text-gray-600">{q.clicks.toLocaleString()}</td>
+                              <td className="px-3 py-2 text-right text-gray-600">{q.position.toFixed(1)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -711,6 +871,48 @@ export default function MarketShareOfAttentionPage() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+
+              {/* Top GSC queries by impressions */}
+              {topGscQueriesBarData.length > 0 && (
+                <div className="col-span-full bg-white border border-gray-200 rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Search className="w-4 h-4 text-emerald-600" />
+                    <h3 className="font-semibold text-gray-900">Top Queries by Impressions</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">Top 10 GSC queries with highest impressions</p>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={topGscQueriesBarData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 11 }} />
+                      <YAxis type="category" dataKey="query" width={180} tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Bar dataKey="impressions" name="Impressions" fill="#10b981" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* GSC clicks vs impressions for top queries */}
+              {topGscQueriesBarData.length > 0 && (
+                <div className="col-span-full bg-white border border-gray-200 rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <BarChart3 className="w-4 h-4 text-blue-600" />
+                    <h3 className="font-semibold text-gray-900">Clicks vs Impressions (Top Queries)</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">Compare clicks and impressions for top-performing queries</p>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={topGscQueriesBarData} barCategoryGap="15%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="query" tick={{ fontSize: 9 }} angle={-12} textAnchor="end" height={60} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="impressions" name="Impressions" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="clicks" name="Clicks" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
           )}
 
@@ -767,16 +969,70 @@ export default function MarketShareOfAttentionPage() {
                   <IntentInsight data={intentBarData} />
                 </div>
               </div>
+
+              {/* Query distribution by intent pie */}
+              {intentPieData.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Target className="w-4 h-4 text-primary-600" />
+                    <h3 className="font-semibold text-gray-900">Query Distribution by Intent</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">Share of queries per intent type</p>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <PieChart>
+                      <Pie
+                        data={intentPieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={90}
+                        paddingAngle={2}
+                        dataKey="value"
+                        nameKey="name"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {intentPieData.map((entry, i) => (
+                          <Cell key={i} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v: number, name: string) => {
+                        const total = intentBarData.reduce((s, d) => s + d.queries, 0);
+                        return [`${v} queries${total > 0 ? ` (${((v / total) * 100).toFixed(1)}%)` : ""}`, name];
+                      }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Mentions vs Missed by intent stacked bar */}
+              {intentBarData.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-2xl p-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <BarChart3 className="w-4 h-4 text-purple-600" />
+                    <h3 className="font-semibold text-gray-900">Mentions vs Missed by Intent</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">Brand mentions vs missed opportunities per intent</p>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart
+                      data={intentBarData.map(d => ({
+                        ...d,
+                        missed: d.queries - d.mentions,
+                      }))}
+                      barCategoryGap="25%"
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="intent" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 11 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="mentions" name="Mentioned" stackId="a" fill="#10b981" radius={[4, 0, 0, 4]} />
+                      <Bar dataKey="missed" name="Missed" stackId="a" fill="#e5e7eb" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
             </div>
           )}
-
-          {/* ── Methodology note ── */}
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex gap-3">
-            <Info className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" />
-            <div className="text-xs text-gray-500 leading-relaxed">
-              <strong className="text-gray-700">Methodology:</strong> AI Mention Share is calculated from your AI Visibility data (ChatGPT, Claude, Gemini, Perplexity, Grok). Organic Proxy Share is impression-weighted from Google Search Console top-3 rankings. The final Market Share of Attention score = <code className="bg-gray-200 px-1 rounded">0.6 × AI Mention Share + 0.4 × Organic Proxy Share</code>. Weighted AI Share applies position scoring (1st = 3pts, 2nd = 2pts, 3rd = 1pt). The "Default Leader" badge is awarded when the combined score exceeds 35%.
-            </div>
-          </div>
 
           {report.generated_at && (
             <p className="text-xs text-gray-400 text-center">
