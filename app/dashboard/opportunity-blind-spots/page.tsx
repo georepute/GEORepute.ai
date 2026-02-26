@@ -14,13 +14,10 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { Target, TrendingUp, AlertCircle, DollarSign, BarChart3, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Target, TrendingUp, AlertCircle, DollarSign, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, Brain } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useLanguage } from '@/lib/language-context';
-import { supabase } from '@/lib/supabase/client';
-import { format, startOfDay, subDays } from 'date-fns';
 
-const GOOGLE_NO_RANK = 999;
 type GapType = 'Both' | 'Google only' | 'AI only' | 'Neither';
 
 const GAP_COLORS: Record<GapType, string> = {
@@ -28,14 +25,6 @@ const GAP_COLORS: Record<GapType, string> = {
   'Google only': '#f59e0b',
   'AI only': '#3b82f6',
   Neither: '#ef4444',
-};
-
-const ENGINE_DISPLAY_NAMES: Record<string, string> = {
-  chatgpt: 'ChatGPT',
-  claude: 'Claude',
-  gemini: 'Gemini',
-  perplexity: 'Perplexity',
-  groq: 'Groq',
 };
 
 interface GSCIntegrationData {
@@ -54,6 +43,9 @@ interface Domain {
 interface OpportunityRow {
   query: string;
   demand: number;
+  googleScore?: number | null;
+  aiScore?: number | null;
+  gapScore?: number | null;
   cpc: number | null;
   gap: GapType;
   estimatedValue: number;
@@ -72,14 +64,34 @@ function getOpportunityNote(demand: number, gap: GapType): string {
   return 'Strong: demand, organic, and AI';
 }
 
+/** Map AI vs Google Gap report band to Opportunity gap type */
+function bandToGapType(band: string): GapType {
+  switch (band) {
+    case 'ai_risk':
+    case 'moderate_gap':
+      return 'Google only';
+    case 'balanced':
+      return 'Both';
+    case 'seo_opportunity':
+      return 'AI only';
+    case 'seo_failure':
+      return 'Neither';
+    default:
+      return 'Neither';
+  }
+}
+
 export default function OpportunityBlindSpotsPage() {
   const { t, isRtl } = useLanguage();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState<string>('');
   const [rows, setRows] = useState<OpportunityRow[]>([]);
+  const [usingGapReport, setUsingGapReport] = useState(false);
+  const [hasAiVsGoogleReport, setHasAiVsGoogleReport] = useState<boolean | null>(null);
   const [loadingDomains, setLoadingDomains] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
-  type SortKey = 'query' | 'demand' | 'cpc' | 'gap' | 'estimatedValue' | 'opportunityNote';
+  const [generating, setGenerating] = useState(false);
+  type SortKey = 'query' | 'demand' | 'googleScore' | 'aiScore' | 'gapScore' | 'cpc' | 'gap' | 'estimatedValue' | 'opportunityNote';
   const [sortKey, setSortKey] = useState<SortKey>('estimatedValue');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -105,135 +117,97 @@ export default function OpportunityBlindSpotsPage() {
     loadDomains();
   }, []);
 
+  const checkAiVsGoogleReportExists = useCallback(async (domainId: string) => {
+    try {
+      const res = await fetch(`/api/reports/ai-vs-google-gap?domainId=${domainId}`);
+      const data = await res.json();
+      const exists = data.success && data.data?.queries?.length > 0;
+      setHasAiVsGoogleReport(exists);
+    } catch {
+      setHasAiVsGoogleReport(false);
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!selectedDomain) {
       setRows([]);
+      setUsingGapReport(false);
+      setHasAiVsGoogleReport(null);
       return;
     }
     try {
       setLoadingData(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      setHasAiVsGoogleReport(null);
 
-      const daysAgo = 90;
-      const startDate = startOfDay(subDays(new Date(), daysAgo));
-      const endDate = format(new Date(), 'yyyy-MM-dd');
+      // Check if AI vs Google Gap report exists (required for this report)
+      checkAiVsGoogleReportExists(selectedDomain);
 
-      // Official GSC query data for this domain (from gsc_queries / sync API)
-      const gscRes = await fetch(
-        `/api/integrations/google-search-console/analytics/queries?domainId=${selectedDomain}&startDate=${format(startDate, 'yyyy-MM-dd')}&endDate=${endDate}&sortBy=impressions`
-      );
-      const gscData = await gscRes.json();
-      const gscQueries = gscData.queries || [];
+      // Load stored Opportunity report from Supabase (includes CPC from Google Ads, gap from AI vs Google Gap)
+      const res = await fetch(`/api/reports/opportunity-blind-spots?domainId=${selectedDomain}`);
+      const data = await res.json();
 
-      const impressionsByQuery: Record<string, number> = {};
-      const googleQueryToPosition = new Map<string, number>();
-      gscQueries.forEach((r: any) => {
-        const q = normalizeQ(r.query || '');
-        if (!q) return;
-        const pos = Number(r.position) || 0;
-        const usePos = pos > 0 ? pos : GOOGLE_NO_RANK;
-        const existing = googleQueryToPosition.get(q);
-        if (existing === undefined || usePos < existing) googleQueryToPosition.set(q, usePos);
-        impressionsByQuery[q] = (impressionsByQuery[q] || 0) + Number(r.impressions || 0);
-      });
-
-      // AI platform responses: all user's projects (to compute gap per query)
-      const { data: projects } = await supabase.from('brand_analysis_projects').select('id').eq('user_id', user.id);
-      const projectIds = (projects ?? []).map((p: any) => p.id).filter(Boolean);
-      const { data: aiResponses } = projectIds.length > 0
-        ? await supabase
-            .from('ai_platform_responses')
-            .select('prompt, platform, response_metadata')
-            .in('project_id', projectIds)
-        : { data: [] as any[] };
-
-      const aiQueryToEngines = new Map<string, string[]>();
-      (aiResponses ?? []).forEach((r: any) => {
-        const q = normalizeQ(r.prompt || '');
-        if (!q) return;
-        const platform = (r.platform || '').toLowerCase();
-        const brandMentioned = r.response_metadata?.brand_mentioned === true;
-        if (!aiQueryToEngines.has(q)) aiQueryToEngines.set(q, []);
-        const entry = aiQueryToEngines.get(q)!;
-        const name = ENGINE_DISPLAY_NAMES[platform];
-        if (brandMentioned && name && !entry.includes(name)) entry.push(name);
-      });
-
-      // CPC map from keyword forecast plans (same source as Keyword Forecast / Keyword Analytics page)
-      const cpcByKeyword = new Map<string, number>();
-      try {
-        const plansRes = await fetch('/api/keyword-forecast/get-plans');
-        const plansData = await plansRes.json();
-        const plans = plansData.plans || [];
-        for (const plan of plans) {
-          let forecasts: Array<{ keyword: string; avgCpc?: number }> = [];
-          if (plan.forecast && Array.isArray(plan.forecast) && plan.forecast.length > 0) {
-            forecasts = plan.forecast;
-          } else {
-            const fRes = await fetch(`/api/keyword-forecast/get-forecast?planId=${plan.id}`);
-            const fData = await fRes.json();
-            if (fData.forecasts) forecasts = fData.forecasts;
-          }
-          forecasts.forEach((f: any) => {
-            const k = normalizeQ(f.keyword || '');
-            if (k && f.avgCpc != null && !cpcByKeyword.has(k)) {
-              cpcByKeyword.set(k, Number(f.avgCpc));
-            }
-          });
-        }
-      } catch (_) {
-        // CPC optional
+      if (data.success && data.data?.queries?.length) {
+        const tableRows: OpportunityRow[] = data.data.queries.map((r: any) => ({
+          query: (r.query || '').length > 120 ? (r.query || '').slice(0, 120) + '…' : (r.query || ''),
+          demand: Number(r.demand || 0),
+          googleScore: r.googleScore != null ? Number(r.googleScore) : null,
+          aiScore: r.aiScore != null ? Number(r.aiScore) : null,
+          gapScore: r.gapScore != null ? Number(r.gapScore) : null,
+          cpc: r.cpc != null ? Number(r.cpc) : null,
+          gap: r.gap || 'Neither',
+          estimatedValue: Number(r.estimatedValue || 0),
+          opportunityNote: r.opportunityNote || getOpportunityNote(Number(r.demand || 0), r.gap || 'Neither'),
+        }));
+        setRows(tableRows);
+        setUsingGapReport(true);
+      } else {
+        setRows([]);
+        setUsingGapReport(false);
       }
-
-      // Resolve CPC for a query: exact match first, then longest keyword that appears in the query
-      const getCpcForQuery = (query: string): number | null => {
-        const exact = cpcByKeyword.get(query);
-        if (exact != null) return exact;
-        let best: { cpc: number; len: number } | null = null;
-        for (const [keyword, cpc] of cpcByKeyword.entries()) {
-          if (keyword.length < 2) continue;
-          if (query.includes(keyword) || keyword.includes(query)) {
-            if (!best || keyword.length > best.len) best = { cpc, len: keyword.length };
-          }
-        }
-        return best ? best.cpc : null;
-      };
-
-      // Build unique queries and gap + demand + cpc
-      const allQueries = new Set<string>([...googleQueryToPosition.keys(), ...aiQueryToEngines.keys()]);
-      const tableRows: OpportunityRow[] = Array.from(allQueries).map((query) => {
-        const rawPosition = googleQueryToPosition.get(query);
-        const googlePosition = rawPosition != null && rawPosition < GOOGLE_NO_RANK ? rawPosition : null;
-        const googlePresent = googlePosition != null && googlePosition >= 1 && googlePosition <= 100;
-        const aiEngines = aiQueryToEngines.get(query) ?? [];
-        const aiMentioned = aiEngines.length > 0;
-        const gap: GapType =
-          googlePresent && aiMentioned ? 'Both' : googlePresent ? 'Google only' : aiMentioned ? 'AI only' : 'Neither';
-        const demand = impressionsByQuery[query] ?? 0;
-        const cpc = getCpcForQuery(query);
-        const estimatedValue = cpc != null && demand > 0 ? demand * cpc : 0;
-        return {
-          query: query.length > 120 ? query.slice(0, 120) + '…' : query,
-          demand,
-          cpc,
-          gap,
-          estimatedValue,
-          opportunityNote: getOpportunityNote(demand, gap),
-        };
-      });
-
-      // Sort by estimated value desc, then demand desc
-      tableRows.sort((a, b) => {
-        if (b.estimatedValue !== a.estimatedValue) return b.estimatedValue - a.estimatedValue;
-        return b.demand - a.demand;
-      });
-      setRows(tableRows);
     } catch (e) {
       toast.error('Failed to load report data');
       setRows([]);
     } finally {
       setLoadingData(false);
+    }
+  }, [selectedDomain, checkAiVsGoogleReportExists]);
+
+  const generateReport = useCallback(async () => {
+    if (!selectedDomain) {
+      toast.error('Please select a domain');
+      return;
+    }
+    try {
+      setGenerating(true);
+      toast.loading('Generating report (fetching CPC from Google Ads, this may take a minute)...', { id: 'gen-opp' });
+      const res = await fetch('/api/reports/opportunity-blind-spots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domainId: selectedDomain }),
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        const tableRows: OpportunityRow[] = data.data.queries.map((r: any) => ({
+          query: (r.query || '').length > 120 ? (r.query || '').slice(0, 120) + '…' : (r.query || ''),
+          demand: Number(r.demand || 0),
+          googleScore: r.googleScore != null ? Number(r.googleScore) : null,
+          aiScore: r.aiScore != null ? Number(r.aiScore) : null,
+          gapScore: r.gapScore != null ? Number(r.gapScore) : null,
+          cpc: r.cpc != null ? Number(r.cpc) : null,
+          gap: r.gap || 'Neither',
+          estimatedValue: Number(r.estimatedValue || 0),
+          opportunityNote: r.opportunityNote || getOpportunityNote(Number(r.demand || 0), r.gap || 'Neither'),
+        }));
+        setRows(tableRows);
+        setUsingGapReport(true);
+        toast.success('Report generated and saved.', { id: 'gen-opp' });
+      } else {
+        toast.error(data.error || 'Failed to generate report', { id: 'gen-opp' });
+      }
+    } catch (e) {
+      toast.error('Failed to generate report', { id: 'gen-opp' });
+    } finally {
+      setGenerating(false);
     }
   }, [selectedDomain]);
 
@@ -262,11 +236,19 @@ export default function OpportunityBlindSpotsPage() {
       value: Math.round(r.estimatedValue * 100) / 100,
     }));
 
-  const demandByGapData = (Object.keys(gapCounts) as GapType[]).map((gap) => ({
+  // Revenue at risk (est. value) by gap type (excludes 'Both' - no risk)
+  const revenueByGapData = (['Neither', 'Google only', 'AI only'] as GapType[]).map((gap) => ({
     name: gap,
-    demand: rows.filter((r) => r.gap === gap).reduce((s, r) => s + r.demand, 0),
+    value: rows.filter((r) => r.gap === gap && r.estimatedValue > 0).reduce((s, r) => s + r.estimatedValue, 0),
     fill: GAP_COLORS[gap],
-  }));
+  })).filter((d) => d.value > 0);
+
+  // Avg CPC by gap type (when CPC data available)
+  const avgCpcByGapData = (Object.keys(gapCounts) as GapType[]).map((gap) => {
+    const withCpc = rows.filter((r) => r.gap === gap && r.cpc != null);
+    const avg = withCpc.length > 0 ? withCpc.reduce((s, r) => s + (r.cpc ?? 0), 0) / withCpc.length : 0;
+    return { name: gap, value: avg, fill: GAP_COLORS[gap], count: withCpc.length };
+  }).filter((d) => d.count > 0);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -279,6 +261,9 @@ export default function OpportunityBlindSpotsPage() {
     let cmp = 0;
     if (sortKey === 'query') cmp = a.query.localeCompare(b.query);
     else if (sortKey === 'demand') cmp = a.demand - b.demand;
+    else if (sortKey === 'googleScore') cmp = (a.googleScore ?? 0) - (b.googleScore ?? 0);
+    else if (sortKey === 'aiScore') cmp = (a.aiScore ?? 0) - (b.aiScore ?? 0);
+    else if (sortKey === 'gapScore') cmp = (a.gapScore ?? 0) - (b.gapScore ?? 0);
     else if (sortKey === 'cpc') cmp = (a.cpc ?? 0) - (b.cpc ?? 0);
     else if (sortKey === 'gap') cmp = a.gap.localeCompare(b.gap);
     else if (sortKey === 'estimatedValue') cmp = a.estimatedValue - b.estimatedValue;
@@ -288,14 +273,23 @@ export default function OpportunityBlindSpotsPage() {
 
   const reportTitle = t.dashboard?.reports?.opportunityBlindSpots ?? 'Opportunity & Blind Spots';
   const reportSubtitle = t.dashboard?.reports?.opportunitySubtitle ?? 'Demand (GSC) + CPC vs gap — prioritize queries with high demand and visibility gaps.';
+  const businessMeaning = t.dashboard?.reports?.opportunityBusinessMeaning ?? 'Revenue opportunities leaking';
+  const dataSourcesLabel = t.dashboard?.reports?.dataSources ?? 'Data Sources';
+  const dataSourcesValue = t.dashboard?.reports?.opportunityDataSources ?? 'GSC, AI, CPC';
+  const crossAnalysisLabel = t.dashboard?.reports?.crossAnalysis ?? 'Cross-Analysis';
+  const crossAnalysisValue = t.dashboard?.reports?.opportunityCrossAnalysis ?? 'Demand + CPC vs Gap';
   const showFor = t.dashboard?.reports?.showOpportunityFor ?? 'Domain (GSC data):';
-  const tableNote = t.dashboard?.reports?.opportunityTableNote ?? 'Queries sorted by estimated value (demand × CPC). CPC from Keyword Forecast when available.';
+  const tableNote = t.dashboard?.reports?.opportunityTableNote ?? 'Queries sorted by estimated value (demand × CPC). CPC from Keyword Forecast (Google Ads API) when connected. Demand from GSC impressions; gap from AI Visibility.';
   const queryCol = t.dashboard?.reports?.queryColumn ?? 'Query';
   const demandCol = t.dashboard?.reports?.demandImpressions ?? 'Demand (impressions)';
   const cpcCol = t.dashboard?.reports?.cpc ?? 'CPC';
   const gapCol = t.dashboard?.reports?.gap ?? 'Gap';
+  const gapTypeCol = t.dashboard?.reports?.gapType ?? 'Type';
+  const gscScoreCol = t.dashboard?.reports?.gscScore ?? 'GSC Score';
+  const aiScoreCol = t.dashboard?.reports?.aiScore ?? 'AI Score';
+  const gapScoreCol = t.dashboard?.reports?.gapScore ?? 'Gap';
   const opportunityCol = t.dashboard?.reports?.opportunity ?? 'Opportunity';
-  const noData = t.dashboard?.reports?.noOpportunityData ?? 'No opportunity data yet. Sync GSC query data for this domain and run AI Visibility for gap analysis.';
+  const noData = t.dashboard?.reports?.noOpportunityData ?? 'Generate the AI vs Google Gap report for this domain first.';
   const chooseProject = t.dashboard?.reports?.chooseProject ?? 'Choose project';
   const opportunityTableTitle = t.dashboard?.reports?.opportunityTableTitle ?? 'Opportunity Table';
   const opportunityTableSubtitle = t.dashboard?.reports?.opportunityTableSubtitle ?? 'Where ROI is hidden — demand, CPC, and visibility gaps';
@@ -305,7 +299,6 @@ export default function OpportunityBlindSpotsPage() {
   const revenueAtRiskLabel = t.dashboard?.reports?.revenueAtRisk ?? 'Revenue at Risk';
   const gapDistributionLabel = t.dashboard?.reports?.gapDistribution ?? 'Gap distribution';
   const topRevenueLabel = t.dashboard?.reports?.topRevenueOpportunities ?? 'Top revenue opportunities';
-  const demandByGapLabel = t.dashboard?.reports?.demandByGapType ?? 'Demand by gap type';
   const loadingProjectsLabel = t.dashboard?.reports?.loadingProjects ?? 'Loading projects...';
   const noBrandProjectsLabel = t.dashboard?.reports?.noBrandAnalysisProjects ?? 'No Brand Analysis Projects';
   const createProjectLabel = t.dashboard?.reports?.createProjectInAIVisibility ?? 'Create a project in AI Visibility to use this report.';
@@ -313,14 +306,17 @@ export default function OpportunityBlindSpotsPage() {
   const goToGSCSetupLabel = t.dashboard?.reports?.goToGSCSetup ?? 'Go to GSC setup';
   const noRevenueDataLabel = t.dashboard?.reports?.noRevenueData ?? 'No revenue data (connect Keyword Forecast for CPC)';
   const noDataLabel = t.dashboard?.reports?.noData ?? 'No data';
-  const noDemandDataLabel = t.dashboard?.reports?.noDemandData ?? 'No demand data';
   const estValueLabel = t.dashboard?.reports?.estValue ?? 'Est. Value';
+  const revenueByGapLabel = t.dashboard?.reports?.revenueByGapType ?? 'Revenue at risk by gap type';
+  const avgCpcByGapLabel = t.dashboard?.reports?.avgCpcByGapType ?? 'Avg CPC by gap type';
+  const noCpcDataLabel = t.dashboard?.reports?.noCpcData ?? 'No CPC data (connect Keyword Forecast for CPC)';
+  const gapFromReportLabel = t.dashboard?.reports?.gapFromAiVsGoogleReport ?? 'Gap from AI vs Google Gap report';
 
   if (loadingDomains) {
     return (
       <div className="min-h-screen bg-gray-50 p-6" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="max-w-7xl mx-auto flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto" />
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto" />
           <p className="text-gray-600 mt-4">{loadingProjectsLabel}</p>
         </div>
       </div>
@@ -331,16 +327,16 @@ export default function OpportunityBlindSpotsPage() {
     return (
       <div className="min-h-screen bg-gray-50 p-6" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="max-w-7xl mx-auto">
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
             <Target className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-900 mb-2">No GSC Domains</h2>
             <p className="text-gray-600 mb-4">Connect and verify a domain in Google Search Console to use this report.</p>
             <div className="flex flex-wrap gap-3 justify-center">
-              <a href="/dashboard/google-search-console" className="text-emerald-600 font-medium hover:underline">
+              <a href="/dashboard/google-search-console" className="text-primary-600 font-medium hover:underline">
                 {goToGSCSetupLabel}
               </a>
               <span className="text-gray-400">|</span>
-              <a href="/dashboard/settings?tab=integrations" className="text-emerald-600 font-medium hover:underline">
+              <a href="/dashboard/settings?tab=integrations" className="text-primary-600 font-medium hover:underline">
                 Settings → Integrations
               </a>
             </div>
@@ -353,127 +349,138 @@ export default function OpportunityBlindSpotsPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-6" dir={isRtl ? 'rtl' : 'ltr'}>
       <div className="max-w-7xl mx-auto">
+        {/* Header */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">{reportTitle}</h1>
-          <p className="text-gray-600 mt-1">{reportSubtitle}</p>
-          <div className="mt-4 flex items-center gap-3">
-            <label className="text-sm font-medium text-gray-700">{showFor}</label>
-            <select
-              value={selectedDomain}
-              onChange={(e) => setSelectedDomain(e.target.value)}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm min-w-[200px]"
-            >
-              {domains.map((d) => (
-                <option key={d.id} value={d.id}>{(d.gsc_integration as GSCIntegrationData)?.domain_url || d.domain}</option>
-              ))}
-            </select>
+          <div className="flex items-center gap-3 mb-2">
+            <Target className="w-8 h-8 text-primary-600" />
+            <h1 className="text-3xl font-bold text-gray-900">{reportTitle}</h1>
           </div>
+          <p className="text-gray-600">{reportSubtitle}</p>
+        </div>
+
+        {/* Controls */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+              <label className="font-medium text-gray-700 text-sm">{showFor}</label>
+              <select
+                value={selectedDomain}
+                onChange={(e) => setSelectedDomain(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              >
+                {domains.map((d) => (
+                  <option key={d.id} value={d.id}>{(d.gsc_integration as GSCIntegrationData)?.domain_url || d.domain}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={loadData}
+              disabled={!selectedDomain || loadingData}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm font-medium"
+            >
+              <RefreshCw className={`w-4 h-4 ${loadingData ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={generateReport}
+              disabled={!selectedDomain || generating || hasAiVsGoogleReport !== true}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 text-sm font-medium"
+            >
+              <Brain className={`w-4 h-4 ${generating ? 'animate-pulse' : ''}`} />
+              {rows.length > 0 ? 'Regenerate' : 'Generate'} Report
+            </button>
+          </div>
+          {hasAiVsGoogleReport === false && selectedDomain && (
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+              <strong>Generate AI vs Google Gap first.</strong> This report requires the AI vs Google Gap report for the selected domain.{' '}
+              <a href="/dashboard/ai-vs-google-gap" className="font-medium text-primary-600 hover:underline">
+                Go to AI vs Google Gap →
+              </a>
+            </div>
+          )}
         </div>
 
         {loadingData ? (
           <div className="flex justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600" />
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
           </div>
         ) : rows.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-600">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center text-gray-600">
             <Target className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-            <p>{noData}</p>
-            <div className="flex flex-wrap gap-3 justify-center mt-4">
-              <a href="/dashboard/ai-visibility" className="text-emerald-600 font-medium hover:underline">
-                {goToAIVisibilityLabel}
-              </a>
-              <span className="text-gray-400">|</span>
-              <a href="/dashboard/settings?tab=integrations" className="text-emerald-600 font-medium hover:underline">
-                {goToGSCSetupLabel}
-              </a>
-            </div>
+            {hasAiVsGoogleReport === false ? (
+              <>
+                <p className="font-medium text-amber-800">Generate AI vs Google Gap report first</p>
+                <p className="text-sm text-gray-500 mt-2">This report requires the AI vs Google Gap report for the selected domain. Create that report, then return here to generate this one.</p>
+                <a
+                  href="/dashboard/ai-vs-google-gap"
+                  className="inline-flex items-center gap-2 mt-4 px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 font-medium"
+                >
+                  Go to AI vs Google Gap →
+                </a>
+              </>
+            ) : (
+              <>
+                <p>{noData}</p>
+                <p className="text-sm text-gray-500 mt-2">Generate AI vs Google Gap first, then generate this report to fetch CPC from Google Ads.</p>
+                <div className="flex flex-wrap gap-3 justify-center mt-4">
+                  <a href="/dashboard/ai-vs-google-gap" className="text-primary-600 font-medium hover:underline">
+                    {t.dashboard?.reports?.aiVsGoogleGap ?? 'AI vs Google Gap'}
+                  </a>
+                  <span className="text-gray-400">|</span>
+                  <button
+                    type="button"
+                    onClick={generateReport}
+                    disabled={generating || hasAiVsGoogleReport !== true}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 text-sm font-medium"
+                  >
+                    <Brain className={`w-4 h-4 ${generating ? 'animate-pulse' : ''}`} />
+                    Generate Report
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white rounded-lg border border-gray-200 p-4">
-                <div className="text-gray-500 text-sm mb-1">{totalQueriesLabel}</div>
-                <p className="text-2xl font-bold text-gray-900">{totalQueries}</p>
-              </div>
-              <div className="bg-white rounded-lg border border-amber-200 p-4">
-                <div className="flex items-center gap-2 text-amber-700 text-sm mb-1"><AlertCircle className="w-4 h-4" /> {priorityGapsLabel}</div>
-                <p className="text-2xl font-bold text-amber-900">{priorityGaps}</p>
-              </div>
-              <div className="bg-white rounded-lg border border-blue-200 p-4">
-                <div className="flex items-center gap-2 text-blue-700 text-sm mb-1"><DollarSign className="w-4 h-4" /> {avgCpcLabel}</div>
-                <p className="text-2xl font-bold text-blue-900">{avgCpc > 0 ? `$${avgCpc.toFixed(2)}` : '—'}</p>
-              </div>
-              <div className="bg-white rounded-lg border border-green-200 p-4">
-                <div className="flex items-center gap-2 text-green-700 text-sm mb-1"><TrendingUp className="w-4 h-4" /> {revenueAtRiskLabel}</div>
-                <p className="text-2xl font-bold text-green-900">{revenueAtRisk > 0 ? `$${revenueAtRisk.toFixed(0)}` : '—'}</p>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
-              <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-4 text-white">
-                <h2 className="text-lg font-bold">{opportunityTableTitle}</h2>
-                <p className="text-white/90 text-sm mt-0.5">{opportunityTableSubtitle}</p>
-              </div>
-              <div className="p-4">
-                <p className="text-sm text-gray-600 mb-3">{tableNote}</p>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-semibold text-gray-900">
-                          <button type="button" onClick={() => toggleSort('query')} className="flex items-center gap-1 hover:text-emerald-600">
-                            {queryCol} {sortKey === 'query' ? (sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />) : <ArrowUpDown className="w-3.5 h-3.5 opacity-50" />}
-                          </button>
-                        </th>
-                        <th className="px-4 py-3 text-right font-semibold text-gray-900">
-                          <button type="button" onClick={() => toggleSort('demand')} className="inline-flex items-center gap-1 ml-auto hover:text-emerald-600">
-                            {demandCol} {sortKey === 'demand' ? (sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />) : <ArrowUpDown className="w-3.5 h-3.5 opacity-50" />}
-                          </button>
-                        </th>
-                        <th className="px-4 py-3 text-right font-semibold text-gray-900">
-                          <button type="button" onClick={() => toggleSort('cpc')} className="inline-flex items-center gap-1 ml-auto hover:text-emerald-600">
-                            {cpcCol} {sortKey === 'cpc' ? (sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />) : <ArrowUpDown className="w-3.5 h-3.5 opacity-50" />}
-                          </button>
-                        </th>
-                        <th className="px-4 py-3 text-left font-semibold text-gray-900">
-                          <button type="button" onClick={() => toggleSort('gap')} className="flex items-center gap-1 hover:text-emerald-600">
-                            {gapCol} {sortKey === 'gap' ? (sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />) : <ArrowUpDown className="w-3.5 h-3.5 opacity-50" />}
-                          </button>
-                        </th>
-                        <th className="px-4 py-3 text-right font-semibold text-gray-900">
-                          <button type="button" onClick={() => toggleSort('estimatedValue')} className="inline-flex items-center gap-1 ml-auto hover:text-emerald-600">
-                            {estValueLabel} {sortKey === 'estimatedValue' ? (sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />) : <ArrowUpDown className="w-3.5 h-3.5 opacity-50" />}
-                          </button>
-                        </th>
-                        <th className="px-4 py-3 text-left font-semibold text-gray-900">
-                          <button type="button" onClick={() => toggleSort('opportunityNote')} className="flex items-center gap-1 hover:text-emerald-600">
-                            {opportunityCol} {sortKey === 'opportunityNote' ? (sortDir === 'asc' ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />) : <ArrowUpDown className="w-3.5 h-3.5 opacity-50" />}
-                          </button>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {sortedRows.slice(0, 100).map((row, i) => (
-                        <tr key={i} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium text-gray-900 max-w-[280px]" title={row.query}>{row.query.length > 60 ? row.query.slice(0, 58) + '…' : row.query}</td>
-                          <td className="px-4 py-3 text-right text-gray-700">{row.demand.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-right text-gray-700">{row.cpc != null ? `$${row.cpc.toFixed(2)}` : '—'}</td>
-                          <td className="px-4 py-3">
-                            <span className="px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: `${GAP_COLORS[row.gap]}20`, color: GAP_COLORS[row.gap] }}>{row.gap}</span>
-                          </td>
-                          <td className="px-4 py-3 text-right text-gray-700">{row.estimatedValue > 0 ? `$${row.estimatedValue.toFixed(0)}` : '—'}</td>
-                          <td className="px-4 py-3 text-gray-600 max-w-[240px]" title={row.opportunityNote}>{row.opportunityNote.length > 40 ? row.opportunityNote.slice(0, 38) + '…' : row.opportunityNote}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            {/* Summary cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+              <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700">{totalQueriesLabel}</span>
+                  <BarChart3 className="w-5 h-5 text-gray-600" />
                 </div>
+                <div className="text-3xl font-bold text-gray-900">{totalQueries}</div>
+              </div>
+              <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg shadow-sm border border-amber-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-amber-700">{priorityGapsLabel}</span>
+                  <AlertCircle className="w-5 h-5 text-amber-600" />
+                </div>
+                <div className="text-3xl font-bold text-amber-900">{priorityGaps}</div>
+                <p className="text-xs text-amber-600 mt-1">No organic, no AI</p>
+              </div>
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg shadow-sm border border-blue-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-blue-700">{avgCpcLabel}</span>
+                  <DollarSign className="w-5 h-5 text-blue-600" />
+                </div>
+                <div className="text-3xl font-bold text-blue-900">{avgCpc > 0 ? `$${avgCpc.toFixed(2)}` : '—'}</div>
+              </div>
+              <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-lg shadow-sm border border-emerald-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-emerald-700">{revenueAtRiskLabel}</span>
+                  <TrendingUp className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div className="text-3xl font-bold text-emerald-900">{revenueAtRisk > 0 ? `$${revenueAtRisk.toFixed(0)}` : '—'}</div>
               </div>
             </div>
 
+            {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">{gapDistributionLabel}</h3>
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">{gapDistributionLabel}</h3>
                 {gapPieData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={240}>
                     <PieChart>
@@ -487,8 +494,8 @@ export default function OpportunityBlindSpotsPage() {
                   <p className="text-gray-500 text-sm">{noDataLabel}</p>
                 )}
               </div>
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">{topRevenueLabel}</h3>
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">{topRevenueLabel}</h3>
                 {topRevenueData.length > 0 ? (
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
@@ -507,24 +514,128 @@ export default function OpportunityBlindSpotsPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-emerald-600" /> {demandByGapLabel}</h3>
-              {demandByGapData.some((d) => d.demand > 0) ? (
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={demandByGapData} margin={{ top: 16, right: 24, left: 24, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip formatter={(v: number) => [v.toLocaleString(), 'Demand']} />
-                      <Bar dataKey="demand" name="Demand">
-                        {demandByGapData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <p className="text-gray-500 text-sm">{noDemandDataLabel}</p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">{revenueByGapLabel}</h3>
+                {revenueByGapData.length > 0 ? (
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={revenueByGapData} margin={{ top: 16, right: 24, left: 24, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v >= 1000 ? (v / 1000) + 'k' : v}`} />
+                        <Tooltip formatter={(v: number) => [`$${v.toFixed(0)}`, 'Revenue at risk']} />
+                        <Bar dataKey="value" name="Revenue at risk">
+                          {revenueByGapData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-sm">{noRevenueDataLabel}</p>
+                )}
+              </div>
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">{avgCpcByGapLabel}</h3>
+                {avgCpcByGapData.length > 0 ? (
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={avgCpcByGapData} margin={{ top: 16, right: 24, left: 24, bottom: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v.toFixed(2)}`} />
+                        <Tooltip formatter={(v: number) => [`$${v.toFixed(2)}`, 'Avg CPC']} />
+                        <Bar dataKey="value" name="Avg CPC">
+                          {avgCpcByGapData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-sm">{noCpcDataLabel}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Opportunity table */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">{opportunityTableTitle}</h3>
+              <p className="text-sm text-gray-500 mb-4">{opportunityTableSubtitle}</p>
+              <p className="text-xs text-gray-500 mb-4">{tableNote}</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="text-left py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('query')} className="inline-flex items-center gap-1 hover:text-gray-900">
+                          {queryCol} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                      <th className="text-right py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('demand')} className="inline-flex items-center gap-1 hover:text-gray-900 ml-auto">
+                          {demandCol} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                      <th className="text-right py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('googleScore')} className="inline-flex items-center gap-1 hover:text-gray-900 ml-auto">
+                          {gscScoreCol} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                      <th className="text-right py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('aiScore')} className="inline-flex items-center gap-1 hover:text-gray-900 ml-auto">
+                          {aiScoreCol} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                      <th className="text-right py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('gapScore')} className="inline-flex items-center gap-1 hover:text-gray-900 ml-auto">
+                          {gapScoreCol} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                      <th className="text-right py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('cpc')} className="inline-flex items-center gap-1 hover:text-gray-900 ml-auto">
+                          {cpcCol} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                      <th className="text-left py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('gap')} className="inline-flex items-center gap-1 hover:text-gray-900">
+                          {gapTypeCol} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                      <th className="text-right py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('estimatedValue')} className="inline-flex items-center gap-1 hover:text-gray-900 ml-auto">
+                          {estValueLabel} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                      <th className="text-left py-3 px-2 font-semibold text-gray-700">
+                        <button type="button" onClick={() => toggleSort('opportunityNote')} className="inline-flex items-center gap-1 hover:text-gray-900">
+                          {opportunityCol} <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedRows.map((row, i) => (
+                      <tr key={i} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-2 px-2 text-gray-900 max-w-[200px] truncate" title={row.query}>{row.query}</td>
+                        <td className="py-2 px-2 text-right text-gray-700">{row.demand.toLocaleString()}</td>
+                        <td className="py-2 px-2 text-right text-gray-700">{row.googleScore != null ? row.googleScore.toFixed(1) : '—'}</td>
+                        <td className="py-2 px-2 text-right text-gray-700">{row.aiScore != null ? row.aiScore.toFixed(1) : '—'}</td>
+                        <td className="py-2 px-2 text-right font-medium text-gray-700">{row.gapScore != null ? row.gapScore.toFixed(1) : '—'}</td>
+                        <td className="py-2 px-2 text-right text-gray-700">{row.cpc != null ? `$${row.cpc.toFixed(2)}` : '—'}</td>
+                        <td className="py-2 px-2">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: `${GAP_COLORS[row.gap]}20`, color: GAP_COLORS[row.gap] }}>
+                            {row.gap}
+                          </span>
+                        </td>
+                        <td className="py-2 px-2 text-right font-medium text-gray-900">{row.estimatedValue > 0 ? `$${row.estimatedValue.toFixed(2)}` : '—'}</td>
+                        <td className="py-2 px-2 text-gray-600 max-w-[220px] text-xs">{row.opportunityNote}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {usingGapReport && (
+                <p className="text-xs text-gray-500 mt-3">{gapFromReportLabel}</p>
               )}
             </div>
           </>

@@ -60,9 +60,9 @@ export async function POST(request: NextRequest) {
       console.log(`Using ${isTestAccount ? 'TEST' : 'PRODUCTION'} account: ${customerId}`);
 
       // Call Google Ads API REST endpoint for generating keyword ideas
-      // Using the official endpoint from https://developers.google.com/google-ads/api/rest/reference/rest/v19/customers/generateKeywordIdeas
+      // Using the official endpoint from https://developers.google.com/google-ads/api/rest/reference/rest/v23/customers/generateKeywordIdeas
       const response = await fetch(
-        `https://googleads.googleapis.com/v19/customers/${customerId}:generateKeywordIdeas`,
+        `https://googleads.googleapis.com/v23/customers/${customerId}:generateKeywordIdeas`,
         {
           method: 'POST',
           headers: {
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Google Ads API Error Response:', errorText);
-        console.error('Request URL:', `https://googleads.googleapis.com/v19/customers/${customerId}:generateKeywordIdeas`);
+        console.error('Request URL:', `https://googleads.googleapis.com/v23/customers/${customerId}:generateKeywordIdeas`);
         console.error('Customer ID:', customerId);
         console.error('Status:', response.status, response.statusText);
         

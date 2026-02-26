@@ -356,8 +356,43 @@ export async function POST(request: NextRequest) {
     // Use ALL TIME data - no date range filtering
     const endDate = new Date()
     const startDate = new Date('2020-01-01') // Start from beginning of time (or earliest possible)
+    const startDateStr = startDate.toISOString().split('T')[0]
+    const endDateStr = endDate.toISOString().split('T')[0]
+    const origin = new URL(request.url).origin
+    const cookieHeader = request.headers.get('cookie') || ''
 
-    // Step 2: Fetch ALL GSC country data (all time)
+    // Step 2a: Sync live GSC country data from Google (ensures report uses real data, not stale cache)
+    setProgress(progressKey, {
+      phase: 'gsc_fetch',
+      processed: 0,
+      total: 0,
+      message: 'Syncing live GSC country data from Google...',
+    });
+    console.log('\n' + '='.repeat(80));
+    console.log('📍 STEP 2a: SYNCING LIVE GSC COUNTRY DATA FROM GOOGLE');
+    console.log('='.repeat(80));
+    const syncResponse = await fetch(`${origin}/api/integrations/google-search-console/analytics/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        domainId,
+        startDate: startDateStr,
+        endDate: endDateStr,
+        dimensions: ['date', 'country'],
+        rowLimit: 25000,
+      }),
+    })
+    if (!syncResponse.ok) {
+      const syncErr = await syncResponse.json().catch(() => ({}))
+      return NextResponse.json({
+        error: syncErr.error || 'Failed to sync GSC data from Google. Please ensure GSC is connected and verified.',
+      }, { status: 500 })
+    }
+
+    // Step 2b: Fetch synced GSC country data (live data from Step 2a)
     setProgress(progressKey, {
       phase: 'gsc_fetch',
       processed: 0,
@@ -365,30 +400,26 @@ export async function POST(request: NextRequest) {
       message: 'Fetching GSC country data...',
     });
     console.log('\n' + '='.repeat(80));
-    console.log('📍 STEP 2: FETCHING GSC COUNTRY DATA (ALL TIME)');
+    console.log('📍 STEP 2b: FETCHING GSC COUNTRY DATA (LIVE)');
     console.log('='.repeat(80));
-    console.log(`   Date Range: ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]} (ALL TIME)`);
-    
     const response = await fetch(
-      `${new URL(request.url).origin}/api/integrations/google-search-console/analytics/sync?domainId=${domainId}&startDate=${startDate.toISOString().split('T')[0]}&endDate=${endDate.toISOString().split('T')[0]}&dataType=country`,
+      `${origin}/api/integrations/google-search-console/analytics/sync?domainId=${domainId}&startDate=${startDateStr}&endDate=${endDateStr}&dataType=country`,
       {
-        headers: {
-          Cookie: request.headers.get('cookie') || '',
-        },
+        headers: { Cookie: cookieHeader },
       }
     )
 
     if (!response.ok) {
-      return NextResponse.json({ 
-        error: 'Failed to fetch GSC data. Please ensure GSC is connected and synced.' 
+      return NextResponse.json({
+        error: 'Failed to fetch GSC data. Please ensure GSC is connected and synced.',
       }, { status: 500 })
     }
 
     const gscData = await response.json()
 
     if (!gscData.success || !gscData.analytics || gscData.analytics.length === 0) {
-      return NextResponse.json({ 
-        error: 'No GSC country data available. Please sync your GSC data first.' 
+      return NextResponse.json({
+        error: 'No GSC country data available from Google. Your domain may have no search impressions in the selected date range.',
       }, { status: 404 })
     }
 

@@ -344,7 +344,7 @@ export default function GeoVisibilityMarketCoveragePage() {
       <div className="min-h-screen bg-gray-50 p-6" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="max-w-7xl mx-auto flex items-center justify-center py-12">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4" />
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4" />
             <p className="text-gray-600">Loading domains...</p>
           </div>
         </div>
@@ -356,7 +356,7 @@ export default function GeoVisibilityMarketCoveragePage() {
     return (
       <div className="min-h-screen bg-gray-50 p-6" dir={isRtl ? 'rtl' : 'ltr'}>
         <div className="max-w-7xl mx-auto">
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
             <Globe className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-900 mb-2">No Verified Domains</h2>
             <p className="text-gray-600 mb-4">
@@ -364,7 +364,7 @@ export default function GeoVisibilityMarketCoveragePage() {
             </p>
             <a
               href="/dashboard/google-search-console"
-              className="inline-flex items-center gap-2 bg-emerald-600 text-white px-6 py-3 rounded-lg hover:bg-emerald-700 transition-colors font-medium"
+              className="inline-flex items-center gap-2 bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors font-medium"
             >
               Add Domain
             </a>
@@ -379,47 +379,56 @@ export default function GeoVisibilityMarketCoveragePage() {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">{reportTitle}</h1>
-              <p className="text-gray-600 mt-1">{reportSubtitle}</p>
+          <div className="flex items-center gap-3 mb-2">
+            <Globe className="w-8 h-8 text-primary-600" />
+            <h1 className="text-3xl font-bold text-gray-900">{reportTitle}</h1>
+          </div>
+          <p className="text-gray-600">{reportSubtitle}</p>
+        </div>
+
+        {/* Controls */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+              <label className="font-medium text-gray-700 text-sm">Domain (GSC data):</label>
+              <select
+                value={selectedDomain}
+                onChange={(e) => setSelectedDomain(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+              >
+                {domains.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {(d.gsc_integration as GSCIntegrationData)?.domain_url || d.domain}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="min-w-[200px]">
-                <label className="block text-xs font-medium text-gray-500 mb-1">Domain</label>
-                <select
-                  value={selectedDomain}
-                  onChange={(e) => setSelectedDomain(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm"
-                >
-                  {domains.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {(d.gsc_integration as GSCIntegrationData)?.domain_url || d.domain}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-end">
-                <button
-                  onClick={calculateMatrix}
-                  disabled={calculating || !selectedDomain}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  <RefreshCw className={`w-4 h-4 ${calculating ? 'animate-spin' : ''}`} />
-                  {calculating ? 'Calculating...' : calculateMatrixLabel}
-                </button>
-              </div>
-            </div>
+            <button
+              onClick={loadMatrix}
+              disabled={!selectedDomain || loadingMatrix}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 text-sm font-medium"
+            >
+              <RefreshCw className={`w-4 h-4 ${loadingMatrix ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button
+              onClick={calculateMatrix}
+              disabled={calculating || !selectedDomain}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 text-sm font-medium"
+            >
+              <RefreshCw className={`w-4 h-4 ${calculating ? 'animate-spin' : ''}`} />
+              {calculating ? 'Calculating...' : calculateMatrixLabel}
+            </button>
           </div>
           {calculating && calcProgress && (
-            <div className="mt-4 p-4 bg-white rounded-lg border border-gray-200">
+            <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
               <div className="flex justify-between text-sm text-gray-600 mb-2">
                 <span>{calcProgress.message || 'Processing...'}</span>
                 <span>{calcProgress.percentage}%</span>
               </div>
               <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-emerald-600 transition-all duration-300"
+                  className="h-full bg-primary-600 transition-all duration-300"
                   style={{ width: `${calcProgress.percentage}%` }}
                 />
               </div>
@@ -428,148 +437,63 @@ export default function GeoVisibilityMarketCoveragePage() {
         </div>
 
         {loadingMatrix ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4" />
-              <p className="text-gray-600">Loading report data...</p>
-            </div>
+          <div className="flex justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
           </div>
         ) : matrixData.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-6 text-white">
-              <h2 className="text-xl font-bold">{reportTitle}</h2>
-              <p className="text-white/90 text-sm mt-0.5">{reportSubtitle}</p>
-            </div>
-            <div className="px-6 py-8">
-              <p className="text-sm text-gray-600 mb-4">{geoDataNote}</p>
-              <div className="rounded-lg bg-gray-50 border border-gray-200 p-8 text-center text-gray-600">
-                <Globe className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                <p className="mb-4">{noRegionalData}</p>
-                <div className="flex flex-wrap gap-3 justify-center">
-                  <a
-                    href="/dashboard/ai-visibility"
-                    className="text-emerald-600 font-medium hover:underline"
-                  >
-                    {goToAIVisibility}
-                  </a>
-                  <span className="text-gray-400">|</span>
-                  <a
-                    href="/dashboard/global-visibility-matrix"
-                    className="text-emerald-600 font-medium hover:underline"
-                  >
-                    Global Visibility Matrix
-                  </a>
-                </div>
-              </div>
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center text-gray-600">
+            <Globe className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+            <p className="mb-4">{noRegionalData}</p>
+            <p className="text-sm text-gray-500 mb-4">{geoDataNote}</p>
+            <div className="flex flex-wrap gap-3 justify-center">
+              <a href="/dashboard/ai-visibility" className="text-primary-600 font-medium hover:underline">
+                {goToAIVisibility}
+              </a>
+              <span className="text-gray-400">|</span>
+              <a href="/dashboard/global-visibility-matrix" className="text-primary-600 font-medium hover:underline">
+                Global Visibility Matrix
+              </a>
             </div>
           </div>
         ) : (
           <>
             {/* Summary cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white rounded-lg border border-gray-200 p-4">
-                <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-                  <MapPin className="w-4 h-4" />
-                  {totalMarketsLabel}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+              <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-700">{totalMarketsLabel}</span>
+                  <MapPin className="w-5 h-5 text-gray-600" />
                 </div>
-                <p className="text-2xl font-bold text-gray-900">{totalMarkets}</p>
+                <div className="text-3xl font-bold text-gray-900">{totalMarkets}</div>
               </div>
-              <div className="bg-white rounded-lg border border-amber-200 p-4">
-                <div className="flex items-center gap-2 text-amber-700 text-sm mb-1">
-                  <AlertCircle className="w-4 h-4" />
-                  Demand but No AI
+              <div className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg shadow-sm border border-amber-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-amber-700">{demandButNoAiLabel}</span>
+                  <AlertCircle className="w-5 h-5 text-amber-600" />
                 </div>
-                <p className="text-2xl font-bold text-amber-900">{demandNoAi}</p>
-                <p className="text-xs text-amber-600 mt-0.5">Impressions &gt; 0, AI &lt; 30%</p>
+                <div className="text-3xl font-bold text-amber-900">{demandNoAi}</div>
+                <p className="text-xs text-amber-600 mt-1">Impressions &gt; 0, AI &lt; 30%</p>
               </div>
-              <div className="bg-white rounded-lg border border-blue-200 p-4">
-                <div className="flex items-center gap-2 text-blue-700 text-sm mb-1">
-                  <TrendingUp className="w-4 h-4" />
-                  {avgAiVisibilityLabel}
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg shadow-sm border border-blue-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-blue-700">{avgAiVisibilityLabel}</span>
+                  <TrendingUp className="w-5 h-5 text-blue-600" />
                 </div>
-                <p className="text-2xl font-bold text-blue-900">{avgAiScore.toFixed(1)}%</p>
+                <div className="text-3xl font-bold text-blue-900">{avgAiScore.toFixed(1)}%</div>
               </div>
-              <div className="bg-white rounded-lg border border-green-200 p-4">
-                <div className="flex items-center gap-2 text-green-700 text-sm mb-1">
-                  <CheckCircle className="w-4 h-4" />
-                  {avgOrganicScoreLabel}
+              <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-lg shadow-sm border border-emerald-200 p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-emerald-700">{avgOrganicScoreLabel}</span>
+                  <CheckCircle className="w-5 h-5 text-emerald-600" />
                 </div>
-                <p className="text-2xl font-bold text-green-900">{avgOrganicScore.toFixed(1)}</p>
+                <div className="text-3xl font-bold text-emerald-900">{avgOrganicScore.toFixed(1)}</div>
               </div>
             </div>
 
-            {/* Regional Table */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
-              <div className="bg-gradient-to-r from-emerald-600 to-teal-600 p-4 text-white">
-                <h2 className="text-lg font-bold">{regionalTableLabel}</h2>
-                <p className="text-white/90 text-sm mt-0.5">Where demand exists but visibility is missing</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200 text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">
-                        {regionProject}
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
-                        {demandGscImpressions}
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
-                        {organicGscClicks}
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
-                        {organicScoreLabel}
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
-                        {aiVisibilityPct}
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
-                        {opportunityLabel}
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">
-                        {quadrantLabel}
-                      </th>
-                      <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">
-                        {gapNoteLabel}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {tableRows.map((row, i) => (
-                      <tr key={row.countryCode + i} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{row.region}</td>
-                        <td className="px-4 py-3 text-right text-gray-700">
-                          {row.demand.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-700">
-                          {row.organic.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-700">{row.organicScore}</td>
-                        <td className="px-4 py-3 text-right text-gray-700">{row.aiPct}%</td>
-                        <td className="px-4 py-3 text-right text-gray-700">{row.opportunityScore}</td>
-                        <td className="px-4 py-3">
-                          <span
-                            className="px-2 py-0.5 rounded text-xs font-medium"
-                            style={{
-                              backgroundColor: `${QUADRANT_COLORS[row.quadrant as string] || '#e5e7eb'}20`,
-                              color: QUADRANT_COLORS[row.quadrant as string] || '#374151',
-                            }}
-                          >
-                            {row.quadrant}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-amber-700 text-xs">{row.gapNote || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Demand vs Organic vs AI Bar Chart */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-emerald-600" />
+            {/* Charts */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-primary-600" />
                 Demand vs Organic vs AI (top 12 by demand)
               </h3>
               <div className="h-80">
@@ -602,10 +526,9 @@ export default function GeoVisibilityMarketCoveragePage() {
               </div>
             </div>
 
-            {/* Opportunity Score + Demand Share */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
                   <Target className="w-5 h-5 text-amber-600" />
                   Opportunity score by market (top 10)
                 </h3>
@@ -629,8 +552,8 @@ export default function GeoVisibilityMarketCoveragePage() {
                   </ResponsiveContainer>
                 </div>
               </div>
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
                   <TrendingUp className="w-5 h-5 text-blue-600" />
                   Demand share by market (top 10)
                 </h3>
@@ -671,8 +594,8 @@ export default function GeoVisibilityMarketCoveragePage() {
             </div>
 
             {/* Gap breakdown */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-2 flex items-center gap-2">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-amber-600" />
                 Gap breakdown
               </h3>
@@ -700,8 +623,8 @@ export default function GeoVisibilityMarketCoveragePage() {
 
             {/* Quadrant Distribution + Priority Actions */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">{quadrantDistributionLabel}</h3>
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">{quadrantDistributionLabel}</h3>
                 {quadrantPieData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={240}>
                     <PieChart>
@@ -727,8 +650,8 @@ export default function GeoVisibilityMarketCoveragePage() {
                   <p className="text-gray-500 text-sm">No quadrant data</p>
                 )}
               </div>
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                   <Target className="w-5 h-5 text-amber-600" />
                   {priorityActionsLabel} (top 5 opportunity)
                 </h3>
@@ -752,6 +675,72 @@ export default function GeoVisibilityMarketCoveragePage() {
                     </li>
                   ))}
                 </ul>
+              </div>
+            </div>
+
+            {/* Regional Table */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-1">{regionalTableLabel}</h3>
+              <p className="text-sm text-gray-500 mb-4">Where demand exists but visibility is missing</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">
+                        {regionProject}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
+                        {demandGscImpressions}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
+                        {organicGscClicks}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
+                        {organicScoreLabel}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
+                        {aiVisibilityPct}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-right font-semibold text-gray-900">
+                        {opportunityLabel}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">
+                        {quadrantLabel}
+                      </th>
+                      <th scope="col" className="px-4 py-3 text-left font-semibold text-gray-900">
+                        {gapNoteLabel}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {tableRows.map((row, i) => (
+                      <tr key={row.countryCode + i} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{row.region}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">
+                          {row.demand.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-700">
+                          {row.organic.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-700">{row.organicScore}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{row.aiPct}%</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{row.opportunityScore}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className="px-2 py-0.5 rounded text-xs font-medium"
+                            style={{
+                              backgroundColor: `${QUADRANT_COLORS[row.quadrant as string] || '#e5e7eb'}20`,
+                              color: QUADRANT_COLORS[row.quadrant as string] || '#374151',
+                            }}
+                          >
+                            {row.quadrant}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-amber-700 text-xs">{row.gapNote || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </>
