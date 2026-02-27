@@ -307,6 +307,9 @@ export async function GET(request: NextRequest) {
         },
         enginesUsed,
         generatedAt: report.generated_at,
+        videoUrl: report.video_url ?? null,
+        videoStatus: report.video_status ?? null,
+        videoGeneratedAt: report.video_generated_at ?? null,
       },
     });
   } catch (error: any) {
@@ -525,6 +528,12 @@ export async function POST(request: NextRequest) {
           ai_blind_spot_pct: summary.aiBlindSpotPct,
           blind_spots: blindSpots,
           generated_at: generatedAt,
+          // Clear video when report is regenerated — video must be regenerated too
+          video_url: null,
+          video_request_id: null,
+          video_status: null,
+          video_generated_at: null,
+          video_requested_at: null,
         },
         { onConflict: "user_id,domain_id" }
       );
@@ -541,6 +550,9 @@ export async function POST(request: NextRequest) {
         summary,
         enginesUsed,
         generatedAt,
+        videoUrl: null,
+        videoStatus: null,
+        videoGeneratedAt: null,
       },
     });
   } catch (error: any) {

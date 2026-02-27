@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   BarChart,
   Bar,
@@ -29,9 +29,31 @@ import {
   Globe,
   Target,
   Search,
+  Video,
+  Download,
+  Loader2,
+  Play,
+  RotateCcw,
+  XCircle,
+  X,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Link from "next/link";
+
+type VideoStatus = "idle" | "pending" | "done" | "failed";
+interface VideoState { status: VideoStatus; url: string | null; generatedAt: string | null; requestId: string | null; }
+const POLL_INTERVAL_MS = 12000;
+const POLL_MAX_COUNT = 75;
+const VIDEO_LANGUAGE_OPTIONS = [
+  { code: "en", name: "English" }, { code: "ar", name: "Arabic" }, { code: "zh", name: "Chinese" },
+  { code: "da", name: "Danish" }, { code: "nl", name: "Dutch" }, { code: "fi", name: "Finnish" },
+  { code: "fr", name: "French" }, { code: "de", name: "German" }, { code: "he", name: "Hebrew" },
+  { code: "hi", name: "Hindi" }, { code: "id", name: "Indonesian" }, { code: "it", name: "Italian" },
+  { code: "ja", name: "Japanese" }, { code: "ko", name: "Korean" }, { code: "no", name: "Norwegian" },
+  { code: "pl", name: "Polish" }, { code: "pt", name: "Portuguese" }, { code: "ru", name: "Russian" },
+  { code: "es", name: "Spanish" }, { code: "sv", name: "Swedish" }, { code: "th", name: "Thai" },
+  { code: "tr", name: "Turkish" }, { code: "ur", name: "Urdu" }, { code: "vi", name: "Vietnamese" },
+];
 
 const PLATFORM_COLORS: Record<string, string> = {
   chatgpt: "#10a37f",
@@ -74,6 +96,71 @@ export default function AiSearchPresencePage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
+  const [video, setVideo] = useState<VideoState>({ status: "idle", url: null, generatedAt: null, requestId: null });
+  const [generatingVideo, setGeneratingVideo] = useState(false);
+  const [videoLanguage, setVideoLanguage] = useState("en");
+  const videoLanguageRef = useRef(videoLanguage);
+  videoLanguageRef.current = videoLanguage;
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollCountRef = useRef(0);
+
+  useEffect(() => { return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); }; }, []);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === "Escape") setShowVideoModal(false); };
+    if (showVideoModal) { window.addEventListener("keydown", onKeyDown); document.body.style.overflow = "hidden"; }
+    return () => { window.removeEventListener("keydown", onKeyDown); document.body.style.overflow = ""; };
+  }, [showVideoModal]);
+  useEffect(() => {
+    if (video.status === "pending" && selectedProjectId) { startPolling(); } else { stopPolling(); }
+    return () => stopPolling();
+  }, [video.status, selectedProjectId]);
+
+  const resetVideo = () => { stopPolling(); setVideo({ status: "idle", url: null, generatedAt: null, requestId: null }); };
+  const startPolling = () => { stopPolling(); pollCountRef.current = 0; pollTimerRef.current = setInterval(pollVideoStatus, POLL_INTERVAL_MS); };
+  const stopPolling = () => { if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; } };
+
+  const generateVideoReport = async (engines: EngineData[], summary: any, brandName: string) => {
+    if (!selectedProjectId || !engines.length) return;
+    try {
+      setGeneratingVideo(true);
+      toast.loading("Starting video report generation with xAI Aurora...", { id: "gen-asp-video" });
+      const reportData = { brandName, engines, summary: { overallPresenceScore: summary.overallMentionRate, totalQueries: summary.totalQueries, totalMentions: summary.totalMentions, avgSentiment: null, enginesCount: engines.filter(e => e.totalQueries > 0).length }, generatedAt: new Date().toISOString() };
+      const languageToUse = videoLanguageRef.current;
+      const res = await fetch("/api/reports/ai-search-presence/video", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectId: selectedProjectId, reportData, language: languageToUse }) });
+      const data = await res.json();
+      if (data.success && data.requestId) {
+        setVideo({ status: "pending", url: null, generatedAt: null, requestId: data.requestId });
+        toast.success("Video generation started! A 15-second video usually takes 2–8 minutes. We'll check automatically.", { id: "gen-asp-video", duration: 6000 });
+      } else { toast.error(data.error || "Failed to start video generation", { id: "gen-asp-video" }); }
+    } catch (err) { console.error("Generate video error:", err); toast.error("Failed to start video generation", { id: "gen-asp-video" }); }
+    finally { setGeneratingVideo(false); }
+  };
+
+  const pollVideoStatus = async () => {
+    if (!selectedProjectId) return;
+    pollCountRef.current += 1;
+    if (pollCountRef.current > POLL_MAX_COUNT) { stopPolling(); setVideo({ status: "failed", url: null, generatedAt: null, requestId: null }); toast.error("Video generation is taking too long. Please try again."); return; }
+    try {
+      const res = await fetch(`/api/reports/ai-search-presence/video?projectId=${selectedProjectId}`);
+      const data = await res.json();
+      if (!data.success) return;
+      const v = data.video;
+      if (!v) return;
+      if (v.status === "done" && v.url) { stopPolling(); setVideo({ status: "done", url: v.url, generatedAt: v.generatedAt, requestId: null }); toast.success("Video report is ready!", { duration: 5000 }); }
+      else if (v.status === "failed") { stopPolling(); setVideo({ status: "failed", url: null, generatedAt: null, requestId: null }); toast.error("Video generation failed. Please try again."); }
+    } catch (err) { console.error("Poll video status error:", err); }
+  };
+
+  const downloadVideo = async (brandName?: string) => {
+    if (!video.url) return;
+    try {
+      const res = await fetch(video.url); const blob = await res.blob(); const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = blobUrl; a.download = `ai-presence-video-${brandName || "report"}-${Date.now()}.mp4`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(blobUrl); toast.success("Download started!");
+    } catch { window.open(video.url!, "_blank"); }
+  };
+
   const loadProjects = useCallback(async () => {
     try {
       setLoading(true);
@@ -100,6 +187,7 @@ export default function AiSearchPresencePage() {
 
   const loadReportForProject = useCallback(async (projectId: string) => {
     if (!projectId) return;
+    resetVideo();
     try {
       setLoading(true);
       const res = await fetch(
@@ -113,6 +201,15 @@ export default function AiSearchPresencePage() {
       } else {
         toast.error(data.error || "Failed to load report");
       }
+      // Restore video state
+      try {
+        const vRes = await fetch(`/api/reports/ai-search-presence/video?projectId=${projectId}`);
+        const vData = await vRes.json();
+        if (vData.success && vData.video) {
+          const v = vData.video;
+          setVideo({ status: v.status || "idle", url: v.url || null, generatedAt: v.generatedAt || null, requestId: v.requestId || null });
+        }
+      } catch { /* ignore video state restore errors */ }
     } catch (err) {
       console.error("Load report error:", err);
       toast.error("Failed to load report");
@@ -434,6 +531,98 @@ export default function AiSearchPresencePage() {
                   <p className="text-xs text-gray-500 mt-1">
                     Engines with data
                   </p>
+                </div>
+              </div>
+            )}
+
+            {/* Video Report Section */}
+            {enginesWithData.length > 0 && computedSummary && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <Video className="w-6 h-6 text-primary-600" />
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">Video Report</h3>
+                      <p className="text-sm text-gray-500">Generate a short AI-narrated video summarizing this report</p>
+                    </div>
+                  </div>
+                  {video.status === "done" && video.url && (
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setShowVideoModal(true)} className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm font-medium">
+                        <Play className="w-4 h-4" /> Preview
+                      </button>
+                      <button onClick={() => downloadVideo(projects.find(p => p.id === selectedProjectId)?.brand_name)} className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm font-medium">
+                        <Download className="w-4 h-4" /> Download
+                      </button>
+                      <button onClick={resetVideo} className="inline-flex items-center gap-2 px-3 py-2 text-gray-500 hover:text-gray-700 text-sm">
+                        <RotateCcw className="w-4 h-4" /> Regenerate
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {video.status === "idle" && (
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-700">Language:</label>
+                      <select value={videoLanguage} onChange={e => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                        {VIDEO_LANGUAGE_OPTIONS.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+                      </select>
+                    </div>
+                    <button
+                      onClick={() => generateVideoReport(enginesWithData as EngineData[], computedSummary, projects.find(p => p.id === selectedProjectId)?.brand_name || "Brand")}
+                      disabled={generatingVideo}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 text-sm font-medium"
+                    >
+                      {generatingVideo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Video className="w-4 h-4" />}
+                      {generatingVideo ? "Starting..." : "Generate Video Report"}
+                    </button>
+                  </div>
+                )}
+                {video.status === "pending" && (
+                  <div className="flex items-center gap-4 p-4 bg-blue-50 rounded-lg">
+                    <Loader2 className="w-5 h-5 text-blue-600 animate-spin flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-blue-800">Generating video report...</p>
+                      <p className="text-xs text-blue-600 mt-1">This usually takes 2–8 minutes. We&apos;re polling automatically every 12 seconds.</p>
+                    </div>
+                    <button onClick={resetVideo} className="ml-auto text-blue-500 hover:text-blue-700"><XCircle className="w-5 h-5" /></button>
+                  </div>
+                )}
+                {video.status === "failed" && (
+                  <div className="flex items-center gap-4 p-4 bg-red-50 rounded-lg">
+                    <XCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800">Video generation failed.</p>
+                      <p className="text-xs text-red-600 mt-1">Please try again.</p>
+                    </div>
+                    <button onClick={resetVideo} className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 text-sm text-red-600 hover:text-red-800 border border-red-300 rounded-lg hover:bg-red-50">
+                      <RotateCcw className="w-3.5 h-3.5" /> Try Again
+                    </button>
+                  </div>
+                )}
+                {video.status === "done" && video.url && video.generatedAt && (
+                  <div className="p-4 bg-green-50 rounded-lg flex items-center gap-3">
+                    <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                    <p className="text-sm text-green-800">Video ready — generated {new Date(video.generatedAt).toLocaleString()}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Video Preview Modal */}
+            {showVideoModal && video.url && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={() => setShowVideoModal(false)}>
+                <div className="relative bg-black rounded-xl overflow-hidden max-w-4xl w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => setShowVideoModal(false)} className="absolute top-3 right-3 z-10 p-1.5 bg-black/50 rounded-full text-white hover:bg-black/80">
+                    <X className="w-5 h-5" />
+                  </button>
+                  <video src={video.url} controls autoPlay className="w-full max-h-[80vh]" />
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-900">
+                    <span className="text-sm text-gray-300">AI Search Presence — Video Report</span>
+                    <button onClick={() => downloadVideo(projects.find(p => p.id === selectedProjectId)?.brand_name)} className="inline-flex items-center gap-2 px-3 py-1.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700 text-sm">
+                      <Download className="w-4 h-4" /> Download
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
