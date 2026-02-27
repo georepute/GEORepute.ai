@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Globe, TrendingUp, TrendingDown, MousePointerClick, Eye, Target, Map as MapIcon, Brain, RefreshCw, Check, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { Globe, TrendingUp, TrendingDown, MousePointerClick, Eye, Target, Map as MapIcon, Brain, RefreshCw, Check, X, AlertCircle, CheckCircle, Video, Loader2, Play, RotateCcw, XCircle, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { normalizeCountryForMerge } from '@/lib/utils/countryMerge';
 
@@ -41,7 +41,24 @@ interface AIMatrixCountry {
   ai_mentioned_competitors?: string[];
   organic_score: number;
   overall_visibility_score: number;
+  quadrant?: 'strong' | 'emerging' | 'declining' | 'absent';
+  gsc_impressions?: number;
 }
+
+type VideoStatus = 'idle' | 'pending' | 'done' | 'failed';
+interface VideoState { status: VideoStatus; url: string | null; generatedAt: string | null; requestId: string | null; }
+const POLL_INTERVAL_MS = 12000;
+const POLL_MAX_COUNT = 75;
+const VIDEO_LANGUAGE_OPTIONS = [
+  { code: 'en', name: 'English' }, { code: 'ar', name: 'Arabic' }, { code: 'zh', name: 'Chinese' },
+  { code: 'da', name: 'Danish' }, { code: 'nl', name: 'Dutch' }, { code: 'fi', name: 'Finnish' },
+  { code: 'fr', name: 'French' }, { code: 'de', name: 'German' }, { code: 'he', name: 'Hebrew' },
+  { code: 'hi', name: 'Hindi' }, { code: 'id', name: 'Indonesian' }, { code: 'it', name: 'Italian' },
+  { code: 'ja', name: 'Japanese' }, { code: 'ko', name: 'Korean' }, { code: 'no', name: 'Norwegian' },
+  { code: 'pl', name: 'Polish' }, { code: 'pt', name: 'Portuguese' }, { code: 'ru', name: 'Russian' },
+  { code: 'es', name: 'Spanish' }, { code: 'sv', name: 'Swedish' }, { code: 'th', name: 'Thai' },
+  { code: 'tr', name: 'Turkish' }, { code: 'ur', name: 'Urdu' }, { code: 'vi', name: 'Vietnamese' },
+];
 
 export default function RegionalStrengthComparisonPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -55,12 +72,32 @@ export default function RegionalStrengthComparisonPage() {
   const [calcProgress, setCalcProgress] = useState<{ processed: number; total: number; percentage: number; message?: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'ai' | 'google'>('ai');
 
+  const [videoAi, setVideoAi] = useState<VideoState>({ status: 'idle', url: null, generatedAt: null, requestId: null });
+  const [videoGoogle, setVideoGoogle] = useState<VideoState>({ status: 'idle', url: null, generatedAt: null, requestId: null });
+  const [generatingVideoAi, setGeneratingVideoAi] = useState(false);
+  const [generatingVideoGoogle, setGeneratingVideoGoogle] = useState(false);
+  const [videoLanguage, setVideoLanguage] = useState('en');
+  const videoLanguageRef = useRef(videoLanguage);
+  videoLanguageRef.current = videoLanguage;
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const [showVideoModalTab, setShowVideoModalTab] = useState<'ai' | 'google'>('ai');
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollCountRef = useRef(0);
+  const videoAiStatusRef = useRef(videoAi.status);
+  const videoGoogleStatusRef = useRef(videoGoogle.status);
+  videoAiStatusRef.current = videoAi.status;
+  videoGoogleStatusRef.current = videoGoogle.status;
+  const prevDomainRef = useRef<string | null>(null);
+
   useEffect(() => {
     loadDomains();
   }, []);
 
   useEffect(() => {
     if (selectedDomain) {
+      const isDomainSwitch = prevDomainRef.current !== null && prevDomainRef.current !== selectedDomain;
+      if (isDomainSwitch) resetVideo();
+      prevDomainRef.current = selectedDomain;
       loadCountries();
       loadAIMatrixData();
     }
@@ -94,6 +131,161 @@ export default function RegionalStrengthComparisonPage() {
     const interval = setInterval(pollProgress, 800);
     return () => clearInterval(interval);
   }, [calculating, selectedDomain]);
+
+  useEffect(() => { return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); }; }, []);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowVideoModal(false); };
+    if (showVideoModal) { window.addEventListener('keydown', onKeyDown); document.body.style.overflow = 'hidden'; }
+    return () => { window.removeEventListener('keydown', onKeyDown); document.body.style.overflow = ''; };
+  }, [showVideoModal]);
+  useEffect(() => {
+    const anyPending = videoAi.status === 'pending' || videoGoogle.status === 'pending';
+    if (anyPending && selectedDomain) { startPolling(); } else { stopPolling(); }
+    return () => stopPolling();
+  }, [videoAi.status, videoGoogle.status, selectedDomain]);
+
+  const resetVideo = () => {
+    stopPolling();
+    setVideoAi({ status: 'idle', url: null, generatedAt: null, requestId: null });
+    setVideoGoogle({ status: 'idle', url: null, generatedAt: null, requestId: null });
+  };
+  const startPolling = () => { stopPolling(); pollCountRef.current = 0; pollTimerRef.current = setInterval(pollVideoStatus, POLL_INTERVAL_MS); };
+  const stopPolling = () => { if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; } };
+
+  const deriveQuadrant = (c: AIMatrixCountry): 'strong' | 'emerging' | 'declining' | 'absent' => {
+    if (c.ai_visibility_score === 0) return 'absent';
+    if (c.ai_visibility_score >= 60 && c.organic_score >= 60) return 'strong';
+    if (c.ai_visibility_score > c.organic_score) return 'emerging';
+    return 'declining';
+  };
+
+  const generateVideoReport = async (tab: 'ai' | 'google') => {
+    if (!selectedDomain) return;
+    const domain = domains.find(d => d.id === selectedDomain);
+    const domainName = domain?.gsc_integration?.domain_url || domain?.domain || '';
+    try {
+      if (tab === 'ai') setGeneratingVideoAi(true); else setGeneratingVideoGoogle(true);
+      toast.loading(`Starting ${tab === 'ai' ? 'Region vs AI' : 'Region vs Google'} video report...`, { id: 'gen-rsc-video' });
+      if (tab === 'ai') {
+        if (aiMatrixData.length === 0) { toast.error('No AI data available. Calculate matrix first.', { id: 'gen-rsc-video' }); return; }
+        const matrixData = aiMatrixData.map(c => ({
+          country_code: c.country_code,
+          country_name: getCountryName(c.country_code),
+          quadrant: (c.quadrant || deriveQuadrant(c)) as string,
+          overall_visibility_score: c.overall_visibility_score || 0,
+          ai_visibility_score: c.ai_visibility_score || 0,
+          organic_score: c.organic_score || 0,
+          opportunity_score: (c.organic_score || 0) - (c.ai_visibility_score || 0),
+          gsc_impressions: (c as any).gsc_impressions || 0,
+        }));
+        const strongCount = matrixData.filter(c => c.quadrant === 'strong').length;
+        const emergingCount = matrixData.filter(c => c.quadrant === 'emerging').length;
+        const decliningCount = matrixData.filter(c => c.quadrant === 'declining').length;
+        const absentCount = matrixData.filter(c => c.quadrant === 'absent').length;
+        const avgScore = matrixData.reduce((s, c) => s + c.overall_visibility_score, 0) / matrixData.length;
+        const topOpportunities = [...matrixData].sort((a, b) => (b.opportunity_score || 0) - (a.opportunity_score || 0)).slice(0, 5).map(c => ({ country: c.country_name || getCountryName(c.country_code), opportunityScore: c.opportunity_score || 0 }));
+        const reportData = {
+          domain: domainName,
+          matrixData,
+          summary: {
+            totalCountries: matrixData.length,
+            strongCountries: strongCount,
+            emergingCountries: emergingCount,
+            decliningCountries: decliningCount,
+            absentCountries: absentCount,
+            avgVisibilityScore: avgScore,
+            topOpportunities,
+          },
+          generatedAt: new Date().toISOString(),
+        };
+        const res = await fetch('/api/reports/regional-strength-comparison/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domainId: selectedDomain, reportData, language: videoLanguageRef.current, tab: 'ai' }) });
+        const data = await res.json();
+        if (data.success && data.requestId) {
+          setVideoAi({ status: 'pending', url: null, generatedAt: null, requestId: data.requestId });
+          toast.success("Video generation started! A 15-second video usually takes 2–8 minutes. We'll check automatically.", { id: 'gen-rsc-video', duration: 6000 });
+        } else { toast.error(data.error || 'Failed to start video generation', { id: 'gen-rsc-video' }); }
+      } else {
+        if (countries.length === 0) { toast.error('No Google data available. Sync data first.', { id: 'gen-rsc-video' }); return; }
+        const totalClicks = countries.reduce((s, c) => s + c.clicks, 0);
+        const totalImpressions = countries.reduce((s, c) => s + c.impressions, 0);
+        const matrixData = countries.map(c => ({
+          country_code: c.country,
+          country_name: getCountryName(c.country),
+          quadrant: '',
+          overall_visibility_score: 0,
+          ai_visibility_score: 0,
+          organic_score: 0,
+          gsc_impressions: c.impressions,
+        }));
+        const reportDataGoogle = {
+          domain: domainName,
+          matrixData,
+          summary: {
+            totalCountries: countries.length,
+            totalClicks,
+            totalImpressions,
+            avgCtr: totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0,
+            topByClicks: [...countries].sort((a, b) => b.clicks - a.clicks).slice(0, 5).map(c => ({ country: getCountryName(c.country), clicks: c.clicks })),
+            topByImpressions: [...countries].sort((a, b) => b.impressions - a.impressions).slice(0, 5).map(c => ({ country: getCountryName(c.country), impressions: c.impressions })),
+          },
+          generatedAt: new Date().toISOString(),
+        };
+        const res = await fetch('/api/reports/regional-strength-comparison/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domainId: selectedDomain, reportDataGoogle, language: videoLanguageRef.current, tab: 'google' }) });
+        const data = await res.json();
+        if (data.success && data.requestId) {
+          setVideoGoogle({ status: 'pending', url: null, generatedAt: null, requestId: data.requestId });
+          toast.success("Video generation started! A 15-second video usually takes 2–8 minutes. We'll check automatically.", { id: 'gen-rsc-video', duration: 6000 });
+        } else { toast.error(data.error || 'Failed to start video generation', { id: 'gen-rsc-video' }); }
+      }
+    } catch (err) { console.error('Generate video error:', err); toast.error('Failed to start video generation', { id: 'gen-rsc-video' }); }
+    finally { if (tab === 'ai') setGeneratingVideoAi(false); else setGeneratingVideoGoogle(false); }
+  };
+
+  const pollVideoStatus = async (manualTab?: 'ai' | 'google') => {
+    if (!selectedDomain) return;
+    const pollAi = manualTab ? manualTab === 'ai' : videoAiStatusRef.current === 'pending';
+    const pollGoogle = manualTab ? manualTab === 'google' : videoGoogleStatusRef.current === 'pending';
+    if (!pollAi && !pollGoogle) return;
+
+    if (!manualTab) pollCountRef.current += 1;
+    if (!manualTab && pollCountRef.current > POLL_MAX_COUNT) {
+      stopPolling();
+      setVideoAi(prev => prev.status === 'pending' ? { status: 'failed' as const, url: null, generatedAt: null, requestId: null } : prev);
+      setVideoGoogle(prev => prev.status === 'pending' ? { status: 'failed' as const, url: null, generatedAt: null, requestId: null } : prev);
+      toast.error('Video generation is taking too long. Please try again.');
+      return;
+    }
+    try {
+      const fetches: Promise<Response>[] = [];
+      if (pollAi) fetches.push(fetch(`/api/reports/regional-strength-comparison/video?domainId=${selectedDomain}&tab=ai`));
+      if (pollGoogle) fetches.push(fetch(`/api/reports/regional-strength-comparison/video?domainId=${selectedDomain}&tab=google`));
+      const responses = await Promise.all(fetches);
+      const updateFromResponse = (v: { status?: string; url?: string; generatedAt?: string } | null, setter: (s: VideoState) => void, label: string) => {
+        if (!v) return;
+        if (v.status === 'done' && v.url) { setter({ status: 'done', url: v.url, generatedAt: v.generatedAt || null, requestId: null }); toast.success(`${label} video is ready!`, { duration: 5000 }); }
+        else if (v.status === 'failed') { setter({ status: 'failed', url: null, generatedAt: null, requestId: null }); toast.error(`${label} video generation failed.`); }
+      };
+      let idx = 0;
+      if (pollAi) {
+        const dataAi = await responses[idx++].json();
+        if (dataAi.success && dataAi.video) updateFromResponse(dataAi.video, setVideoAi, 'Region vs AI');
+      }
+      if (pollGoogle) {
+        const dataGoogle = await responses[idx].json();
+        if (dataGoogle.success && dataGoogle.video) updateFromResponse(dataGoogle.video, setVideoGoogle, 'Region vs Google');
+      }
+    } catch (err) { console.error('Poll video status error:', err); }
+  };
+
+  const downloadVideo = async (tab: 'ai' | 'google') => {
+    const video = tab === 'ai' ? videoAi : videoGoogle;
+    if (!video.url) return;
+    try {
+      const res = await fetch(video.url); const blob = await res.blob(); const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = blobUrl; a.download = `regional-strength-${tab}-video-${selectedDomain}-${Date.now()}.mp4`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(blobUrl); toast.success('Download started!');
+    } catch { window.open(video.url!, '_blank'); }
+  };
 
   const loadDomains = async () => {
     try {
@@ -222,6 +414,25 @@ export default function RegionalStrengthComparisonPage() {
       setAiMatrixData([]);
     } finally {
       setLoadingAiMatrix(false);
+    }
+    if (selectedDomain) {
+      try {
+        const [vResAi, vResGoogle] = await Promise.all([
+          fetch(`/api/reports/regional-strength-comparison/video?domainId=${selectedDomain}&tab=ai`),
+          fetch(`/api/reports/regional-strength-comparison/video?domainId=${selectedDomain}&tab=google`),
+        ]);
+        const vDataAi = await vResAi.json();
+        const vDataGoogle = await vResGoogle.json();
+        const applyVideo = (v: any, setter: (s: VideoState) => void) => {
+          if (!v) { setter({ status: 'idle', url: null, generatedAt: null, requestId: null }); return; }
+          if (v.status === 'done' && v.url) setter({ status: 'done', url: v.url, generatedAt: v.generatedAt, requestId: null });
+          else if (v.status === 'pending') setter({ status: 'pending', url: null, generatedAt: null, requestId: null });
+          else if (v.status === 'failed') setter({ status: 'failed', url: null, generatedAt: null, requestId: null });
+          else setter({ status: 'idle', url: null, generatedAt: null, requestId: null });
+        };
+        if (vDataAi.success) applyVideo(vDataAi.video, setVideoAi);
+        if (vDataGoogle.success) applyVideo(vDataGoogle.video, setVideoGoogle);
+      } catch { /* ignore */ }
     }
   };
 
@@ -699,6 +910,52 @@ export default function RegionalStrengthComparisonPage() {
               </div>
             ) : aiMatrixData.length > 0 ? (
               <>
+                {/* ========== VIDEO REPORT SECTION (Region vs AI) ========== */}
+                <div className="mb-6">
+                  {videoAi.status === 'idle' && (
+                    <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-violet-600" /></div>
+                      <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Region vs AI Video Report</h3><p className="text-sm text-gray-600 mt-0.5">Generate an AI-powered video of your AI visibility by region — quadrants, opportunities, and absent markets.</p></div>
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideoAi} className="px-3 py-2.5 border border-violet-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[120px]" title="Video language">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                        <button onClick={() => generateVideoReport('ai')} disabled={generatingVideoAi} className="px-5 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 flex items-center gap-2 font-medium text-sm whitespace-nowrap"><Play className="w-4 h-4" />Generate Video</button>
+                      </div>
+                    </div>
+                  )}
+                  {videoAi.status === 'pending' && (
+                    <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6">
+                      <div className="flex items-center gap-4">
+                        <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Loader2 className="w-6 h-6 text-violet-600 animate-spin" /></div>
+                        <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Generating Region vs AI Video…</h3><p className="text-sm text-gray-600 mt-0.5">xAI Aurora is rendering your 15-second video. This typically takes <strong>2–8 minutes</strong>. We&apos;re checking automatically every 12 seconds.</p></div>
+                        <button onClick={() => pollVideoStatus('ai')} className="flex-shrink-0 px-4 py-2 bg-white text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 flex items-center gap-2 text-sm font-medium"><RefreshCw className="w-4 h-4" />Check Now</button>
+                      </div>
+                    </div>
+                  )}
+                  {videoAi.status === 'failed' && (
+                    <div className="bg-red-50 rounded-xl border border-red-200 p-6 flex items-center gap-4">
+                      <div className="flex-shrink-0 w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center"><XCircle className="w-6 h-6 text-red-600" /></div>
+                      <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Video Generation Failed</h3><p className="text-sm text-gray-600 mt-0.5">The video generation request expired or failed. Please try again.</p></div>
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideoAi} className="px-3 py-2 border border-red-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[120px]" title="Video language">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                        <button onClick={() => generateVideoReport('ai')} disabled={generatingVideoAi} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2 text-sm font-medium"><RotateCcw className="w-4 h-4" />Retry</button>
+                      </div>
+                    </div>
+                  )}
+                  {videoAi.status === 'done' && videoAi.url && (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-3"><div className="w-12 h-12 bg-gradient-to-br from-violet-500 to-indigo-600 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-white" /></div><div><h3 className="font-semibold text-gray-900">Region vs AI Video Report</h3>{videoAi.generatedAt && <p className="text-xs text-gray-500 mt-0.5">Generated {new Date(videoAi.generatedAt).toLocaleString()}</p>}</div></div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button onClick={() => { setShowVideoModalTab('ai'); setShowVideoModal(true); }} className="px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg hover:from-violet-700 hover:to-indigo-700 flex items-center gap-2 text-sm font-medium"><Play className="w-4 h-4" />Preview Video</button>
+                          <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideoAi} className="px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[100px]" title="Video language for regeneration">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                          <button onClick={() => generateVideoReport('ai')} disabled={generatingVideoAi} className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium"><RotateCcw className="w-4 h-4" />Regenerate</button>
+                          <button onClick={() => downloadVideo('ai')} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1.5 text-sm font-medium"><Download className="w-4 h-4" />Download</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* AI Summary Stats - Focus on Weak Regions */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                   <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg shadow-sm border border-red-200 p-6">
@@ -1102,6 +1359,54 @@ export default function RegionalStrengthComparisonPage() {
               </div>
             ) : (
               <>
+                {/* ========== VIDEO REPORT SECTION (Region vs Google Search) ========== */}
+                {countries.length > 0 && (
+                  <div className="mb-6">
+                    {videoGoogle.status === 'idle' && (
+                      <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                        <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-violet-600" /></div>
+                        <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Region vs Google Search Video Report</h3><p className="text-sm text-gray-600 mt-0.5">Generate an AI-powered video of your Google Search Console performance by region — clicks, impressions, and top countries.</p></div>
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideoGoogle} className="px-3 py-2.5 border border-violet-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[120px]" title="Video language">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                          <button onClick={() => generateVideoReport('google')} disabled={generatingVideoGoogle} className="px-5 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 flex items-center gap-2 font-medium text-sm whitespace-nowrap"><Play className="w-4 h-4" />Generate Video</button>
+                        </div>
+                      </div>
+                    )}
+                    {videoGoogle.status === 'pending' && (
+                      <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6">
+                        <div className="flex items-center gap-4">
+                          <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Loader2 className="w-6 h-6 text-violet-600 animate-spin" /></div>
+                          <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Generating Region vs Google Video…</h3><p className="text-sm text-gray-600 mt-0.5">xAI Aurora is rendering your 15-second video. This typically takes <strong>2–8 minutes</strong>. We&apos;re checking automatically every 12 seconds.</p></div>
+                          <button onClick={() => pollVideoStatus('google')} className="flex-shrink-0 px-4 py-2 bg-white text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 flex items-center gap-2 text-sm font-medium"><RefreshCw className="w-4 h-4" />Check Now</button>
+                        </div>
+                      </div>
+                    )}
+                    {videoGoogle.status === 'failed' && (
+                      <div className="bg-red-50 rounded-xl border border-red-200 p-6 flex items-center gap-4">
+                        <div className="flex-shrink-0 w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center"><XCircle className="w-6 h-6 text-red-600" /></div>
+                        <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Video Generation Failed</h3><p className="text-sm text-gray-600 mt-0.5">The video generation request expired or failed. Please try again.</p></div>
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideoGoogle} className="px-3 py-2 border border-red-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[120px]" title="Video language">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                          <button onClick={() => generateVideoReport('google')} disabled={generatingVideoGoogle} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2 text-sm font-medium"><RotateCcw className="w-4 h-4" />Retry</button>
+                        </div>
+                      </div>
+                    )}
+                    {videoGoogle.status === 'done' && videoGoogle.url && (
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <div className="flex items-center justify-between flex-wrap gap-3">
+                          <div className="flex items-center gap-3"><div className="w-12 h-12 bg-gradient-to-br from-violet-500 to-indigo-600 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-white" /></div><div><h3 className="font-semibold text-gray-900">Region vs Google Video Report</h3>{videoGoogle.generatedAt && <p className="text-xs text-gray-500 mt-0.5">Generated {new Date(videoGoogle.generatedAt).toLocaleString()}</p>}</div></div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button onClick={() => { setShowVideoModalTab('google'); setShowVideoModal(true); }} className="px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg hover:from-violet-700 hover:to-indigo-700 flex items-center gap-2 text-sm font-medium"><Play className="w-4 h-4" />Preview Video</button>
+                            <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideoGoogle} className="px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[100px]" title="Video language for regeneration">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                            <button onClick={() => generateVideoReport('google')} disabled={generatingVideoGoogle} className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium"><RotateCcw className="w-4 h-4" />Regenerate</button>
+                            <button onClick={() => downloadVideo('google')} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1.5 text-sm font-medium"><Download className="w-4 h-4" />Download</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Summary Stats */}
                 {countries.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
@@ -1553,6 +1858,16 @@ export default function RegionalStrengthComparisonPage() {
               </>
             )}
           </>
+        )}
+
+        {/* Shared Video Modal */}
+        {showVideoModal && (showVideoModalTab === 'ai' ? videoAi.url : videoGoogle.url) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={() => setShowVideoModal(false)}>
+            <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50"><h3 className="font-semibold text-gray-900">{showVideoModalTab === 'ai' ? 'Region vs AI Video Report' : 'Region vs Google Video Report'}</h3><div className="flex items-center gap-2"><button onClick={() => downloadVideo(showVideoModalTab)} className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg flex items-center gap-1.5">Download</button><button onClick={() => setShowVideoModal(false)} className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors" aria-label="Close"><X className="w-5 h-5" /></button></div></div>
+              <div className="flex-1 min-h-0 bg-gray-950 flex items-center justify-center p-4"><video src={showVideoModalTab === 'ai' ? videoAi.url! : videoGoogle.url!} controls autoPlay className="max-w-full max-h-[calc(90vh-80px)]">Your browser does not support the video tag.</video></div>
+            </div>
+          </div>
         )}
       </div>
     </div>

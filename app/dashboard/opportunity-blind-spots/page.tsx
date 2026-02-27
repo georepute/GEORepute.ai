@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   BarChart,
   Bar,
@@ -14,9 +14,24 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { Target, TrendingUp, AlertCircle, DollarSign, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, Brain } from 'lucide-react';
+import { Target, TrendingUp, AlertCircle, DollarSign, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, Brain, Video, Download, Loader2, Play, RotateCcw, XCircle, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useLanguage } from '@/lib/language-context';
+
+type VideoStatus = 'idle' | 'pending' | 'done' | 'failed';
+interface VideoState { status: VideoStatus; url: string | null; generatedAt: string | null; requestId: string | null; }
+const POLL_INTERVAL_MS = 12000;
+const POLL_MAX_COUNT = 75;
+const VIDEO_LANGUAGE_OPTIONS = [
+  { code: 'en', name: 'English' }, { code: 'ar', name: 'Arabic' }, { code: 'zh', name: 'Chinese' },
+  { code: 'da', name: 'Danish' }, { code: 'nl', name: 'Dutch' }, { code: 'fi', name: 'Finnish' },
+  { code: 'fr', name: 'French' }, { code: 'de', name: 'German' }, { code: 'he', name: 'Hebrew' },
+  { code: 'hi', name: 'Hindi' }, { code: 'id', name: 'Indonesian' }, { code: 'it', name: 'Italian' },
+  { code: 'ja', name: 'Japanese' }, { code: 'ko', name: 'Korean' }, { code: 'no', name: 'Norwegian' },
+  { code: 'pl', name: 'Polish' }, { code: 'pt', name: 'Portuguese' }, { code: 'ru', name: 'Russian' },
+  { code: 'es', name: 'Spanish' }, { code: 'sv', name: 'Swedish' }, { code: 'th', name: 'Thai' },
+  { code: 'tr', name: 'Turkish' }, { code: 'ur', name: 'Urdu' }, { code: 'vi', name: 'Vietnamese' },
+];
 
 type GapType = 'Both' | 'Google only' | 'AI only' | 'Neither';
 
@@ -95,6 +110,72 @@ export default function OpportunityBlindSpotsPage() {
   const [sortKey, setSortKey] = useState<SortKey>('estimatedValue');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
+  const [reportMeta, setReportMeta] = useState<{ domain: string; summary: any; enginesUsed: string[]; generatedAt: string } | null>(null);
+  const [video, setVideo] = useState<VideoState>({ status: 'idle', url: null, generatedAt: null, requestId: null });
+  const [generatingVideo, setGeneratingVideo] = useState(false);
+  const [videoLanguage, setVideoLanguage] = useState('en');
+  const videoLanguageRef = useRef(videoLanguage);
+  videoLanguageRef.current = videoLanguage;
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollCountRef = useRef(0);
+
+  useEffect(() => { return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); }; }, []);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowVideoModal(false); };
+    if (showVideoModal) { window.addEventListener('keydown', onKeyDown); document.body.style.overflow = 'hidden'; }
+    return () => { window.removeEventListener('keydown', onKeyDown); document.body.style.overflow = ''; };
+  }, [showVideoModal]);
+  useEffect(() => {
+    if (video.status === 'pending' && selectedDomain) { startPolling(); } else { stopPolling(); }
+    return () => stopPolling();
+  }, [video.status, selectedDomain]);
+
+  const resetVideo = () => { stopPolling(); setVideo({ status: 'idle', url: null, generatedAt: null, requestId: null }); };
+  const startPolling = () => { stopPolling(); pollCountRef.current = 0; pollTimerRef.current = setInterval(pollVideoStatus, POLL_INTERVAL_MS); };
+  const stopPolling = () => { if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; } };
+
+  const generateVideoReport = async () => {
+    if (!selectedDomain || !reportMeta || rows.length === 0) return;
+    try {
+      setGeneratingVideo(true);
+      toast.loading('Starting video report generation with xAI Aurora...', { id: 'gen-opp-video' });
+      const reportData = { domain: reportMeta.domain, queries: rows.map(r => ({ query: r.query, demand: r.demand, cpc: r.cpc, gap: r.gap, estimatedValue: r.estimatedValue, opportunityNote: r.opportunityNote })), summary: reportMeta.summary, enginesUsed: reportMeta.enginesUsed, generatedAt: reportMeta.generatedAt };
+      const languageToUse = videoLanguageRef.current;
+      const res = await fetch('/api/reports/opportunity-blind-spots/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domainId: selectedDomain, reportData, language: languageToUse }) });
+      const data = await res.json();
+      if (data.success && data.requestId) {
+        setVideo({ status: 'pending', url: null, generatedAt: null, requestId: data.requestId });
+        toast.success("Video generation started! A 15-second video usually takes 2–8 minutes. We'll check automatically.", { id: 'gen-opp-video', duration: 6000 });
+      } else { toast.error(data.error || 'Failed to start video generation', { id: 'gen-opp-video' }); }
+    } catch (err) { console.error('Generate video error:', err); toast.error('Failed to start video generation', { id: 'gen-opp-video' }); }
+    finally { setGeneratingVideo(false); }
+  };
+
+  const pollVideoStatus = async () => {
+    if (!selectedDomain) return;
+    pollCountRef.current += 1;
+    if (pollCountRef.current > POLL_MAX_COUNT) { stopPolling(); setVideo({ status: 'failed', url: null, generatedAt: null, requestId: null }); toast.error('Video generation is taking too long. Please try again.'); return; }
+    try {
+      const res = await fetch(`/api/reports/opportunity-blind-spots/video?domainId=${selectedDomain}`);
+      const data = await res.json();
+      if (!data.success) return;
+      const v = data.video;
+      if (!v) return;
+      if (v.status === 'done' && v.url) { stopPolling(); setVideo({ status: 'done', url: v.url, generatedAt: v.generatedAt, requestId: null }); toast.success('Video report is ready!', { duration: 5000 }); }
+      else if (v.status === 'failed') { stopPolling(); setVideo({ status: 'failed', url: null, generatedAt: null, requestId: null }); toast.error('Video generation failed. Please try again.'); }
+    } catch (err) { console.error('Poll video status error:', err); }
+  };
+
+  const downloadVideo = async () => {
+    if (!video.url) return;
+    try {
+      const res = await fetch(video.url); const blob = await res.blob(); const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = blobUrl; a.download = `opportunity-video-${reportMeta?.domain || 'report'}-${Date.now()}.mp4`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(blobUrl); toast.success('Download started!');
+    } catch { window.open(video.url!, '_blank'); }
+  };
+
   const loadDomains = useCallback(async () => {
     try {
       setLoadingDomains(true);
@@ -135,6 +216,7 @@ export default function OpportunityBlindSpotsPage() {
       setHasAiVsGoogleReport(null);
       return;
     }
+    resetVideo();
     try {
       setLoadingData(true);
       setHasAiVsGoogleReport(null);
@@ -160,9 +242,17 @@ export default function OpportunityBlindSpotsPage() {
         }));
         setRows(tableRows);
         setUsingGapReport(true);
+        const d = data.data;
+        setReportMeta({ domain: d.domain || '', summary: d.summary, enginesUsed: d.enginesUsed || [], generatedAt: d.generatedAt });
+        if (d.videoStatus === 'done' && d.videoUrl) setVideo({ status: 'done', url: d.videoUrl, generatedAt: d.videoGeneratedAt, requestId: null });
+        else if (d.videoStatus === 'pending') setVideo({ status: 'pending', url: null, generatedAt: null, requestId: null });
+        else if (d.videoStatus === 'failed') setVideo({ status: 'failed', url: null, generatedAt: null, requestId: null });
+        else resetVideo();
       } else {
         setRows([]);
         setUsingGapReport(false);
+        setReportMeta(null);
+        resetVideo();
       }
     } catch (e) {
       toast.error('Failed to load report data');
@@ -200,7 +290,9 @@ export default function OpportunityBlindSpotsPage() {
         }));
         setRows(tableRows);
         setUsingGapReport(true);
-        toast.success('Report generated and saved.', { id: 'gen-opp' });
+        resetVideo();
+        setReportMeta({ domain: data.data.domain || '', summary: data.data.summary, enginesUsed: data.data.enginesUsed || [], generatedAt: data.data.generatedAt });
+        toast.success('Report generated and saved! Generate a video report to visualize your data.', { id: 'gen-opp' });
       } else {
         toast.error(data.error || 'Failed to generate report', { id: 'gen-opp' });
       }
@@ -401,6 +493,62 @@ export default function OpportunityBlindSpotsPage() {
             </div>
           )}
         </div>
+
+        {/* ========== VIDEO REPORT SECTION ========== */}
+        {rows.length > 0 && (
+          <div className="mb-6">
+            {video.status === 'idle' && (
+              <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-violet-600" /></div>
+                <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Video Report</h3><p className="text-sm text-gray-600 mt-0.5">Generate an AI-powered video presentation of this report — all charts, data, and insights visualized with professional animations, powered by xAI Aurora.</p></div>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideo} className="px-3 py-2.5 border border-violet-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[120px]" title="Video language">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                  <button onClick={generateVideoReport} disabled={generatingVideo} className="px-5 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 flex items-center gap-2 font-medium text-sm whitespace-nowrap"><Play className="w-4 h-4" />Generate Video Report</button>
+                </div>
+              </div>
+            )}
+            {video.status === 'pending' && (
+              <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6">
+                <div className="flex items-center gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Loader2 className="w-6 h-6 text-violet-600 animate-spin" /></div>
+                  <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Generating Video Report…</h3><p className="text-sm text-gray-600 mt-0.5">xAI Aurora is rendering your 15-second professional video. This typically takes <strong>2–8 minutes</strong>. We&apos;re checking automatically every 12 seconds.</p><div className="mt-3 flex items-center gap-2"><div className="flex gap-1"><span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} /><span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} /><span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} /></div><span className="text-xs text-violet-600">Scenes being rendered with all your data</span></div></div>
+                  <button onClick={pollVideoStatus} className="flex-shrink-0 px-4 py-2 bg-white text-violet-700 border border-violet-300 rounded-lg hover:bg-violet-50 flex items-center gap-2 text-sm font-medium"><RefreshCw className="w-4 h-4" />Check Now</button>
+                </div>
+              </div>
+            )}
+            {video.status === 'failed' && (
+              <div className="bg-red-50 rounded-xl border border-red-200 p-6 flex items-center gap-4">
+                <div className="flex-shrink-0 w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center"><XCircle className="w-6 h-6 text-red-600" /></div>
+                <div className="flex-1 min-w-0"><h3 className="font-semibold text-gray-900">Video Generation Failed</h3><p className="text-sm text-gray-600 mt-0.5">The video generation request expired or failed. Please try again.</p></div>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideo} className="px-3 py-2 border border-red-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[120px]" title="Video language">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                  <button onClick={generateVideoReport} disabled={generatingVideo} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center gap-2 text-sm font-medium"><RotateCcw className="w-4 h-4" />Retry</button>
+                </div>
+              </div>
+            )}
+            {video.status === 'done' && video.url && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3"><div className="w-12 h-12 bg-gradient-to-br from-violet-500 to-indigo-600 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-white" /></div><div><h3 className="font-semibold text-gray-900">Video Report</h3>{video.generatedAt && <p className="text-xs text-gray-500 mt-0.5">Generated {new Date(video.generatedAt).toLocaleString()}</p>}</div></div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={() => setShowVideoModal(true)} className="px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg hover:from-violet-700 hover:to-indigo-700 flex items-center gap-2 text-sm font-medium"><Play className="w-4 h-4" />Preview Video</button>
+                    <select value={videoLanguage} onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }} disabled={generatingVideo} className="px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[100px]" title="Video language for regeneration">{VIDEO_LANGUAGE_OPTIONS.map((opt) => <option key={opt.code} value={opt.code}>{opt.name}</option>)}</select>
+                    <button onClick={generateVideoReport} disabled={generatingVideo} className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50 flex items-center gap-1.5 text-sm font-medium"><RotateCcw className="w-4 h-4" />Regenerate</button>
+                    <button onClick={downloadVideo} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1.5 text-sm font-medium"><Download className="w-4 h-4" />Download</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {showVideoModal && video.url && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={() => setShowVideoModal(false)}>
+                <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50"><h3 className="font-semibold text-gray-900">Video Report</h3><div className="flex items-center gap-2"><button onClick={downloadVideo} className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg flex items-center gap-1.5"><Download className="w-4 h-4" />Download</button><button onClick={() => setShowVideoModal(false)} className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors" aria-label="Close"><X className="w-5 h-5" /></button></div></div>
+                  <div className="flex-1 min-h-0 bg-gray-950 flex items-center justify-center p-4"><video src={video.url} controls autoPlay className="max-w-full max-h-[calc(90vh-80px)]">Your browser does not support the video tag.</video></div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {loadingData ? (
           <div className="flex justify-center py-12">
