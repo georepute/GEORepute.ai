@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { supabase } from '@/lib/supabase/client';
 import { useLanguage } from "@/lib/language-context";
 import dynamic from "next/dynamic";
 import { 
@@ -64,7 +64,6 @@ type PublishPlatform = "shopify" | "wordpress" | "wordpress_self_hosted";
 
 function BlogPageContent() {
   const { isRtl, t, language } = useLanguage();
-  const supabase = createClientComponentClient();
   const router = useRouter();
   const searchParams = useSearchParams();
   

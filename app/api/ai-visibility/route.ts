@@ -1,7 +1,6 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { GoogleSearchConsoleService } from '@/lib/integrations/google-search-console'
 
 function computeNextScheduledAt(frequency: string): string | null {
@@ -17,7 +16,7 @@ function computeNextScheduledAt(frequency: string): string | null {
 // GET all AI visibility metrics for the authenticated user
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createServerSupabaseClient()
     
     const {
       data: { session },
@@ -44,7 +43,7 @@ export async function GET(request: NextRequest) {
 // POST - Run brand analysis and create AI visibility metrics
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createServerSupabaseClient()
     
     const {
       data: { session },

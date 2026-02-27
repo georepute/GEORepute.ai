@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { supabase } from '@/lib/supabase/client';
 import { useLanguage } from "@/lib/language-context";
 import { 
   Target,
@@ -50,7 +50,6 @@ interface MissedPromptAction {
 
 export default function MissedPromptsPage() {
   const { isRtl, t, language } = useLanguage();
-  const supabase = createClientComponentClient();
   const router = useRouter();
   
   const [projects, setProjects] = useState<Project[]>([]);

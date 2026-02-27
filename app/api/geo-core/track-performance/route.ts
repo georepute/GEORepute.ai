@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { trackQuoraPerformance, QuoraConfig } from "@/lib/integrations/quora";
 
 /**
@@ -15,7 +14,7 @@ import { trackQuoraPerformance, QuoraConfig } from "@/lib/integrations/quora";
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     
     // Check authentication
     const { data: { session }, error: authError } = await supabase.auth.getSession();

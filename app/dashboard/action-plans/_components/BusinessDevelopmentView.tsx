@@ -31,7 +31,7 @@ import {
   FileText,
   Play,
 } from "lucide-react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -358,7 +358,6 @@ const INTENT_COLORS: Record<string, string> = {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function BusinessDevelopmentView({ project, intelligenceData }: BusinessDevelopmentViewProps) {
-  const supabase = createClientComponentClient();
 
   const [markets, setMarkets] = useState<TargetMarket[]>([]);
   const [loading, setLoading] = useState(true);

@@ -1,6 +1,5 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 import type { NextRequest } from 'next/server'
 import { checkAIVisibility } from '@/lib/ai/geoCore'
 import { setProgress } from '@/lib/global-visibility-matrix/progress'
@@ -149,7 +148,7 @@ function checkDomainInSources(
 // POST - Check AI presence for countries
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createServerSupabaseClient()
     
     const {
       data: { session },

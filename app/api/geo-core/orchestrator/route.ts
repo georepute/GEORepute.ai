@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { publishToGitHub, GitHubConfig } from "@/lib/integrations/github";
 import { publishToReddit, RedditConfig, refreshRedditToken } from "@/lib/integrations/reddit";
 import { publishToMedium, MediumConfig } from "@/lib/integrations/medium";
@@ -19,7 +18,7 @@ import { publishToX, XConfig } from "@/lib/integrations/x";
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -173,7 +172,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

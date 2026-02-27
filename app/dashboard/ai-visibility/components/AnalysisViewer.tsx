@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { supabase } from '@/lib/supabase/client';
 import { 
   Play,
   CheckCircle,
@@ -33,7 +33,6 @@ interface AnalysisViewerProps {
 }
 
 export default function AnalysisViewer({ sessionId, projectId, onBack }: AnalysisViewerProps) {
-  const supabase = createClientComponentClient();
   const [sessions, setSessions] = useState<AnalysisSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<AnalysisSession | null>(null);
   const [detailedResults, setDetailedResults] = useState<any>(null);

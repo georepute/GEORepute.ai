@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
 import { getStrategicBlindSpotsStrings, getLangInstruction, LANGUAGE_NAMES } from "@/lib/video-report-translations";
 
@@ -182,7 +181,7 @@ async function downloadAndStoreVideo(
 // GET — return current video status/URL; if pending, poll xAI and finalize if ready
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -341,7 +340,7 @@ export async function GET(request: NextRequest) {
 // POST — start video generation via xAI Aurora
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

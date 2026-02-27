@@ -3,8 +3,7 @@
  * Handles OAuth response, exchanges code for tokens, and saves to database
  */
 
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { GoogleSearchConsoleService } from '@/lib/integrations/google-search-console';
@@ -81,7 +80,7 @@ export async function GET(request: NextRequest) {
     console.log('✅ Tokens obtained successfully');
 
     // Get authenticated user
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

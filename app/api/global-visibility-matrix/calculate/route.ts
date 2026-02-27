@@ -1,6 +1,5 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { createServerSupabaseClient } from '@/lib/supabase/server'
 import type { NextRequest } from 'next/server'
 import OpenAI from 'openai'
 import { setProgress, clearProgress, buildProgressKey } from '@/lib/global-visibility-matrix/progress'
@@ -304,7 +303,7 @@ function getMedian(values: number[]): number {
 // POST - Calculate global visibility matrix
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createServerSupabaseClient()
     
     const {
       data: { session },

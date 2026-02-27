@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { 
   Building2, 
   Globe, 
@@ -21,6 +22,7 @@ export default function OrganizationInfo() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState(false);
   const [orgData, setOrgData] = useState({
     name: "",
     description: "",
@@ -60,6 +62,10 @@ export default function OrganizationInfo() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    setLogoError(false);
+  }, [orgData.logo_url]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -231,17 +237,23 @@ export default function OrganizationInfo() {
             className="p-4 bg-gray-50 border border-gray-200 rounded-lg"
           >
             <p className="text-sm font-medium text-gray-700 mb-3">Logo Preview:</p>
-            <div className="flex items-center justify-center bg-white p-6 rounded-lg border border-gray-200">
-              <img 
-                src={orgData.logo_url} 
-                alt="Organization Logo" 
-                className="max-h-24 max-w-full object-contain"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.style.display = 'none';
-                  toast.error('Failed to load logo. Please check the URL.');
-                }}
-              />
+            <div className="relative flex items-center justify-center bg-white p-6 rounded-lg border border-gray-200 min-h-[6rem]">
+              {!logoError ? (
+                <Image
+                  src={orgData.logo_url}
+                  alt="Organization Logo"
+                  width={96}
+                  height={96}
+                  className="max-h-24 max-w-full object-contain"
+                  unoptimized
+                  onError={() => {
+                    setLogoError(true);
+                    toast.error("Failed to load logo. Please check the URL.");
+                  }}
+                />
+              ) : (
+                <Upload className="w-10 h-10 text-gray-400" aria-hidden />
+              )}
             </div>
           </motion.div>
         )}

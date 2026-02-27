@@ -23,45 +23,30 @@ export default function ImageUpload({
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const validateFile = (file: File): string | null => {
-    // Check file type
+  const validateFile = useCallback((file: File): string | null => {
     const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
     if (!validTypes.includes(file.type)) {
       return "Invalid file type. Please upload JPEG, PNG, or WebP images only.";
     }
-
-    // Check file size (convert MB to bytes)
     const maxSizeBytes = maxSizeMB * 1024 * 1024;
     if (file.size > maxSizeBytes) {
       return `File size exceeds ${maxSizeMB}MB limit. Please choose a smaller image.`;
     }
-
     return null;
-  };
+  }, [maxSizeMB]);
 
-  const uploadImage = async (file: File) => {
+  const uploadImage = useCallback(async (file: File) => {
     setUploading(true);
     setError(null);
-
     try {
-      // Create form data
       const formData = new FormData();
       formData.append("file", file);
-
-      // Upload to API
-      const response = await fetch("/api/upload-image", {
-        method: "POST",
-        body: formData,
-      });
-
+      const response = await fetch("/api/upload-image", { method: "POST", body: formData });
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || "Upload failed");
       }
-
       const data = await response.json();
-      
-      // Set preview and notify parent
       setPreview(data.url);
       onImageUploaded(data.url);
     } catch (err: any) {
@@ -70,7 +55,7 @@ export default function ImageUpload({
     } finally {
       setUploading(false);
     }
-  };
+  }, [onImageUploaded]);
 
   const handleFileSelect = useCallback(
     (file: File) => {
@@ -79,10 +64,9 @@ export default function ImageUpload({
         setError(validationError);
         return;
       }
-
       uploadImage(file);
     },
-    [maxSizeMB]
+    [validateFile, uploadImage]
   );
 
   const handleDrop = useCallback(

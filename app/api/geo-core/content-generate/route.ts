@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { generateStrategicContent } from "@/lib/ai/geoCore";
 import { applyLearningRules } from "@/lib/learning/rulesEngine";
 import { generatePlatformSchema, schemaToScriptTag } from "@/lib/seo/schemaGenerator";
@@ -9,7 +8,7 @@ import { generatePlatformStructuredContent } from "@/lib/seo/structuredContent";
 export async function POST(request: NextRequest) {
   try {
     // Auth check
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -620,7 +619,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Auth check
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

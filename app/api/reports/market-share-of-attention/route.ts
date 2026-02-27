@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 // Weighted position scoring: 1st mention = 3pts, 2nd = 2pts, 3rd = 1pt
 function positionPoints(position: number | null): number {
@@ -313,7 +312,7 @@ async function resolveProjectByDomainId(
 // ── GET: return domains with project link + data status + saved report ────────
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -551,7 +550,7 @@ export async function GET(request: NextRequest) {
 // ── POST: generate new report ───────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

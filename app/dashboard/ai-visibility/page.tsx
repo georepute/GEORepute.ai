@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { supabase } from '@/lib/supabase/client';
 import { useLanguage } from "@/lib/language-context";
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -172,7 +172,6 @@ const normalizeUrl = (url: string) => {
 
 function AIVisibilityContent() {
   const { isRtl, t, language } = useLanguage();
-  const supabase = createClientComponentClient();
   const router = useRouter();
   const searchParams = useSearchParams();
   

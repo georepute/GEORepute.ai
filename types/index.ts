@@ -10,12 +10,25 @@ export interface User {
 }
 
 // Organization Types
+export interface WhiteLabelConfig {
+  companyName?: string;
+  customDomain?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  agencyFooter?: string;
+  poweredByEnabled?: boolean;
+  disclaimerText?: string;
+  customCSS?: string;
+}
+
 export interface Organization {
   id: string;
   name: string;
   description?: string;
   website?: string;
   logo_url?: string;
+  white_label_config?: WhiteLabelConfig | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -135,17 +148,6 @@ export interface Notification {
   message: string;
   read: boolean;
   createdAt: Date;
-}
-
-// White Label Config
-export interface WhiteLabelConfig {
-  id: string;
-  domain: string;
-  logoUrl?: string;
-  primaryColor: string;
-  secondaryColor: string;
-  companyName: string;
-  customCSS?: string;
 }
 
 // Subscription

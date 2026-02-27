@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "@/lib/supabase/client";
 import { useLanguage } from "@/lib/language-context";
 import { 
   FileText, 
@@ -69,7 +69,6 @@ function ContentInner() {
   const { isRtl, t, language } = useLanguage();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const supabase = createClientComponentClient();
   const [activeTab, setActiveTab] = useState<"all" | "draft" | "review" | "scheduled" | "published">("all");
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);

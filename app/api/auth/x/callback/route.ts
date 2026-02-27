@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getXCurrentUser } from "@/lib/integrations/x";
 
 const X_TOKEN_URL = "https://api.x.com/2/oauth2/token";
@@ -8,7 +8,7 @@ const PKCE_COOKIE_NAME = "x_oauth_pkce";
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDateDaysAgo, getSearchConsoleSiteUrl } from '@/lib/integrations/google-search-console';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { google } from 'googleapis';
 import { normalizeCountryForMerge } from '@/lib/utils/countryMerge';
 
@@ -57,7 +56,7 @@ function deduplicateGscAnalytics(rows: GscAnalyticsRowInput[]): GscAnalyticsRow[
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
 
     if (!session) {
@@ -439,7 +438,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
 
     if (!session) {

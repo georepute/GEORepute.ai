@@ -22,7 +22,7 @@ import {
   ExternalLink,
   Zap,
 } from "lucide-react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "@/lib/supabase/client";
 import toast from "react-hot-toast";
 import Button from "@/components/Button";
 import Card from "@/components/Card";
@@ -169,7 +169,6 @@ export interface CompetitorResearchViewProps {
 
 export function CompetitorResearchView({ project, intelligenceData }: CompetitorResearchViewProps) {
   const router = useRouter();
-  const supabase = createClientComponentClient();
   const { language: appLanguage } = useLanguage();
 
   const [entries, setEntries] = useState<CompetitorEntry[]>([{ ...EMPTY_ENTRY }]);

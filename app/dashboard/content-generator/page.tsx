@@ -33,11 +33,10 @@ import Card from "@/components/Card";
 import toast from "react-hot-toast";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "@/lib/supabase/client";
 import { useLanguage } from "@/lib/language-context";
 
 function ContentGeneratorPageInner() {
-  const supabase = createClientComponentClient();
   const { t, isRtl } = useLanguage();
   const cg = t.dashboard.contentGeneratorPage;
   const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he">("en");

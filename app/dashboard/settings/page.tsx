@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useLanguage } from "@/lib/language-context";
+import { supabase } from "@/lib/supabase/client";
+import { getUserOrganizations, updateOrganization } from "@/lib/organizations";
 
 export default function Settings() {
   const { isRtl, t } = useLanguage();
@@ -47,6 +49,20 @@ export default function Settings() {
   const [showVoiceForm, setShowVoiceForm] = useState(false);
   const [editingVoice, setEditingVoice] = useState<any>(null);
   const [savingVoice, setSavingVoice] = useState(false);
+
+  // White-label: persisted to organizations.white_label_config
+  const [whiteLabelOrgId, setWhiteLabelOrgId] = useState<string | null>(null);
+  const [whiteLabelCompanyName, setWhiteLabelCompanyName] = useState("");
+  const [whiteLabelCustomDomain, setWhiteLabelCustomDomain] = useState("");
+  const [whiteLabelLogoUrl, setWhiteLabelLogoUrl] = useState("");
+  const [whiteLabelPrimaryColor, setWhiteLabelPrimaryColor] = useState("#0ea5e9");
+  const [whiteLabelSecondaryColor, setWhiteLabelSecondaryColor] = useState("#d946ef");
+  const [whiteLabelAgencyFooter, setWhiteLabelAgencyFooter] = useState("");
+  const [whiteLabelPoweredBy, setWhiteLabelPoweredBy] = useState(true);
+  const [whiteLabelDisclaimer, setWhiteLabelDisclaimer] = useState("");
+  const [whiteLabelCustomCSS, setWhiteLabelCustomCSS] = useState("");
+  const [whiteLabelLoading, setWhiteLabelLoading] = useState(false);
+  const [whiteLabelSaving, setWhiteLabelSaving] = useState(false);
   
   // Form States for Brand Voice
   const [voiceBrandName, setVoiceBrandName] = useState("");
@@ -117,6 +133,33 @@ export default function Settings() {
     if (activeTab === "brand-voice") {
       loadBrandVoices();
     }
+  }, [activeTab]);
+
+  // Load white-label config when white-label tab is active
+  useEffect(() => {
+    if (activeTab !== "white-label") return;
+    let cancelled = false;
+    setWhiteLabelLoading(true);
+    getUserOrganizations()
+      .then((res) => {
+        if (cancelled || !res.success || !res.organizations?.length) return;
+        const first = res.organizations[0];
+        const org = first?.organization as { id: string; name?: string; logo_url?: string; white_label_config?: Record<string, unknown> } | undefined;
+        if (!org?.id) return;
+        setWhiteLabelOrgId(org.id);
+        const wl = (org.white_label_config || {}) as Record<string, unknown>;
+        setWhiteLabelCompanyName((wl.companyName as string) ?? org.name ?? "GeoRepute");
+        setWhiteLabelCustomDomain((wl.customDomain as string) ?? "");
+        setWhiteLabelLogoUrl((wl.logoUrl as string) ?? org.logo_url ?? "");
+        setWhiteLabelPrimaryColor((wl.primaryColor as string) ?? "#0ea5e9");
+        setWhiteLabelSecondaryColor((wl.secondaryColor as string) ?? "#d946ef");
+        setWhiteLabelAgencyFooter((wl.agencyFooter as string) ?? "");
+        setWhiteLabelPoweredBy((wl.poweredByEnabled as boolean) ?? true);
+        setWhiteLabelDisclaimer((wl.disclaimerText as string) ?? "");
+        setWhiteLabelCustomCSS((wl.customCSS as string) ?? "");
+      })
+      .finally(() => { if (!cancelled) setWhiteLabelLoading(false); });
+    return () => { cancelled = true; };
   }, [activeTab]);
 
   const handleSave = () => {
@@ -740,96 +783,201 @@ export default function Settings() {
             {activeTab === "white-label" && (
               <div>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">White Label Configuration</h2>
-                <p className="text-gray-600 mb-6">Customize branding for your agency</p>
+                <p className="text-gray-600 mb-6">Customize branding for proposals and reports. Saved to your organization.</p>
 
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Company Name
-                    </label>
-                    <input
-                      type="text"
-                      defaultValue="GeoRepute"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-                    />
+                {whiteLabelLoading ? (
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Loading…
                   </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Company Name
+                      </label>
+                      <input
+                        type="text"
+                        value={whiteLabelCompanyName}
+                        onChange={(e) => setWhiteLabelCompanyName(e.target.value)}
+                        placeholder="GeoRepute"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                      />
+                    </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Custom Domain
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="dashboard.yourcompany.com"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">
-                      Configure your DNS to point to our servers
-                    </p>
-                  </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Custom Domain
+                      </label>
+                      <input
+                        type="text"
+                        value={whiteLabelCustomDomain}
+                        onChange={(e) => setWhiteLabelCustomDomain(e.target.value)}
+                        placeholder="dashboard.yourcompany.com"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                      />
+                      <p className="text-sm text-gray-500 mt-1">
+                        Configure your DNS to point to our servers
+                      </p>
+                    </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      Logo
-                    </label>
-                    <div className="flex items-center gap-4">
-                      <div className="w-32 h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center">
-                        <Upload className="w-8 h-8 text-gray-400" />
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Logo URL
+                      </label>
+                      <input
+                        type="url"
+                        value={whiteLabelLogoUrl}
+                        onChange={(e) => setWhiteLabelLogoUrl(e.target.value)}
+                        placeholder="https://…"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                      />
+                      {whiteLabelLogoUrl && (
+                        <div className="mt-2 w-24 h-24 border border-gray-200 rounded-lg overflow-hidden bg-gray-50 flex items-center justify-center">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={whiteLabelLogoUrl} alt="Logo" className="max-w-full max-h-full object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Primary Color
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="color"
+                            value={whiteLabelPrimaryColor}
+                            onChange={(e) => setWhiteLabelPrimaryColor(e.target.value)}
+                            className="h-12 w-20 border border-gray-300 rounded-lg cursor-pointer"
+                          />
+                          <input
+                            type="text"
+                            value={whiteLabelPrimaryColor}
+                            onChange={(e) => setWhiteLabelPrimaryColor(e.target.value)}
+                            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                          />
+                        </div>
                       </div>
-                      <button className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                        Upload Logo
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Secondary Color
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="color"
+                            value={whiteLabelSecondaryColor}
+                            onChange={(e) => setWhiteLabelSecondaryColor(e.target.value)}
+                            className="h-12 w-20 border border-gray-300 rounded-lg cursor-pointer"
+                          />
+                          <input
+                            type="text"
+                            value={whiteLabelSecondaryColor}
+                            onChange={(e) => setWhiteLabelSecondaryColor(e.target.value)}
+                            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Agency Footer (e.g. “Prepared by Acme Agency”)
+                      </label>
+                      <input
+                        type="text"
+                        value={whiteLabelAgencyFooter}
+                        onChange={(e) => setWhiteLabelAgencyFooter(e.target.value)}
+                        placeholder="Prepared by Your Agency"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        id="wl-powered-by"
+                        checked={whiteLabelPoweredBy}
+                        onChange={(e) => setWhiteLabelPoweredBy(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-primary-600"
+                      />
+                      <label htmlFor="wl-powered-by" className="text-sm font-medium text-gray-700">
+                        Show “Powered by GEORepute” on proposals
+                      </label>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Custom Disclaimer (proposals)
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={whiteLabelDisclaimer}
+                        onChange={(e) => setWhiteLabelDisclaimer(e.target.value)}
+                        placeholder="This proposal is based on publicly available data…"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Custom CSS (Advanced)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={whiteLabelCustomCSS}
+                        onChange={(e) => setWhiteLabelCustomCSS(e.target.value)}
+                        placeholder="/* Add your custom CSS here */"
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none font-mono text-sm"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!whiteLabelOrgId) {
+                            toast.error("No organization found");
+                            return;
+                          }
+                          setWhiteLabelSaving(true);
+                          try {
+                            const hexToRgb = (hex: string) => {
+                              const m = hex.replace(/^#/, "").match(/^(..)(..)(..)$/);
+                              if (!m) return undefined;
+                              return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+                            };
+                            const { success, error } = await updateOrganization(whiteLabelOrgId, {
+                              white_label_config: {
+                                companyName: whiteLabelCompanyName || undefined,
+                                customDomain: whiteLabelCustomDomain || undefined,
+                                logoUrl: whiteLabelLogoUrl || undefined,
+                                primaryColor: whiteLabelPrimaryColor || undefined,
+                                secondaryColor: whiteLabelSecondaryColor || undefined,
+                                agencyFooter: whiteLabelAgencyFooter || undefined,
+                                poweredByEnabled: whiteLabelPoweredBy,
+                                disclaimerText: whiteLabelDisclaimer || undefined,
+                                customCSS: whiteLabelCustomCSS || undefined,
+                              } as any,
+                            });
+                            if (success) toast.success("White label settings saved");
+                            else toast.error(error || "Failed to save");
+                          } catch (e) {
+                            toast.error("Failed to save");
+                          } finally {
+                            setWhiteLabelSaving(false);
+                          }
+                        }}
+                        disabled={whiteLabelSaving}
+                        className="px-6 py-2.5 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {whiteLabelSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                        Save White Label
                       </button>
                     </div>
                   </div>
-
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Primary Color
-                      </label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="color"
-                          defaultValue="#0ea5e9"
-                          className="h-12 w-20 border border-gray-300 rounded-lg cursor-pointer"
-                        />
-                        <input
-                          type="text"
-                          defaultValue="#0ea5e9"
-                          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Secondary Color
-                      </label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="color"
-                          defaultValue="#d946ef"
-                          className="h-12 w-20 border border-gray-300 rounded-lg cursor-pointer"
-                        />
-                        <input
-                          type="text"
-                          defaultValue="#d946ef"
-                          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Custom CSS (Advanced)
-                    </label>
-                    <textarea
-                      rows={6}
-                      placeholder="/* Add your custom CSS here */"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none font-mono text-sm"
-                    />
-                  </div>
-                </div>
+                )}
               </div>
             )}
 

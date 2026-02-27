@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { google } from 'googleapis';
 import { getKeywordCpcFromGoogleAds } from '@/lib/google-ads/keyword-ideas';
 
@@ -33,7 +32,7 @@ function getOpportunityNote(demand: number, gap: GapType): string {
 /** GET — Load saved Opportunity report from Supabase */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -84,7 +83,7 @@ export async function GET(request: NextRequest) {
 /** POST — Generate report: AI vs Google Gap + CPC from Google Ads, save to Supabase */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

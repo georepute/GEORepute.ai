@@ -1,11 +1,10 @@
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { generateAnnualStrategicPlan } from "@/lib/ai/geoCore";
 
 // ─── GET: load stored annual plan for a project ───────────────────────────────
 export async function GET(request: Request) {
-  const supabase = createRouteHandlerClient({ cookies });
+  const supabase = createServerSupabaseClient();
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -31,7 +30,7 @@ export async function GET(request: Request) {
 
 // ─── POST: generate + save annual plan ───────────────────────────────────────
 export async function POST(request: Request) {
-  const supabase = createRouteHandlerClient({ cookies });
+  const supabase = createServerSupabaseClient();
   const {
     data: { session },
   } = await supabase.auth.getSession();

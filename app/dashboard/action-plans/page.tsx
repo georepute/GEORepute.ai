@@ -35,7 +35,7 @@ import {
   Flag,
   Search,
 } from "lucide-react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { supabase } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useLanguage } from "@/lib/language-context";
 import Button from "@/components/Button";
@@ -151,7 +151,6 @@ const PLATFORMS = [
 
 export default function ActionPlansPage() {
   const router = useRouter();
-  const supabase = createClientComponentClient();
   const { language, t } = useLanguage();
 
   // Tab state

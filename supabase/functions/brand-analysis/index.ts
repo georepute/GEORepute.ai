@@ -2096,7 +2096,12 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
               analysis_result: analysisResult
             });
           } else {
-            console.error('Website analysis failed:', await analyzeResponse.text());
+            const errText = await analyzeResponse.text();
+            if (analyzeResponse.status === 404 || (errText && errText.includes('NOT_FOUND'))) {
+              console.warn('analyze-content function not deployed (404/NOT_FOUND), skipping website analysis');
+            } else {
+              console.error('Website analysis failed:', errText);
+            }
           }
         } catch (analysisError) {
           console.error('Error during website analysis:', analysisError);
@@ -2897,7 +2902,12 @@ Deno.serve(async (req) => {
                 analysis_result: analysisResult
               });
             } else {
-              console.error('Website analysis failed:', await analyzeResponse.text());
+              const errText = await analyzeResponse.text();
+              if (analyzeResponse.status === 404 || (errText && errText.includes('NOT_FOUND'))) {
+                console.warn('analyze-content function not deployed (404/NOT_FOUND), skipping website analysis');
+              } else {
+                console.error('Website analysis failed:', errText);
+              }
             }
           } catch (analysisError) {
             console.error('Error during website analysis:', analysisError);
