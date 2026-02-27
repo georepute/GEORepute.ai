@@ -84,7 +84,7 @@ async function downloadAndStoreVideo(xaiVideoUrl: string, userId: string, domain
 }
 
 // Same pattern as ai-search-presence: select then update or insert (avoids upsert issues with partial unique indexes)
-async function getVideoRecord(supabase: { from: (table: string) => unknown }, userId: string, domainId: string) {
+async function getVideoRecord(supabase: any, userId: string, domainId: string) {
   const { data, error } = await supabase
     .from("report_videos")
     .select("id, video_url, video_request_id, video_status, video_generated_at, video_requested_at")
@@ -96,10 +96,10 @@ async function getVideoRecord(supabase: { from: (table: string) => unknown }, us
   return { data, error };
 }
 
-async function upsertVideoRecord(supabase: { from: (table: string) => unknown },
+async function upsertVideoRecord(supabase: any,
   userId: string,
   domainId: string,
-  updates: Record<string, unknown>
+  updates: Record<string, any>
 ) {
   const { data: existing } = await getVideoRecord(supabase, userId, domainId);
   if (existing?.id) {
