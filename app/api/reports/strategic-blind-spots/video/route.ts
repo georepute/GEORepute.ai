@@ -181,7 +181,7 @@ async function downloadAndStoreVideo(
 // GET — return current video status/URL; if pending, poll xAI and finalize if ready
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -340,7 +340,7 @@ export async function GET(request: NextRequest) {
 // POST — start video generation via xAI Aurora
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

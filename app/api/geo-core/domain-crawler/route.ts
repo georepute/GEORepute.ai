@@ -5,7 +5,7 @@ import * as cheerio from "cheerio";
 // Playwright crawler - crawls up to 20 pages and extracts keywords
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

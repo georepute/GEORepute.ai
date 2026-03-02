@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
     console.log('✅ Tokens obtained successfully');
 
     // Get authenticated user
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

@@ -47,8 +47,8 @@ export default function RoleSelection() {
         .single();
 
       if (profile?.role) {
-        // User already has a role, redirect to AI Visibility page
-        router.push("/dashboard/ai-visibility");
+        // User already has a role, redirect to dashboard (portal home)
+        router.push("/dashboard");
       } else {
         // Automatically show agency form for new users
         setShowAgencyForm(true);

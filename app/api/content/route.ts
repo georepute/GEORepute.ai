@@ -5,7 +5,7 @@ import type { NextRequest } from 'next/server'
 // GET all content for the authenticated user
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
+    const supabase = await createServerSupabaseClient()
     
     const {
       data: { session },
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 // POST - Create new content
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
+    const supabase = await createServerSupabaseClient()
     
     const {
       data: { session },

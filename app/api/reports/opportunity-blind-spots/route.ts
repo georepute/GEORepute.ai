@@ -32,7 +32,7 @@ function getOpportunityNote(demand: number, gap: GapType): string {
 /** GET — Load saved Opportunity report from Supabase */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
 /** POST — Generate report: AI vs Google Gap + CPC from Google Ads, save to Supabase */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

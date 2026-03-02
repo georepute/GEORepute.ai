@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
 
     // Persist suggestions to ai_platform_responses.gap_suggestion when project_id is provided
     if (projectId && suggestions.length > 0) {
-      const supabase = createServerSupabaseClient();
+      const supabase = await createServerSupabaseClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

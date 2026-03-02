@@ -102,6 +102,7 @@ export default function DashboardLayout({
   };
 
   const allNavigation: NavigationItem[] = [
+    { name: t.dashboard.sidebar.dashboard, href: "/dashboard", icon: LayoutDashboard, requiredCapability: undefined },
     { name: t.dashboard.sidebar.domainManagement, href: "/dashboard/domains", icon: Server, requiredCapability: "canManageSettings" },
     { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
     { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },

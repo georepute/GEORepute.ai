@@ -6,7 +6,7 @@ import { applyLearningRules } from "@/lib/learning/rulesEngine";
 export async function POST(request: NextRequest) {
   try {
     // Auth check
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Auth check
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

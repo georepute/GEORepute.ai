@@ -4,7 +4,7 @@ import { generateAnnualStrategicPlan } from "@/lib/ai/geoCore";
 
 // ─── GET: load stored annual plan for a project ───────────────────────────────
 export async function GET(request: Request) {
-  const supabase = createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
 
 // ─── POST: generate + save annual plan ───────────────────────────────────────
 export async function POST(request: Request) {
-  const supabase = createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient();
   const {
     data: { session },
   } = await supabase.auth.getSession();

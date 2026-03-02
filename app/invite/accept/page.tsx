@@ -110,7 +110,7 @@ function AcceptInvitationInner() {
 
       // Redirect to AI Visibility page after 2 seconds
       setTimeout(() => {
-        router.push('/dashboard/ai-visibility');
+        router.push('/dashboard');
       }, 2000);
 
     } catch (err: any) {

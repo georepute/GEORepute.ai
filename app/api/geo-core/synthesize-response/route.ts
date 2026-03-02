@@ -48,7 +48,7 @@ interface SynthesizeRequest {
 export async function POST(request: NextRequest) {
   try {
     // Auth check
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get the authenticated user using the proper auth helper
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
