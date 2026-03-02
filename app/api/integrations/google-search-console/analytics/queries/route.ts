@@ -6,6 +6,9 @@ import { cookies } from 'next/headers';
  * GET /api/integrations/google-search-console/analytics/queries
  * Get top queries for a domain
  */
+
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

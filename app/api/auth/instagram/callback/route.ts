@@ -10,6 +10,8 @@ import { getUserPages } from "@/lib/integrations/facebook";
  * Gets user's Facebook Pages, finds Instagram Business Account, and saves to Supabase
  */
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

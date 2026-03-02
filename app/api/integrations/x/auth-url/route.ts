@@ -14,6 +14,9 @@ function base64UrlEncode(buffer: Buffer): string {
 /**
  * GET - Get X (Twitter) OAuth 2.0 authorization URL with PKCE
  */
+
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

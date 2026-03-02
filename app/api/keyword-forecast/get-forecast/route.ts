@@ -4,6 +4,8 @@ import { cookies } from 'next/headers';
 import { google } from 'googleapis';
 import { getKeywordCpcFromGoogleAds } from '@/lib/google-ads/keyword-ideas';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);

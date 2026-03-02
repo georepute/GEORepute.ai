@@ -456,6 +456,8 @@ function generateDecisionLogic(scores: IntelligenceScores): {
   return { priorities, focusAreas, quarterlyThemes };
 }
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

@@ -9,6 +9,8 @@ import { cookies } from "next/headers";
  * Gets user info and saves to Supabase
  */
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = 'force-dynamic';
+
 /**
  * GET - Get Google Analytics 4 OAuth authorization URL
  */

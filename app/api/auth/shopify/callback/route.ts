@@ -8,6 +8,8 @@ import { exchangeShopifyCode, verifyShopifyConnection } from "@/lib/integrations
  * Handles the OAuth redirect from Shopify after user authorization
  */
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);

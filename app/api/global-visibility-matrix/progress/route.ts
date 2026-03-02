@@ -7,6 +7,9 @@ import { getProgress, buildProgressKey } from '@/lib/global-visibility-matrix/pr
  * GET /api/global-visibility-matrix/progress?domainId=xxx
  * Returns current calculation progress for the authenticated user's domain.
  */
+
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

@@ -5,6 +5,9 @@ import { cookies } from 'next/headers';
 /**
  * GET - Fetch user's Google Maps businesses (unique places)
  */
+
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

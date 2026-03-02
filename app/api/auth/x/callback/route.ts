@@ -6,6 +6,8 @@ import { getXCurrentUser } from "@/lib/integrations/x";
 const X_TOKEN_URL = "https://api.x.com/2/oauth2/token";
 const PKCE_COOKIE_NAME = "x_oauth_pkce";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

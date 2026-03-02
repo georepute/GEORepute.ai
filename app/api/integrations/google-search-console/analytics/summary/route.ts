@@ -6,6 +6,9 @@ import { cookies } from 'next/headers';
  * GET /api/integrations/google-search-console/analytics/summary
  * Get summary statistics for a domain
  */
+
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

@@ -8,6 +8,8 @@ import { exchangeWordPressCode, verifyWordPressConnection, getWordPressSites } f
  * Handles the OAuth redirect from WordPress.com after user authorization
  */
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);

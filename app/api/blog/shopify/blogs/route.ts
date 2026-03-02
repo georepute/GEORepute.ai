@@ -6,6 +6,9 @@ import { getShopifyBlogs } from "@/lib/integrations/shopify";
 /**
  * GET: Fetch available blogs from connected Shopify store
  */
+
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies });

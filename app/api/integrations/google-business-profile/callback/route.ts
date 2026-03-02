@@ -12,6 +12,9 @@ import { GoogleBusinessProfileService } from '@/lib/integrations/google-business
 /**
  * GET - OAuth callback handler
  */
+
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
