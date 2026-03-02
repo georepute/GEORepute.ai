@@ -303,7 +303,7 @@ function getMedian(values: number[]): number {
 // POST - Calculate global visibility matrix
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
+    const supabase = await createServerSupabaseClient()
     
     const {
       data: { session },

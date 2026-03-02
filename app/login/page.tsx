@@ -1,17 +1,18 @@
 "use client";
 
+import { Suspense, useState } from "react";
 import { motion } from "framer-motion";
-import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/LanguageToggle";
 
-export default function Login() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isRtl, t } = useLanguage();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -38,14 +39,13 @@ export default function Login() {
 
       if (signInError) throw signInError;
 
-      // Redirect to AI Visibility page on success
+      // Redirect on success: use redirect param if present, otherwise dashboard (portal home)
       if (data.session) {
-        // Auth-helpers automatically handle cookies, but we need to refresh the router
         router.refresh();
-        // Small delay to ensure router is refreshed
         await new Promise(resolve => setTimeout(resolve, 100));
-        // Use router.push for proper Next.js navigation
-        router.push("/dashboard/ai-visibility");
+        const redirectTo = searchParams.get("redirect");
+        const target = redirectTo && redirectTo.startsWith("/") ? redirectTo : "/dashboard";
+        router.push(target);
         return; // Don't set loading to false, we're redirecting
       }
     } catch (err: any) {
@@ -334,6 +334,18 @@ export default function Login() {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+export default function Login() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 flex items-center justify-center">
+        <div className="animate-pulse text-gray-500">Loading...</div>
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }
 

@@ -7,7 +7,7 @@ type RiskAccelerationLevel = "HIGH" | "MEDIUM" | "LOW";
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

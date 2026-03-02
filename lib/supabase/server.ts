@@ -1,9 +1,9 @@
-import { createServerClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 
 /**
  * Create a Supabase client for server-side use (Route Handlers, Server Components, Server Actions).
- * Uses createServerClient from @supabase/auth-helpers-nextjs with Next.js cookie store.
+ * Uses createServerClient from @supabase/ssr with Next.js cookie store.
  */
 export function createServerSupabaseClient() {
   const cookieStore = cookies()

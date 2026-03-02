@@ -10,7 +10,7 @@ import { sendWelcomeEmail } from '@/lib/email';
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser();

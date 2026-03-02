@@ -312,7 +312,7 @@ async function resolveProjectByDomainId(
 // ── GET: return domains with project link + data status + saved report ────────
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -550,7 +550,7 @@ export async function GET(request: NextRequest) {
 // ── POST: generate new report ───────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

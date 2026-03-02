@@ -4,7 +4,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 // GET: Fetch all brand voice profiles for the authenticated user
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
 // POST: Create a new brand voice profile
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
 // PATCH: Update an existing brand voice profile
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -190,7 +190,7 @@ export async function PATCH(request: NextRequest) {
 // DELETE: Delete a brand voice profile
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

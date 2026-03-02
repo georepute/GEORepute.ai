@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get the authenticated user using the proper auth helper
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     if (authError || !user) {

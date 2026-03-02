@@ -18,7 +18,7 @@ function base64UrlEncode(buffer: Buffer): string {
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

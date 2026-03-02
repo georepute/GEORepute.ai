@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     // Get the authenticated user using the proper auth helper
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const {
       data: { session },
     } = await supabase.auth.getSession();

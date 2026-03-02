@@ -61,7 +61,7 @@ function OnboardingContent() {
             .limit(1);
           if (completedJobs && completedJobs.length > 0) {
             console.log('User has completed onboarding (has completed domain scan), redirecting to dashboard');
-            router.push("/dashboard/ai-visibility");
+            router.push("/dashboard");
             return;
           }
         } catch (_) {

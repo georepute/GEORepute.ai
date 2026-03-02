@@ -5,7 +5,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 export async function POST(request: NextRequest) {
   try {
     // Get authenticated user
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
     if (authError || !user) {

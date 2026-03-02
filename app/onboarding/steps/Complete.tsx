@@ -23,7 +23,7 @@ export default function Complete() {
 
   const handleFinish = () => {
     skipOnboarding();
-    router.push("/dashboard/ai-visibility");
+    router.push("/dashboard");
   };
 
   return (

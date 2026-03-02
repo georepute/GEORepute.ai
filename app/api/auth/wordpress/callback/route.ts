@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabase = createServerSupabaseClient();
+    const supabase = await createServerSupabaseClient();
 
     // Get current user session
     const {

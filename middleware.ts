@@ -1,9 +1,9 @@
-import { createServerClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function middleware(req: NextRequest) {
-  const res = NextResponse.next()
+  let res = NextResponse.next({ request: req })
 
   try {
     const supabase = createServerClient(
@@ -15,6 +15,8 @@ export async function middleware(req: NextRequest) {
             return req.cookies.getAll()
           },
           setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value))
+            res = NextResponse.next({ request: req })
             cookiesToSet.forEach(({ name, value, options }) => res.cookies.set(name, value, options))
           },
         },
@@ -35,6 +37,11 @@ export async function middleware(req: NextRequest) {
       redirectUrl.searchParams.set('redirect', req.nextUrl.pathname)
       return NextResponse.redirect(redirectUrl)
     }
+
+    // Redirect authenticated users from root to dashboard (portal home)
+    if (session && req.nextUrl.pathname === '/') {
+      return NextResponse.redirect(new URL('/dashboard', req.nextUrl.origin))
+    }
   } catch (e) {
     console.error('Middleware error:', e)
   }
@@ -43,5 +50,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*'],
+  matcher: ['/', '/dashboard/:path*'],
 }
