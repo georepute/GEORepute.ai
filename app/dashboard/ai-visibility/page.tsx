@@ -406,6 +406,7 @@ function AIVisibilityContent() {
             href={url}
             target="_blank"
             rel="noopener noreferrer"
+            title={domain || brandDomain}
             className={`${isBrand ? 'font-semibold text-purple-700' : 'text-gray-900'} hover:underline`}
           >
             {name}
@@ -4556,10 +4557,17 @@ function AIVisibilityContent() {
                         <h3 className="text-lg font-semibold text-gray-900 mb-3">All Competitors ({results.competitors.all.length})</h3>
                         <div className="space-y-2">
                           {results.competitors.all.map((competitor: string | { name: string; domain?: string }, idx: number) => {
-                            const competitorName = typeof competitor === 'string' ? competitor : competitor.name;
+                            const { name: competitorName, domain: competitorDomain } = typeof competitor === 'string' ? { name: competitor, domain: undefined } : { name: competitor.name, domain: competitor.domain };
+                            const url = competitorDomain ? (competitorDomain.startsWith('http') ? competitorDomain : `https://${competitorDomain}`) : null;
                             return (
                               <div key={idx} className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                                <span className="text-gray-900 font-medium">{competitorName}</span>
+                                {url ? (
+                                  <a href={url} target="_blank" rel="noopener noreferrer" title={competitorDomain} className="text-gray-900 font-medium hover:underline">
+                                    {competitorName}
+                                  </a>
+                                ) : (
+                                  <span className="text-gray-900 font-medium">{competitorName}</span>
+                                )}
                               </div>
                             );
                           })}
@@ -4570,10 +4578,17 @@ function AIVisibilityContent() {
                           <h3 className="text-lg font-semibold text-gray-900 mb-3">Organic Competitors ({results.competitors.organic.length})</h3>
                           <div className="space-y-2">
                             {results.competitors.organic.map((competitor: string | { name: string; domain?: string }, idx: number) => {
-                              const competitorName = typeof competitor === 'string' ? competitor : competitor.name;
+                              const { name: competitorName, domain: competitorDomain } = typeof competitor === 'string' ? { name: competitor, domain: undefined } : { name: competitor.name, domain: competitor.domain };
+                              const url = competitorDomain ? (competitorDomain.startsWith('http') ? competitorDomain : `https://${competitorDomain}`) : null;
                               return (
                                 <div key={idx} className="p-3 bg-blue-50 rounded-lg">
-                                  <span className="text-blue-900 font-medium">{competitorName}</span>
+                                  {url ? (
+                                    <a href={url} target="_blank" rel="noopener noreferrer" title={competitorDomain} className="text-blue-900 font-medium hover:underline">
+                                      {competitorName}
+                                    </a>
+                                  ) : (
+                                    <span className="text-blue-900 font-medium">{competitorName}</span>
+                                  )}
                                 </div>
                               );
                             })}

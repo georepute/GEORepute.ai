@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getIndustryBenchmark } from "@/lib/quote-builder/industry-benchmarks";
 
-const MANDATORY_DISCLAIMER =
-  "This proposal is based on publicly available data and comparative market benchmarks. It does not represent official search engine metrics and does not imply algorithm influence or guaranteed results.";
+const MANDATORY_DISCLAIMER = "";
 
 export async function GET(request: NextRequest) {
   try {

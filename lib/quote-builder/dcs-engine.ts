@@ -37,7 +37,7 @@ export interface DCSResult {
   distanceToSafetyZone: number;   // 70 - DCS
   distanceToDominanceZone: number; // 85 - DCS
   industryAverage: number;
-  competitorComparison?: { name: string; score: number }[];
+  competitorComparison?: { name: string; domain?: string; score: number }[];
 }
 
 export interface DCSContext {
@@ -53,7 +53,7 @@ export interface DCSContext {
   googleMapsReviews: { place_rating?: number; place_reviews_total?: number; reviews_data?: any[] }[];
   websiteAnalysis: { analysis_result?: any }[];
   domainIntelligenceResults: { results?: any } | null;
-  competitors: string[];
+  competitors: (string | { name: string; domain?: string })[];
   industry: string;
 }
 
@@ -218,9 +218,13 @@ export function computeDCS(context: DCSContext): DCSResult {
   const distanceToSafetyZone = Math.max(0, 70 - finalScore);
   const distanceToDominanceZone = Math.max(0, 85 - finalScore);
 
-  // Competitor names only; scores would require running DCS per competitor (not stored)
+  // Competitor name + optional domain; scores would require running DCS per competitor (not stored)
   const competitorComparison = context.competitors.length
-    ? context.competitors.map((name) => ({ name, score: industryAverage }))
+    ? context.competitors.map((c) => {
+        const name = typeof c === "string" ? c : c.name;
+        const domain = typeof c === "object" && c && "domain" in c ? (c as { domain?: string }).domain : undefined;
+        return { name, domain, score: industryAverage };
+      })
     : undefined;
 
   return {

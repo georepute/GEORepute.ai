@@ -22,18 +22,21 @@ export async function GET(
     }
 
     const supabase = createClient(url, anonKey);
-    const { data, error } = await supabase.rpc("get_quote_by_share_token", { token });
+    const { data, error } = await supabase.rpc("get_proposal_public", { p_token: token });
     if (error) {
-      console.error("get_quote_by_share_token error:", error);
+      console.error("get_proposal_public error:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     const row = Array.isArray(data) ? data[0] : data;
-    if (!row) {
+    if (!row || !row.quote_data) {
       return NextResponse.json({ error: "Proposal not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ quote: row });
+    return NextResponse.json({
+      quote: row.quote_data as Record<string, unknown>,
+      whiteLabelConfig: (row.white_label_config as Record<string, unknown>) ?? {},
+    });
   } catch (e) {
     console.error("Proposals [token] GET error:", e);
     return NextResponse.json(

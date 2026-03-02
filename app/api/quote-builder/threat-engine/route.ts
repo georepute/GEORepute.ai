@@ -126,6 +126,8 @@ export async function GET(request: NextRequest) {
     if (cpi >= 60) riskAccelerationIndicator = "HIGH";
     else if (cpi >= 35) riskAccelerationIndicator = "MEDIUM";
 
+    const projectionDisclaimer = "Projection only, not guarantee.";
+
     return NextResponse.json({
       competitivePressureIndex: cpi,
       riskAccelerationIndicator,
@@ -138,6 +140,7 @@ export async function GET(request: NextRequest) {
       },
       disclaimer:
         "Projected DCS and risk indicators are estimates based on current data, not guarantees.",
+      projectionDisclaimer,
     });
   } catch (error: any) {
     console.error("Threat engine error:", error);

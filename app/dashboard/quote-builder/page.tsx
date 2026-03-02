@@ -24,6 +24,8 @@ import {
   Mail,
   Copy,
   ExternalLink,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import {
   Radar,
@@ -52,18 +54,49 @@ const REPORT_LABELS: Record<string, string> = {
   geo_visibility: "GEO Visibility",
 };
 
-const STEPS = [
-  "Domain & Client",
-  "Scan",
-  "DCS Overview",
-  "Market & Revenue",
-  "Risk & Threat",
-  "Recommendation",
-  "Reports",
-  "Pricing",
-  "Preview",
-  "Export",
-];
+const STEPS: Record<number, string> = {
+  1: "Domain & Client",
+  2: "Scan",
+  3: "DCS Overview",
+  4: "Market & Revenue",
+  5: "Risk & Threat",
+  6: "Recommendation",
+  7: "Reports",
+  8: "Pricing",
+  9: "Preview",
+  10: "Export",
+};
+
+const STEPS_QUICK = [1, 2, 3, 6, 7, 8, 10]; // Skip Market (4), Risk (5), Preview (9)
+const STEPS_FULL = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+function nextStepNumber(step: number, mode: "quick" | "advanced" | "internal"): number {
+  const list = mode === "quick" ? STEPS_QUICK : STEPS_FULL;
+  const i = list.indexOf(step);
+  if (i < 0 || i >= list.length - 1) return step;
+  return list[i + 1];
+}
+
+function prevStepNumber(step: number, mode: "quick" | "advanced" | "internal"): number {
+  const list = mode === "quick" ? STEPS_QUICK : STEPS_FULL;
+  const i = list.indexOf(step);
+  if (i <= 0) return step;
+  return list[i - 1];
+}
+
+function stepsForMode(mode: "quick" | "advanced" | "internal"): number[] {
+  return mode === "quick" ? STEPS_QUICK : STEPS_FULL;
+}
+
+const DRAFT_STORAGE_KEY = "quote_builder_draft_id";
+
+/** Base URL for proposal share links: use production URL when set, else current origin. */
+function getProposalBaseUrl(): string {
+  const fromEnv = process.env.NEXT_PUBLIC_APP_URL;
+  if (fromEnv) return fromEnv.replace(/\/+$/, "");
+  if (typeof window !== "undefined") return window.location.origin;
+  return "";
+}
 
 interface Project {
   id: string;
@@ -76,6 +109,7 @@ interface Quote {
   id: string;
   share_token: string;
   status: string;
+  project_id?: string | null;
   domain: string;
   client_name: string | null;
   client_email: string | null;
@@ -87,7 +121,8 @@ interface Quote {
     radarChartData: { layer: string; score: number; fullMark: number }[];
     distanceToSafetyZone: number;
     distanceToDominanceZone: number;
-    competitorComparison?: { name: string; score: number }[];
+    industryAverage?: number;
+    competitorComparison?: { name: string; domain?: string; score: number }[];
   };
   revenue_exposure: {
     searchDemand: number;
@@ -95,10 +130,24 @@ interface Quote {
     avgDealValue: number;
     disclaimer?: string;
   };
+  market_data?: {
+    totalSearchDemand?: number;
+    marketOpportunityIndex?: number | null;
+    competitiveShareOfAttention?: number;
+    cpcWeightedValue?: number | null;
+    summary?: {
+      totalSearchDemand?: number;
+      competitiveShareOfAttention?: string;
+      cpcWeightedValue?: string | null;
+    };
+  };
   threat_data: {
     competitivePressureIndex: number;
     riskAccelerationIndicator: string;
     signals?: Record<string, number>;
+    projectedDcsSixMonths?: number;
+    projectionDisclaimer?: string;
+    legalNegativeMentions?: string;
   };
   recommendation: {
     primaryMode: string;
@@ -168,13 +217,53 @@ export default function QuoteBuilderPage() {
     fetchHistory();
   }, [fetchProjects, fetchHistory]);
 
+  // Restore draft quote on load so refresh doesn't force "start again"
+  useEffect(() => {
+    if (quote != null) return;
+    const draftId = typeof window !== "undefined" ? sessionStorage.getItem(DRAFT_STORAGE_KEY) : null;
+    if (!draftId) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/quote-builder?id=${encodeURIComponent(draftId)}`);
+      const data = await res.json().catch(() => ({}));
+      if (cancelled || !res.ok || !data.quote) return;
+      const q = data.quote as Quote;
+      if (q.status !== "draft") {
+        sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+        return;
+      }
+      setQuote(q);
+      setSelectedProjectId(q.project_id ?? "");
+      setClientName(q.client_name ?? "");
+      setClientEmail(q.client_email ?? "");
+      setContactPerson(q.contact_person ?? "");
+      setValidUntil(q.valid_until ? new Date(q.valid_until).toISOString().slice(0, 10) : "");
+      setSelectedReports(q.selected_reports ?? []);
+      setStep(3);
+      toast.success("Draft restored");
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     if (quote) {
       setInternalNotes(quote.internal_notes ?? "");
       setWinProbability(quote.win_probability ?? null);
       setPriceOverride(quote.price_override != null ? String(quote.price_override) : "");
+      if (typeof window !== "undefined" && quote.status === "draft") {
+        sessionStorage.setItem(DRAFT_STORAGE_KEY, quote.id);
+      }
+    } else if (typeof window !== "undefined") {
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
     }
-  }, [quote?.id]);
+  }, [quote?.id, quote?.status]);
+
+  // When switching to Quick, snap off skipped steps (4, 5, 9) so we don't show a step not in the progress bar
+  useEffect(() => {
+    if (mode !== "quick") return;
+    if (step === 4 || step === 5) setStep(6);
+    else if (step === 9) setStep(10);
+  }, [mode]);
 
   const handleGenerate = async () => {
     if (!selectedProjectId || !domain) {
@@ -204,6 +293,9 @@ export default function QuoteBuilderPage() {
       setQuote(data.quote);
       setSelectedReports(data.quote.selected_reports || []);
       setStep(3);
+      if (typeof window !== "undefined" && data.quote.status === "draft") {
+        sessionStorage.setItem(DRAFT_STORAGE_KEY, data.quote.id);
+      }
       toast.success("Proposal generated");
       fetchHistory();
     } catch (e) {
@@ -263,9 +355,54 @@ export default function QuoteBuilderPage() {
 
   const copyShareLink = () => {
     if (!quote?.share_token) return;
-    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/proposals/${quote.share_token}`;
+    const url = `${getProposalBaseUrl()}/proposals/${quote.share_token}`;
     navigator.clipboard.writeText(url);
     toast.success("Link copied");
+  };
+
+  const handleEditQuote = async (id: string) => {
+    try {
+      const res = await fetch(`/api/quote-builder?id=${encodeURIComponent(id)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load quote");
+      const q = data.quote as Quote;
+      setQuote(q);
+      setSelectedProjectId(q.project_id ?? "");
+      setClientName(q.client_name ?? "");
+      setClientEmail(q.client_email ?? "");
+      setContactPerson(q.contact_person ?? "");
+      setValidUntil(q.valid_until ? new Date(q.valid_until).toISOString().slice(0, 10) : "");
+      setSelectedReports(q.selected_reports ?? []);
+      if (typeof window !== "undefined" && q.status === "draft") {
+        sessionStorage.setItem(DRAFT_STORAGE_KEY, q.id);
+      }
+      setStep(3);
+      toast.success("Quote loaded — continue editing");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load quote");
+    }
+  };
+
+  const handleDeleteQuote = async (q: { id: string; status: string }) => {
+    if (q.status !== "draft") {
+      toast.error("Only draft quotes can be deleted");
+      return;
+    }
+    if (typeof window !== "undefined" && !window.confirm("Delete this draft quote?")) return;
+    try {
+      const res = await fetch(`/api/quote-builder?id=${encodeURIComponent(q.id)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Delete failed");
+      if (quote?.id === q.id) {
+        setQuote(null);
+        setStep(1);
+        sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+      }
+      fetchHistory();
+      toast.success("Draft deleted");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    }
   };
 
   const currentQuote = quote;
@@ -284,32 +421,45 @@ export default function QuoteBuilderPage() {
         <p className="text-gray-600">Generate board-ready proposals in under 7 minutes</p>
       </div>
 
-      {/* Mode tabs */}
-      <div className="flex gap-2 mb-6 border-b border-gray-200">
-        {(["quick", "advanced", "internal"] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={`px-4 py-2 text-sm font-medium rounded-t-lg capitalize ${
-              mode === m ? "bg-primary-100 text-primary-700 border-b-2 border-primary-600" : "text-gray-600 hover:bg-gray-100"
-            }`}
-          >
-            {m === "quick" ? "Quick Call" : m === "advanced" ? "Advanced" : "Agency Internal"}
-          </button>
-        ))}
+      {/* Mode tabs — clearly interactive; selection changes step flow and internal-only fields */}
+      <div className="mb-6">
+        <div className="flex gap-1 p-1 bg-gray-100 rounded-lg w-fit" role="tablist" aria-label="Quote builder mode">
+          {(["quick", "advanced", "internal"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={mode === m}
+              onClick={() => setMode(m)}
+              className={`px-4 py-2.5 text-sm font-medium rounded-md transition-colors ${
+                mode === m
+                  ? "bg-white text-gray-900 shadow-sm border border-gray-200"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+              }`}
+            >
+              {m === "quick" ? "Quick Call" : m === "advanced" ? "Advanced" : "Agency Internal"}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-sm text-gray-500">
+          {mode === "quick" && "Fewer steps: Domain → Scan → DCS → Recommendation → Reports → Pricing → Export."}
+          {mode === "advanced" && "All 10 steps including Market, Risk, and Preview."}
+          {mode === "internal" && "Full flow plus internal notes, win probability, and price override log (on Pricing step)."}
+        </p>
       </div>
 
-      {/* Step progress */}
+      {/* Step progress — only show steps for current mode */}
       <div className="flex flex-wrap gap-2 mb-8">
-        {STEPS.map((label, i) => (
+        {stepsForMode(mode).map((stepNum, i) => (
           <button
-            key={label}
-            onClick={() => setStep(i + 1)}
+            key={stepNum}
+            type="button"
+            onClick={() => setStep(stepNum)}
             className={`px-3 py-1.5 text-xs font-medium rounded-full ${
-              step === i + 1 ? "bg-primary-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              step === stepNum ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
             }`}
           >
-            {i + 1}. {label}
+            {i + 1}. {STEPS[stepNum]}
           </button>
         ))}
       </div>
@@ -392,9 +542,9 @@ export default function QuoteBuilderPage() {
             <div className="mt-6 flex justify-between">
               <div />
               <button
-                onClick={() => setStep(2)}
+                onClick={() => setStep(nextStepNumber(1, mode))}
                 disabled={!selectedProjectId}
-                className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2"
+                className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
               >
                 Next: Scan <ChevronRight className="w-4 h-4" />
               </button>
@@ -420,12 +570,18 @@ export default function QuoteBuilderPage() {
             ) : (
               <>
                 <p className="text-gray-600 mb-6">
-                  Generate a proposal snapshot from your existing brand analysis data. This uses your
-                  DCS, revenue exposure, and threat data.
+                  Generate a proposal snapshot from your existing brand analysis data. The scan uses:
                 </p>
+                <ul className="text-sm text-gray-600 mb-6 list-disc list-inside space-y-1">
+                  <li>DCS (6 layers: AI & Search, Organic, Social, Reputation, Website, Risk)</li>
+                  <li>GSC search demand & revenue exposure (3 tiers)</li>
+                  <li>Threat engine (competitive pressure, risk indicator)</li>
+                  <li>Market data & competitor comparison</li>
+                </ul>
                 <div className="flex justify-between">
                   <button
-                    onClick={() => setStep(1)}
+                    type="button"
+                    onClick={() => setStep(prevStepNumber(2, mode))}
                     className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2"
                   >
                     <ChevronLeft className="w-4 h-4" /> Back
@@ -433,7 +589,7 @@ export default function QuoteBuilderPage() {
                   <button
                     onClick={handleGenerate}
                     disabled={!selectedProjectId || scanning}
-                    className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2"
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
                   >
                     {scanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                     Generate proposal
@@ -461,6 +617,9 @@ export default function QuoteBuilderPage() {
                 <p className="text-sm text-gray-500 mt-2">
                   Distance to Safety (70): {dcs.distanceToSafetyZone} pts — Distance to Dominance (85): {dcs.distanceToDominanceZone} pts
                 </p>
+                {dcs.industryAverage != null && !Number.isNaN(dcs.industryAverage) && (
+                  <p className="text-sm text-gray-500 mt-1">Industry average: <span className="font-medium text-gray-700">{Math.round(dcs.industryAverage)}</span></p>
+                )}
               </div>
               <div className="h-64">
                 {dcs.radarChartData?.length > 0 && (
@@ -475,27 +634,73 @@ export default function QuoteBuilderPage() {
                 )}
               </div>
             </div>
-            {dcs.competitorComparison && dcs.competitorComparison.length > 0 && (
+            {(dcs.layerBreakdown?.length ?? 0) > 0 && (
               <div className="mt-6">
-                <h3 className="font-semibold text-gray-900 mb-2">Competitor comparison</h3>
-                <div className="h-48">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={dcs.competitorComparison} layout="vertical" margin={{ left: 80 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" domain={[0, 100]} />
-                      <YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 12 }} />
-                      <Bar dataKey="score" fill="#0ea5e9" name="Score" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                <h3 className="font-semibold text-gray-900 mb-2">Layer breakdown</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {dcs.layerBreakdown!.map((layer) => (
+                    <div key={layer.name} className="flex justify-between items-center py-2 px-3 bg-gray-50 rounded-lg">
+                      <span className="text-sm text-gray-700 truncate" title={layer.name}>{layer.name}</span>
+                      <span className="text-sm font-semibold text-gray-900 ml-2">{Math.round(layer.score)}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
+            {dcs.competitorComparison && dcs.competitorComparison.length > 0 && (() => {
+              const normalize = (c: { name: unknown; domain?: unknown; score: number }) => {
+                const rawName = c.name;
+                const rawDomain = c.domain;
+                const displayName = typeof rawName === "string" ? rawName : (rawName && typeof rawName === "object" && "name" in rawName ? String((rawName as { name?: string }).name ?? "") : String(rawName ?? ""));
+                const domain = typeof rawDomain === "string" ? rawDomain : (rawName && typeof rawName === "object" && "domain" in rawName ? String((rawName as { domain?: string }).domain ?? "") : "");
+                return { displayName: displayName || "—", domain: (domain || "").replace(/^(https?:\/\/)?/i, "").trim(), score: c.score };
+              };
+              const normalized = dcs.competitorComparison.map((c, i) => ({ ...normalize(c), key: typeof c.name === "string" ? c.name : i }));
+              return (
+                <div className="mt-6">
+                  <h3 className="font-semibold text-gray-900 mb-2">Competitor comparison</h3>
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={normalized.map((n) => ({ ...n, displayLabel: n.displayName }))}
+                        layout="vertical"
+                        margin={{ left: 80 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" domain={[0, 100]} />
+                        <YAxis type="category" dataKey="displayLabel" width={100} tick={{ fontSize: 11 }} />
+                        <Bar dataKey="score" fill="#0ea5e9" name="Score" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                    {normalized.map((n, i) => {
+                      const url = n.domain ? (n.domain.startsWith("http") ? n.domain : `https://${n.domain}`) : null;
+                      return url ? (
+                        <a
+                          key={n.key ?? i}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={n.domain}
+                          className="text-indigo-600 hover:underline"
+                        >
+                          {n.displayName} <span className="text-gray-600 font-medium">{n.score}</span>
+                        </a>
+                      ) : (
+                        <span key={n.key ?? i} className="text-gray-600">{n.displayName} <span className="font-medium">{n.score}</span></span>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="mt-6 flex justify-between">
-              <button onClick={() => setStep(2)} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(prevStepNumber(3, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
-              <button onClick={() => setStep(4)} className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2">
-                Next: Market & Revenue <ChevronRight className="w-4 h-4" />
+              <button type="button" onClick={() => setStep(nextStepNumber(3, mode))} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-2">
+                Next <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </motion.div>
@@ -511,6 +716,34 @@ export default function QuoteBuilderPage() {
             className="bg-white rounded-xl p-6 border border-gray-200"
           >
             <h2 className="text-xl font-bold text-gray-900 mb-4">Market & Revenue Exposure</h2>
+            {currentQuote.market_data && (currentQuote.market_data.marketOpportunityIndex != null || currentQuote.market_data.summary) && (
+              <div className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {currentQuote.market_data.marketOpportunityIndex != null && !Number.isNaN(currentQuote.market_data.marketOpportunityIndex) && (
+                  <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-100">
+                    <p className="text-xs text-indigo-700 font-medium">Market Opportunity Index</p>
+                    <p className="text-xl font-bold text-indigo-900">{Math.round(currentQuote.market_data.marketOpportunityIndex)}</p>
+                  </div>
+                )}
+                {currentQuote.market_data.summary?.competitiveShareOfAttention && (
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs text-gray-600">Competitive share of attention</p>
+                    <p className="text-lg font-semibold text-gray-900">{currentQuote.market_data.summary.competitiveShareOfAttention}</p>
+                  </div>
+                )}
+                {currentQuote.market_data.summary?.cpcWeightedValue && (
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs text-gray-600">CPC weighted value</p>
+                    <p className="text-lg font-semibold text-gray-900">{currentQuote.market_data.summary.cpcWeightedValue}</p>
+                  </div>
+                )}
+                {(currentQuote.market_data.totalSearchDemand ?? revenue.searchDemand) != null && (
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs text-gray-600">Total search demand</p>
+                    <p className="text-lg font-semibold text-gray-900">{(currentQuote.market_data.totalSearchDemand ?? revenue.searchDemand)?.toLocaleString() ?? "—"}</p>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="grid md:grid-cols-3 gap-4 mb-6">
               <div className="p-4 bg-gray-50 rounded-lg">
                 <p className="text-sm text-gray-600">Search demand</p>
@@ -537,10 +770,10 @@ export default function QuoteBuilderPage() {
               <p className="text-xs text-gray-500 border-t pt-4">{revenue.disclaimer}</p>
             )}
             <div className="mt-6 flex justify-between">
-              <button onClick={() => setStep(3)} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(prevStepNumber(4, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
-              <button onClick={() => setStep(5)} className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(nextStepNumber(4, mode))} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-2">
                 Next: Risk <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -571,12 +804,35 @@ export default function QuoteBuilderPage() {
                   {threat.riskAccelerationIndicator}
                 </span>
               </div>
+              {threat.projectedDcsSixMonths != null && !Number.isNaN(threat.projectedDcsSixMonths) && (
+                <div className="md:col-span-2">
+                  <p className="text-sm text-gray-600">Projected DCS (6 months)</p>
+                  <p className="text-xl font-bold text-gray-900">{Math.round(threat.projectedDcsSixMonths)}</p>
+                  {threat.projectionDisclaimer && <p className="text-xs text-gray-500 mt-1">{threat.projectionDisclaimer}</p>}
+                </div>
+              )}
+              {threat.legalNegativeMentions != null && threat.legalNegativeMentions !== "" && (
+                <div className="md:col-span-2">
+                  <p className="text-sm text-gray-600">Legal / negative mentions</p>
+                  <p className="text-gray-900">{threat.legalNegativeMentions}</p>
+                </div>
+              )}
             </div>
+            {threat.signals && Object.keys(threat.signals).length > 0 && (
+              <div className="mt-4">
+                <p className="text-sm font-medium text-gray-700 mb-2">Risk signals</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(threat.signals).map(([k, v]) => (
+                    <span key={k} className="px-2 py-1 bg-gray-100 rounded text-xs text-gray-700">{k}: {typeof v === "number" ? v.toFixed(0) : v}</span>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="mt-6 flex justify-between">
-              <button onClick={() => setStep(4)} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(prevStepNumber(5, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
-              <button onClick={() => setStep(6)} className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(nextStepNumber(5, mode))} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-2">
                 Next: Recommendation <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -609,10 +865,10 @@ export default function QuoteBuilderPage() {
               ))}
             </div>
             <div className="mt-6 flex justify-between">
-              <button onClick={() => setStep(5)} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(prevStepNumber(6, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
-              <button onClick={() => setStep(7)} className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(nextStepNumber(6, mode))} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-2">
                 Next: Reports <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -652,10 +908,10 @@ export default function QuoteBuilderPage() {
               ))}
             </div>
             <div className="mt-6 flex justify-between">
-              <button onClick={() => setStep(6)} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(prevStepNumber(7, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
-              <button onClick={() => setStep(8)} className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(nextStepNumber(7, mode))} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-2">
                 Next: Pricing <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -739,10 +995,10 @@ export default function QuoteBuilderPage() {
               )}
             </div>
             <div className="mt-6 flex justify-between">
-              <button onClick={() => setStep(7)} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(prevStepNumber(8, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
-              <button onClick={() => setStep(9)} className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(nextStepNumber(8, mode))} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-2">
                 Next: Preview <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -765,15 +1021,12 @@ export default function QuoteBuilderPage() {
               <p><strong>DCS:</strong> {dcs?.finalScore ?? "—"} | <strong>Recommendation:</strong> {recommendation?.primaryMode ?? "—"}</p>
               <p><strong>Investment range:</strong> ${displayPrice.toLocaleString()}/month</p>
               <p><strong>Reports included:</strong> {selectedReports.map((r) => REPORT_LABELS[r] || r).join(", ") || "None"}</p>
-              <p className="text-xs text-gray-500 mt-4">
-                This proposal is based on publicly available data and comparative market benchmarks. It does not represent official search engine metrics and does not imply algorithm influence or guaranteed results.
-              </p>
             </div>
             <div className="mt-6 flex justify-between">
-              <button onClick={() => setStep(8)} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(prevStepNumber(9, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
-              <button onClick={() => setStep(10)} className="px-6 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(nextStepNumber(9, mode))} className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-2">
                 Next: Export <ChevronRight className="w-4 h-4" />
               </button>
             </div>
@@ -819,7 +1072,10 @@ export default function QuoteBuilderPage() {
                 onClick={async () => {
                   if (!currentQuote) return;
                   try {
-                    await generateProposalPDF(currentQuote as any);
+                    const res = await fetch("/api/quote-builder/white-label");
+                    const data = await res.json().catch(() => ({}));
+                    const whiteLabelConfig = data.whiteLabelConfig ?? null;
+                    await generateProposalPDF(currentQuote as any, whiteLabelConfig);
                     toast.success("PDF downloaded");
                   } catch (e) {
                     toast.error("Failed to generate PDF");
@@ -830,14 +1086,19 @@ export default function QuoteBuilderPage() {
               </button>
             </div>
             <p className="text-sm text-gray-500 mt-4">
-              Share link: {typeof window !== "undefined" ? window.location.origin : ""}/proposals/{currentQuote.share_token}
+              Share link: {getProposalBaseUrl()}/proposals/{currentQuote.share_token}
             </p>
             <div className="mt-6 flex justify-between">
-              <button onClick={() => setStep(9)} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
+              <button type="button" onClick={() => setStep(prevStepNumber(10, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" /> Back
               </button>
               <button
-                onClick={() => { setStep(1); setQuote(null); setSelectedProjectId(""); }}
+                onClick={() => {
+                  setStep(1);
+                  setQuote(null);
+                  setSelectedProjectId("");
+                  sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+                }}
                 className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium"
               >
                 New proposal
@@ -871,7 +1132,25 @@ export default function QuoteBuilderPage() {
                   <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(q.status)}`}>
                     {q.status}
                   </span>
-                  <a href={`/proposals/${q.share_token}`} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-primary-600" title="View proposal">
+                  <button
+                    type="button"
+                    onClick={() => handleEditQuote(q.id)}
+                    className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                    title="Edit quote"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  {q.status === "draft" && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteQuote(q)}
+                      className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                      title="Delete draft"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                  <a href={`/proposals/${q.share_token}`} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-500 hover:text-indigo-600 rounded-lg" title="View proposal">
                     <Eye className="w-4 h-4" />
                   </a>
                 </div>

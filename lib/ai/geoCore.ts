@@ -400,7 +400,7 @@ export async function generateStrategicContent(
     github: "technical, plain-spoken, documentation-style but personal",
     linkedin: "professional yet human, conversational, thoughtful",
     twitter: "short, witty, spontaneous, a bit emotional",
-    facebook: "casual, personal, community-focused, friendly",
+    facebook: "professional, business-appropriate, friendly yet polished, trustworthy, family-friendly",
     instagram: "visual storytelling, authentic, trendy, personal",
     shopify: "professional, informative, comprehensive, SEO-optimized, blog-style with HTML formatting",
   };
@@ -475,6 +475,7 @@ This MUST score 100% HUMAN on ALL AI detectors (GPTZero, Turnitin, Copyleaks, Wr
 - NO EXCESSIVE CASUAL SLANG - Avoid: "LOL", "lol", "lmao", "bruh", "omg", "wtf", "smh", "fr", "deadass"
 - NO EXCESSIVE CASUAL LANGUAGE - Write naturally but professionally, like a real person's Facebook post (clean and structured)
 - Keep language clean and professional while maintaining natural human voice
+- NO inappropriate, suggestive, provocative, offensive, or unprofessional content - suitable for business/brand audiences
 
 ✅ CONTENT REQUIREMENTS:
 - Write clean, structured, professional content
@@ -607,10 +608,11 @@ ${input.contentType === 'linkedin_article' || input.contentType === 'article' ? 
 - Focus on value-driven content with professional tone
 - Write like a real person would write a Facebook post - clean, structured, professional
 ${input.brandVoice ? `- IGNORE "professional" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone, but still NO EMOJIS even if brand voice allows emojis` : ""}` : ''}
-${input.targetPlatform === 'facebook' ? `- Facebook style: ${input.brandVoice ? "Format only - " : ""}Casual, personal, community-focused, friendly
-- Use "I've been thinking...", "Just wanted to share...", "Has anyone else noticed..."
-- Mix of personal stories and observations
-- Conversational and engaging, community-driven
+${input.targetPlatform === 'facebook' ? `- Facebook style: ${input.brandVoice ? "Format only - " : ""}Professional, business-appropriate, friendly yet polished, trustworthy, family-friendly
+- Use warm but professional phrasing: "I've been thinking...", "Wanted to share...", "Has anyone else noticed..."
+- Mix of insight and value-driven observations—always suitable for a business or brand page
+- Conversational and engaging, but NEVER casual to the point of being unprofessional
+- 🚫 CRITICAL FOR FACEBOOK: Content MUST be appropriate for all audiences. NO suggestive, provocative, offensive, controversial, slang-heavy, or unprofessional language. Suitable for a corporate, agency, or brand Facebook page.
 ${input.brandVoice ? `- IGNORE "casual" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
 ${input.targetPlatform === 'instagram' ? `- Instagram style: ${input.brandVoice ? "Format only - " : ""}Visual storytelling, authentic, trendy, personal
 - Use "So I've been...", "Okay but...", "Can we talk about..."
@@ -709,7 +711,7 @@ ${input.brandVoice.signature_phrases && input.brandVoice.signature_phrases.lengt
 PLATFORM-SPECIFIC REQUIREMENTS:
 ${input.brandVoice ? '' : `🚨 CRITICAL: NO brand voice selected - Remove ALL emojis from the final content`}
 ${input.brandVoice && !input.brandVoice.use_emojis ? `🚨 CRITICAL: Brand voice disallows emojis - Remove ALL emojis from the final content` : ''}
-${input.targetPlatform === 'facebook' ? `✅ Facebook style: Casual, personal, community-focused` : ''}
+${input.targetPlatform === 'facebook' ? `✅ Facebook style: Professional, business-appropriate, family-friendly, no inappropriate content` : ''}
 ${input.targetPlatform === 'instagram' ? `✅ Instagram style: Visual storytelling, trendy, personal` : ''}
 ${input.targetPlatform === 'reddit' ? `✅ Reddit style: Casual, conversational, story-like, community-focused` : ''}
 ${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate` : ''}

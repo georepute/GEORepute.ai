@@ -53,6 +53,14 @@ export interface RecommendationInput {
   dcsScore: number;
   competitivePressureIndex: number;
   opportunityScore?: number;
+  /** Distance to Safety Zone (70) — gap to close */
+  distanceToSafetyZone?: number;
+  /** Market Opportunity Index 0–100 from market_data */
+  marketOpportunityIndex?: number;
+  /** Complexity score from keywords/competitors */
+  complexityScore?: number;
+  /** Number of markets in scope */
+  numberOfMarkets?: number;
 }
 
 export interface RecommendationResult {
@@ -63,8 +71,16 @@ export interface RecommendationResult {
 }
 
 export function getRecommendation(input: RecommendationInput): RecommendationResult {
-  const { dcsScore, competitivePressureIndex, opportunityScore = 0 } = input;
-
+  const {
+    dcsScore,
+    competitivePressureIndex,
+    opportunityScore = 0,
+    distanceToSafetyZone = Math.max(0, 70 - input.dcsScore),
+    marketOpportunityIndex,
+    complexityScore = 0,
+    numberOfMarkets = 1,
+  } = input;
+  const marketOpportunity = marketOpportunityIndex ?? opportunityScore;
   const priorities: { area: string; reason: string; urgency: string }[] = [];
   const focusAreas: string[] = [];
 
@@ -80,22 +96,36 @@ export function getRecommendation(input: RecommendationInput): RecommendationRes
   }
 
   if (dcsScore >= 50 && dcsScore < 70) {
+    const highOpportunity = marketOpportunity >= 60;
     return {
       primaryMode: "growth",
       allModes: STRATEGIC_MODES,
       priorities: [
-        { area: "Expand visibility", reason: "Moderate DCS; opportunity to grow share.", urgency: "medium" },
+        {
+          area: "Expand visibility",
+          reason: highOpportunity
+            ? "Moderate DCS with strong market opportunity; grow share."
+            : "Moderate DCS; opportunity to grow share.",
+          urgency: highOpportunity ? "medium" : "medium",
+        },
       ],
       focusAreas: ["Opportunity capture", "AI visibility expansion"],
     };
   }
 
   if (dcsScore >= 30 && dcsScore < 50) {
+    const multiMarket = (numberOfMarkets ?? 1) > 2 || (complexityScore ?? 0) >= 30;
     return {
       primaryMode: "strategic_control",
       allModes: STRATEGIC_MODES,
       priorities: [
-        { area: "Close critical gaps", reason: "Significant DCS gap; blind spots and risk present.", urgency: "high" },
+        {
+          area: "Close critical gaps",
+          reason: multiMarket
+            ? "Significant DCS gap and multi-market/complex scope; blind spots and risk present."
+            : "Significant DCS gap; blind spots and risk present.",
+          urgency: "high",
+        },
       ],
       focusAreas: ["Blind spot coverage", "Gap closure", "Risk mitigation"],
     };
@@ -112,11 +142,18 @@ export function getRecommendation(input: RecommendationInput): RecommendationRes
     };
   }
 
+  const multiMarket = (numberOfMarkets ?? 1) > 2;
   return {
     primaryMode: "dominance",
     allModes: STRATEGIC_MODES,
     priorities: [
-      { area: "Market leadership", reason: "Aggressive investment to capture market.", urgency: "medium" },
+      {
+        area: "Market leadership",
+        reason: multiMarket
+          ? "Aggressive investment to capture market across multiple markets."
+          : "Aggressive investment to capture market.",
+        urgency: "medium",
+      },
     ],
     focusAreas: ["Full DCS coverage", "Multi-market expansion", "Premium retainer"],
   };

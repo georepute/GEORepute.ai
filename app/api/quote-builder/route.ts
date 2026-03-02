@@ -34,9 +34,29 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
+    const quoteId = searchParams.get("id");
     const statusFilter = searchParams.get("status");
     const limit = Math.min(50, parseInt(searchParams.get("limit") || "20", 10) || 20);
     const offset = parseInt(searchParams.get("offset") || "0", 10) || 0;
+
+    if (quoteId) {
+      const { data: row, error } = await supabase
+        .from("quotes")
+        .select("*, brand_analysis_projects(brand_name, website_url)")
+        .eq("id", quoteId)
+        .eq("user_id", session.user.id)
+        .single();
+      if (error || !row) {
+        return NextResponse.json({ error: "Quote not found" }, { status: 404 });
+      }
+      const item = {
+        ...row,
+        brand_name: row.brand_analysis_projects?.brand_name ?? null,
+        website_url: row.brand_analysis_projects?.website_url ?? null,
+        brand_analysis_projects: undefined,
+      };
+      return NextResponse.json({ quote: item });
+    }
 
     let query = supabase
       .from("quotes")
@@ -157,6 +177,7 @@ export async function POST(request: NextRequest) {
       competitorComparison: unknown[];
       distanceToSafetyZone: number;
       distanceToDominanceZone: number;
+      industryAverage?: number;
       project?: { domain?: string };
     };
     const revenueData = revenueRes.data as {
@@ -166,18 +187,43 @@ export async function POST(request: NextRequest) {
       avgDealValue: number;
       revenueExposureWindow: { conservative: number; strategic: number; dominance: number };
       disclaimer: string;
+      advertisingComparison?: { avgCpc?: number; revenueAtRisk?: number } | null;
     };
     const threatData = threatRes.data as {
       competitivePressureIndex: number;
       riskAccelerationIndicator: string;
       signals: Record<string, number>;
       disclaimer: string;
+      projectionDisclaimer?: string;
     };
+    const projectionDisclaimer = threatData.projectionDisclaimer ?? "Projection only, not guarantee.";
+    const projectedDcsSixMonths = Math.round(
+      Math.max(0, Math.min(100, dcsData.finalScore - (threatData.competitivePressureIndex / 100) * 15))
+    );
 
-    const recommendation = getRecommendation({
-      dcsScore: dcsData.finalScore,
-      competitivePressureIndex: threatData.competitivePressureIndex,
-    });
+    const competitiveShare = threatData.signals?.competitiveShare ?? 50;
+    const brandShareOfAttention = Math.round((100 - competitiveShare) * 10) / 10;
+    const demandComponent = Math.min(100, Math.round((revenueData.searchDemand || 0) / 5000) * 5);
+    const cpcComponent = revenueData.advertisingComparison?.avgCpc
+      ? Math.min(100, Math.round((revenueData.advertisingComparison.avgCpc || 0) * 2))
+      : 50;
+    const marketOpportunityIndex = Math.round(
+      demandComponent * 0.4 + brandShareOfAttention * 0.4 + cpcComponent * 0.2
+    );
+    const marketData = {
+      totalSearchDemand: revenueData.searchDemand,
+      commercialIntentVolume: revenueData.advertisingComparison?.revenueAtRisk ?? null,
+      cpcWeightedValue: revenueData.advertisingComparison?.avgCpc ?? null,
+      competitiveShareOfAttention: brandShareOfAttention,
+      marketOpportunityIndex: Math.min(100, Math.max(0, marketOpportunityIndex)),
+      summary: {
+        totalSearchDemand: revenueData.searchDemand,
+        competitiveShareOfAttention: `${brandShareOfAttention}%`,
+        cpcWeightedValue: revenueData.advertisingComparison?.avgCpc
+          ? `$${revenueData.advertisingComparison.avgCpc.toFixed(2)}`
+          : null,
+      },
+    };
 
     const monitoringDepth =
       (scopeAdjustments?.monitoringDepth as "basic" | "standard" | "deep") || "standard";
@@ -192,6 +238,15 @@ export async function POST(request: NextRequest) {
       Math.round((keywords.length || 0) * 2 + (competitors.length || 0) * 5)
     );
     const dcsGap = Math.max(0, 70 - dcsData.finalScore);
+
+    const recommendation = getRecommendation({
+      dcsScore: dcsData.finalScore,
+      competitivePressureIndex: threatData.competitivePressureIndex,
+      distanceToSafetyZone: dcsData.distanceToSafetyZone,
+      marketOpportunityIndex: marketData.marketOpportunityIndex,
+      complexityScore,
+      numberOfMarkets,
+    });
 
     const pricingResult = computePricing({
       complexityScore,
@@ -232,8 +287,9 @@ export async function POST(request: NextRequest) {
         competitorComparison: dcsData.competitorComparison,
         distanceToSafetyZone: dcsData.distanceToSafetyZone,
         distanceToDominanceZone: dcsData.distanceToDominanceZone,
+        industryAverage: dcsData.industryAverage,
       },
-      market_data: {},
+      market_data: marketData,
       revenue_exposure: {
         searchDemand: revenueData.searchDemand,
         ctrBenchmark: revenueData.ctrBenchmark,
@@ -247,6 +303,9 @@ export async function POST(request: NextRequest) {
         riskAccelerationIndicator: threatData.riskAccelerationIndicator,
         signals: threatData.signals,
         disclaimer: threatData.disclaimer,
+        projectionDisclaimer,
+        projectedDcsSixMonths,
+        legalNegativeMentions: "Not assessed",
       },
       recommendation: {
         primaryMode: recommendation.primaryMode,

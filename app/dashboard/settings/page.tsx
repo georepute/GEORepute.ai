@@ -783,7 +783,8 @@ export default function Settings() {
             {activeTab === "white-label" && (
               <div>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">White Label Configuration</h2>
-                <p className="text-gray-600 mb-6">Customize branding for proposals and reports. Saved to your organization.</p>
+                <p className="text-gray-600 mb-2">Customize branding for proposals and reports. Saved to your organization.</p>
+                <p className="text-sm text-gray-500 mb-6">This branding applies to all proposals from your organization—including every quote builder proposal you create and their shared links.</p>
 
                 {whiteLabelLoading ? (
                   <div className="flex items-center gap-2 text-gray-600">
@@ -915,7 +916,7 @@ export default function Settings() {
                         rows={3}
                         value={whiteLabelDisclaimer}
                         onChange={(e) => setWhiteLabelDisclaimer(e.target.value)}
-                        placeholder="This proposal is based on publicly available data…"
+                        placeholder="Optional custom disclaimer"
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none"
                       />
                     </div>
