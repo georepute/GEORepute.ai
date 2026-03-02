@@ -141,6 +141,7 @@ export default function DashboardLayout({
       children: [
         { name: t.dashboard.sidebar.keywordForecastAnalytics, href: "/dashboard/analytics", icon: TrendingUp, requiredCapability: "canViewAnalytics" },
         { name: t.dashboard.sidebar.gscAnalytics, href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.biReports, href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" }
       ]
     },
     { 
