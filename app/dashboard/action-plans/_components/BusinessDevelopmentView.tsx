@@ -417,7 +417,7 @@ export function BusinessDevelopmentView({ project, intelligenceData }: BusinessD
     } finally {
       setLoading(false);
     }
-  }, [project?.id, supabase]);
+  }, [project?.id]);
 
   useEffect(() => { loadMarkets(); }, [loadMarkets]);
 

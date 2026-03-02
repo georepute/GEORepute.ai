@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+
+export const dynamic = "force-dynamic";
 import { computePricing, type PricingInput } from "@/lib/quote-builder/pricing-engine";
 
 export async function GET(request: NextRequest) {

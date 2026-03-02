@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { GoogleBusinessProfileService } from '@/lib/integrations/google-business-profile';
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET - OAuth callback handler
  */

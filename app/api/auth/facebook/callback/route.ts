@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getUserPages } from "@/lib/integrations/facebook";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Facebook OAuth Callback
  * Handles the redirect from Facebook after user authorization

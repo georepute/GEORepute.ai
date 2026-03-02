@@ -3,6 +3,8 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 import type { NextRequest } from 'next/server'
 import { normalizeCountryForMerge } from '@/lib/utils/countryMerge'
 
+export const dynamic = "force-dynamic";
+
 // GET - Fetch stored global visibility matrix data
 export async function GET(request: NextRequest) {
   try {

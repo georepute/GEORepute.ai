@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { GoogleAnalyticsService } from '@/lib/integrations/google-analytics';
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET - OAuth callback handler
  */

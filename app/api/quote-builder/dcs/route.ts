@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { computeDCS, type DCSContext } from "@/lib/quote-builder/dcs-engine";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createServerSupabaseClient();

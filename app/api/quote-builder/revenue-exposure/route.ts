@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getIndustryBenchmark } from "@/lib/quote-builder/industry-benchmarks";
 
+export const dynamic = "force-dynamic";
+
 const MANDATORY_DISCLAIMER = "";
 
 export async function GET(request: NextRequest) {

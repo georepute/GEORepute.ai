@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import { GoogleSearchConsoleService } from '@/lib/integrations/google-search-console';
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET - OAuth callback handler
  */

@@ -202,7 +202,7 @@ export default function QuoteBuilderPage() {
       .select("id, brand_name, website_url, industry")
       .order("updated_at", { ascending: false });
     if (!error && data) setProjects(data as Project[]);
-  }, [supabase]);
+  }, []);
 
   const fetchHistory = useCallback(async () => {
     setLoadingHistory(true);

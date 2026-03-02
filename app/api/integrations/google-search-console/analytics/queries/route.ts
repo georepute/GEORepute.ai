@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/integrations/google-search-console/analytics/queries
  * Get top queries for a domain

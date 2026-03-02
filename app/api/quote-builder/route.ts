@@ -3,6 +3,8 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getRecommendation } from "@/lib/quote-builder/recommendation-engine";
 import { computePricing, REPORT_ADDON_IDS } from "@/lib/quote-builder/pricing-engine";
 
+export const dynamic = "force-dynamic";
+
 function getBaseUrl(): string {
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;

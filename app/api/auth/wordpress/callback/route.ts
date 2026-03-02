@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { exchangeWordPressCode, verifyWordPressConnection, getWordPressSites } from "@/lib/integrations/wordpress";
 
+export const dynamic = "force-dynamic";
+
 /**
  * WordPress.com OAuth Callback
  * Handles the OAuth redirect from WordPress.com after user authorization

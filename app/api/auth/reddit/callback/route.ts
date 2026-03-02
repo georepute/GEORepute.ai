@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Reddit OAuth Callback
  * Handles the redirect from Reddit after user authorization

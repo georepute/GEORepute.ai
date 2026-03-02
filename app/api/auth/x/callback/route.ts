@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getXCurrentUser } from "@/lib/integrations/x";
 
+export const dynamic = "force-dynamic";
+
 const X_TOKEN_URL = "https://api.x.com/2/oauth2/token";
 const PKCE_COOKIE_NAME = "x_oauth_pkce";
 

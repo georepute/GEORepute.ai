@@ -222,7 +222,7 @@ export function CompetitorResearchView({ project, intelligenceData }: Competitor
     } finally {
       setLoadingSaved(false);
     }
-  }, [project?.id, supabase]);
+  }, [project?.id]);
 
   useEffect(() => {
     loadSaved();

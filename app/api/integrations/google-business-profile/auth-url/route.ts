@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET - Get Google Business Profile OAuth authorization URL
  */

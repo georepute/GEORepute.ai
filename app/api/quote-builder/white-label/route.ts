@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/quote-builder/white-label
  * Returns the current user's organization white_label_config for use in PDF/public proposal branding.

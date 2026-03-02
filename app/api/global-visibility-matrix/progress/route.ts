@@ -2,6 +2,8 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { getProgress, buildProgressKey } from '@/lib/global-visibility-matrix/progress';
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/global-visibility-matrix/progress?domainId=xxx
  * Returns current calculation progress for the authenticated user's domain.

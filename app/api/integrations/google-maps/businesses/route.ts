@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET - Fetch user's Google Maps businesses (unique places)
  */

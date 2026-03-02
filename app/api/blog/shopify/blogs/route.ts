@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getShopifyBlogs } from "@/lib/integrations/shopify";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET: Fetch available blogs from connected Shopify store
  */

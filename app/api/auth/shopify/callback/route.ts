@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { exchangeShopifyCode, verifyShopifyConnection } from "@/lib/integrations/shopify";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Shopify OAuth Callback
  * Handles the OAuth redirect from Shopify after user authorization

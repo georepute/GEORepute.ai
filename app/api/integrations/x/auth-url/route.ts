@@ -3,6 +3,8 @@ import { cookies } from "next/headers";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import crypto from "crypto";
 
+export const dynamic = "force-dynamic";
+
 const X_AUTHORIZE_URL = "https://x.com/i/oauth2/authorize";
 const PKCE_COOKIE_NAME = "x_oauth_pkce";
 const PKCE_COOKIE_MAX_AGE = 600; // 10 minutes

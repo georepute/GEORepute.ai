@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 const AI_ENGINES = [
   { id: "chatgpt", displayName: "ChatGPT" },
   { id: "claude", displayName: "Claude" },
