@@ -121,58 +121,40 @@ export async function POST(request: NextRequest) {
       avg_deal_value: avgDealValue,
     } = body;
 
-    if (!projectId || !domain) {
+    const domainNormalized =
+      typeof domain === "string"
+        ? domain.replace(/^https?:\/\//i, "").replace(/^www\./i, "").split("/")[0].trim()
+        : "";
+    if (!domainNormalized) {
       return NextResponse.json(
-        { error: "project_id and domain are required" },
+        { error: "domain is required" },
         { status: 400 }
       );
     }
 
-    const { data: project, error: projectError } = await supabase
-      .from("brand_analysis_projects")
-      .select("id, brand_name, industry, website_url, domain_id, keywords, competitors")
-      .eq("id", projectId)
-      .eq("user_id", session.user.id)
-      .single();
+    const modeParam = ["quick", "advanced", "internal"].includes(mode) ? mode : "quick";
+    let project: { id: string; brand_name: string | null; industry: string | null; website_url: string | null; domain_id: string | null; keywords: string[] | null; competitors: string[] | null } | null = null;
 
-    if (projectError || !project) {
-      return NextResponse.json(
-        { error: "Project not found" },
-        { status: 404 }
-      );
+    if (projectId) {
+      const { data: projectRow, error: projectError } = await supabase
+        .from("brand_analysis_projects")
+        .select("id, brand_name, industry, website_url, domain_id, keywords, competitors")
+        .eq("id", projectId)
+        .eq("user_id", session.user.id)
+        .single();
+
+      if (projectError || !projectRow) {
+        return NextResponse.json(
+          { error: "Project not found" },
+          { status: 404 }
+        );
+      }
+      project = projectRow;
     }
 
     const cookieHeader = request.headers.get("cookie");
 
-    const [dcsRes, revenueRes, threatRes] = await Promise.all([
-      fetchWithAuth(`/api/quote-builder/dcs?projectId=${encodeURIComponent(projectId)}`, cookieHeader),
-      fetchWithAuth(
-        `/api/quote-builder/revenue-exposure?projectId=${encodeURIComponent(projectId)}${avgDealValue != null ? `&avgDealValue=${avgDealValue}` : ""}`,
-        cookieHeader
-      ),
-      fetchWithAuth(`/api/quote-builder/threat-engine?projectId=${encodeURIComponent(projectId)}`, cookieHeader),
-    ]);
-
-    if (dcsRes.error) {
-      return NextResponse.json(
-        { error: "DCS calculation failed: " + dcsRes.error },
-        { status: 502 }
-      );
-    }
-    if (revenueRes.error) {
-      return NextResponse.json(
-        { error: "Revenue exposure failed: " + revenueRes.error },
-        { status: 502 }
-      );
-    }
-    if (threatRes.error) {
-      return NextResponse.json(
-        { error: "Threat engine failed: " + threatRes.error },
-        { status: 502 }
-      );
-    }
-
-    const dcsData = dcsRes.data as {
+    type DcsPayload = {
       finalScore: number;
       layerBreakdown: { name: string; score: number }[];
       radarChartData: unknown[];
@@ -182,7 +164,7 @@ export async function POST(request: NextRequest) {
       industryAverage?: number;
       project?: { domain?: string };
     };
-    const revenueData = revenueRes.data as {
+    type RevenuePayload = {
       searchDemand: number;
       ctrBenchmark: number;
       conversionRate: number;
@@ -191,13 +173,86 @@ export async function POST(request: NextRequest) {
       disclaimer: string;
       advertisingComparison?: { avgCpc?: number; revenueAtRisk?: number } | null;
     };
-    const threatData = threatRes.data as {
+    type ThreatPayload = {
       competitivePressureIndex: number;
       riskAccelerationIndicator: string;
       signals: Record<string, number>;
       disclaimer: string;
       projectionDisclaimer?: string;
     };
+
+    let dcsData: DcsPayload;
+    let revenueData: RevenuePayload;
+    let threatData: ThreatPayload;
+
+    if (project) {
+      const [dcsRes, revenueRes, threatRes] = await Promise.all([
+        fetchWithAuth(`/api/quote-builder/dcs?projectId=${encodeURIComponent(project.id)}&mode=${encodeURIComponent(modeParam)}`, cookieHeader),
+        fetchWithAuth(
+          `/api/quote-builder/revenue-exposure?projectId=${encodeURIComponent(project.id)}&mode=${encodeURIComponent(modeParam)}${avgDealValue != null ? `&avgDealValue=${avgDealValue}` : ""}`,
+          cookieHeader
+        ),
+        fetchWithAuth(`/api/quote-builder/threat-engine?projectId=${encodeURIComponent(project.id)}&mode=${encodeURIComponent(modeParam)}`, cookieHeader),
+      ]);
+
+      if (dcsRes.error) {
+        return NextResponse.json(
+          { error: "DCS calculation failed: " + dcsRes.error },
+          { status: 502 }
+        );
+      }
+      if (revenueRes.error) {
+        return NextResponse.json(
+          { error: "Revenue exposure failed: " + revenueRes.error },
+          { status: 502 }
+        );
+      }
+      if (threatRes.error) {
+        return NextResponse.json(
+          { error: "Threat engine failed: " + threatRes.error },
+          { status: 502 }
+        );
+      }
+
+      dcsData = dcsRes.data as DcsPayload;
+      revenueData = revenueRes.data as RevenuePayload;
+      threatData = threatRes.data as ThreatPayload;
+    } else {
+      // Domain-only (no GSC): stub data so proposal can still be generated
+      const defaultLayers = [
+        { name: "AI & Search Influence", score: 0 },
+        { name: "Organic & Commercial", score: 0 },
+        { name: "Social Authority", score: 0 },
+        { name: "Reputation & GMB", score: 0 },
+        { name: "Website & Content", score: 0 },
+        { name: "Risk & Exposure", score: 0 },
+      ];
+      dcsData = {
+        finalScore: 0,
+        layerBreakdown: defaultLayers,
+        radarChartData: defaultLayers.map((l) => ({ layer: l.name, score: l.score, fullMark: 100 })),
+        competitorComparison: [],
+        distanceToSafetyZone: 70,
+        distanceToDominanceZone: 85,
+        industryAverage: 50,
+      };
+      revenueData = {
+        searchDemand: 0,
+        ctrBenchmark: 0.02,
+        conversionRate: 0.02,
+        avgDealValue: avgDealValue ?? 0,
+        revenueExposureWindow: { conservative: 0, strategic: 0, dominance: 0 },
+        disclaimer: "Estimates based on limited data. Connect GSC for accurate revenue exposure.",
+      };
+      threatData = {
+        competitivePressureIndex: 0,
+        riskAccelerationIndicator: "LOW",
+        signals: {},
+        disclaimer: "No threat data available without brand analysis.",
+        projectionDisclaimer: "Projection only, not guarantee.",
+      };
+    }
+
     const projectionDisclaimer = threatData.projectionDisclaimer ?? "Projection only, not guarantee.";
     const projectedDcsSixMonths = Math.round(
       Math.max(0, Math.min(100, dcsData.finalScore - (threatData.competitivePressureIndex / 100) * 15))
@@ -209,15 +264,16 @@ export async function POST(request: NextRequest) {
     const cpcComponent = revenueData.advertisingComparison?.avgCpc
       ? Math.min(100, Math.round((revenueData.advertisingComparison.avgCpc || 0) * 2))
       : 50;
-    const marketOpportunityIndex = Math.round(
+    const marketOpportunityIndexRaw = Math.round(
       demandComponent * 0.4 + brandShareOfAttention * 0.4 + cpcComponent * 0.2
     );
-    const marketData = {
+    const marketOpportunityIndex = Math.min(100, Math.max(0, marketOpportunityIndexRaw));
+    const marketData: Record<string, unknown> = {
       totalSearchDemand: revenueData.searchDemand,
       commercialIntentVolume: revenueData.advertisingComparison?.revenueAtRisk ?? null,
       cpcWeightedValue: revenueData.advertisingComparison?.avgCpc ?? null,
       competitiveShareOfAttention: brandShareOfAttention,
-      marketOpportunityIndex: Math.min(100, Math.max(0, marketOpportunityIndex)),
+      marketOpportunityIndex,
       summary: {
         totalSearchDemand: revenueData.searchDemand,
         competitiveShareOfAttention: `${brandShareOfAttention}%`,
@@ -226,6 +282,12 @@ export async function POST(request: NextRequest) {
           : null,
       },
     };
+    if (modeParam === "advanced") {
+      const rev = revenueData as { aiQueryGrowthTrend?: number | null; geographicSignals?: string | null; emergingTopicClusters?: string[] | null };
+      marketData.aiQueryGrowthTrend = rev.aiQueryGrowthTrend ?? null;
+      marketData.geographicSignals = rev.geographicSignals ?? null;
+      marketData.emergingTopicClusters = rev.emergingTopicClusters ?? null;
+    }
 
     const monitoringDepth =
       (scopeAdjustments?.monitoringDepth as "basic" | "standard" | "deep") || "standard";
@@ -233,8 +295,8 @@ export async function POST(request: NextRequest) {
       REPORT_ADDON_IDS.includes(id as any)
     );
     const numberOfMarkets = Array.isArray(selectedMarkets) ? Math.max(1, selectedMarkets.length) : 1;
-    const keywords = (project.keywords as string[]) || [];
-    const competitors = (project.competitors as string[]) || [];
+    const keywords = (project?.keywords as string[] | undefined) || [];
+    const competitors = (project?.competitors as string[] | undefined) || [];
     const complexityScore = Math.min(
       50,
       Math.round((keywords.length || 0) * 2 + (competitors.length || 0) * 5)
@@ -245,7 +307,7 @@ export async function POST(request: NextRequest) {
       dcsScore: dcsData.finalScore,
       competitivePressureIndex: threatData.competitivePressureIndex,
       distanceToSafetyZone: dcsData.distanceToSafetyZone,
-      marketOpportunityIndex: marketData.marketOpportunityIndex,
+      marketOpportunityIndex,
       complexityScore,
       numberOfMarkets,
     });
@@ -274,11 +336,11 @@ export async function POST(request: NextRequest) {
     const insertPayload = {
       user_id: session.user.id,
       organization_id: orgUser?.organization_id ?? null,
-      project_id: projectId,
+      project_id: project?.id ?? null,
       client_name: clientName ?? null,
       client_email: clientEmail ?? null,
       contact_person: contactPerson ?? null,
-      domain,
+      domain: domainNormalized,
       mode: ["quick", "advanced", "internal"].includes(mode) ? mode : "quick",
       status: "draft",
       valid_until: validUntil || null,

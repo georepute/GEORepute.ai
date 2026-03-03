@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -26,6 +27,11 @@ import {
   ExternalLink,
   Pencil,
   Trash2,
+  ChevronDown,
+  ChevronUp,
+  History,
+  Palette,
+  X,
 } from "lucide-react";
 import {
   Radar,
@@ -90,12 +96,43 @@ function stepsForMode(mode: "quick" | "advanced" | "internal"): number[] {
 
 const DRAFT_STORAGE_KEY = "quote_builder_draft_id";
 
-/** Base URL for proposal share links: use production URL when set, else current origin. */
+/** Base URL for proposal share links. In production (origin not localhost) use origin; otherwise use NEXT_PUBLIC_APP_URL or origin. */
 function getProposalBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    const origin = window.location.origin;
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+    if (!isLocalhost) return origin;
+    const fromEnv = process.env.NEXT_PUBLIC_APP_URL;
+    if (fromEnv) return fromEnv.replace(/\/+$/, "");
+    return origin;
+  }
   const fromEnv = process.env.NEXT_PUBLIC_APP_URL;
   if (fromEnv) return fromEnv.replace(/\/+$/, "");
-  if (typeof window !== "undefined") return window.location.origin;
   return "";
+}
+
+/** Build Gmail compose URL with pre-filled to, subject, and body (proposal link). */
+function getGmailComposeUrl(quote: { client_email?: string | null; client_name?: string | null; share_token: string }): string {
+  const baseUrl = typeof window !== "undefined" ? getProposalBaseUrl() : "";
+  const proposalLink = baseUrl ? `${baseUrl}/proposals/${quote.share_token}` : "";
+  const clientName = quote.client_name || "Proposal";
+  const subject = `Strategic Intelligence Proposal – ${clientName}`;
+  const bodyLines = [
+    "Hi,",
+    "",
+    "Please find your Strategic Intelligence Proposal below.",
+    "",
+    proposalLink ? `View proposal: ${proposalLink}` : "",
+    "",
+    "Best regards",
+  ];
+  const body = bodyLines.join("\n").trim();
+  const to = (quote.client_email || "").trim();
+  const params = new URLSearchParams();
+  if (to) params.set("to", to);
+  params.set("su", subject);
+  params.set("body", body);
+  return `https://mail.google.com/mail/?view=cm&fs=1&${params.toString()}`;
 }
 
 interface Project {
@@ -140,6 +177,10 @@ interface Quote {
       competitiveShareOfAttention?: string;
       cpcWeightedValue?: string | null;
     };
+    /** Advanced mode: optional full breakdown fields */
+    aiQueryGrowthTrend?: number | null;
+    geographicSignals?: string | null;
+    emergingTopicClusters?: string[] | null;
   };
   threat_data: {
     competitivePressureIndex: number;
@@ -188,8 +229,20 @@ export default function QuoteBuilderPage() {
   const [priceOverrideReason, setPriceOverrideReason] = useState("");
   const [internalNotes, setInternalNotes] = useState("");
   const [winProbability, setWinProbability] = useState<number | null>(null);
-  const [quoteHistory, setQuoteHistory] = useState<{ id: string; share_token: string; client_name: string | null; status: string; total_monthly_price: number | null; created_at: string; domain: string }[]>([]);
+  const [marginEstimate, setMarginEstimate] = useState<string>("");
+  const [quoteHistory, setQuoteHistory] = useState<{ id: string; share_token: string; client_name: string | null; status: string; total_monthly_price: number | null; price_override?: number | null; win_probability?: number | null; created_at: string; domain: string }[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [activityLog, setActivityLog] = useState<{ id: string; action: string; old_value: Record<string, unknown> | null; new_value: Record<string, unknown> | null; created_at: string }[]>([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+  const [activityLogOpen, setActivityLogOpen] = useState(false);
+  const [activityModalQuoteId, setActivityModalQuoteId] = useState<string | null>(null);
+  const [activityModalLog, setActivityModalLog] = useState<{ id: string; action: string; old_value: Record<string, unknown> | null; new_value: Record<string, unknown> | null; created_at: string }[]>([]);
+  const [loadingActivityModal, setLoadingActivityModal] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [showSendProposalModal, setShowSendProposalModal] = useState(false);
+  const [sendProposalRecipientName, setSendProposalRecipientName] = useState("");
+  const [sendProposalEmail, setSendProposalEmail] = useState("");
+  const [sendProposalMessage, setSendProposalMessage] = useState("");
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
   const domain = selectedProject?.website_url
@@ -249,6 +302,7 @@ export default function QuoteBuilderPage() {
     if (quote) {
       setInternalNotes(quote.internal_notes ?? "");
       setWinProbability(quote.win_probability ?? null);
+      setMarginEstimate(quote.margin_estimate != null ? String(quote.margin_estimate) : "");
       setPriceOverride(quote.price_override != null ? String(quote.price_override) : "");
       if (typeof window !== "undefined" && quote.status === "draft") {
         sessionStorage.setItem(DRAFT_STORAGE_KEY, quote.id);
@@ -267,7 +321,7 @@ export default function QuoteBuilderPage() {
 
   const handleGenerate = async () => {
     if (!selectedProjectId || !domain) {
-      toast.error("Select a project first");
+      toast.error("Select a project with a website URL");
       return;
     }
     setScanning(true);
@@ -341,7 +395,50 @@ export default function QuoteBuilderPage() {
       total_monthly_price: num,
     });
     toast.success("Price updated");
+    if (quote?.id && activityLogOpen) fetchActivityLog(quote.id);
   };
+
+  const fetchActivityLog = useCallback(async (quoteId: string) => {
+    setLoadingActivity(true);
+    try {
+      const res = await fetch(`/api/quote-builder/activity?quoteId=${encodeURIComponent(quoteId)}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(data.activity)) {
+        setActivityLog(data.activity);
+      } else {
+        setActivityLog([]);
+      }
+    } catch {
+      setActivityLog([]);
+    } finally {
+      setLoadingActivity(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activityModalQuoteId) {
+      setActivityModalLog([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingActivityModal(true);
+    fetch(`/api/quote-builder/activity?quoteId=${encodeURIComponent(activityModalQuoteId)}`)
+      .then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (!cancelled && ok && Array.isArray(data.activity)) {
+          setActivityModalLog(data.activity);
+        } else if (!cancelled) {
+          setActivityModalLog([]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setActivityModalLog([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingActivityModal(false);
+      });
+    return () => { cancelled = true; };
+  }, [activityModalQuoteId]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -383,6 +480,29 @@ export default function QuoteBuilderPage() {
     }
   };
 
+  const handleOpenDraftAtExport = async (id: string) => {
+    try {
+      const res = await fetch(`/api/quote-builder?id=${encodeURIComponent(id)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load quote");
+      const q = data.quote as Quote;
+      setQuote(q);
+      setSelectedProjectId(q.project_id ?? "");
+      setClientName(q.client_name ?? "");
+      setClientEmail(q.client_email ?? "");
+      setContactPerson(q.contact_person ?? "");
+      setValidUntil(q.valid_until ? new Date(q.valid_until).toISOString().slice(0, 10) : "");
+      setSelectedReports(q.selected_reports ?? []);
+      if (typeof window !== "undefined" && q.status === "draft") {
+        sessionStorage.setItem(DRAFT_STORAGE_KEY, q.id);
+      }
+      setStep(10);
+      toast.success("Quote opened at Export");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load quote");
+    }
+  };
+
   const handleDeleteQuote = async (q: { id: string; status: string }) => {
     if (q.status !== "draft") {
       toast.error("Only draft quotes can be deleted");
@@ -416,9 +536,18 @@ export default function QuoteBuilderPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Strategic Intelligence Quote Builder</h1>
-        <p className="text-gray-600">Generate board-ready proposals in under 7 minutes</p>
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Strategic Intelligence Quote Builder</h1>
+          <p className="text-gray-600">Generate board-ready proposals in under 7 minutes</p>
+        </div>
+        <Link
+          href="/dashboard/settings?tab=white-label"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 text-sm font-medium transition-colors"
+        >
+          <Palette className="w-4 h-4 text-indigo-600" />
+          White label / Branding
+        </Link>
       </div>
 
       {/* Mode tabs — clearly interactive; selection changes step flow and internal-only fields */}
@@ -716,6 +845,9 @@ export default function QuoteBuilderPage() {
             className="bg-white rounded-xl p-6 border border-gray-200"
           >
             <h2 className="text-xl font-bold text-gray-900 mb-4">Market & Revenue Exposure</h2>
+            {mode === "advanced" && (
+              <p className="text-sm text-gray-500 mb-4">Full market breakdown and revenue exposure (Advanced mode).</p>
+            )}
             {currentQuote.market_data && (currentQuote.market_data.marketOpportunityIndex != null || currentQuote.market_data.summary) && (
               <div className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {currentQuote.market_data.marketOpportunityIndex != null && !Number.isNaN(currentQuote.market_data.marketOpportunityIndex) && (
@@ -740,6 +872,28 @@ export default function QuoteBuilderPage() {
                   <div className="p-3 bg-gray-50 rounded-lg">
                     <p className="text-xs text-gray-600">Total search demand</p>
                     <p className="text-lg font-semibold text-gray-900">{(currentQuote.market_data.totalSearchDemand ?? revenue.searchDemand)?.toLocaleString() ?? "—"}</p>
+                  </div>
+                )}
+              </div>
+            )}
+            {mode === "advanced" && currentQuote.market_data && (
+              <div className="mb-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {currentQuote.market_data.aiQueryGrowthTrend != null && (
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs text-gray-600">AI query growth trend</p>
+                    <p className="text-lg font-semibold text-gray-900">{currentQuote.market_data.aiQueryGrowthTrend}%</p>
+                  </div>
+                )}
+                {currentQuote.market_data.geographicSignals != null && currentQuote.market_data.geographicSignals !== "" && (
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs text-gray-600">Geographic signals</p>
+                    <p className="text-sm font-semibold text-gray-900">{currentQuote.market_data.geographicSignals}</p>
+                  </div>
+                )}
+                {currentQuote.market_data.emergingTopicClusters != null && currentQuote.market_data.emergingTopicClusters.length > 0 && (
+                  <div className="p-3 bg-gray-50 rounded-lg sm:col-span-2">
+                    <p className="text-xs text-gray-600">Emerging topic clusters</p>
+                    <p className="text-sm font-semibold text-gray-900">{currentQuote.market_data.emergingTopicClusters.join(", ")}</p>
                   </div>
                 )}
               </div>
@@ -790,6 +944,9 @@ export default function QuoteBuilderPage() {
             className="bg-white rounded-xl p-6 border border-gray-200"
           >
             <h2 className="text-xl font-bold text-gray-900 mb-4">Risk & Competitive Pressure</h2>
+            {mode === "advanced" && (
+              <p className="text-sm text-gray-500 mb-4">Full threat and risk engine output (Advanced mode).</p>
+            )}
             <div className="grid md:grid-cols-2 gap-6">
               <div>
                 <p className="text-sm text-gray-600">Competitive Pressure Index</p>
@@ -967,6 +1124,28 @@ export default function QuoteBuilderPage() {
               {mode === "internal" && (
                 <>
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Margin estimate (%)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      value={marginEstimate}
+                      onChange={(e) => setMarginEstimate(e.target.value)}
+                      onBlur={() => {
+                        const trimmed = marginEstimate.trim();
+                        if (trimmed === "") {
+                          updateQuote({ margin_estimate: null });
+                          return;
+                        }
+                        const v = parseFloat(trimmed);
+                        if (!isNaN(v)) updateQuote({ margin_estimate: v });
+                      }}
+                      placeholder="e.g. 25"
+                      className="w-32 px-4 py-2 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Internal notes</label>
                     <textarea
                       value={internalNotes}
@@ -990,6 +1169,58 @@ export default function QuoteBuilderPage() {
                       }}
                       className="w-32 px-4 py-2 border border-gray-300 rounded-lg"
                     />
+                  </div>
+                  <div className="border border-gray-200 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !activityLogOpen;
+                        setActivityLogOpen(next);
+                        if (next && currentQuote?.id) {
+                          fetchActivityLog(currentQuote.id);
+                        }
+                      }}
+                      className="w-full flex items-center justify-between px-4 py-3 text-left text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg"
+                    >
+                      <span className="flex items-center gap-2">
+                        <History className="w-4 h-4" />
+                        Proposal history / Price override log
+                      </span>
+                      {activityLogOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                    {activityLogOpen && (
+                      <div className="border-t border-gray-200 px-4 py-3 bg-gray-50 rounded-b-lg max-h-60 overflow-y-auto">
+                        {loadingActivity ? (
+                          <p className="text-sm text-gray-500 flex items-center gap-2">
+                            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+                          </p>
+                        ) : activityLog.length === 0 ? (
+                          <p className="text-sm text-gray-500">No activity yet.</p>
+                        ) : (
+                          <ul className="space-y-2 text-sm">
+                            {activityLog.map((entry) => {
+                              const date = new Date(entry.created_at).toLocaleString();
+                              let label = entry.action.replace(/_/g, " ");
+                              if (entry.action === "price_override" && entry.new_value && typeof entry.new_value.price_override === "number") {
+                                label = `Price override to $${Number(entry.new_value.price_override).toLocaleString()}`;
+                                const reason = entry.new_value.price_override_reason;
+                                if (reason) label += ` (${String(reason)})`;
+                              } else if (entry.action === "status_changed" && entry.new_value && typeof entry.new_value.status === "string") {
+                                label = `Status → ${entry.new_value.status}`;
+                              } else if (entry.action === "created") {
+                                label = "Quote created";
+                              }
+                              return (
+                                <li key={entry.id} className="flex flex-wrap gap-x-2 gap-y-1">
+                                  <span className="font-medium text-gray-700">{label}</span>
+                                  <span className="text-gray-500">{date}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1045,6 +1276,36 @@ export default function QuoteBuilderPage() {
             <h2 className="text-xl font-bold text-gray-900 mb-4">Export & send</h2>
             <div className="flex flex-wrap gap-4">
               <button
+                onClick={() => {
+                  if (!(currentQuote.client_email || "").trim()) {
+                    toast.error("Add client email in Domain & Client to send by email.");
+                    return;
+                  }
+                  setSendProposalRecipientName(
+                    (currentQuote.contact_person || currentQuote.client_name || "").trim()
+                  );
+                  setSendProposalEmail((currentQuote.client_email || "").trim());
+                  setSendProposalMessage(
+                    "Please find your Strategic Intelligence Proposal attached and the link below."
+                  );
+                  setShowSendProposalModal(true);
+                }}
+                disabled={!(currentQuote.client_email || "").trim()}
+                className="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary-700"
+              >
+                <Mail className="w-4 h-4" /> Send proposal email
+              </button>
+              <button
+                onClick={() => {
+                  const url = getGmailComposeUrl(currentQuote);
+                  window.open(url, "_blank", "noopener,noreferrer");
+                  toast.success("Gmail compose opened.");
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2 hover:bg-gray-50"
+              >
+                <Mail className="w-4 h-4" /> Send via Gmail
+              </button>
+              <button
                 onClick={copyShareLink}
                 className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2 hover:bg-gray-50"
               >
@@ -1059,15 +1320,6 @@ export default function QuoteBuilderPage() {
                 <ExternalLink className="w-4 h-4" /> Open proposal
               </a>
               <button
-                onClick={() => {
-                  updateQuote({ status: "sent" });
-                  toast.success("Marked as sent");
-                }}
-                className="px-4 py-2 bg-primary-600 text-white rounded-lg font-medium flex items-center gap-2"
-              >
-                <Send className="w-4 h-4" /> Mark as sent
-              </button>
-              <button
                 className="px-4 py-2 bg-gray-800 text-white rounded-lg font-medium flex items-center gap-2"
                 onClick={async () => {
                   if (!currentQuote) return;
@@ -1075,7 +1327,8 @@ export default function QuoteBuilderPage() {
                     const res = await fetch("/api/quote-builder/white-label");
                     const data = await res.json().catch(() => ({}));
                     const whiteLabelConfig = data.whiteLabelConfig ?? null;
-                    await generateProposalPDF(currentQuote as any, whiteLabelConfig);
+                    const quoteForPdf = { ...currentQuote, selected_reports: selectedReports.length ? selectedReports : (currentQuote.selected_reports ?? []) };
+                    await generateProposalPDF(quoteForPdf as any, whiteLabelConfig);
                     toast.success("PDF downloaded");
                   } catch (e) {
                     toast.error("Failed to generate PDF");
@@ -1086,7 +1339,16 @@ export default function QuoteBuilderPage() {
               </button>
             </div>
             <p className="text-sm text-gray-500 mt-4">
+              <strong>Send proposal email</strong> sends the proposal (with PDF attachment and link) from this app and marks the proposal as sent automatically. <strong>Send via Gmail</strong> opens Gmail with the link pre-filled.
+            </p>
+            <p className="text-sm text-gray-500 mt-2">
               Share link: {getProposalBaseUrl()}/proposals/{currentQuote.share_token}
+            </p>
+            <p className="text-sm text-gray-500 mt-2">
+              PDF and shared proposal use your organization&apos;s branding.{" "}
+              <Link href="/dashboard/settings?tab=white-label" className="text-indigo-600 hover:underline font-medium">
+                Configure white label
+              </Link>
             </p>
             <div className="mt-6 flex justify-between">
               <button type="button" onClick={() => setStep(prevStepNumber(10, mode))} className="px-4 py-2 border border-gray-300 rounded-lg font-medium flex items-center gap-2">
@@ -1108,6 +1370,176 @@ export default function QuoteBuilderPage() {
         )}
       </AnimatePresence>
 
+      {/* Send proposal via email modal */}
+      {showSendProposalModal && currentQuote && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden"
+          >
+            <div className="bg-gradient-to-r from-primary-600 to-indigo-600 p-6 text-white">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Mail className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold">Send proposal via email</h2>
+                    <p className="text-sm text-white/90 mt-1">
+                      Proposal PDF attached, link included
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowSendProposalModal(false)}
+                  className="w-8 h-8 hover:bg-white/20 rounded-lg transition-colors flex items-center justify-center"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Recipient name
+                  </label>
+                  <input
+                    type="text"
+                    value={sendProposalRecipientName}
+                    onChange={(e) => setSendProposalRecipientName(e.target.value)}
+                    placeholder="Enter recipient name"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Email address
+                  </label>
+                  <input
+                    type="email"
+                    value={sendProposalEmail}
+                    onChange={(e) => setSendProposalEmail(e.target.value)}
+                    placeholder="Enter email address"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Message
+                  </label>
+                  <textarea
+                    value={sendProposalMessage}
+                    onChange={(e) => setSendProposalMessage(e.target.value)}
+                    placeholder="Message to include in the email..."
+                    rows={4}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all resize-y"
+                  />
+                </div>
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-lg border border-blue-100">
+                  <h3 className="font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-primary-600" />
+                    What we&apos;ll send
+                  </h3>
+                  <div className="text-sm text-gray-600 space-y-1">
+                    <p>• Your message (above)</p>
+                    <p>• Proposal PDF as attachment</p>
+                    <p>• Online proposal link in the email</p>
+                    <p>• Domain: {currentQuote.domain}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowSendProposalModal(false)}
+                  disabled={sendingEmail}
+                  className="flex-1 px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-semibold disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!currentQuote?.id || sendingEmail || !sendProposalEmail.trim()) return;
+                    setSendingEmail(true);
+                    try {
+                      const res = await fetch("/api/quote-builder/white-label");
+                      const data = await res.json().catch(() => ({}));
+                      const whiteLabelConfig = data.whiteLabelConfig ?? null;
+                      const quoteForPdf = {
+                        ...currentQuote,
+                        selected_reports:
+                          selectedReports.length
+                            ? selectedReports
+                            : (currentQuote.selected_reports ?? []),
+                      };
+                      const buffer = await generateProposalPDF(
+                        quoteForPdf as any,
+                        whiteLabelConfig,
+                        { returnBuffer: true }
+                      );
+                      let pdfBase64 = "";
+                      if (buffer instanceof ArrayBuffer) {
+                        const bytes = new Uint8Array(buffer);
+                        const chunk = 8192;
+                        let binary = "";
+                        for (let i = 0; i < bytes.length; i += chunk) {
+                          binary += String.fromCharCode.apply(
+                            null,
+                            bytes.subarray(i, i + chunk) as unknown as number[]
+                          );
+                        }
+                        pdfBase64 = btoa(binary);
+                      }
+                      const sendRes = await fetch("/api/quote-builder/send-proposal-email", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          quoteId: currentQuote.id,
+                          to: sendProposalEmail.trim(),
+                          message: sendProposalMessage.trim() || undefined,
+                          pdfBase64: pdfBase64 || undefined,
+                        }),
+                      });
+                      const sendData = await sendRes.json().catch(() => ({}));
+                      if (sendData.success && sendData.sent) {
+                        setQuote((prev) =>
+                          prev ? { ...prev, status: "sent" } : null
+                        );
+                        setShowSendProposalModal(false);
+                        toast.success("Email sent and proposal marked as sent.");
+                      } else {
+                        toast.error(sendData.error || "Failed to send email");
+                      }
+                    } catch (e) {
+                      toast.error("Failed to send email");
+                    } finally {
+                      setSendingEmail(false);
+                    }
+                  }}
+                  disabled={sendingEmail || !sendProposalEmail.trim()}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-primary-600 to-indigo-600 text-white rounded-lg hover:shadow-lg transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {sendingEmail ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Sending…
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="w-4 h-4" />
+                      Send proposal
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
       {/* Quote history */}
       <div className="mt-10 bg-white rounded-xl p-6 border border-gray-200">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Recent quotes</h2>
@@ -1120,21 +1552,49 @@ export default function QuoteBuilderPage() {
             {quoteHistory.map((q) => (
               <div
                 key={q.id}
-                className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50"
+                role={q.status === "draft" ? "button" : undefined}
+                tabIndex={q.status === "draft" ? 0 : undefined}
+                onClick={q.status === "draft" ? () => handleOpenDraftAtExport(q.id) : undefined}
+                onKeyDown={q.status === "draft" ? (e) => e.key === "Enter" && handleOpenDraftAtExport(q.id) : undefined}
+                className={`flex items-center justify-between p-4 border border-gray-200 rounded-lg ${q.status === "draft" ? "cursor-pointer hover:bg-indigo-50 hover:border-indigo-200" : "hover:bg-gray-50"}`}
               >
                 <div>
                   <p className="font-medium text-gray-900">{q.client_name || q.domain || "—"}</p>
                   <p className="text-sm text-gray-600">
-                    ${(q.total_monthly_price ?? 0).toLocaleString()} · {q.domain} · {new Date(q.created_at).toLocaleDateString()}
+                    {q.price_override != null
+                      ? `$${Number(q.price_override).toLocaleString()} (override)`
+                      : `$${(q.total_monthly_price ?? 0).toLocaleString()}`}
+                    {" · "}
+                    {q.domain}
+                    {" · "}
+                    {new Date(q.created_at).toLocaleDateString()}
+                    {q.win_probability != null && (
+                      <>
+                        {" · "}
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
+                          Win {q.win_probability}%
+                        </span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(q.status)}`}>
                     {q.status}
                   </span>
+                  {mode === "internal" && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setActivityModalQuoteId(q.id); }}
+                      className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                      title="Proposal history"
+                    >
+                      <History className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => handleEditQuote(q.id)}
+                    onClick={(e) => { e.stopPropagation(); handleEditQuote(q.id); }}
                     className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg"
                     title="Edit quote"
                   >
@@ -1143,14 +1603,14 @@ export default function QuoteBuilderPage() {
                   {q.status === "draft" && (
                     <button
                       type="button"
-                      onClick={() => handleDeleteQuote(q)}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteQuote(q); }}
                       className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
                       title="Delete draft"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
-                  <a href={`/proposals/${q.share_token}`} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-500 hover:text-indigo-600 rounded-lg" title="View proposal">
+                  <a href={`/proposals/${q.share_token}`} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-500 hover:text-indigo-600 rounded-lg" title="View proposal" onClick={(e) => e.stopPropagation()}>
                     <Eye className="w-4 h-4" />
                   </a>
                 </div>
@@ -1159,6 +1619,51 @@ export default function QuoteBuilderPage() {
           </div>
         )}
       </div>
+
+      {/* Activity log modal (Agency Internal – from quote history) */}
+      {activityModalQuoteId != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActivityModalQuoteId(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Proposal history</h3>
+              <button type="button" onClick={() => setActivityModalQuoteId(null)} className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
+                <ChevronRight className="w-5 h-5 rotate-90" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              {loadingActivityModal ? (
+                <p className="text-sm text-gray-500 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+                </p>
+              ) : activityModalLog.length === 0 ? (
+                <p className="text-sm text-gray-500">No activity for this quote.</p>
+              ) : (
+                <ul className="space-y-2 text-sm">
+                  {activityModalLog.map((entry) => {
+                    const date = new Date(entry.created_at).toLocaleString();
+                    let label = entry.action.replace(/_/g, " ");
+                    if (entry.action === "price_override" && entry.new_value && typeof entry.new_value.price_override === "number") {
+                      label = `Price override to $${Number(entry.new_value.price_override).toLocaleString()}`;
+                      const reason = entry.new_value.price_override_reason;
+                      if (reason) label += ` (${String(reason)})`;
+                    } else if (entry.action === "status_changed" && entry.new_value && typeof entry.new_value.status === "string") {
+                      label = `Status → ${entry.new_value.status}`;
+                    } else if (entry.action === "created") {
+                      label = "Quote created";
+                    }
+                    return (
+                      <li key={entry.id} className="flex flex-wrap gap-x-2 gap-y-1 py-1 border-b border-gray-100 last:border-0">
+                        <span className="font-medium text-gray-700">{label}</span>
+                        <span className="text-gray-500">{date}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

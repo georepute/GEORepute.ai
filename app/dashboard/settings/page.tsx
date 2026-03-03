@@ -85,6 +85,16 @@ export default function Settings() {
     { id: "billing", label: t.dashboard.settings.billing, icon: CreditCard },
   ];
 
+  // Open tab from URL (?tab=white-label etc.)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabFromUrl = urlParams.get("tab");
+    const validTabs = ["profile", "brand-voice", "white-label", "notifications", "integrations", "security", "billing"];
+    if (tabFromUrl && validTabs.includes(tabFromUrl)) {
+      setActiveTab(tabFromUrl);
+    }
+  }, []);
+
   // Check for OAuth callback and auto-switch to integrations tab
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);

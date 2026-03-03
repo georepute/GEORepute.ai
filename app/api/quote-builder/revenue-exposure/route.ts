@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get("projectId");
     const dealValueParam = searchParams.get("avgDealValue");
+    const mode = searchParams.get("mode"); // "quick" | "advanced" | "internal" – when "quick" can return summary only in future
 
     if (!projectId) {
       return NextResponse.json(
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest) {
           .maybeSingle()
       : { data: null };
 
-    return NextResponse.json({
+    const payload: Record<string, unknown> = {
       searchDemand,
       ctrBenchmark: Math.round(ctrBenchmark * 10000) / 100,
       conversionRate: Math.round(conversionRate * 10000) / 100,
@@ -109,7 +110,13 @@ export async function GET(request: NextRequest) {
         ? { avgCpc: opportunityReport.avg_cpc, revenueAtRisk: opportunityReport.revenue_at_risk }
         : null,
       disclaimer: MANDATORY_DISCLAIMER,
-    });
+    };
+    if (mode === "advanced") {
+      payload.aiQueryGrowthTrend = null;
+      payload.geographicSignals = null;
+      payload.emergingTopicClusters = null;
+    }
+    return NextResponse.json(payload);
   } catch (error: any) {
     console.error("Revenue exposure error:", error);
     return NextResponse.json(

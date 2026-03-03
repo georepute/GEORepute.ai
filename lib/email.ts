@@ -10,6 +10,7 @@ interface EmailOptions {
   subject: string;
   html: string;
   text?: string;
+  attachments?: Array<{ filename: string; content: Buffer }>;
 }
 
 // Create reusable transporter
@@ -52,13 +53,17 @@ export async function sendEmail(options: EmailOptions): Promise<{ success: boole
     await emailTransporter.verify();
 
     // Send email
-    const info = await emailTransporter.sendMail({
+    const mailOptions: nodemailer.SendMailOptions = {
       from: `"${process.env.EMAIL_FROM_NAME || 'GeoRepute.ai'}" <${process.env.GMAIL_USER}>`,
       to: options.to,
       subject: options.subject,
       html: options.html,
       text: options.text || options.html.replace(/<[^>]*>/g, ''), // Strip HTML for text version
-    });
+    };
+    if (options.attachments?.length) {
+      mailOptions.attachments = options.attachments;
+    }
+    const info = await emailTransporter.sendMail(mailOptions);
 
     console.log('Email sent successfully:', info.messageId);
     return { success: true };

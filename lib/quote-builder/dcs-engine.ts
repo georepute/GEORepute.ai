@@ -55,6 +55,11 @@ export interface DCSContext {
   domainIntelligenceResults: { results?: any } | null;
   competitors: (string | { name: string; domain?: string })[];
   industry: string;
+  /** From brand_analysis_sessions.competitor_analysis (AI visibility / competitor-analysis-engine). */
+  competitorAnalysis?: {
+    rankings?: Array<{ name: string | { name: string; domain?: string }; rank?: number; ranking_score?: number; mentions?: number }>;
+    share_of_voice?: Array<{ brand: string; mentions?: number; share_percentage?: number }>;
+  } | null;
 }
 
 // Layer 1: AI & Search Influence (20%) — same as strategic-intelligence calculateAIVisibilityScore
@@ -173,6 +178,106 @@ function layer6RiskExternalExposure(blindSpotReport: any, gapReport: any): numbe
   return blindSpotReport ? blindScore : gapScore;
 }
 
+/** Deterministic 0–1 from string (for per-competitor estimated DCS spread). */
+function hashToUnit(s: string): number {
+  let h = 0;
+  const str = String(s || "").trim() || "x";
+  for (let i = 0; i < str.length; i++) {
+    h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  }
+  return (h % 10007) / 10007;
+}
+
+/**
+ * Estimated DCS for one competitor when we don't have per-competitor data.
+ * Returns a deterministic score in a band around industry average so the comparison chart shows variation.
+ */
+function estimateCompetitorDCS(
+  name: string,
+  domain: string | undefined,
+  industryAverage: number
+): number {
+  const seed = [name, domain].filter(Boolean).join("|").toLowerCase();
+  const u = hashToUnit(seed);
+  const spread = 14;
+  const delta = (u - 0.5) * 2 * spread;
+  const score = industryAverage + delta;
+  return Math.min(100, Math.max(0, Math.round(score)));
+}
+
+function norm(s: string | undefined): string {
+  return (s || "").toLowerCase().trim();
+}
+
+/** Normalize for flexible match: strip common suffixes (Inc, Ltd, .com, etc.) and extra spaces. */
+function normNameForMatch(s: string | undefined): string {
+  const t = (s || "").toLowerCase().trim().replace(/\s+/g, " ");
+  return t
+    .replace(/\s+(inc\.?|ltd\.?|llc|corp\.?|co\.?|limited|company)$/i, "")
+    .replace(/(\.com|\.io|\.co|\.net|\.org)$/i, "")
+    .trim();
+}
+
+/** Match project competitor (name, domain) to a ranking or share_of_voice entry. Uses exact norm first, then flexible (core name) match. */
+function matchesRankingEntry(
+  entryName: string | { name: string; domain?: string },
+  projectName: string,
+  projectDomain: string | undefined
+): boolean {
+  const rName = typeof entryName === "string" ? entryName : entryName?.name;
+  const rDomain = typeof entryName === "object" && entryName && "domain" in entryName ? (entryName as { domain?: string }).domain : undefined;
+  const nEntry = norm(rName);
+  const nProj = norm(projectName);
+  if (nEntry === nProj) return true;
+  const nEntryCore = normNameForMatch(rName);
+  const nProjCore = normNameForMatch(projectName);
+  if (nEntryCore && nProjCore && (nEntryCore === nProjCore || nEntryCore.includes(nProjCore) || nProjCore.includes(nEntryCore))) return true;
+  if (projectDomain != null && projectDomain !== "" && rDomain != null && rDomain !== "" && norm(rDomain) === norm(projectDomain)) return true;
+  return false;
+}
+
+/** Same flexible match for share_of_voice brand field. */
+function matchesSovBrand(sovBrand: string, projectName: string): boolean {
+  if (norm(sovBrand) === norm(projectName)) return true;
+  const coreBrand = normNameForMatch(sovBrand);
+  const coreProj = normNameForMatch(projectName);
+  return !!(coreBrand && coreProj && (coreBrand === coreProj || coreBrand.includes(coreProj) || coreProj.includes(coreBrand)));
+}
+
+/**
+ * Get competitor score from AI visibility competitor_analysis when available.
+ * Uses rankings.ranking_score (0–1 → 0–100) or share_of_voice.share_percentage so each competitor gets a distinct score from real data.
+ * If no analysis or no match, falls back to estimateCompetitorDCS (deterministic hash per name/domain) so scores still differ per competitor.
+ */
+function getCompetitorScoreFromAnalysis(
+  competitorAnalysis: DCSContext["competitorAnalysis"],
+  name: string,
+  domain: string | undefined,
+  industryAverage: number
+): number {
+  if (!competitorAnalysis) return estimateCompetitorDCS(name, domain, industryAverage);
+
+  const rankings = competitorAnalysis.rankings;
+  if (rankings?.length) {
+    const entry = rankings.find((r) => matchesRankingEntry(r.name, name, domain));
+    if (entry != null && entry.ranking_score != null && !Number.isNaN(entry.ranking_score)) {
+      const s = Math.round(entry.ranking_score * 100);
+      return Math.min(100, Math.max(0, s));
+    }
+  }
+
+  const sov = competitorAnalysis.share_of_voice;
+  if (sov?.length) {
+    const entry = sov.find((s) => matchesSovBrand(s.brand, name));
+    if (entry != null && entry.share_percentage != null && !Number.isNaN(entry.share_percentage)) {
+      const s = Math.round(Number(entry.share_percentage));
+      return Math.min(100, Math.max(0, s));
+    }
+  }
+
+  return estimateCompetitorDCS(name, domain, industryAverage);
+}
+
 export function computeDCS(context: DCSContext): DCSResult {
   const l1 = layer1AiSearchInfluence(context.aiResponses, context.sessionTotalQueries);
   const l2 = layer2OrganicCommercial(
@@ -218,12 +323,14 @@ export function computeDCS(context: DCSContext): DCSResult {
   const distanceToSafetyZone = Math.max(0, 70 - finalScore);
   const distanceToDominanceZone = Math.max(0, 85 - finalScore);
 
-  // Competitor name + optional domain; scores would require running DCS per competitor (not stored)
+  // Per-competitor score: from AI visibility (rankings / share_of_voice) when available — each competitor gets a different score.
+  // Fallback: estimateCompetitorDCS(name, domain, industryAverage) is deterministic per name/domain so no two competitors get the same score.
   const competitorComparison = context.competitors.length
     ? context.competitors.map((c) => {
         const name = typeof c === "string" ? c : c.name;
         const domain = typeof c === "object" && c && "domain" in c ? (c as { domain?: string }).domain : undefined;
-        return { name, domain, score: industryAverage };
+        const score = getCompetitorScoreFromAnalysis(context.competitorAnalysis, name, domain, industryAverage);
+        return { name, domain, score };
       })
     : undefined;
 

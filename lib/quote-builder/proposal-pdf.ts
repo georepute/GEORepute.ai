@@ -34,7 +34,22 @@ const GREEN = { r: 16, g: 185, b: 129 };
 const AMBER = { r: 245, g: 158, b: 11 };
 const RED = { r: 239, g: 68, b: 68 };
 
-const DEFAULT_DISCLAIMER = "";
+const DEFAULT_DISCLAIMER =
+  "This proposal is based on publicly available data and comparative market benchmarks. It does not represent official search engine metrics and does not imply algorithm influence or guaranteed results.";
+
+const REPORT_LABELS: Record<string, string> = {
+  ai_vs_google_gap: "AI vs Google Gap",
+  market_share_of_attention: "Market Share of Attention",
+  opportunity_blind_spots: "Opportunity & Blind Spots",
+  geo_visibility: "GEO Visibility",
+};
+
+const REPORT_DESCRIPTIONS: Record<string, string> = {
+  ai_vs_google_gap: "Compare brand visibility in AI answers vs traditional search; identify gaps and opportunities.",
+  market_share_of_attention: "Measure share of voice and attention across AI and organic channels.",
+  opportunity_blind_spots: "Surface untapped queries and content gaps with competitive context.",
+  geo_visibility: "Assess visibility and demand by geography; prioritize markets.",
+};
 
 export interface WhiteLabelConfig {
   companyName?: string;
@@ -72,6 +87,9 @@ function normalizeWhiteLabel(raw: WhiteLabelConfig | Record<string, unknown> | n
 
 export interface QuoteForPDF {
   client_name: string | null;
+  client_email?: string | null;
+  contact_person?: string | null;
+  valid_until?: string | null;
   domain: string;
   dcs_snapshot: {
     finalScore: number;
@@ -94,6 +112,8 @@ export interface QuoteForPDF {
     competitiveShareOfAttention?: number;
     marketOpportunityIndex?: number;
     summary?: { totalSearchDemand?: number; competitiveShareOfAttention?: string; cpcWeightedValue?: string | null };
+    aiQueryGrowthTrend?: number | null;
+    emergingTopicClusters?: string[] | null;
   };
   threat_data: {
     competitivePressureIndex: number;
@@ -356,10 +376,16 @@ function drawRule(doc: jsPDF, x: number, y: number, w: number, gray = 220) {
   doc.line(x, y, x + w, y);
 }
 
+export type GenerateProposalPDFOptions = {
+  /** If true, returns the PDF as ArrayBuffer instead of triggering download. */
+  returnBuffer?: boolean;
+};
+
 export async function generateProposalPDF(
   quote: QuoteForPDF,
-  whiteLabel?: WhiteLabelConfig | Record<string, unknown> | null
-): Promise<void> {
+  whiteLabel?: WhiteLabelConfig | Record<string, unknown> | null,
+  options?: GenerateProposalPDFOptions
+): Promise<void | ArrayBuffer> {
   const wl = normalizeWhiteLabel(whiteLabel);
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -399,11 +425,16 @@ export async function generateProposalPDF(
 
   const footer = (pageNum: number) => {
     const fy = pageHeight - 6;
-    doc.setFontSize(6.5);
+    doc.setFontSize(6);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(GRAY_500.r, GRAY_500.g, GRAY_500.b);
     if (disclaimer) {
-      doc.text(disclaimer.slice(0, 80) + (disclaimer.length > 80 ? "…" : ""), margin, fy - 2, { maxWidth: pageWidth - 2 * margin });
+      const disclaimerLines = doc.splitTextToSize(disclaimer, pageWidth - 2 * margin);
+      let dy = fy - 2 - (disclaimerLines.length - 1) * 3.2;
+      disclaimerLines.forEach((line: string) => {
+        doc.text(line, margin, dy, { maxWidth: pageWidth - 2 * margin });
+        dy += 3.2;
+      });
     }
     doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, fy, { align: "center" });
     if (wl?.poweredByEnabled !== false) {
@@ -428,13 +459,24 @@ export async function generateProposalPDF(
 
   const boxPad = 4;
   const clientBoxY = y;
-  drawSectionBox(doc, margin, clientBoxY, pageWidth - 2 * margin, 14);
+  const hasContact = !!(quote.contact_person || quote.client_email || quote.valid_until);
+  const clientBoxH = hasContact ? 28 : 14;
+  drawSectionBox(doc, margin, clientBoxY, pageWidth - 2 * margin, clientBoxH);
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
   doc.text(`Client: ${quote.client_name || "—"}`, margin + boxPad, clientBoxY + 6);
   doc.text(`Domain: ${quote.domain || "—"}`, margin + boxPad, clientBoxY + 11);
-  y = clientBoxY + 16;
+  if (hasContact) {
+    if (quote.contact_person) doc.text(`Contact: ${quote.contact_person}`, margin + boxPad, clientBoxY + 16);
+    if (quote.client_email) doc.text(`Email: ${quote.client_email}`, margin + boxPad, clientBoxY + 21);
+    if (quote.valid_until) {
+      const raw = quote.valid_until;
+      const validStr = typeof raw === "string" ? (raw.length >= 10 ? raw.slice(0, 10) : raw) : String(raw);
+      doc.text(`Valid until: ${validStr}`, margin + boxPad, clientBoxY + 26);
+    }
+  }
+  y = clientBoxY + clientBoxH + 2;
 
   const dcsScore = Math.round(dcs.finalScore ?? 0);
   const dcsBoxH = 28;
@@ -523,6 +565,8 @@ export async function generateProposalPDF(
   let metricsH = 6;
   if (market?.summary?.competitiveShareOfAttention) metricsH += 5;
   if (market?.summary?.cpcWeightedValue) metricsH += 5;
+  if (market?.aiQueryGrowthTrend != null && !Number.isNaN(market.aiQueryGrowthTrend)) metricsH += 5;
+  if (market?.emergingTopicClusters?.length) metricsH += 5;
   metricsH += 6 + 5 + 5 + 4;
   drawSectionBox(doc, margin, metricsBoxTop, pageWidth - 2 * margin, metricsH);
   let metricsLineY = metricsBoxTop + 6;
@@ -542,6 +586,16 @@ export async function generateProposalPDF(
   }
   if (market?.summary?.cpcWeightedValue) {
     doc.text(`CPC weighted value: ${market.summary.cpcWeightedValue}`, margin + boxPad, metricsLineY);
+    metricsLineY += 5;
+  }
+  if (market?.aiQueryGrowthTrend != null && !Number.isNaN(market.aiQueryGrowthTrend)) {
+    doc.text(`AI query growth trend: ${market.aiQueryGrowthTrend}%`, margin + boxPad, metricsLineY);
+    metricsLineY += 5;
+  }
+  if (market?.emergingTopicClusters?.length) {
+    const clustersText = market.emergingTopicClusters.slice(0, 3).join(", ") + (market.emergingTopicClusters.length > 3 ? "…" : "");
+    doc.text(`Opportunity clusters: ${clustersText}`, margin + boxPad, metricsLineY, { maxWidth: pageWidth - 2 * margin - 2 * boxPad });
+    metricsLineY += 5;
   }
   y = metricsBoxTop + metricsH + 8;
 
@@ -713,12 +767,64 @@ export async function generateProposalPDF(
   doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
   doc.text("Scope", margin, y);
   y += 6;
-  drawSectionBox(doc, margin, y, pageWidth - 2 * margin, 18);
+  const scopeLine1 = `Markets: ${quote.selected_markets?.length ? quote.selected_markets.join(", ") : "—"}`;
+  drawSectionBox(doc, margin, y, pageWidth - 2 * margin, 12);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text(`Markets: ${(quote.selected_markets?.length ? quote.selected_markets.join(", ") : "—")}`, margin + boxPad, y + 6);
-  doc.text(`Reports included: ${(quote.selected_reports?.length ? quote.selected_reports.join(", ") : "—")}`, margin + boxPad, y + 12);
-  y += 22;
+  doc.text(scopeLine1, margin + boxPad, y + 7);
+  y += 16;
+
+  if (quote.selected_reports?.length) {
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+    doc.text("Reports included in this proposal", margin, y);
+    y += 6;
+    const reportIds = quote.selected_reports;
+    let reportsBoxH = 4;
+    const reportEntries: { name: string; desc: string }[] = reportIds.map((r) => ({
+      name: REPORT_LABELS[r] || r,
+      desc: REPORT_DESCRIPTIONS[r] || "Included in retainer scope.",
+    }));
+    reportEntries.forEach(({ name, desc }) => {
+      const descWrap = doc.splitTextToSize(desc, pageWidth - 2 * margin - 2 * boxPad - 4);
+      reportsBoxH += 6 + descWrap.length * 3.5;
+    });
+    drawSectionBox(doc, margin, y, pageWidth - 2 * margin, reportsBoxH);
+    let ry = y + 5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    reportEntries.forEach(({ name, desc }) => {
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(primary.r, primary.g, primary.b);
+      doc.text("• " + name, margin + boxPad, ry);
+      ry += 4;
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+      doc.setFontSize(8);
+      const wrap = doc.splitTextToSize(desc, pageWidth - 2 * margin - 2 * boxPad - 4);
+      wrap.forEach((line: string) => {
+        doc.text(line, margin + boxPad + 2, ry);
+        ry += 3.5;
+      });
+      doc.setFontSize(9);
+      ry += 3;
+    });
+    y += reportsBoxH + 6;
+  }
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+  doc.text("Next steps", margin, y);
+  y += 6;
+  drawSectionBox(doc, margin, y, pageWidth - 2 * margin, 16);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(GRAY_700.r, GRAY_700.g, GRAY_700.b);
+  doc.text("Schedule kickoff call → Define success metrics → Monthly strategy reviews", margin + boxPad, y + 6);
+  doc.text("Customize timeline and deliverables in the engagement agreement.", margin + boxPad, y + 12);
+  y += 20;
 
   const displayPrice = quote.price_override ?? quote.total_monthly_price ?? quote.pricing_data?.suggestedMax ?? 0;
   const invBoxTop = y;
@@ -749,5 +855,8 @@ export async function generateProposalPDF(
   }
   footer(4);
 
+  if (options?.returnBuffer) {
+    return doc.output("arraybuffer") as ArrayBuffer;
+  }
   doc.save(`Proposal-${quote.domain || "quote"}-${Date.now()}.pdf`);
 }

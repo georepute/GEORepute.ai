@@ -11,7 +11,9 @@ import {
   BarChart3,
   TrendingUp,
   Eye,
-  RefreshCw
+  RefreshCw,
+  AlertTriangle,
+  ChevronDown
 } from "lucide-react";
 
 interface AnalysisSession {
@@ -377,6 +379,27 @@ export default function AnalysisViewer({ sessionId, projectId, onBack }: Analysi
                                 </span>
                               ))}
                             </div>
+                          </div>
+                        )}
+
+                        {/* Platform errors (root cause) */}
+                        {detailedResults.summary?.platform_errors && Object.keys(detailedResults.summary.platform_errors).length > 0 && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                            <details className="group">
+                              <summary className="flex items-center gap-2 cursor-pointer list-none font-medium text-amber-800">
+                                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                                <span>Some AI platforms had errors during this run</span>
+                                <ChevronDown className="w-4 h-4 shrink-0 transition-transform group-open:rotate-180" />
+                              </summary>
+                              <ul className="mt-2 space-y-1.5 text-sm text-amber-800">
+                                {Object.entries(detailedResults.summary.platform_errors).map(([platform, message]: [string, unknown]) => (
+                                  <li key={platform} className="flex gap-2">
+                                    <span className="font-medium capitalize shrink-0">{platform}:</span>
+                                    <span className="text-amber-700">{String(message)}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
                           </div>
                         )}
 

@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get("projectId");
+    const mode = searchParams.get("mode"); // "quick" | "advanced" | "internal" – when "quick" can return CPI + indicator only in future
 
     if (!projectId) {
       return NextResponse.json(
