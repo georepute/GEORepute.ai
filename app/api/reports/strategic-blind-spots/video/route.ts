@@ -1,7 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createClient } from "@supabase/supabase-js";
-import { getStrategicBlindSpotsStrings, getLangInstruction, LANGUAGE_NAMES } from "@/lib/video-report-translations";
+import { getStrategicBlindSpotsStrings } from "@/lib/video-report-translations";
+import ffmpeg from "fluent-ffmpeg";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+
+/** Resolve ffmpeg binary path — Next.js bundling can corrupt ffmpeg-static's path, so we resolve from node_modules */
+function getFfmpegPath(): string | null {
+  const exe = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const pkgPath = path.join(process.cwd(), "node_modules", "ffmpeg-static", exe);
+  if (fs.existsSync(pkgPath)) return pkgPath;
+  try {
+    const staticPath = require("ffmpeg-static");
+    return typeof staticPath === "string" ? staticPath : null;
+  } catch {
+    return null;
+  }
+}
 
 // xAI Aurora video generation API
 const XAI_BASE = "https://api.x.ai/v1";
@@ -12,9 +29,11 @@ const XAI_BASE = "https://api.x.ai/v1";
 //     ADD COLUMN IF NOT EXISTS video_request_id TEXT,
 //     ADD COLUMN IF NOT EXISTS video_status TEXT,
 //     ADD COLUMN IF NOT EXISTS video_generated_at TIMESTAMPTZ,
-//     ADD COLUMN IF NOT EXISTS video_requested_at TIMESTAMPTZ;
+//     ADD COLUMN IF NOT EXISTS video_requested_at TIMESTAMPTZ,
+//     ADD COLUMN IF NOT EXISTS video_request_id_part2 TEXT,
+//     ADD COLUMN IF NOT EXISTS video_part1_path TEXT;
 const VIDEO_BUCKET = "blind-spot-videos";
-const POLL_TIMEOUT_MS = 15 * 60 * 1000; // 15 min — stop polling and mark failed
+const POLL_TIMEOUT_MS = 40 * 60 * 1000; // 40 min — sequential: Part 1 + Part 2 + merge
 
 interface BlindSpot {
   query: string;
@@ -42,117 +61,92 @@ interface ReportData {
   generatedAt: string;
 }
 
-const LLM_LABELS: Record<string, string> = {
-  chatgpt: "ChatGPT",
-  gemini: "Gemini",
-  perplexity: "Perplexity",
-  claude: "Claude",
-  grok: "Grok",
-};
+const CREATIVE_DIRECTION = `CREATIVE INTENT: This video must leave viewers STUNNED — like the first time they've ever been exposed to something like this. Forget numbers. Forget data. This is about FEELING. A visceral revelation. Documentary-reveal style. Build tension. The goal: viewers should be left speechless. Bold, cinematic, unforgettable. Abstract visuals over charts. Emotion over metrics.`;
 
-function buildVideoPrompt(report: ReportData, languageCode: string): string {
-  const { domain, blindSpots, summary, generatedAt } = report;
+const VOICEOVER_PACE = `VOICEOVER: Documentary narrator. Slow, deliberate, revelatory. Poetic. Each line lands with weight. Pause 1.5–2 seconds when each new visual appears. Let the reveal breathe. Like uncovering a hidden truth. No data dumps — only feeling. CRITICAL: The final voiceover line MUST complete fully before the video ends. Never cut off or fade the last words.`;
 
-  const highPriority = blindSpots.filter((b) => b.priority === "high");
-  const mediumPriority = blindSpots.filter((b) => b.priority === "medium");
-  const lowPriority = blindSpots.filter((b) => b.priority === "low");
-  const aiIgnored = blindSpots.filter((b) => !b.aiMentions);
-  const aiMentioned = blindSpots.filter((b) => b.aiMentions);
-  const top10Missing = aiIgnored.slice(0, 10);
-  const top20 = blindSpots.slice(0, 20);
-  const top15 = blindSpots.slice(0, 15);
-  const perLlmStats = summary.perLlmStats || {};
-  const hasLlmStats = Object.keys(perLlmStats).length > 0;
+const GRAPHICS_STYLE = `VISUALS — NO CHARTS, NO DATA, NO NUMBERS. Abstract, cinematic, emotional:
+- Background: Deep navy, indigo gradients. High contrast. Cinematic. Moody.
+- Typography: Minimal text. Bold when used. No tables, no counts.
+- Imagery: Metaphors. Invisibility. Blind spots as shadows, fog, voids. Brand disappearing. Search as emptiness. Abstract shapes, light and shadow.
+- Colors: GEORepute palette — blue #3b82f6, teal #14b8a6, purple #8b5cf6. Amber for urgency. Red for alarm. Dark gradients.
+- Motion: Cinematic. Slow reveals. 0.4s transitions. Pause 1.5–2 sec before voice. Build tension.`;
+
+function buildVideoPromptPart1(report: ReportData): string {
+  const { domain, generatedAt } = report;
+  const s = getStrategicBlindSpotsStrings("en").s;
   const formattedDate = new Date(generatedAt).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
   });
 
-  const topMissingQuery = top10Missing[0];
-  const worstLlm =
-    hasLlmStats
-      ? Object.entries(perLlmStats).sort(([, a], [, b]) => a.pct - b.pct)[0]
-      : null;
+  return `${CREATIVE_DIRECTION}
 
-  const aiIgnoredPct  = Math.round((aiIgnored.length  / (blindSpots.length || 1)) * 100);
-  const aiMentionedPct = Math.round((aiMentioned.length / (blindSpots.length || 1)) * 100);
-  const highPct   = Math.round((highPriority.length   / (blindSpots.length || 1)) * 100);
-  const medPct    = Math.round((mediumPriority.length  / (blindSpots.length || 1)) * 100);
-  const lowPct    = Math.round((lowPriority.length    / (blindSpots.length || 1)) * 100);
+PROFESSIONAL VOICEOVER REQUIRED. English only. ${VOICEOVER_PACE} Cinematic, tension-building music. NO numbers. NO data. ONLY emotion and revelation.
 
-  // Compact helpers — keep data rows short to stay under 4096-char limit
-  const q = (s: string, max = 22) => s.length > max ? s.slice(0, max - 1) + "…" : s;
+${GRAPHICS_STYLE}
 
-  // Scene 3: top 5 AI-ignored queries
-  const missingList = top10Missing.slice(0, 5)
-    .map((b, i) => `${i + 1}.${q(b.query)} ${b.volume.toLocaleString()}/mo score:${b.blindSpotScore.toFixed(1)} [${b.priority[0].toUpperCase()}]`)
-    .join("\n");
+15-sec video. Part 1 of 2. All text in English. DO NOT show charts, graphs, counts, or percentages.
 
-  // Scene 4: top 12 blind spots bar chart
-  const barList = top20.slice(0, 12)
-    .map((b, i) => `${i + 1}.${q(b.query, 20)} ${b.blindSpotScore.toFixed(1)}[${b.priority[0].toUpperCase()}]`)
-    .join("\n");
+VOICEOVER (poetic, revelatory; pause 1.5–2 sec when each visual appears; final line must complete fully):
+[0-4s] [Pause 1.5s] "What you don't know is killing you. ${domain} — invisible where it matters most."
+[4-10s] [Pause 1.5s] "You're missing. Entire conversations. AI answers. You're not there. The world is searching. You're a blind spot."
+[10-15s] [Pause 1.5s] "These gaps. They're real. They're urgent. Yours to close."
 
-  // Scene 7: demand vs absence top 8
-  const dvsList = top15.slice(0, 8)
-    .map(b => `${q(b.query, 18)} D:${b.demandScore.toFixed(1)} A:${b.absenceScore.toFixed(1)}`)
-    .join("\n");
+[0-4s] TITLE: "${s.title} — ${domain}". Dark gradient. Bold. Tagline: "${s.tagline}". Hold 1.5s. GEORepute.ai ${formattedDate}.
 
-  // Scene 6: per-LLM
-  const llmList = hasLlmStats
-    ? Object.entries(perLlmStats)
-        .map(([k, s]) => `${LLM_LABELS[k] || k}:${s.pct}%(${s.mentioned}/${s.total})`)
-        .join(" | ")
-    : "";
+[4-10s] VISUAL: Abstract. Metaphor of invisibility. Brand name fading into fog. Search results with empty space. Void. Shadow. No numbers. Hold 1.5s.
 
-  const topQuery  = topMissingQuery?.query  || top20[0]?.query  || "top blind spot";
-  const topVolume = (topMissingQuery?.volume || top20[0]?.volume || 0).toLocaleString();
+[10-15s] VISUAL: Urgency. Abstract shapes — red, orange, green. Gaps. Blind spots as voids. Cinematic. No charts. Hold 1.5s.`.trim();
+}
 
-  const { s, useInstruction } = getStrategicBlindSpotsStrings(languageCode);
-  const worstLlmStr = worstLlm
-    ? `${s.worstAiGap} ${LLM_LABELS[worstLlm[0]] || worstLlm[0]} ${worstLlm[1].pct}%`
-    : "";
+function buildVideoPromptPart2(report: ReportData): string {
+  const { domain, generatedAt } = report;
+  const s = getStrategicBlindSpotsStrings("en").s;
+  const formattedDate = new Date(generatedAt).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 
-  const s6start = hasLlmStats ? 45 : 99; // skip scene 6 if no LLM data
-  const s7start = hasLlmStats ? 53 : 45;
-  const s8start = hasLlmStats ? 57 : 53;
-  const langInstruction = useInstruction ? getLangInstruction(languageCode) : "";
+  return `${CREATIVE_DIRECTION}
 
-  return `${langInstruction}NO VOICEOVER. No narration or spoken words. Use simple background music/tune only.
+PROFESSIONAL VOICEOVER REQUIRED. English only. ${VOICEOVER_PACE} Cinematic music continues. NO numbers. NO data. ONLY emotion and revelation.
 
-15-sec dark-SaaS data video. Navy bg #0f172a, neon accents, glow borders, bold sans-serif. Spring animations, counter roll-ups, staggered bars, 0.3s fade transitions.
+${GRAPHICS_STYLE}
 
-[0-2s] TITLE: "${s.title} — ${domain}". Navy→indigo gradient. Amber pulsing icon. Tagline: "${s.tagline}" Footer: GEORepute.ai ${formattedDate}.
+15-sec video. Part 2 of 2. All text in English. DO NOT show charts, graphs, counts, or percentages.
 
-[2-6s] KPI DASHBOARD "${s.whatAreWeIgnoring}" — 4 animated cards, numbers roll up:
-AMBER ${summary.totalBlindSpots} ${s.ignored} | BLUE ${s.score} ${summary.avgBlindSpotScore.toFixed(1)} | RED ${summary.aiBlindSpotPct}% ${s.aiBlind} | PURPLE ${highPriority.length} ${s.urgent}
+VOICEOVER (poetic, revelatory; pause 1.5–2 sec when each visual appears; final line must complete fully):
+[0-8s] [Pause 1.5s] "Some gaps ignore you. AI answers. You're not in them. Others mention you. The split is real. The gap is yours."
+[8-15s] [Pause 1.5s] "Your move. Close the gaps. Prioritize. Start. GEORepute.ai."
 
-[6-9s] ${s.topBlindSpots} — horizontal bar chart, bars grow left→right (spring, stagger 0.08s). Red=high, orange=med, green=low:
-${barList}
+[0-8s] VISUAL: Abstract. Split concept — AI ignoring vs AI mentioning. Metaphor. Light and shadow. No numbers. No charts. Hold 1.5s.
 
-[9-12s] SPLIT: LEFT donut "${s.priority}" ${s.high} ${highPriority.length}(${highPct}%) red | ${s.med} ${mediumPriority.length}(${medPct}%) orange | ${s.low} ${lowPriority.length}(${lowPct}%) green. RIGHT bars "${s.aiGap}" ${s.ignores} ${aiIgnored.length}(${aiIgnoredPct}%) red | ${s.mentions} ${aiMentioned.length}(${aiMentionedPct}%) green.${hasLlmStats ? `
-LLM rates: ${llmList}` : ""}
+[8-15s] CONCLUSION (7 sec): Abstract. "Your move. Close the gaps. Prioritize. Start." Minimal text. Bold. Footer: "GEORepute.ai • ${formattedDate}". Hold 1.5s.`.trim();
+}
 
-[12-15s] CLOSING (violet glow border): ${summary.totalBlindSpots} ${s.closing} ${summary.aiBlindSpotPct}% AI invisible | ${highPriority.length} ${s.urgent}. ${s.fixFirst} "${q(topQuery, 30)}" ${topVolume}/mo. ${worstLlmStr} Footer: "GEORepute.ai • ${formattedDate}"`.trim();
+function getSupabaseAdmin() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 }
 
 async function downloadAndStoreVideo(
   xaiVideoUrl: string,
   userId: string,
-  domainId: string
+  domainId: string,
+  suffix = ""
 ): Promise<string | null> {
   try {
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
+    const supabaseAdmin = getSupabaseAdmin();
     const videoRes = await fetch(xaiVideoUrl);
     if (!videoRes.ok) return null;
 
     const videoBuffer = Buffer.from(await videoRes.arrayBuffer());
-    const fileName = `${userId}/${domainId}-${Date.now()}.mp4`;
+    const fileName = `${userId}/${domainId}-${Date.now()}${suffix}.mp4`;
 
     const { error } = await supabaseAdmin.storage
       .from(VIDEO_BUCKET)
@@ -167,13 +161,99 @@ async function downloadAndStoreVideo(
       return null;
     }
 
-    const { data: urlData } = supabaseAdmin.storage
-      .from(VIDEO_BUCKET)
-      .getPublicUrl(fileName);
-
+    const { data: urlData } = supabaseAdmin.storage.from(VIDEO_BUCKET).getPublicUrl(fileName);
     return urlData.publicUrl;
   } catch (err) {
     console.error("[blind-spot-video] downloadAndStoreVideo error:", err);
+    return null;
+  }
+}
+
+/** Upload video buffer to storage and return the storage path (for Part 1 in sequential flow). */
+async function uploadPartToStorage(
+  buffer: Buffer,
+  userId: string,
+  domainId: string
+): Promise<string | null> {
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const fileName = `${userId}/${domainId}-part1-${Date.now()}.mp4`;
+    const { error } = await supabaseAdmin.storage
+      .from(VIDEO_BUCKET)
+      .upload(fileName, buffer, {
+        contentType: "video/mp4",
+        cacheControl: "3600",
+        upsert: true,
+      });
+    if (error) {
+      console.error("[blind-spot-video] uploadPartToStorage error:", error);
+      return null;
+    }
+    return fileName;
+  } catch (err) {
+    console.error("[blind-spot-video] uploadPartToStorage error:", err);
+    return null;
+  }
+}
+
+/** Download video from Supabase storage by path. */
+async function downloadFromStorage(storagePath: string): Promise<Buffer | null> {
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data, error } = await supabaseAdmin.storage.from(VIDEO_BUCKET).download(storagePath);
+    if (error || !data) return null;
+    return Buffer.from(await data.arrayBuffer());
+  } catch (err) {
+    console.error("[blind-spot-video] downloadFromStorage error:", err);
+    return null;
+  }
+}
+
+async function mergeTwoVideos(
+  part1Buffer: Buffer,
+  part2Buffer: Buffer
+): Promise<Buffer | null> {
+  const tmpDir = os.tmpdir();
+  const part1Path = path.join(tmpDir, `part1-${Date.now()}.mp4`);
+  const part2Path = path.join(tmpDir, `part2-${Date.now()}.mp4`);
+  const listPath = path.join(tmpDir, `list-${Date.now()}.txt`);
+  const outPath = path.join(tmpDir, `merged-${Date.now()}.mp4`);
+
+  try {
+    fs.writeFileSync(part1Path, part1Buffer);
+    fs.writeFileSync(part2Path, part2Buffer);
+    const p1 = part1Path.replace(/\\/g, "/");
+    const p2 = part2Path.replace(/\\/g, "/");
+    fs.writeFileSync(listPath, `file '${p1}'\nfile '${p2}'`);
+
+    const ffmpegPath = getFfmpegPath();
+    if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
+
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg()
+        .input(listPath)
+        .inputOptions(["-f", "concat", "-safe", "0"])
+        .outputOptions(["-c", "copy"])
+        .output(outPath)
+        .on("end", () => resolve())
+        .on("error", reject)
+        .run();
+    });
+
+    const merged = fs.readFileSync(outPath);
+    fs.unlinkSync(part1Path);
+    fs.unlinkSync(part2Path);
+    fs.unlinkSync(listPath);
+    fs.unlinkSync(outPath);
+    return merged;
+  } catch (err) {
+    console.error("[blind-spot-video] mergeVideos error:", err);
+    try {
+      if (fs.existsSync(part1Path)) fs.unlinkSync(part1Path);
+      if (fs.existsSync(part2Path)) fs.unlinkSync(part2Path);
+      if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
+      if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+    } catch {}
     return null;
   }
 }
@@ -197,7 +277,7 @@ export async function GET(request: NextRequest) {
 
     const { data: report, error } = await supabase
       .from("blind_spot_reports")
-      .select("video_url, video_request_id, video_status, video_generated_at, video_requested_at")
+      .select("video_url, video_request_id, video_request_id_part2, video_status, video_generated_at, video_requested_at, video_part1_path")
       .eq("user_id", session.user.id)
       .eq("domain_id", domainId)
       .single();
@@ -218,104 +298,280 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // If pending, check xAI status
-    if (report.video_request_id && report.video_status === "pending") {
-      // Missing video_requested_at = old job, treat as timed out
-      const requestedAt = report.video_requested_at
-        ? new Date(report.video_requested_at).getTime()
-        : Date.now() - POLL_TIMEOUT_MS - 1;
-      const elapsed = Date.now() - requestedAt;
+    const requestedAt = report.video_requested_at
+      ? new Date(report.video_requested_at).getTime()
+      : Date.now() - POLL_TIMEOUT_MS - 1;
+    const elapsed = Date.now() - requestedAt;
 
-      // Timeout: stop polling after 15 min and mark failed
-      if (elapsed > POLL_TIMEOUT_MS) {
-        console.log("[blind-spot-video] Poll timeout after", Math.round(elapsed / 60000), "min, marking failed");
-        await supabase
-          .from("blind_spot_reports")
-          .update({ video_status: "failed", video_request_id: null, video_requested_at: null })
-          .eq("user_id", session.user.id)
-          .eq("domain_id", domainId);
+    if (elapsed > POLL_TIMEOUT_MS && (report.video_status === "pending_part1" || report.video_status === "pending_part2")) {
+      console.log("[blind-spot-video] Poll timeout, marking failed");
+      await supabase
+        .from("blind_spot_reports")
+        .update({
+          video_status: "failed",
+          video_request_id: null,
+          video_request_id_part2: null,
+          video_requested_at: null,
+          video_part1_path: null,
+        })
+        .eq("user_id", session.user.id)
+        .eq("domain_id", domainId);
+      return NextResponse.json({ success: true, video: { status: "failed" } });
+    }
 
-        return NextResponse.json({
-          success: true,
-          video: { status: "failed" },
-        });
-      }
+    const xaiApiKey = process.env.XAI_API_KEY;
 
-      const xaiApiKey = process.env.XAI_API_KEY;
-      if (!xaiApiKey) {
-        return NextResponse.json({
-          success: true,
-          video: { status: "pending", requestId: report.video_request_id },
-        });
-      }
-
+    // Sequential: pending_part1 — poll Part 1, when done store it and start Part 2
+    if (report.video_status === "pending_part1" && report.video_request_id && xaiApiKey) {
       try {
-        const statusRes = await fetch(
-          `${XAI_BASE}/videos/${report.video_request_id}`,
-          { headers: { Authorization: `Bearer ${xaiApiKey}` } }
-        );
+        const res1 = await fetch(`${XAI_BASE}/videos/${report.video_request_id}`, {
+          headers: { Authorization: `Bearer ${xaiApiKey}` },
+        });
+        const data1 = res1.ok ? await res1.json().catch(() => ({})) : {};
+        const url1 = data1.video?.url ?? data1.output?.url ?? data1.result?.url ?? data1.url;
+        const status1 = data1.status ?? data1.state ?? data1.phase;
 
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          const status = statusData.status ?? statusData.state ?? statusData.phase;
-          const videoUrl = statusData.video?.url ?? statusData.output?.url ?? statusData.result?.url ?? statusData.url;
+        if (status1 === "expired" || status1 === "failed" || status1 === "error") {
+          await supabase
+            .from("blind_spot_reports")
+            .update({ video_status: "failed", video_request_id: null, video_requested_at: null, video_part1_path: null })
+            .eq("user_id", session.user.id)
+            .eq("domain_id", domainId);
+          return NextResponse.json({ success: true, video: { status: "failed" } });
+        }
 
-          console.log("[blind-spot-video] xAI status:", status ?? "(no status)", "videoUrl:", !!videoUrl, "for requestId:", report.video_request_id);
-
-          // xAI returns video.url directly when ready (no status field) — treat presence of video URL as success
-          if (videoUrl) {
-            const storedUrl = await downloadAndStoreVideo(
-              videoUrl,
-              session.user.id,
-              domainId
-            );
-
-            const finalUrl = storedUrl || videoUrl;
-            const now = new Date().toISOString();
-
-            await supabase
-              .from("blind_spot_reports")
-              .update({
-                video_url: finalUrl,
-                video_status: "done",
-                video_generated_at: now,
-                video_request_id: null,
-                video_requested_at: null,
-              })
-              .eq("user_id", session.user.id)
-              .eq("domain_id", domainId);
-
-            return NextResponse.json({
-              success: true,
-              video: { url: finalUrl, status: "done", generatedAt: now },
-            });
-          }
-
-          // Treat "expired" | "failed" | "error" as failed
-          if (status === "expired" || status === "failed" || status === "error") {
+        if (url1) {
+          const part1Res = await fetch(url1);
+          if (!part1Res.ok) {
             await supabase
               .from("blind_spot_reports")
               .update({ video_status: "failed", video_request_id: null, video_requested_at: null })
               .eq("user_id", session.user.id)
               .eq("domain_id", domainId);
-
-            return NextResponse.json({
-              success: true,
-              video: { status: "failed" },
-            });
+            return NextResponse.json({ success: true, video: { status: "failed" } });
+          }
+          const part1Buffer = Buffer.from(await part1Res.arrayBuffer());
+          const part1Path = await uploadPartToStorage(part1Buffer, session.user.id, domainId);
+          if (!part1Path) {
+            await supabase
+              .from("blind_spot_reports")
+              .update({ video_status: "failed", video_request_id: null, video_requested_at: null })
+              .eq("user_id", session.user.id)
+              .eq("domain_id", domainId);
+            return NextResponse.json({ success: true, video: { status: "failed" } });
           }
 
-          // status undefined or unknown — log full response for debugging
-          if (status === undefined || status === null) {
-            console.warn("[blind-spot-video] xAI returned unknown status, full response:", JSON.stringify(statusData).slice(0, 500));
+          const { data: dbReport } = await supabase
+            .from("blind_spot_reports")
+            .select("blind_spots, domain_hostname, total_blind_spots, avg_blind_spot_score, ai_blind_spot_pct, engines_used, generated_at")
+            .eq("user_id", session.user.id)
+            .eq("domain_id", domainId)
+            .single();
+
+          if (!dbReport) {
+            await supabase
+              .from("blind_spot_reports")
+              .update({ video_status: "failed", video_request_id: null, video_requested_at: null, video_part1_path: null })
+              .eq("user_id", session.user.id)
+              .eq("domain_id", domainId);
+            return NextResponse.json({ success: true, video: { status: "failed" } });
           }
-        } else {
-          console.warn("[blind-spot-video] xAI status API non-OK:", statusRes.status, await statusRes.text().catch(() => ""));
+
+          const blindSpots = dbReport.blind_spots || [];
+          const enginesUsed = dbReport.engines_used || [];
+          const perLlmStats: Record<string, { mentioned: number; total: number; pct: number }> = {};
+          for (const engineKey of enginesUsed) {
+            const withEngine = blindSpots.filter((b: any) => b?.llmMentions && engineKey in b.llmMentions);
+            const mentioned = withEngine.filter((b: any) => b.llmMentions[engineKey]).length;
+            const total = withEngine.length;
+            perLlmStats[engineKey] = {
+              mentioned,
+              total,
+              pct: total > 0 ? Math.round((mentioned / total) * 1000) / 10 : 0,
+            };
+          }
+          const reportData: ReportData = {
+            domain: dbReport.domain_hostname,
+            blindSpots,
+            summary: {
+              totalBlindSpots: dbReport.total_blind_spots,
+              avgBlindSpotScore: Number(dbReport.avg_blind_spot_score),
+              aiBlindSpotPct: Number(dbReport.ai_blind_spot_pct),
+              perLlmStats,
+            },
+            enginesUsed,
+            generatedAt: dbReport.generated_at,
+          };
+
+          const prompt2 = buildVideoPromptPart2(reportData);
+          const genRes2 = await fetch(`${XAI_BASE}/videos/generations`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${xaiApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "grok-imagine-video",
+              duration: 15,
+              aspect_ratio: "16:9",
+              resolution: "720p",
+              prompt: prompt2,
+            }),
+          });
+          const genData2 = await genRes2.json().catch(() => ({}));
+          const requestId2 = genRes2.ok ? (genData2.id ?? genData2.request_id ?? genData2.requestId) : null;
+
+          if (!requestId2) {
+            console.error("[blind-spot-video] Part 2 start failed");
+            await supabase
+              .from("blind_spot_reports")
+              .update({ video_status: "failed", video_request_id: null, video_requested_at: null, video_part1_path: null })
+              .eq("user_id", session.user.id)
+              .eq("domain_id", domainId);
+            return NextResponse.json({ success: true, video: { status: "failed" } });
+          }
+
+          await supabase
+            .from("blind_spot_reports")
+            .update({
+              video_request_id: requestId2,
+              video_request_id_part2: null,
+              video_status: "pending_part2",
+              video_part1_path: part1Path,
+            })
+            .eq("user_id", session.user.id)
+            .eq("domain_id", domainId);
+
+          console.log("[blind-spot-video] Part 1 done, Part 2 started (sequential):", requestId2);
         }
       } catch (pollErr) {
-        console.error("[blind-spot-video] Poll error:", pollErr);
+        console.error("[blind-spot-video] Poll Part 1 error:", pollErr);
       }
+      return NextResponse.json({
+        success: true,
+        video: { status: "pending", requestId: report.video_request_id },
+      });
+    }
 
+    // Sequential: pending_part2 — poll Part 2, when done merge with Part 1 and finalize
+    if (report.video_status === "pending_part2" && report.video_request_id && report.video_part1_path && xaiApiKey) {
+      try {
+        const res2 = await fetch(`${XAI_BASE}/videos/${report.video_request_id}`, {
+          headers: { Authorization: `Bearer ${xaiApiKey}` },
+        });
+        const data2 = res2.ok ? await res2.json().catch(() => ({})) : {};
+        const url2 = data2.video?.url ?? data2.output?.url ?? data2.result?.url ?? data2.url;
+        const status2 = data2.status ?? data2.state ?? data2.phase;
+
+        if (status2 === "expired" || status2 === "failed" || status2 === "error") {
+          await supabase
+            .from("blind_spot_reports")
+            .update({
+              video_status: "failed",
+              video_request_id: null,
+              video_request_id_part2: null,
+              video_requested_at: null,
+              video_part1_path: null,
+            })
+            .eq("user_id", session.user.id)
+            .eq("domain_id", domainId);
+          return NextResponse.json({ success: true, video: { status: "failed" } });
+        }
+
+        if (url2) {
+          const part1Buffer = await downloadFromStorage(report.video_part1_path);
+          const part2Res = await fetch(url2);
+          if (!part1Buffer || !part2Res.ok) {
+            await supabase
+              .from("blind_spot_reports")
+              .update({
+                video_status: "failed",
+                video_request_id: null,
+                video_request_id_part2: null,
+                video_requested_at: null,
+                video_part1_path: null,
+              })
+              .eq("user_id", session.user.id)
+              .eq("domain_id", domainId);
+            return NextResponse.json({ success: true, video: { status: "failed" } });
+          }
+          const part2Buffer = Buffer.from(await part2Res.arrayBuffer());
+          const mergedBuffer = await mergeTwoVideos(part1Buffer, part2Buffer);
+
+          if (!mergedBuffer) {
+            await supabase
+              .from("blind_spot_reports")
+              .update({
+                video_status: "failed",
+                video_request_id: null,
+                video_request_id_part2: null,
+                video_requested_at: null,
+                video_part1_path: null,
+              })
+              .eq("user_id", session.user.id)
+              .eq("domain_id", domainId);
+            return NextResponse.json({ success: true, video: { status: "failed" } });
+          }
+
+          const supabaseAdmin = getSupabaseAdmin();
+          const fileName = `${session.user.id}/${domainId}-${Date.now()}.mp4`;
+          const { error: uploadErr } = await supabaseAdmin.storage
+            .from(VIDEO_BUCKET)
+            .upload(fileName, mergedBuffer, {
+              contentType: "video/mp4",
+              cacheControl: "3600",
+              upsert: true,
+            });
+
+          if (uploadErr) {
+            console.error("[blind-spot-video] Final upload error:", uploadErr);
+            await supabase
+              .from("blind_spot_reports")
+              .update({
+                video_status: "failed",
+                video_request_id: null,
+                video_request_id_part2: null,
+                video_requested_at: null,
+                video_part1_path: null,
+              })
+              .eq("user_id", session.user.id)
+              .eq("domain_id", domainId);
+            return NextResponse.json({ success: true, video: { status: "failed" } });
+          }
+
+          const { data: urlData } = supabaseAdmin.storage.from(VIDEO_BUCKET).getPublicUrl(fileName);
+          const now = new Date().toISOString();
+
+          await supabase
+            .from("blind_spot_reports")
+            .update({
+              video_url: urlData.publicUrl,
+              video_status: "done",
+              video_generated_at: now,
+              video_request_id: null,
+              video_request_id_part2: null,
+              video_requested_at: null,
+              video_part1_path: null,
+            })
+            .eq("user_id", session.user.id)
+            .eq("domain_id", domainId);
+
+          console.log("[blind-spot-video] Merged 30s video ready (sequential)");
+          return NextResponse.json({
+            success: true,
+            video: { url: urlData.publicUrl, status: "done", generatedAt: now },
+          });
+        }
+      } catch (pollErr) {
+        console.error("[blind-spot-video] Poll Part 2 error:", pollErr);
+      }
+      return NextResponse.json({
+        success: true,
+        video: { status: "pending", requestId: report.video_request_id },
+      });
+    }
+
+    if (report.video_request_id && !xaiApiKey) {
       return NextResponse.json({
         success: true,
         video: { status: "pending", requestId: report.video_request_id },
@@ -337,7 +593,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST — start video generation via xAI Aurora
+// POST — start Part 1 only (sequential: Part 2 starts after Part 1 completes, via GET poll)
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
@@ -349,14 +605,56 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { domainId, reportData, language } = body as { domainId: string; reportData: ReportData; language?: string };
+    const { domainId, reportData: reportDataFromClient } = body as { domainId: string; reportData?: ReportData };
 
-    if (!domainId || !reportData) {
+    if (!domainId) {
       return NextResponse.json(
-        { error: "domainId and reportData are required" },
+        { error: "domainId is required" },
         { status: 400 }
       );
     }
+
+    // Use live data from DB — ensures video reflects current report, not stale client state
+    const { data: dbReport, error: fetchError } = await supabase
+      .from("blind_spot_reports")
+      .select("blind_spots, domain_hostname, total_blind_spots, avg_blind_spot_score, ai_blind_spot_pct, engines_used, generated_at")
+      .eq("user_id", session.user.id)
+      .eq("domain_id", domainId)
+      .single();
+
+    if (fetchError || !dbReport) {
+      return NextResponse.json(
+        { error: "No report found. Generate a report first." },
+        { status: 404 }
+      );
+    }
+
+    const blindSpots = dbReport.blind_spots || [];
+    const enginesUsed = dbReport.engines_used || [];
+    const perLlmStats: Record<string, { mentioned: number; total: number; pct: number }> = {};
+    for (const engineKey of enginesUsed) {
+      const withEngine = blindSpots.filter((b: any) => b?.llmMentions && engineKey in b.llmMentions);
+      const mentioned = withEngine.filter((b: any) => b.llmMentions[engineKey]).length;
+      const total = withEngine.length;
+      perLlmStats[engineKey] = {
+        mentioned,
+        total,
+        pct: total > 0 ? Math.round((mentioned / total) * 1000) / 10 : 0,
+      };
+    }
+
+    const reportData: ReportData = {
+      domain: dbReport.domain_hostname,
+      blindSpots,
+      summary: {
+        totalBlindSpots: dbReport.total_blind_spots,
+        avgBlindSpotScore: Number(dbReport.avg_blind_spot_score),
+        aiBlindSpotPct: Number(dbReport.ai_blind_spot_pct),
+        perLlmStats,
+      },
+      enginesUsed,
+      generatedAt: dbReport.generated_at,
+    };
 
     const xaiApiKey = process.env.XAI_API_KEY;
     if (!xaiApiKey) {
@@ -366,71 +664,54 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const languageCode = (language || "en").toLowerCase().split("-")[0] || "en";
-    const prompt = buildVideoPrompt(reportData, languageCode);
-    console.log("[blind-spot-video] Starting video generation for domain:", reportData.domain, "language:", LANGUAGE_NAMES[languageCode?.toLowerCase().split("-")[0] || "en"] || "English");
+    const prompt1 = buildVideoPromptPart1(reportData);
+    const headers = {
+      Authorization: `Bearer ${xaiApiKey}`,
+      "Content-Type": "application/json",
+    };
+    const bodyTemplate = { model: "grok-imagine-video", duration: 15, aspect_ratio: "16:9", resolution: "720p" };
 
-    const genRes = await fetch(`${XAI_BASE}/videos/generations`, {
+    console.log("[blind-spot-video] Starting Part 1 (sequential) for domain:", reportData.domain);
+
+    const genRes1 = await fetch(`${XAI_BASE}/videos/generations`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${xaiApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "grok-imagine-video",
-        prompt,
-        duration: 15,
-        aspect_ratio: "16:9",
-        resolution: "720p",
-      }),
+      headers,
+      body: JSON.stringify({ ...bodyTemplate, prompt: prompt1 }),
     });
 
-    if (!genRes.ok) {
-      const errData = await genRes.json().catch(() => ({}));
-      console.error("[blind-spot-video] xAI generation error:", errData);
-      return NextResponse.json(
-        {
-          error:
-            (errData as any)?.error?.message ||
-            `xAI API error: ${genRes.status} ${genRes.statusText}`,
-        },
-        { status: genRes.status >= 500 ? 502 : 400 }
-      );
-    }
+    const genData1 = await genRes1.json().catch(() => ({}));
+    const requestId1 = genRes1.ok ? (genData1.id ?? genData1.request_id ?? genData1.requestId) : null;
 
-    const genData = await genRes.json();
-    const requestId: string = genData.id ?? genData.request_id ?? genData.requestId;
-
-    if (!requestId) {
-      console.error("[blind-spot-video] No request_id in xAI response:", genData);
+    if (!requestId1) {
+      const err1 = !genRes1.ok ? (genData1 as any)?.error?.message || genRes1.statusText : null;
+      console.error("[blind-spot-video] Part 1 start failed:", err1);
       return NextResponse.json(
-        { error: "xAI did not return a request ID" },
+        { error: err1 || "Failed to start video generation. Please try again." },
         { status: 502 }
       );
     }
 
-    console.log("[blind-spot-video] xAI job started, requestId:", requestId);
-
-    // Store pending status in DB (video_requested_at for poll timeout)
     const now = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("blind_spot_reports")
       .update({
-        video_request_id: requestId,
-        video_status: "pending",
+        video_request_id: requestId1,
+        video_request_id_part2: null,
+        video_status: "pending_part1",
         video_url: null,
         video_generated_at: null,
         video_requested_at: now,
+        video_part1_path: null,
       })
       .eq("user_id", session.user.id)
       .eq("domain_id", domainId);
 
     if (updateError) {
       console.error("[blind-spot-video] DB update error:", updateError);
-      // Non-fatal — still return success so client can poll
     }
 
-    return NextResponse.json({ success: true, requestId, status: "pending" });
+    console.log("[blind-spot-video] Part 1 started (sequential):", requestId1);
+    return NextResponse.json({ success: true, requestId: requestId1, status: "pending" });
   } catch (err: any) {
     console.error("[blind-spot-video] POST error:", err);
     return NextResponse.json(
