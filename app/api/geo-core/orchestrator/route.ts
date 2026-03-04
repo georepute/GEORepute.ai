@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") || "all";
+    const contentId = searchParams.get("contentId");
 
     let query = supabase
       .from("content_strategy")
@@ -36,8 +37,14 @@ export async function GET(request: NextRequest) {
       .eq("user_id", session.user.id)
       .order("created_at", { ascending: false });
 
-    if (status !== "all") {
+    if (contentId) {
+      query = query.eq("id", contentId);
+    }
+    if (status !== "all" && status !== "failed") {
       query = query.eq("status", status);
+    }
+    if (status === "failed") {
+      query = query.eq("status", "published");
     }
 
     const { data, error } = await query;
@@ -105,11 +112,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Calculate stats
+    // Calculate stats and effective status (published but all publish attempts failed → "failed")
     const allContent = data || [];
+    const getEffectiveStatus = (item: any) => {
+      const base = item.status || "draft";
+      const records = publishedData[item.id] || [];
+      if (base === "published" && records.length > 0) {
+        const allFailed = records.every(
+          (r: any) => r.status === "failed" || (r.status === "pending" && !r.published_url)
+        );
+        if (allFailed) return "failed";
+      }
+      return base;
+    };
     const stats = {
       total: allContent.length,
-      published: allContent.filter((c) => c.status === "published").length,
+      published: allContent.filter((c) => getEffectiveStatus(c) === "published").length,
+      failed: allContent.filter((c) => getEffectiveStatus(c) === "failed").length,
       scheduled: allContent.filter((c) => c.status === "scheduled").length,
       review: allContent.filter((c) => c.status === "review").length,
       draft: allContent.filter((c) => c.status === "draft").length,
@@ -136,11 +155,13 @@ export async function GET(request: NextRequest) {
         contentType = "Article";
       }
 
+      const effectiveStatus = getEffectiveStatus(item);
+
       return {
         id: item.id,
         title: item.topic || "Untitled",
         type: contentType,
-        status: item.status || "draft",
+        status: effectiveStatus,
         platforms: item.target_platform ? [item.target_platform] : [],
         publishDate: item.scheduled_at || item.created_at,
         performance: {
@@ -154,9 +175,14 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    const content =
+      status === "failed"
+        ? formattedData.filter((item: any) => item.status === "failed")
+        : formattedData;
+
     return NextResponse.json(
       {
-        content: formattedData,
+        content,
         stats,
       },
       { status: 200 }
@@ -1548,8 +1574,8 @@ export async function POST(request: NextRequest) {
             console.log("✅ Setting published_url to:", insertData.published_url);
           } else {
             insertData.published_url = null;
-            insertData.status = "pending";
-            console.warn("⚠️ publishUrl is invalid, setting published_url to null");
+            insertData.status = "failed";
+            console.warn("⚠️ publishUrl is invalid, setting status to failed");
           }
 
           console.log("📦 Insert data prepared:", {
@@ -2181,7 +2207,7 @@ export async function POST(request: NextRequest) {
             platform: publishPlatform,
             published_url: publishUrl,
             published_at: new Date().toISOString(),
-            status: publishUrl ? "published" : "pending",
+            status: publishUrl ? "published" : "failed",
             platform_post_id: (publishPlatform === "github" ? gitHubResult?.discussionNumber?.toString() : 
                               publishPlatform === "reddit" ? redditResult?.postId :
                               publishPlatform === "linkedin" ? linkedInResult?.postId :

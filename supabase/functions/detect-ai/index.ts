@@ -15,7 +15,7 @@ const corsHeaders = {
 
 // MASSIVELY EXPANDED AI DETECTION PATTERNS
 // Helper function to get patterns based on language
-function getAiPatterns(language: 'en' | 'he' = 'en') {
+function getAiPatterns(language: 'en' | 'he' | 'ar' | 'fr' = 'en') {
   if (language === 'he') {
     return {
       // TIER 1: DEAD GIVEAWAYS (99% confidence) - Hebrew AI patterns
@@ -162,6 +162,70 @@ function getAiPatterns(language: 'en' | 'he' = 'en') {
           confidence: 94,
           category: "meta"
         }
+      ]
+    };
+  }
+
+  if (language === 'ar') {
+    return {
+      deadGiveaways: [
+        { pattern: /(في الختام|ختاماً|باختصار|خلاصة القول|في النهاية)/g, reason: "DEAD GIVEAWAY: AI conclusion in Arabic", confidence: 99, category: "tier1" },
+        { pattern: /(الجَدير بالذِكر|من المهم أن نلاحظ|يُجدر الإشارة|لا بد من الإشارة)/g, reason: "DEAD GIVEAWAY: AI meta-commentary in Arabic", confidence: 98, category: "tier1" },
+        { pattern: /(في عالم|في ظل|في سياق|في إطار)/g, reason: "DEAD GIVEAWAY: AI framing in Arabic", confidence: 97, category: "tier1" },
+        { pattern: /(علاوة على ذلك|بالإضافة إلى ذلك|فضلاً عن ذلك|إلى جانب ذلك)/g, reason: "DEAD GIVEAWAY: AI transition in Arabic", confidence: 96, category: "tier1" },
+        { pattern: /(بشكل شامل|بصورة شاملة|على نحو متكامل|بطريقة شمولية)/g, reason: "DEAD GIVEAWAY: AI descriptor in Arabic", confidence: 95, category: "tier1" }
+      ],
+      extremelyHigh: [
+        { pattern: /(محوري|أساسي|حاسم|حيوي|مهم جداً)/g, reason: "AI importance markers in Arabic", confidence: 96, category: "importance" },
+        { pattern: /(في العصر الحديث|في العالم الرقمي|في وقتنا الحاضر|في يومنا هذا)/g, reason: "AI temporal cliché in Arabic", confidence: 95, category: "opener" },
+        { pattern: /(يُسهّل|يُعزّز|يُحسّن|يُفعّل|يُحفّز)/g, reason: "AI action verbs in Arabic", confidence: 94, category: "action" }
+      ],
+      veryHigh: [
+        { pattern: /(بالتالي|وعليه|ومن ثم|لذلك|إذن)/g, reason: "Formal AI transitions in Arabic", confidence: 91, category: "transition" },
+        { pattern: /(متعدد الأبعاد|شامل|متكامل|معقد|دقيق)/g, reason: "AI descriptors in Arabic", confidence: 90, category: "descriptor" }
+      ],
+      high: [
+        { pattern: /(مختلف|عديد|متنوع|واسع|كبير)/g, reason: "AI variety in Arabic", confidence: 87, category: "variety" }
+      ],
+      highConfidence: [],
+      mediumConfidence: [],
+      lowConfidence: [],
+      structure: [],
+      sentencePatterns: [
+        { pattern: /(ما أهمية هذا|كيف يمكننا|ما هي الآثار|لماذا هذا مهم)\s*[؟?]/g, reason: "RHETORICAL QUESTION: AI in Arabic", confidence: 93, category: "rhetorical" },
+        { pattern: /(من ناحية|من جهة أخرى|على العكس|في المقابل)/g, reason: "BALANCED PERSPECTIVE: AI in Arabic", confidence: 88, category: "balance" }
+      ]
+    };
+  }
+
+  if (language === 'fr') {
+    return {
+      deadGiveaways: [
+        { pattern: /\b(en conclusion|pour conclure|en résumé|en fin de compte|pour résumer)\b/gi, reason: "DEAD GIVEAWAY: AI conclusion in French", confidence: 99, category: "tier1" },
+        { pattern: /\b(il est important de noter|il convient de souligner|il faut noter|il est essentiel de)\b/gi, reason: "DEAD GIVEAWAY: AI meta-commentary in French", confidence: 98, category: "tier1" },
+        { pattern: /\b(dans le monde moderne|à l'ère du numérique|de nos jours|à l'heure actuelle)\b/gi, reason: "DEAD GIVEAWAY: AI temporal cliché in French", confidence: 97, category: "tier1" },
+        { pattern: /\b(de plus|par ailleurs|en outre|également|de même)\b/gi, reason: "DEAD GIVEAWAY: AI transition in French", confidence: 96, category: "tier1" },
+        { pattern: /\b(complet|holistique|multifacettes|nuancé|approche globale)\b/gi, reason: "DEAD GIVEAWAY: AI descriptor in French", confidence: 95, category: "tier1" }
+      ],
+      extremelyHigh: [
+        { pattern: /\b(crucial|pivotal|paramount|essentiel|fondamental)\b/gi, reason: "AI importance in French", confidence: 96, category: "importance" },
+        { pattern: /\b(faciliter|favoriser|optimiser|améliorer|renforcer)\b/gi, reason: "AI action verbs in French", confidence: 95, category: "action" },
+        { pattern: /\b(innovant|cutting-edge|state-of-the-art|moderne|avancé)\b/gi, reason: "AI hype in French", confidence: 94, category: "hype" }
+      ],
+      veryHigh: [
+        { pattern: /\b(par conséquent|en conséquence|ainsi|donc|de ce fait)\b/gi, reason: "Formal transitions in French", confidence: 91, category: "transition" },
+        { pattern: /\b(divers|nombreux|multiple|étendu|conséquent)\b/gi, reason: "AI variety in French", confidence: 90, category: "variety" }
+      ],
+      high: [
+        { pattern: /\b(significatif|considérable|substantiel|notable|important)\b/gi, reason: "AI emphasis in French", confidence: 87, category: "emphasis" }
+      ],
+      highConfidence: [],
+      mediumConfidence: [],
+      lowConfidence: [],
+      structure: [],
+      sentencePatterns: [
+        { pattern: /\b(qu'est-ce que cela signifie|pourquoi est-ce important|comment pouvons-nous)\s*\?/gi, reason: "RHETORICAL QUESTION: AI in French", confidence: 93, category: "rhetorical" },
+        { pattern: /\b(d'une part|d'autre part|en revanche|par contre)\b/gi, reason: "BALANCED PERSPECTIVE: AI in French", confidence: 88, category: "balance" }
       ]
     };
   }
@@ -1020,7 +1084,7 @@ interface WordDetection {
   phraseEnd?: number; // End position of the phrase
 }
 
-function analyzeTextDetailed(text: string, language: 'en' | 'he' = 'en'): {
+function analyzeTextDetailed(text: string, language: 'en' | 'he' | 'ar' | 'fr' = 'en'): {
   words: WordDetection[];
   aiPercentage: number;
   summary: string;
@@ -1908,14 +1972,14 @@ function generateHighlightedHtml(text: string, detections: WordDetection[]): str
   return highlighted;
 }
 
-function applyHighlightsToHtml(originalHtml: string, plainText: string, detections: WordDetection[], language: 'en' | 'he' = 'en'): string {
+function applyHighlightsToHtml(originalHtml: string, plainText: string, detections: WordDetection[], language: 'en' | 'he' | 'ar' | 'fr' = 'en'): string {
   // If original is not HTML, just use plain text highlighting
   if (!originalHtml.includes('<') || (!originalHtml.includes('<p>') && !originalHtml.includes('<h') && !originalHtml.includes('<div>'))) {
     return generateHighlightedHtml(plainText, detections);
   }
   
-  // For Hebrew, use Unicode-aware word boundaries or direct matching
-  const isHebrew = language === 'he';
+  // For Hebrew and Arabic, avoid \b (word boundaries don't work well with non-Latin scripts)
+  const useWordBoundaries = language === 'en' || language === 'fr';
   
   // Group detections by phrase - prioritize complete phrases over individual words
   const phraseGroups = new Map<string, {
@@ -1959,11 +2023,10 @@ function applyHighlightsToHtml(originalHtml: string, plainText: string, detectio
     const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     
     // Create regex to find the complete phrase
-    // For Hebrew, don't use word boundaries (\b) as they don't work well with Hebrew text
-    // Use Unicode-aware boundaries or direct matching
-    const phraseRegex = isHebrew 
-      ? new RegExp(`(${escapedPhrase})`, 'gi')
-      : new RegExp(`\\b(${escapedPhrase})\\b`, 'gi');
+    // For Hebrew/Arabic, don't use \b; for English/French use word boundaries
+    const phraseRegex = useWordBoundaries
+      ? new RegExp(`\\b(${escapedPhrase})\\b`, 'gi')
+      : new RegExp(`(${escapedPhrase})`, 'gi');
     
     // Determine color class
     let colorClass = "gltr-human";
@@ -2026,10 +2089,10 @@ function applyHighlightsToHtml(originalHtml: string, plainText: string, detectio
   for (const [wordKey, detection] of sortedWords) {
     const word = detection.word;
     const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // For Hebrew, don't use word boundaries (\b) as they don't work well with Hebrew text
-    const wordRegex = isHebrew
-      ? new RegExp(`(${escapedWord})`, 'gi')
-      : new RegExp(`\\b(${escapedWord})\\b`, 'gi');
+    // For Hebrew/Arabic, don't use \b; for English/French use word boundaries
+    const wordRegex = useWordBoundaries
+      ? new RegExp(`\\b(${escapedWord})\\b`, 'gi')
+      : new RegExp(`(${escapedWord})`, 'gi');
     
     let colorClass = "gltr-human";
     if (detection.confidence >= 90) {
@@ -2105,7 +2168,7 @@ serve(async (req) => {
 
     // Determine language preference (from body or cookie)
     const preferredLanguage = language || req.headers.get('cookie')?.split('; ').find(row => row.startsWith('preferred-language='))?.split('=')[1] || 'en';
-    const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en') ? preferredLanguage : 'en';
+    const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en' || preferredLanguage === 'ar' || preferredLanguage === 'fr') ? preferredLanguage : 'en';
 
     // Store original HTML for proper highlighting
     const originalHtml = text;
@@ -2137,7 +2200,7 @@ serve(async (req) => {
     console.log(`Text sample (first 100 chars): ${plainText.substring(0, 100)}`);
 
     // Perform detailed analysis with language parameter
-    const analysis = analyzeTextDetailed(plainText, validLanguage as 'en' | 'he');
+    const analysis = analyzeTextDetailed(plainText, validLanguage as 'en' | 'he' | 'ar' | 'fr');
     
     console.log(`Detection results: ${analysis.words.length} words detected, ${analysis.topPhrases.length} phrases found`);
     if (analysis.topPhrases.length > 0) {
@@ -2150,7 +2213,7 @@ serve(async (req) => {
       console.log("🤖 Starting ML-based detection (HuggingFace)...");
       hfDetection = await runHuggingFaceDetector(plainText);
     } else {
-      console.log("⏭️ Skipping HuggingFace (Hebrew) - using pattern-based detection only");
+      console.log("⏭️ Skipping HuggingFace (non-English) - using pattern-based detection only");
     }
     let finalAi = analysis.aiPercentage;
     const signals = [...(analysis.metrics?.signals ?? [])];
@@ -2205,7 +2268,7 @@ serve(async (req) => {
     };
     
     // Generate highlighted HTML by mapping detections back to original HTML structure
-    const highlightedHtml = applyHighlightsToHtml(originalHtml, plainText, analysis.words, validLanguage as 'en' | 'he');
+    const highlightedHtml = applyHighlightsToHtml(originalHtml, plainText, analysis.words, validLanguage as 'en' | 'he' | 'ar' | 'fr');
 
     return new Response(
       JSON.stringify({

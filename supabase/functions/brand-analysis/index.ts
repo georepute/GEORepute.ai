@@ -340,10 +340,24 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
     
     // System message based on language — instruct the AI to respond in the query's language
     const langCode = (language || 'en').toLowerCase().split('-')[0];
-    const systemMessage = langCode === 'en'
+    let systemMessage = langCode === 'en'
       ? 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands.'
       : 'You are a helpful business research assistant. Provide detailed, factual responses about companies and brands. CRITICAL: You MUST respond in the SAME language as the user\'s query. If the query is in French, respond in French. If in German, respond in German. Always match the language of the query exactly.';
-    
+
+    // Platforms with built-in web search — instruct them to use it for current brand/company info
+    if (platform === 'groq') {
+      systemMessage = (langCode === 'en'
+        ? 'You are a helpful business research assistant. Use web search and visit websites when needed to find current, accurate information about the company or brand. Provide detailed, factual responses about companies and brands.'
+        : systemMessage + ' Use web search and visit websites when needed to find current information about the company or brand.');
+    }
+    if (platform === 'claude' || platform === 'gemini') {
+      const searchInstruction = langCode === 'en'
+        ? ' Use web search when needed to find current, accurate information about the company or brand.'
+        : ' Use web search when needed to find current information about the company or brand.';
+      if (platform === 'claude') systemMessage = systemMessage + searchInstruction;
+      if (platform === 'gemini') systemMessage = systemMessage + searchInstruction;
+    }
+
     if (platform === 'chatgpt' && apiKey) {
       try {
         const response = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
@@ -396,7 +410,8 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
                 role: 'user',
                 content: prompt
               }
-            ]
+            ],
+            tools: [{ type: 'web_search_20250305', name: 'web_search' }]
           })
         });
         if (!response.ok) {
@@ -416,7 +431,7 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
           ? `${systemMessage}\n\n${prompt}`
           : prompt;
 
-        const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+        const response = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -431,6 +446,7 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
                 ]
               }
             ],
+            tools: [{ google_search: {} }],
             generationConfig: {
               temperature: 0.7,
               maxOutputTokens: 1000
@@ -438,7 +454,9 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
           })
         });
         if (!response.ok) {
-          throw new Error(`Gemini API error: ${response.statusText}`);
+          const errBody = await response.text();
+          const errPreview = errBody.length > 300 ? errBody.substring(0, 300) + '...' : errBody;
+          throw new Error(`Gemini API error: ${response.status} ${response.statusText}${errPreview ? ' - ' + errPreview : ''}`);
         }
         const data = await response.json();
         if (data.candidates && data.candidates[0] && data.candidates[0].content) {
@@ -576,28 +594,34 @@ async function queryAIPlatform(platform, prompt, language = 'en') {
     if (platform === 'groq' && apiKey) {
       try {
         const requestBody = {
-          model: 'llama-3.3-70b-versatile',
-            messages: [
-              {
-                role: 'system',
-                content: systemMessage
-              },
-              {
-                role: 'user',
-                content: prompt
-              }
-            ],
+          model: 'groq/compound',
+          messages: [
+            {
+              role: 'system',
+              content: systemMessage
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
           max_tokens: 2048,
-            temperature: 0.7
+          temperature: 0.7,
+          compound_custom: {
+            tools: {
+              enabled_tools: ['web_search', 'visit_website']
+            }
+          }
         };
-        
-        console.log(`Groq API request - Model: ${requestBody.model}, Prompt length: ${prompt.length}, Max tokens: ${requestBody.max_tokens}`);
-        
+
+        console.log(`Groq API request - Model: ${requestBody.model} (Compound with web_search, visit_website), Prompt length: ${prompt.length}, Max tokens: ${requestBody.max_tokens}`);
+
         const response = await fetchWithRetry('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Groq-Model-Version': 'latest'
           },
           body: JSON.stringify(requestBody)
         });

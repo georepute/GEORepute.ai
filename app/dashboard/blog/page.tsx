@@ -96,7 +96,7 @@ function BlogPageContent() {
   // Blog post form state
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
-  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he">("en");
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr">("en");
   const [post, setPost] = useState<BlogPost>({
     title: "",
     content: "",
@@ -1071,6 +1071,8 @@ function BlogPageContent() {
                         >
                           <option value="en">{t.dashboard.blogPage.english}</option>
                           <option value="he">{t.dashboard.blogPage.hebrew}</option>
+                          <option value="ar">{t.dashboard.blogPage.arabic}</option>
+                          <option value="fr">{t.dashboard.blogPage.french}</option>
                         </select>
                       </div>
 

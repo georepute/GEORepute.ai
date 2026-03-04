@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       generatedContent, // Pre-generated content to use when skipGeneration is true
       contentType, // Type of content (e.g., 'answer' for AI visibility responses)
       tone, // Tone of the content
-      language, // Language for content generation ("en" or "he")
+      language, // Language for content generation ("en", "he", "ar", or "fr")
       actionPlanId, // Optional: Link content to action plan
       actionPlanStepId, // Optional: Link content to specific step
       sourceMissedPrompt, // Optional: Original missed prompt this content was created from
@@ -40,10 +40,11 @@ export async function POST(request: NextRequest) {
       schemaOnly, // When true with skipGeneration: return schema only, do not insert (caller inserts, e.g. blog)
       websiteUrl: bodyWebsiteUrl, // Optional: website URL for backlinks
       projectId, // Optional: brand project ID to look up website URL
+      regenerateForContentId, // Optional: update this content_strategy row instead of inserting (preview Regenerate)
     } = body;
 
     // Get language preference: from request body, or from cookies as fallback
-    let preferredLanguage: "en" | "he" = language || "en";
+    let preferredLanguage: "en" | "he" | "ar" | "fr" = language || "en";
     if (!language) {
       // Try to get from cookies
       const cookieHeader = request.headers.get("cookie");
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
           return acc;
         }, {} as Record<string, string>);
         const cookieLanguage = cookies["preferred-language"];
-        if (cookieLanguage === "he" || cookieLanguage === "en") {
+        if (cookieLanguage === "he" || cookieLanguage === "en" || cookieLanguage === "ar" || cookieLanguage === "fr") {
           preferredLanguage = cookieLanguage;
         }
       }
@@ -378,13 +379,54 @@ export async function POST(request: NextRequest) {
     };
 
     if (!skipGeneration) {
-      const insertResult = await supabase
-        .from("content_strategy")
-        .insert(insertPayload)
-        .select()
-        .single();
-      data = insertResult.data;
-      error = insertResult.error;
+      if (regenerateForContentId) {
+        const { data: existingRow } = await supabase
+          .from("content_strategy")
+          .select("id, metadata")
+          .eq("id", regenerateForContentId)
+          .eq("user_id", session.user.id)
+          .maybeSingle();
+        if (existingRow) {
+          const existingMeta = (existingRow.metadata as Record<string, unknown>) || {};
+          const mergedMetadata = {
+            ...existingMeta,
+            ...contentMetadata,
+            schema: contentMetadata.schema,
+            structuredSEO: { ...(existingMeta.structuredSEO as object || {}), ...contentMetadata.structuredSEO },
+          };
+          const updateResult = await supabase
+            .from("content_strategy")
+            .update({
+              topic: insertPayload.topic,
+              generated_content: insertPayload.generated_content,
+              target_keywords: insertPayload.target_keywords,
+              metadata: mergedMetadata,
+              word_count: insertPayload.word_count,
+              ai_model: insertPayload.ai_model,
+            })
+            .eq("id", regenerateForContentId)
+            .select()
+            .single();
+          data = updateResult.data;
+          error = updateResult.error;
+        } else {
+          const insertResult = await supabase
+            .from("content_strategy")
+            .insert(insertPayload)
+            .select()
+            .single();
+          data = insertResult.data;
+          error = insertResult.error;
+        }
+      } else {
+        const insertResult = await supabase
+          .from("content_strategy")
+          .insert(insertPayload)
+          .select()
+          .single();
+        data = insertResult.data;
+        error = insertResult.error;
+      }
     } else {
       // skipGeneration: insert one row per platform unless schemaOnly (e.g. blog sends schemaOnly and inserts itself)
       if (schemaOnly) {

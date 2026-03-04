@@ -32,7 +32,8 @@ import {
   Copy,
   Check,
   Mic,
-  Star
+  Star,
+  LayoutDashboard
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Image from "next/image";
@@ -50,7 +51,7 @@ interface ContentItem {
   id: string;
   title: string;
   type: string;
-  status: "draft" | "review" | "scheduled" | "published";
+  status: "draft" | "review" | "scheduled" | "published" | "failed";
   platforms: string[];
   publishDate: string | null;
   performance: { views: number; engagement: number };
@@ -69,7 +70,7 @@ function ContentInner() {
   const { isRtl, t, language } = useLanguage();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"all" | "draft" | "review" | "scheduled" | "published">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "draft" | "review" | "scheduled" | "published" | "failed">("all");
   const [contentItems, setContentItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -90,6 +91,7 @@ function ContentInner() {
   const [stats, setStats] = useState({
     total: 0,
     published: 0,
+    failed: 0,
     scheduled: 0,
     review: 0,
     draft: 0,
@@ -141,7 +143,7 @@ function ContentInner() {
     };
   } | null>(null);
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
-  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he">("en");
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr">("en");
 
   // Humanization State
   const [isHumanizing, setIsHumanizing] = useState(false);
@@ -460,6 +462,7 @@ function ContentInner() {
       setStats(data.stats || {
         total: 0,
         published: 0,
+        failed: 0,
         scheduled: 0,
         review: 0,
         draft: 0,
@@ -2003,6 +2006,7 @@ function ContentInner() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "published": return { bg: "bg-green-100", text: "text-green-700", icon: CheckCircle };
+      case "failed": return { bg: "bg-red-100", text: "text-red-700", icon: XCircle };
       case "scheduled": return { bg: "bg-blue-100", text: "text-blue-700", icon: Clock };
       case "review": return { bg: "bg-yellow-100", text: "text-yellow-700", icon: AlertCircle };
       case "draft": return { bg: "bg-gray-100", text: "text-gray-700", icon: FileText };
@@ -2016,6 +2020,7 @@ function ContentInner() {
     { id: "review", label: t.dashboard.content.inReview, count: stats.review },
     { id: "scheduled", label: t.dashboard.content.scheduled, count: stats.scheduled },
     { id: "published", label: t.dashboard.content.published, count: stats.published },
+    { id: "failed", label: t.dashboard.content.failed ?? "Failed", count: stats.failed ?? 0 },
   ];
 
   if (loading) {
@@ -2366,7 +2371,7 @@ function ContentInner() {
                                 {/* Status Badge */}
                                 <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm ${statusConfig.bg} ${statusConfig.text}`}>
                                   <StatusIcon className="w-4 h-4" />
-                                  <span className="font-medium capitalize">{item.status}</span>
+                                  <span className="font-medium">{item.status === "failed" ? (t.dashboard.content.failed ?? "Failed") : item.status.charAt(0).toUpperCase() + item.status.slice(1)}</span>
                                 </div>
 
                                 {/* Action Buttons */}
@@ -2436,6 +2441,15 @@ function ContentInner() {
                                   </button>
                                 )}
 
+                                {(item.status === "draft" || item.status === "review") && (
+                                  <button
+                                    onClick={() => router.push(`/dashboard/content/preview/${item.id}`)}
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title={t.dashboard.content.preview ?? "Preview"}
+                                  >
+                                    <LayoutDashboard className="w-5 h-5" />
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => {
                                     setViewContent(item);
@@ -2639,7 +2653,7 @@ function ContentInner() {
                     ) : (
                       <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${statusConfig.bg} ${statusConfig.text}`}>
                         <StatusIcon className="w-4 h-4" />
-                        <span className="font-semibold capitalize">{item.status}</span>
+                        <span className="font-semibold">{item.status === "failed" ? (t.dashboard.content.failed ?? "Failed") : item.status.charAt(0).toUpperCase() + item.status.slice(1)}</span>
                       </div>
                     )}
 
@@ -2729,6 +2743,16 @@ function ContentInner() {
                             </button>
                           )}
 
+                          {/* Preview (draft/review only) */}
+                          {(item.status === "draft" || item.status === "review") && (
+                            <button
+                              onClick={() => router.push(`/dashboard/content/preview/${item.id}`)}
+                              className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                              title={t.dashboard.content.preview ?? "Preview"}
+                            >
+                              <LayoutDashboard className="w-5 h-5" />
+                            </button>
+                          )}
                           {/* View action for all statuses */}
                           <button 
                             onClick={() => {
@@ -3907,6 +3931,8 @@ function ContentInner() {
                         >
                           <option value="en">{t.dashboard.content.english}</option>
                           <option value="he">{t.dashboard.content.hebrew}</option>
+                          <option value="ar">{t.dashboard.content.arabic}</option>
+                          <option value="fr">{t.dashboard.content.french}</option>
                         </select>
                       </div>
                     </div>
