@@ -485,15 +485,19 @@ This MUST score 100% HUMAN on ALL AI detectors (GPTZero, Turnitin, Copyleaks, Wr
 - NO EMOJIS WHATSOEVER - Content must be completely emoji-free
 - NO EXCESSIVE CASUAL SLANG - Avoid: "LOL", "lol", "lmao", "bruh", "omg", "wtf", "smh", "fr", "deadass"
 - NO EXCESSIVE CASUAL LANGUAGE - Write naturally but professionally, like a real person's Facebook post (clean and structured)
+- NO INFORMAL WORDS - Use a professional tone on every platform; do not use informal words, colloquialisms, or slang
 - Keep language clean and professional while maintaining natural human voice
 - NO inappropriate, suggestive, provocative, offensive, or unprofessional content - suitable for business/brand audiences
 
 ✅ CONTENT REQUIREMENTS:
 - Write clean, structured, professional content
+- Be precise to the topic/query: address the user's question or topic directly; stay on topic and do not drift or add unrelated tangents
+- Every sentence should relate to and support the topic/query above
+- Be professional in tone on every platform; avoid informal words and slang
 - Keep language natural and professional
 - Focus on clear communication and value
 ${languageInstruction}
-Topic: "${input.topic}"
+Topic/Query: "${input.topic}"
 Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force${input.language === "he" ? "; when writing in Hebrew use only Hebrew equivalents—never write English or other language words in the content" : input.language === "ar" ? "; when writing in Arabic use only Arabic equivalents—never write English or other language words in the content" : input.language === "fr" ? "; when writing in French use only French equivalents—never write English or other language words in the content" : ""})
 Platform: ${input.targetPlatform}
 ${input.brandMention ? `Brand: ${input.brandMention} (${influenceGuidelines[input.influenceLevel]})` : "No brand"}
@@ -542,7 +546,14 @@ Think: "A ${input.brandVoice.tone} person posting on ${input.targetPlatform}" NO
 
 ### 🚨 CONTENT REQUIREMENTS
 
+🎯 **PRECISION TO QUERY (MANDATORY):**
+- The content MUST directly address the Topic/Query above. Do not generalize or go off-topic.
+- If the topic is a question, answer it clearly and stay focused on that question.
+- If the topic is a theme, center the entire piece on that theme. Every paragraph should support it.
+- Do not add filler, tangents, or unrelated points. Be precise and relevant.
+
 4️⃣ **PLATFORM-SPECIFIC FORMATTING**
+For every platform: use a professional tone and do not use informal words or slang.
 ${input.brandVoice ? `
 ═══════════════════════════════════════════════════════════════════
 🎭 BRAND VOICE MODE ACTIVE
@@ -722,14 +733,17 @@ ${input.brandVoice ? `✅ Emoji style is ${input.brandVoice.emoji_style}` : `✅
 ${input.brandVoice.signature_phrases && input.brandVoice.signature_phrases.length > 0 ? `✅ Signature phrase used naturally (if relevant): "${input.brandVoice.signature_phrases[0]}"` : ""}
 
 PLATFORM-SPECIFIC REQUIREMENTS:
+✅ All platforms: Professional tone only; do not use informal words or slang.
 ${input.brandVoice ? '' : `🚨 CRITICAL: NO brand voice selected - Remove ALL emojis from the final content`}
 ${input.brandVoice && !input.brandVoice.use_emojis ? `🚨 CRITICAL: Brand voice disallows emojis - Remove ALL emojis from the final content` : ''}
 ${input.targetPlatform === 'facebook' ? `✅ Facebook style: Professional, business-appropriate, family-friendly, no inappropriate content` : ''}
-${input.targetPlatform === 'instagram' ? `✅ Instagram style: Visual storytelling, trendy, personal` : ''}
-${input.targetPlatform === 'reddit' ? `✅ Reddit style: Casual, conversational, story-like, community-focused` : ''}
-${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate` : ''}
-${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced` : ''}
-${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal` : ''}
+${input.targetPlatform === 'instagram' ? `✅ Instagram style: Visual storytelling, trendy, personal — keep language professional, no informal words` : ''}
+${input.targetPlatform === 'reddit' ? `✅ Reddit style: Conversational, story-like, community-focused — professional tone, no informal words or slang` : ''}
+${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate — professional, no informal words` : ''}
+${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced — professional tone, no informal words` : ''}
+${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal — professional, no informal words` : ''}
+${input.targetPlatform === 'linkedin' ? `✅ LinkedIn style: Professional yet human, thoughtful — no informal words` : ''}
+${input.targetPlatform === 'twitter' ? `✅ X/Twitter style: Short, punchy — professional tone, no informal words or slang` : ''}
 ${input.language === "he" ? `✅ Hebrew only: Content uses only Hebrew script (א-ת) and punctuation; no Latin/transliterations/corrupted chars; 150+ words, complete sentence at end` : ''}
 ${input.language === "ar" ? `✅ Arabic only: Content uses only Arabic script and punctuation; no Latin/mixed script; 150+ words, complete sentence at end` : ''}
 ${input.language === "fr" ? `✅ French only: Content uses only French; correct grammar and accents; 150+ words, complete sentence at end` : ''}

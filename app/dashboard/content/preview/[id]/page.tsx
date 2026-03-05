@@ -67,7 +67,6 @@ export default function PublicationPreviewPage() {
     metaTitle: false,
     cta: false,
     image: false,
-    links: false,
   });
   const [selectedPlatform, setSelectedPlatform] = useState("blog");
   const [editTextModal, setEditTextModal] = useState(false);
@@ -554,24 +553,6 @@ export default function PublicationPreviewPage() {
                   </div>
                 )}
               </div>
-              <div>
-                <button
-                  onClick={() => toggleStaging("links")}
-                  className="flex items-center gap-2 text-sm text-gray-600 w-full"
-                >
-                  {expandedStaging.links ? (
-                    <ChevronDown className="w-4 h-4" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4" />
-                  )}
-                  Links
-                </button>
-                {expandedStaging.links && (
-                  <div className="mt-1 text-sm text-gray-700 pl-6">
-                    {links.length ? links.join(", ") : "—"}
-                  </div>
-                )}
-              </div>
               <div className="pt-3 flex flex-wrap gap-2">
                 <button
                   onClick={() => setEditTextModal(true)}
@@ -659,11 +640,16 @@ export default function PublicationPreviewPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
+              {!contentChanged && (
+                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  Edit the content (via Edit button), change the image, or regenerate to enable publishing.
+                </p>
+              )}
               <div className="flex flex-col gap-2 pt-2">
                 <button
                   onClick={handlePublishNow}
-                  disabled={committing}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+                  disabled={committing || !contentChanged}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {committing ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -674,8 +660,8 @@ export default function PublicationPreviewPage() {
                 </button>
                 <button
                   onClick={handleSchedule}
-                  disabled={committing || !scheduleDate}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  disabled={committing || !scheduleDate || !contentChanged}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {committing ? (
                     <Loader2 className="w-5 h-5 animate-spin" />

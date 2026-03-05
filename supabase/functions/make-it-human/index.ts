@@ -1051,28 +1051,39 @@ class MultiPassHumanizer {
     return result.trim();
   }
   
-  // Single humanization pass
-  humanizePass(text: string, detectedPhrases: string[] = []): string {
-    this.passCount++;
-    console.log(`🔄 Pass ${this.passCount}: Starting humanization...`);
-    
-    let result = text;
-    
-    // NEW: Fix formatting issues first (emojis, dashes, leading spaces, uniform paragraphs)
+  // Run one pass of humanization on a single block (no internal paragraph splits)
+  private humanizeBlock(block: string, detectedPhrases: string[] = []): string {
+    let result = block;
     result = this.removeEmojis(result);
     result = this.fixDashes(result);
     result = this.removeLeadingSpaces(result);
     result = this.breakUniformParagraphs(result);
-    
-    // Only use detectedPhrases on first pass to avoid removing already-removed phrases
-    result = this.replaceAIWords(result, this.passCount === 1 ? detectedPhrases : []);
+    result = this.replaceAIWords(result, detectedPhrases);
     result = this.breakSentences(result);
     result = this.varyVocabulary(result);
     result = this.addContractions(result);
     result = this.addFillers(result);
     result = this.cleanup(result);
-    
-    console.log(`✓ Pass ${this.passCount} complete`);
+    return result;
+  }
+
+  // Single humanization pass – preserves paragraph structure (double newlines)
+  humanizePass(text: string, detectedPhrases: string[] = []): string {
+    this.passCount++;
+    console.log(`🔄 Pass ${this.passCount}: Starting humanization (preserving paragraphs)...`);
+
+    // Split by paragraph breaks so we don't turn them into space
+    const paragraphs = text.split(/\n\n+/).map((p) => p.trim()).filter((p) => p.length > 0);
+
+    if (paragraphs.length <= 1) {
+      return this.humanizeBlock(text, this.passCount === 1 ? detectedPhrases : []);
+    }
+
+    const useDetected = this.passCount === 1 ? detectedPhrases : [];
+    const humanized = paragraphs.map((para) => this.humanizeBlock(para, useDetected));
+    const result = humanized.join("\n\n");
+
+    console.log(`✓ Pass ${this.passCount} complete (${paragraphs.length} paragraphs preserved)`);
     return result;
   }
   
@@ -1117,6 +1128,60 @@ function processHTML(html: string, humanizer: MultiPassHumanizer, passes: number
   }
   
   return processed.join('');
+}
+
+/** Sentence-ending characters per language for paragraph splitting in formatting layer */
+const SENTENCE_END_BY_LANG: Record<string, string> = {
+  en: ".!?",
+  fr: ".!?",
+  he: ".!?\u05C3",   // Latin + Hebrew sof pasuq (׃)
+  ar: ".!?\u061F\u06D4", // Latin + Arabic question mark (؟) + Arabic full stop (۔)
+};
+
+/**
+ * Formatting layer: clean spacing and line breaks after humanization.
+ * Works for English, French, Hebrew, and Arabic.
+ * - Preserves existing paragraph breaks (from humanizePass).
+ * - Normalizes line endings and collapses excessive newlines (max one blank line between paragraphs).
+ * - Trims each line and the whole text; collapses multiple spaces to single space within each line.
+ * - If text has no paragraph breaks and is long, inserts breaks every ~4–5 sentences (using language-appropriate sentence endings).
+ * Safe for both plain text and HTML (preserves tag structure).
+ */
+function applyFormattingLayer(text: string, language: string = "en"): string {
+  if (!text || !text.trim()) return text;
+  // Normalize line endings to \n
+  let s = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Collapse 3+ newlines to exactly 2 (one blank line between paragraphs)
+  s = s.replace(/\n{3,}/g, "\n\n");
+  const lines = s.split("\n");
+  const result: string[] = [];
+  let prevEmpty = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const collapsed = trimmed.replace(/\s+/g, " ");
+    const isEmpty = collapsed.length === 0;
+    if (isEmpty && prevEmpty) continue;
+    prevEmpty = isEmpty;
+    result.push(collapsed);
+  }
+  let out = result.join("\n").trim();
+
+  // If still one long line (no paragraph breaks) and long enough, add paragraph breaks every few sentences
+  const minLengthForBreak = language === "ar" || language === "he" ? 300 : 400;
+  if (!out.includes("\n\n") && out.length > minLengthForBreak) {
+    const endChars = SENTENCE_END_BY_LANG[language] || SENTENCE_END_BY_LANG.en;
+    const escaped = endChars.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const sentenceRegex = new RegExp(`(?<=[${escaped}])\\s+`, "gu");
+    const sentences = out.split(sentenceRegex).filter((x) => x.trim());
+    const maxSentencesPerParagraph = 4;
+    const paragraphs: string[] = [];
+    for (let i = 0; i < sentences.length; i += maxSentencesPerParagraph) {
+      paragraphs.push(sentences.slice(i, i + maxSentencesPerParagraph).join(" ").trim());
+    }
+    out = paragraphs.filter((p) => p.length > 0).join("\n\n");
+  }
+
+  return out;
 }
 
 // Main server
@@ -1168,21 +1233,22 @@ serve(async (req) => {
     
     const humanizer = new MultiPassHumanizer(validLanguage as 'en' | 'he' | 'ar' | 'fr');
     const humanized = processHTML(text, humanizer, numPasses, validDetectedPhrases);
+    const formatted = applyFormattingLayer(humanized, validLanguage);
     
-    const ratio = text.length > 0 ? (humanized.length / text.length) : 1;
+    const ratio = text.length > 0 ? (formatted.length / text.length) : 1;
     
-    console.log(`✅ Humanization complete (${humanized.length} chars, was ${text.length} chars, ratio: ${(ratio * 100).toFixed(1)}%)`);
+    console.log(`✅ Humanization complete (${formatted.length} chars, was ${text.length} chars, ratio: ${(ratio * 100).toFixed(1)}%)`);
     
     return new Response(
       JSON.stringify({
-        humanVersion: humanized,
+        humanVersion: formatted,
         original: text,
         success: true,
         passes: numPasses,
         detectedPhrasesRemoved: validDetectedPhrases.length,
         length: {
           original: text.length,
-          humanized: humanized.length,
+          humanized: formatted.length,
           ratio: ratio
         }
       }),

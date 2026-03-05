@@ -9,7 +9,7 @@ import { publishToLinkedIn, LinkedInConfig } from "@/lib/integrations/linkedin";
 import { publishToInstagram, InstagramConfig } from "@/lib/integrations/instagram";
 import { publishToShopify, ShopifyConfig } from "@/lib/integrations/shopify";
 import { publishToWordPress, publishToSelfHostedWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
-import { publishToX, XConfig } from "@/lib/integrations/x";
+import { publishToX, uploadMediaToX, XConfig } from "@/lib/integrations/x";
 
 /**
  * Content Orchestrator API
@@ -1207,8 +1207,19 @@ export async function POST(request: NextRequest) {
                 };
                 let xContent = contentStrategy.generated_content || "";
                 xContent = xContent.replace(/<!-- SEO Schema.*?-->/gs, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").trim();
-                console.log("X publish: calling publishToX, content length:", xContent?.length);
-                xResult = await publishToX(xConfig, { text: xContent });
+                const imageUrl = contentStrategy.metadata?.imageUrl;
+                let xMediaIds: string[] | undefined;
+                if (imageUrl) {
+                  const upload = await uploadMediaToX(xConfig, imageUrl);
+                  if ("mediaId" in upload) {
+                    xMediaIds = [upload.mediaId];
+                    console.log("X publish: image uploaded, media_id:", upload.mediaId);
+                  } else {
+                    console.warn("X publish: image upload failed, posting text only:", upload.error);
+                  }
+                }
+                console.log("X publish: calling publishToX, content length:", xContent?.length, "media:", xMediaIds?.length ?? 0);
+                xResult = await publishToX(xConfig, { text: xContent, mediaIds: xMediaIds });
                 console.log("X publish result:", xResult?.success, xResult?.url || xResult?.error);
                 if (xResult.success && xResult.url) {
                   publishUrl = xResult.url;

@@ -361,18 +361,36 @@ export async function POST(request: NextRequest) {
     // When skipGeneration is true, we still insert one row per platform so drafts appear (e.g. missed prompts multi-platform)
     let data: any = null;
     let error: any = null;
+
+    // DB expects integer for neutrality_score and word_count (AI may return float or string e.g. "0.95")
+    const rawNeutrality = result.neutralityScore ?? 0;
+    const neutralityNum = typeof rawNeutrality === "string" ? parseFloat(rawNeutrality) : Number(rawNeutrality);
+    const neutralityScore = Number.isFinite(neutralityNum)
+      ? neutralityNum <= 1 && neutralityNum >= 0
+        ? Math.round(neutralityNum * 100)
+        : Math.round(neutralityNum)
+      : 0;
+    const rawWordCount = result.wordCount ?? result.content?.split(/\s+/).length ?? 0;
+    const wordCountNum = typeof rawWordCount === "string" ? parseInt(rawWordCount, 10) : Number(rawWordCount);
+    const wordCount = Number.isFinite(wordCountNum) ? Math.round(wordCountNum) : Math.max(0, (result.content || "").split(/\s+/).length);
+
+    const targetKeywordsArray = Array.isArray(targetKeywords)
+      ? targetKeywords
+      : typeof targetKeywords === "string"
+        ? targetKeywords.split(",").map((k: string) => k.trim()).filter(Boolean)
+        : [];
     
     const insertPayload = {
       user_id: session.user.id,
       topic,
-      target_keywords: targetKeywords,
+      target_keywords: targetKeywordsArray,
       target_platform: normalizedPlatform,
       brand_mention: brandMention,
       influence_level: influenceLevel || "subtle",
       generated_content: result.content,
-      neutrality_score: result.neutralityScore ?? 0,
+      neutrality_score: neutralityScore,
       tone: result.tone ?? "informative",
-      word_count: result.wordCount ?? 0,
+      word_count: wordCount,
       ai_model: result.ai_model || "claude-sonnet-4-5-20250929",
       metadata: contentMetadata,
       status: "draft",

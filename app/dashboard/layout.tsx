@@ -113,6 +113,7 @@ export default function DashboardLayout({
       expandKey: "contentGenerator",
       children: [
         { name: t.dashboard.sidebar.newContent, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
+        { name: t.dashboard.sidebar.multiplePlatform, href: "/dashboard/content-generator/multiple-platform", icon: Layers, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.missedPrompts, href: "/dashboard/missed-prompts", icon: FileText, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.blog, href: "/dashboard/blog", icon: Globe, requiredCapability: "canManageContent" },
       ]

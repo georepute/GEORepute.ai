@@ -32,8 +32,7 @@ import {
   Copy,
   Check,
   Mic,
-  Star,
-  LayoutDashboard
+  Star
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Image from "next/image";
@@ -446,6 +445,14 @@ function ContentInner() {
       }
     }
   }, [contentItems, searchParams, actionPlanContext]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When arriving from multi-platform "Ready to Publish", switch to draft tab so user sees their content
+  useEffect(() => {
+    const fromMulti = searchParams.get('fromMulti');
+    if (fromMulti === '1') {
+      setActiveTab('draft');
+    }
+  }, [searchParams]);
 
   const loadContent = async () => {
     setLoading(true);
@@ -2441,25 +2448,27 @@ function ContentInner() {
                                   </button>
                                 )}
 
-                                {(item.status === "draft" || item.status === "review") && (
+                                {item.status === "draft" && (
                                   <button
                                     onClick={() => router.push(`/dashboard/content/preview/${item.id}`)}
-                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    className="px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium flex items-center gap-1.5"
                                     title={t.dashboard.content.preview ?? "Preview"}
                                   >
-                                    <LayoutDashboard className="w-5 h-5" />
+                                    {t.dashboard.content.edit ?? "Edit"}
                                   </button>
                                 )}
-                                <button
-                                  onClick={() => {
-                                    setViewContent(item);
-                                    setShowViewModal(true);
-                                  }}
-                                  className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-                                  title={t.dashboard.content.view}
-                                >
-                                  <Eye className="w-5 h-5" />
-                                </button>
+                                {item.status !== "review" && (
+                                  <button
+                                    onClick={() => {
+                                      setViewContent(item);
+                                      setShowViewModal(true);
+                                    }}
+                                    className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                                    title={t.dashboard.content.view}
+                                  >
+                                    <Eye className="w-5 h-5" />
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleDelete(item.id)}
                                   className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
@@ -2670,7 +2679,7 @@ function ContentInner() {
                         </div>
                       ) : (
                         <>
-                          {/* Draft: Only Approve button */}
+                          {/* Draft: Approve button */}
                           {item.status === "draft" && (
                             <button
                               onClick={() => handleApprove(item.id)}
@@ -2743,28 +2752,30 @@ function ContentInner() {
                             </button>
                           )}
 
-                          {/* Preview (draft/review only) */}
-                          {(item.status === "draft" || item.status === "review") && (
+                          {/* Edit (draft only) – same as preview: go to preview page */}
+                          {item.status === "draft" && (
                             <button
                               onClick={() => router.push(`/dashboard/content/preview/${item.id}`)}
-                              className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                              className="px-3 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium hover:bg-blue-100 transition-colors flex items-center gap-2"
                               title={t.dashboard.content.preview ?? "Preview"}
                             >
-                              <LayoutDashboard className="w-5 h-5" />
+                              {t.dashboard.content.edit ?? "Edit"}
                             </button>
                           )}
-                          {/* View action for all statuses */}
-                          <button 
-                            onClick={() => {
-                              setViewContent(item);
-                              setShowViewModal(true);
-                            }}
-                            disabled={publishingContentId === item.id}
-                            className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title={t.dashboard.content.view}
-                          >
-                            <Eye className="w-5 h-5" />
-                          </button>
+                          {/* View action – hidden in review (no preview icon in review) */}
+                          {item.status !== "review" && (
+                            <button 
+                              onClick={() => {
+                                setViewContent(item);
+                                setShowViewModal(true);
+                              }}
+                              disabled={publishingContentId === item.id}
+                              className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={t.dashboard.content.view}
+                            >
+                              <Eye className="w-5 h-5" />
+                            </button>
+                          )}
                           {/* Delete action for all statuses */}
                           <button 
                             onClick={() => handleDelete(item.id)}
