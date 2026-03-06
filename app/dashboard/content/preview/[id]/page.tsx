@@ -74,6 +74,7 @@ export default function PublicationPreviewPage() {
   const [scheduleTime, setScheduleTime] = useState("09:00");
   const [committing, setCommitting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [platformUsernames, setPlatformUsernames] = useState<Record<string, string>>({});
 
   const quillModules = useMemo(
     () => ({
@@ -145,6 +146,34 @@ export default function PublicationPreviewPage() {
   useEffect(() => {
     fetchContent();
   }, [fetchContent]);
+
+  useEffect(() => {
+    const loadPlatformUsernames = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) return;
+      const { data: rows } = await supabase
+        .from("platform_integrations")
+        .select("platform, platform_username, metadata")
+        .eq("user_id", session.user.id)
+        .eq("status", "connected");
+      if (!rows?.length) return;
+      const map: Record<string, string> = {};
+      for (const row of rows) {
+        const platform = (row.platform as string)?.toLowerCase?.() || "";
+        const meta = (row.metadata as Record<string, unknown>) || {};
+        const username = row.platform_username?.trim() || "";
+        const display =
+          platform === "linkedin"
+            ? (meta.fullName as string) || username
+            : platform === "x"
+              ? username ? (username.startsWith("@") ? username : `@${username}`) : ""
+              : username;
+        if (display) map[platform] = display;
+      }
+      setPlatformUsernames((prev) => ({ ...prev, ...map }));
+    };
+    loadPlatformUsernames();
+  }, []);
 
   const toggleStaging = (key: string) => {
     setExpandedStaging((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -611,6 +640,7 @@ export default function PublicationPreviewPage() {
                 ctaText={ctaText}
                 ctaUrl={ctaUrl}
                 metaTitle={metaTitle}
+                platformDisplayName={platformUsernames[selectedPlatform]}
               />
             </div>
           </div>
@@ -762,6 +792,7 @@ function PlatformPreview({
   ctaText,
   ctaUrl,
   metaTitle,
+  platformDisplayName,
 }: {
   platform: string;
   title: string;
@@ -770,6 +801,7 @@ function PlatformPreview({
   ctaText: string;
   ctaUrl: string;
   metaTitle: string;
+  platformDisplayName?: string;
 }) {
   const plain = stripHtml(body);
   const truncated = plain.length > 200 ? plain.slice(0, 200) + "…" : plain;
@@ -803,7 +835,7 @@ function PlatformPreview({
         <div className="p-3 flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0" />
           <div>
-            <div className="font-semibold text-gray-900 text-sm">User Name</div>
+            <div className="font-semibold text-gray-900 text-sm">{platformDisplayName || "User Name"}</div>
             <div className="text-xs text-gray-500">Headline</div>
           </div>
         </div>
@@ -827,7 +859,7 @@ function PlatformPreview({
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden text-left max-w-md">
         <div className="p-3 flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-blue-200 flex-shrink-0" />
-          <div className="font-semibold text-gray-900 text-sm">User Name</div>
+          <div className="font-semibold text-gray-900 text-sm">{platformDisplayName || "User Name"}</div>
         </div>
         <p className="px-3 pb-2 text-sm text-gray-800">{truncatedShort}</p>
         {imageUrl && (
@@ -849,7 +881,7 @@ function PlatformPreview({
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden text-left max-w-md">
         <div className="p-2 flex items-center gap-2 border-b bg-gray-50">
           <div className="w-6 h-6 rounded-full bg-orange-500 flex-shrink-0" />
-          <span className="text-xs font-medium text-gray-600">r/subreddit</span>
+          <span className="text-xs font-medium text-gray-600">{platformDisplayName ? `u/${platformDisplayName}` : "r/subreddit"}</span>
         </div>
         <h3 className="px-3 py-2 font-semibold text-gray-900 text-sm">{title || "Post title"}</h3>
         <p className="px-3 pb-2 text-sm text-gray-700">{truncatedShort}</p>
@@ -873,7 +905,7 @@ function PlatformPreview({
         <div className="p-3 flex items-start gap-3">
           <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0" />
           <div className="min-w-0">
-            <div className="font-semibold text-gray-900 text-sm">@username</div>
+            <div className="font-semibold text-gray-900 text-sm">{platformDisplayName || "@username"}</div>
             <p className="text-sm text-gray-800 mt-1 whitespace-pre-wrap">{truncatedShort}</p>
             {imageUrl && (
               <div className="mt-2 rounded-lg overflow-hidden border border-gray-200">
@@ -909,7 +941,7 @@ function PlatformPreview({
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden text-left max-w-sm">
         <div className="p-2 flex items-center gap-2 border-b">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex-shrink-0" />
-          <span className="font-semibold text-sm">username</span>
+          <span className="font-semibold text-sm">{platformDisplayName || "username"}</span>
         </div>
         {imageUrl ? (
           <div className="aspect-square bg-gray-100">

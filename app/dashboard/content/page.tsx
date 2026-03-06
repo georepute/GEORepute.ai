@@ -833,19 +833,23 @@ function ContentInner() {
         throw new Error('Content not found');
       }
 
-      // Get published records to find Instagram/Facebook/LinkedIn/GitHub/Quora posts
+      // Get published records to find Instagram/Facebook/LinkedIn/GitHub/Quora/X posts
       const publishedRecords = contentItem.published_records || [];
       const instagramPost = publishedRecords.find((r: any) => r.platform === 'instagram');
       const facebookPost = publishedRecords.find((r: any) => r.platform === 'facebook');
       const linkedinPost = publishedRecords.find((r: any) => r.platform === 'linkedin');
       const githubPost = publishedRecords.find((r: any) => r.platform === 'github');
       const quoraPost = publishedRecords.find((r: any) => r.platform === 'quora');
+      const xPost = publishedRecords.find((r: any) => r.platform === 'x');
+      const shopifyPost = publishedRecords.find((r: any) => r.platform === 'shopify');
+      const wordpressPost = publishedRecords.find((r: any) => r.platform === 'wordpress');
+      const wordpressSelfHostedPost = publishedRecords.find((r: any) => r.platform === 'wordpress_self_hosted');
       
-      // Determine which platform to show metrics for (Quora added)
-      const platform = instagramPost ? 'instagram' : (facebookPost ? 'facebook' : (linkedinPost ? 'linkedin' : (githubPost ? 'github' : (quoraPost ? 'quora' : null))));
+      // Determine which platform to show metrics for (Quora, X, Shopify, WordPress)
+      const platform = instagramPost ? 'instagram' : (facebookPost ? 'facebook' : (linkedinPost ? 'linkedin' : (githubPost ? 'github' : (quoraPost ? 'quora' : (xPost ? 'x' : (shopifyPost ? 'shopify' : (wordpressPost ? 'wordpress' : (wordpressSelfHostedPost ? 'wordpress_self_hosted' : null))))))));
       setPerformancePlatform(platform);
 
-      // If it's Instagram, Facebook, LinkedIn, GitHub, or Quora, load existing metrics from database (if any)
+      // If it's Instagram, Facebook, LinkedIn, GitHub, Quora, X, or Shopify, load existing metrics from database (if any)
       if (platform) {
         // Load existing metrics from database (don't auto-fetch from API)
         if (contentItem.raw?.metadata?.performance) {
@@ -865,7 +869,10 @@ function ContentInner() {
             reactions: platformMetrics.reactions || 0,
             clicks: platformMetrics.clicks || 0,
             upvotes: platformMetrics.upvotes || 0, // For GitHub and Quora
-            views: platformMetrics.views || 0, // For Quora
+            views: platformMetrics.views || 0, // For Quora, Shopify, WordPress
+            quote_count: platformMetrics.quote_count ?? undefined, // For X
+            note: platformMetrics.note, // For Shopify
+            store_sessions: platformMetrics.store_sessions ?? undefined, // For Shopify (analytics scope)
             lastUpdated: platformMetrics.lastUpdated || null, // Preserve timestamp from database
           });
         } else {
@@ -882,12 +889,12 @@ function ContentInner() {
             reactions: 0,
             clicks: 0,
             upvotes: 0, // For GitHub and Quora
-            views: 0, // For Quora
+            views: 0, // For Quora, Shopify, WordPress
             lastUpdated: null,
           });
         }
       } else {
-        // For non-Instagram/Facebook/LinkedIn/GitHub/Quora platforms, show message
+        // For unsupported platforms, show message
         setCurrentMetrics(null);
       }
     } catch (error: any) {
@@ -955,7 +962,10 @@ function ContentInner() {
               reactions: platformMetrics.reactions || 0,
               clicks: platformMetrics.clicks || 0,
               upvotes: platformMetrics.upvotes || 0, // For GitHub and Quora
-              views: platformMetrics.views || 0, // For Quora
+              views: platformMetrics.views || 0, // For Quora, Shopify, WordPress
+              quote_count: platformMetrics.quote_count ?? undefined, // For X
+              note: platformMetrics.note, // For Shopify
+              store_sessions: platformMetrics.store_sessions ?? undefined, // For Shopify (analytics scope)
               lastUpdated: lastUpdated, // Always set timestamp
             });
             
@@ -980,7 +990,7 @@ function ContentInner() {
               reactions: 0,
               clicks: 0,
               upvotes: 0, // For GitHub and Quora
-              views: 0, // For Quora
+              views: 0, // For Quora, Shopify, WordPress
               lastUpdated: new Date().toISOString(), // Set timestamp even if no data
             });
             toast.success('Refresh completed. No metrics available yet.', { id: 'refresh-metrics' });
@@ -2808,13 +2818,13 @@ function ContentInner() {
                   {t.dashboard.content.trackContentPerformance}
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora'
+                  {(performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora' || performancePlatform === 'x' || performancePlatform === 'shopify' || performancePlatform === 'wordpress' || performancePlatform === 'wordpress_self_hosted')
                     ? t.dashboard.content.liveMetricsFrom
                     : t.dashboard.content.measurePerformance}
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                {(performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora') && (
+                {(performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora' || performancePlatform === 'x' || performancePlatform === 'shopify' || performancePlatform === 'wordpress' || performancePlatform === 'wordpress_self_hosted') && (
                   <div className="flex flex-col items-end gap-1">
                     <button
                       onClick={handleRefreshMetrics}
@@ -2856,8 +2866,8 @@ function ContentInner() {
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                   <span className="ml-3 text-gray-600">{t.dashboard.content.loadingMetrics}</span>
                 </div>
-              ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora') && currentMetrics ? (
-                // Show live metrics for Instagram/Facebook/LinkedIn/GitHub/Quora with charts
+              ) : (performancePlatform === 'instagram' || performancePlatform === 'facebook' || performancePlatform === 'linkedin' || performancePlatform === 'github' || performancePlatform === 'quora' || performancePlatform === 'x' || performancePlatform === 'shopify' || performancePlatform === 'wordpress' || performancePlatform === 'wordpress_self_hosted') && currentMetrics ? (
+                // Show live metrics for Instagram/Facebook/LinkedIn/GitHub/Quora/X/Shopify/WordPress with charts
                 <div className="space-y-6">
                   {/* Engagement Metrics Bar Chart */}
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
@@ -2866,14 +2876,28 @@ function ContentInner() {
                       <BarChart
                         data={(() => {
                           // For Quora and GitHub, show Upvotes instead of Likes
-                          const data = [
-                            { 
-                              name: performancePlatform === 'github' ? 'Reactions' : (performancePlatform === 'quora' ? 'Upvotes' : 'Likes'), 
-                              value: performancePlatform === 'quora' ? (currentMetrics.upvotes || 0) : (currentMetrics.likes || 0), 
-                              fill: '#3b82f6' 
-                            },
-                            { name: 'Comments', value: currentMetrics.comments || 0, fill: '#10b981' },
-                          ];
+                          const data = (performancePlatform === 'shopify' || performancePlatform === 'wordpress' || performancePlatform === 'wordpress_self_hosted')
+                            ? (performancePlatform === 'wordpress' || performancePlatform === 'wordpress_self_hosted')
+                              ? [
+                                  { name: 'Views', value: currentMetrics.views ?? 0, fill: '#3b82f6' },
+                                  { name: 'Likes', value: currentMetrics.likes ?? 0, fill: '#ec4899' },
+                                  { name: 'Comments', value: currentMetrics.comments ?? 0, fill: '#10b981' },
+                                ]
+                              : [
+                                  { name: 'Views', value: currentMetrics.views ?? 0, fill: '#3b82f6' },
+                                  { name: 'Engagement', value: currentMetrics.engagement ?? 0, fill: '#10b981' },
+                                  ...(performancePlatform === 'shopify' && currentMetrics.store_sessions !== undefined && currentMetrics.store_sessions !== null
+                                    ? [{ name: 'Store sessions (30d)', value: currentMetrics.store_sessions, fill: '#8b5cf6' }]
+                                    : []),
+                                ]
+                            : [
+                                { 
+                                  name: performancePlatform === 'github' ? 'Reactions' : (performancePlatform === 'quora' ? 'Upvotes' : 'Likes'), 
+                                  value: performancePlatform === 'quora' ? (currentMetrics.upvotes || 0) : (currentMetrics.likes || 0), 
+                                  fill: '#3b82f6' 
+                                },
+                                { name: performancePlatform === 'x' ? 'Replies' : 'Comments', value: currentMetrics.comments || 0, fill: '#10b981' },
+                              ];
                           // For GitHub, always show Upvotes (even if 0)
                           if (performancePlatform === 'github') {
                             // Always include upvotes for GitHub, even if 0
@@ -2887,6 +2911,10 @@ function ContentInner() {
                               upvotes: upvotesValue,
                               upvotesRaw: currentMetrics.upvotes,
                             });
+                          } else if (performancePlatform === 'shopify') {
+                            // Shopify: store_sessions bar already added in data array above
+                          } else if (performancePlatform === 'wordpress' || performancePlatform === 'wordpress_self_hosted') {
+                            // WordPress: Views and Engagement only (already in data)
                           } else if (performancePlatform === 'quora') {
                             // For Quora, always show all 4 metrics: Views, Upvotes (already first), Comments (already second), Shares
                             // Views
@@ -2906,11 +2934,14 @@ function ContentInner() {
                               shares: sharesValue,
                             });
                           } else {
-                            // For other platforms, show Shares and Saved if available
+                            // For other platforms (Facebook, Instagram, LinkedIn, X), show Shares and Saved if available
                             if (currentMetrics.shares !== undefined) {
-                              data.push({ name: 'Shares', value: currentMetrics.shares || 0, fill: '#8b5cf6' });
+                              data.push({ name: performancePlatform === 'x' ? 'Retweets' : 'Shares', value: currentMetrics.shares || 0, fill: '#8b5cf6' });
                             }
-                            if (currentMetrics.saved !== undefined) {
+                            if (performancePlatform === 'x' && (currentMetrics.quote_count !== undefined && currentMetrics.quote_count !== null)) {
+                              data.push({ name: 'Quotes', value: currentMetrics.quote_count || 0, fill: '#f59e0b' });
+                            }
+                            if (currentMetrics.saved !== undefined && performancePlatform !== 'x') {
                               data.push({ name: 'Saved', value: currentMetrics.saved || 0, fill: '#f59e0b' });
                             }
                           }
@@ -2949,12 +2980,15 @@ function ContentInner() {
                             // For GitHub, add Upvotes color
                             if (performancePlatform === 'github') {
                               data.push({ fill: '#f59e0b' });
-                            } else {
-                              // For other platforms, add Shares and Saved colors if available
+                            } else if (performancePlatform !== 'shopify') {
+                              // For other platforms (Facebook, Instagram, LinkedIn, X), add Shares/Retweets, Quotes (X), Saved
                               if (currentMetrics.shares !== undefined) {
                                 data.push({ fill: '#8b5cf6' });
                               }
-                              if (currentMetrics.saved !== undefined) {
+                              if (performancePlatform === 'x' && (currentMetrics.quote_count !== undefined && currentMetrics.quote_count !== null)) {
+                                data.push({ fill: '#f59e0b' });
+                              }
+                              if (currentMetrics.saved !== undefined && performancePlatform !== 'x') {
                                 data.push({ fill: '#f59e0b' });
                               }
                             }
@@ -2965,6 +2999,9 @@ function ContentInner() {
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
+                    {(performancePlatform === 'shopify' || performancePlatform === 'wordpress_self_hosted') && currentMetrics.note && (
+                      <p className="text-xs text-gray-500 mt-3 italic">{currentMetrics.note}</p>
+                    )}
                   </div>
 
                   {/* Engagement Rate Radial Chart - Always show if engagement data exists */}
@@ -3018,7 +3055,7 @@ function ContentInner() {
                   )}
                 </div>
               ) : (
-                // No metrics available or not Instagram/Facebook/LinkedIn/GitHub/Quora
+                // No metrics available or unsupported platform
                 <div className="flex flex-col items-center justify-center py-12">
                   <TrendingUp className="w-16 h-16 text-gray-300 mb-4" />
                   <h4 className="text-lg font-semibold text-gray-900 mb-2">{t.dashboard.content.noPerformanceData}</h4>

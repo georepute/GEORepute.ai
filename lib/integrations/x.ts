@@ -102,6 +102,12 @@ export async function uploadMediaToX(
     if (id) return { mediaId: id };
   }
 
+  if (resV2.status === 401) {
+    return {
+      error: "X connection expired or invalid. Reconnect X in Settings → Integrations.",
+    };
+  }
+
   const is403 = resV2.status === 403;
   const isOAuth2Blocked =
     is403 &&
@@ -188,6 +194,12 @@ export async function publishToX(
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    if (res.status === 401) {
+      return {
+        success: false,
+        error: "X connection expired or invalid. Reconnect X in Settings → Integrations.",
+      };
+    }
     // X API v2 error shape: { detail, title, errors: [{ message }], type }
     const errMsg =
       data?.errors?.[0]?.message ||

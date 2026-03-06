@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
         clientId,
         redirectUri,
         state,
-        ['read_content', 'write_content']
+        ['read_content', 'write_content', 'read_reports']
       );
 
       return NextResponse.json(
