@@ -441,13 +441,14 @@ export async function verifyShopifyConnection(config: ShopifyConfig): Promise<{
 
 /**
  * Generate Shopify OAuth authorization URL
+ * Scopes: read_content, write_content for blog; read_reports for analytics (ShopifyQL/shopifyqlQuery).
  */
 export function generateShopifyAuthUrl(
   shopDomain: string,
   clientId: string,
   redirectUri: string,
   state: string,
-  scopes: string[] = ['read_content', 'write_content']
+  scopes: string[] = ['read_content', 'write_content', 'read_reports']
 ): string {
   const normalizedDomain = normalizeShopDomain(shopDomain);
   const scopeString = scopes.join(',');

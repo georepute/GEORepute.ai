@@ -204,12 +204,48 @@ function parseCompetitorName(value: any): { name: string; domain?: string } {
   return { name: String(value) };
 }
 
+/** Build search variations for a name (lowercase, no spaces, no punctuation, significant words) */
+function buildNameVariations(name: string): string[] {
+  if (!name || !name.trim()) return [];
+  const lower = name.toLowerCase().trim();
+  const words = lower.split(/\s+/).filter(Boolean);
+  const variations = [
+    lower,
+    lower.replace(/\s+/g, ''),
+    lower.replace(/[^\w\s]/g, '').trim(),
+  ].filter(Boolean);
+  if (words.length === 1) {
+    if (words[0].length > 2) variations.push(words[0]);
+  } else {
+    for (const word of words) {
+      if (word.length >= 4) variations.push(word);
+    }
+  }
+  return [...new Set(variations)].filter((v) => v.length > 2);
+}
+
+/** Returns true if text contains a real mention of the name (word boundaries for short names) */
+function textMentionsName(text: string, name: string): boolean {
+  if (!text || typeof text !== 'string' || !name || !name.trim()) return false;
+  const lowerText = text.toLowerCase();
+  const variations = buildNameVariations(name);
+  return variations.some((variation) => {
+    if (variation.length <= 4) {
+      const escaped = variation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+      return regex.test(text);
+    }
+    return lowerText.includes(variation);
+  });
+}
+
 /**
- * Extract competitor data from AI platform responses
+ * Extract competitor data from AI platform responses.
+ * Uses both response_metadata (brand_mentioned, competitors_found) and direct scanning of
+ * response text so competitor share of voice and rankings reflect real AI response content.
  */
 function extractCompetitorData(brandName: string, competitors: any[], responses: any[]): CompetitorData[] {
-  // Parse all competitor names to ensure we have clean strings
-  const parsedCompetitors = competitors.map(c => parseCompetitorName(c).name);
+  const parsedCompetitors = competitors.map((c) => parseCompetitorName(c).name);
   const allBrands = [brandName, ...parsedCompetitors];
   const competitorData: CompetitorData[] = [];
 
@@ -219,29 +255,34 @@ function extractCompetitorData(brandName: string, competitors: any[], responses:
     let sentimentCount = 0;
     const platforms = new Set<string>();
 
-    for (const response of responses) {
-      const metadata = response.response_metadata;
-      
-      // Check if this brand is mentioned
+    for (const row of responses) {
+      const metadata = row.response_metadata;
+      const responseText = row.response || '';
+
       const isBrand = brand.toLowerCase() === brandName.toLowerCase();
-      const isMentioned = isBrand 
-        ? metadata?.brand_mentioned === true
-        : metadata?.competitors_found?.some((c: any) => {
-            const compName = typeof c === 'string' ? c : c.name;
-            return compName?.toLowerCase() === brand.toLowerCase();
-          });
+
+      // Prefer metadata when present; otherwise derive from actual response text
+      let isMentioned: boolean;
+      if (isBrand) {
+        isMentioned = metadata?.brand_mentioned === true || textMentionsName(responseText, brand);
+      } else {
+        const inMetadata = metadata?.competitors_found?.some((c: any) => {
+          const compName = typeof c === 'string' ? c : c?.name;
+          return compName != null && String(compName).toLowerCase() === brand.toLowerCase();
+        });
+        isMentioned = inMetadata || textMentionsName(responseText, brand);
+      }
 
       if (isMentioned) {
         mentions++;
-        platforms.add(response.platform);
+        platforms.add(row.platform || 'unknown');
 
-        // Get sentiment
-        if (isBrand && metadata?.sentiment_score !== null && metadata?.sentiment_score !== undefined) {
+        if (isBrand && metadata?.sentiment_score != null && !Number.isNaN(metadata.sentiment_score)) {
           totalSentiment += metadata.sentiment_score;
           sentimentCount++;
         } else if (!isBrand && metadata?.competitor_contexts?.[brand]?.sentiment) {
-          const sentimentMap: Record<string, number> = { 'positive': 0.8, 'negative': 0.2, 'mixed': 0.5, 'neutral': 0.5 };
-          totalSentiment += sentimentMap[metadata.competitor_contexts[brand].sentiment] || 0.5;
+          const sentimentMap: Record<string, number> = { positive: 0.8, negative: 0.2, mixed: 0.5, neutral: 0.5 };
+          totalSentiment += sentimentMap[metadata.competitor_contexts[brand].sentiment] ?? 0.5;
           sentimentCount++;
         }
       }
@@ -251,7 +292,6 @@ function extractCompetitorData(brandName: string, competitors: any[], responses:
     const totalResponses = responses.length;
     const relevance = totalResponses > 0 ? mentions / totalResponses : 0;
 
-    // Calculate trends (simplified - would need historical data for real trends)
     const mentionsTrend = mentions > 10 ? 0.15 : mentions > 5 ? 0.05 : mentions > 0 ? 0 : -0.1;
     const sentimentTrend = avgSentiment > 0.7 ? 0.1 : avgSentiment < 0.4 ? -0.1 : 0;
 
@@ -261,10 +301,7 @@ function extractCompetitorData(brandName: string, competitors: any[], responses:
       sentiment: avgSentiment,
       relevance,
       platforms: Array.from(platforms),
-      trends: {
-        mentions_trend: mentionsTrend,
-        sentiment_trend: sentimentTrend
-      }
+      trends: { mentions_trend: mentionsTrend, sentiment_trend: sentimentTrend },
     });
   }
 
@@ -354,8 +391,12 @@ function rankCompetitors(params: any) {
     };
   });
 
-  // Sort by score (descending)
-  rankedCompetitors.sort((a: any, b: any) => b.ranking_score - a.ranking_score);
+  // Sort by score (descending), then by mentions, then by name for stable order
+  rankedCompetitors.sort((a: any, b: any) => {
+    if (b.ranking_score !== a.ranking_score) return b.ranking_score - a.ranking_score;
+    if (b.mentions !== a.mentions) return b.mentions - a.mentions;
+    return (a.name || '').localeCompare(b.name || '');
+  });
 
   // Add ranking positions
   rankedCompetitors.forEach((competitor: any, index: number) => {

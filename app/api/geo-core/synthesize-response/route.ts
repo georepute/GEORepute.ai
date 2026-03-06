@@ -42,7 +42,7 @@ interface SynthesizeRequest {
   competitors: string[];
   influenceLevel?: "subtle" | "moderate" | "strong";
   brandVoice?: BrandVoice | null;
-  language?: "en" | "he";
+  language?: "en" | "he" | "ar" | "fr";
 }
 
 export async function POST(request: NextRequest) {
@@ -145,7 +145,19 @@ ${language === "he" ? `
 - The user's query is in Hebrew. You MUST write the ENTIRE synthesized response in HEBREW (עברית) only.
 - Use Hebrew script (right-to-left). Do not mix in English or other languages.
 - If any source response is in Hebrew, prefer and preserve Hebrew. If sources are in English, translate the synthesized answer into natural Hebrew.
-- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in Hebrew.` : ""}`;
+- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in Hebrew.` : ""}
+${language === "ar" ? `
+## CRITICAL - Arabic Output:
+- The user's query is in Arabic. You MUST write the ENTIRE synthesized response in ARABIC only.
+- Use Arabic script (right-to-left). Do not mix in English or other languages.
+- If any source response is in Arabic, prefer and preserve Arabic. If sources are in English, translate the synthesized answer into natural Arabic (Modern Standard Arabic).
+- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in Arabic.` : ""}
+${language === "fr" ? `
+## CRITICAL - French Output:
+- The user's query is in French. You MUST write the ENTIRE synthesized response in FRENCH only.
+- Use correct French grammar, accents (é, è, ê, à, ù, ç, etc.), and punctuation. Do not mix in English or other languages.
+- If any source response is in French, prefer and preserve French. If sources are in English, translate the synthesized answer into natural French.
+- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in French.` : ""}`;
 
     const userPrompt = `## Original User Query:
 "${prompt}"
@@ -161,6 +173,8 @@ Now synthesize the best possible response that:
 3. Naturally mentions "${brandName}" in a helpful, value-adding way
 4. Is optimized for SEO and readability
 ${language === "he" ? "5. Write the ENTIRE response in HEBREW (עברית) only - no English or other languages in the output." : ""}
+${language === "ar" ? "5. Write the ENTIRE response in ARABIC only - no English or other languages in the output." : ""}
+${language === "fr" ? "5. Write the ENTIRE response in FRENCH only - no English or other languages in the output." : ""}
 
 Write the optimized response:`;
 

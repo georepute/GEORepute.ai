@@ -368,7 +368,8 @@ export function generatePlatformSchema(
     case "facebook":
     case "instagram":
     case "twitter":
-      // WebPage schema for social media posts
+    case "x":
+      // WebPage schema for social media posts (X = Twitter)
       return generateWebPageSchema(input);
 
     default:

@@ -1353,9 +1353,30 @@ function AIVisibilityContent() {
         return;
       }
 
-      // Store analysis info and show modal
+      // Store analysis info and show modal (session ID is returned immediately; batches run in background)
       setAnalysisStartInfo(data);
       setShowAnalysisStartModal(true);
+
+      // Trigger first batch (and subsequent batches) in background so user sees session ID right away
+      if (data.session_id && Array.isArray(data.queries) && data.queries.length > 0 && Array.isArray(data.platforms) && data.platforms.length > 0) {
+        fetch(`${supabaseUrl}/functions/v1/brand-analysis`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
+            projectId: project.id,
+            sessionId: data.session_id,
+            queries: data.queries,
+            platforms: data.platforms,
+            language: data.language || language || "en",
+            continueProcessing: true,
+            batchStartIndex: 0,
+            batchSize: 6,
+          }),
+        }).catch((err) => console.error("Background batch start failed:", err));
+      }
 
       // Show notification banner
       setShowAnalysisStartNotification(true);
@@ -6664,6 +6685,27 @@ function AIVisibilityContent() {
                 </p>
               </div>
 
+              {/* Platform errors from last analysis */}
+              {projectStats?.platform_errors && Object.keys(projectStats.platform_errors).length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <details className="group">
+                    <summary className="flex items-center gap-2 cursor-pointer list-none font-medium text-amber-800">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Some AI platforms had errors</span>
+                      <ChevronDown className="w-4 h-4 shrink-0 transition-transform group-open:rotate-180" />
+                    </summary>
+                    <ul className="mt-2 space-y-1.5 text-sm text-amber-800">
+                      {Object.entries(projectStats.platform_errors).map(([platform, message]) => (
+                        <li key={platform} className="flex gap-2">
+                          <span className="font-medium capitalize shrink-0">{platform}:</span>
+                          <span className="text-amber-700">{String(message)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="space-y-3">
                 <button
@@ -7129,6 +7171,22 @@ function AIVisibilityContent() {
                                             <Globe className="w-3 h-3 text-gray-500" />
                                             {session.results_summary.platforms_analyzed.length} platforms
                                           </div>
+                                        )}
+                                        {session.results_summary?.platform_errors && Object.keys(session.results_summary.platform_errors).length > 0 && (
+                                          <details className="group/platformErr">
+                                            <summary className="cursor-pointer list-none flex items-center gap-1 px-2 py-1 bg-amber-100 rounded-md text-xs text-amber-800 w-fit">
+                                              <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                              <span>{Object.keys(session.results_summary.platform_errors).length} platform error(s)</span>
+                                              <ChevronDown className="w-3 h-3 shrink-0 transition-transform group-open/platformErr:rotate-180" />
+                                            </summary>
+                                            <ul className="mt-1 ml-1 pl-2 border-l-2 border-amber-200 space-y-0.5 text-xs text-amber-900">
+                                              {Object.entries(session.results_summary.platform_errors).map(([platform, message]) => (
+                                                <li key={platform}>
+                                                  <span className="font-medium capitalize">{platform}:</span> {String(message)}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          </details>
                                         )}
                                       </div>
                                     )}

@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const projectId = searchParams.get("projectId");
+    const mode = searchParams.get("mode"); // "quick" | "advanced" | "internal" – when "quick" can return lighter payload in future
 
     if (!projectId) {
       return NextResponse.json(
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
     ] = await Promise.all([
       supabase
         .from("brand_analysis_sessions")
-        .select("id, results_summary, total_queries")
+        .select("id, results_summary, total_queries, competitor_analysis")
         .eq("project_id", projectId)
         .eq("status", "completed")
         .order("started_at", { ascending: false })
@@ -156,9 +157,11 @@ export async function GET(request: NextRequest) {
     const sessionRows = sessionRowsRes.data || [];
     let aiResponses: any[] = [];
     let sessionTotalQueries: number | null = null;
+    let competitorAnalysis: DCSContext["competitorAnalysis"] = null;
 
     if (sessionRows.length > 0) {
       const latestSession = sessionRows[0];
+      competitorAnalysis = latestSession.competitor_analysis ?? null;
       sessionTotalQueries =
         latestSession.results_summary?.total_queries ||
         latestSession.total_queries ||
@@ -220,6 +223,7 @@ export async function GET(request: NextRequest) {
       domainIntelligenceResults: domainIntelligenceRes.data || null,
       competitors: Array.isArray(project.competitors) ? project.competitors : [],
       industry: project.industry || "Technology",
+      competitorAnalysis: competitorAnalysis ?? null,
     };
 
     const result = computeDCS(context);

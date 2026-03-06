@@ -39,7 +39,7 @@ import { useLanguage } from "@/lib/language-context";
 function ContentGeneratorPageInner() {
   const { t, isRtl } = useLanguage();
   const cg = t.dashboard.contentGeneratorPage;
-  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he">("en");
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr">("en");
   const router = useRouter();
   const searchParams = useSearchParams();
   
@@ -1185,6 +1185,8 @@ function ContentGeneratorPageInner() {
                   >
                     <option value="en">{cg.english}</option>
                     <option value="he">{cg.hebrew}</option>
+                    <option value="ar">{cg.arabic}</option>
+                    <option value="fr">{cg.french}</option>
                   </select>
                 </div>
 

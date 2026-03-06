@@ -19,12 +19,23 @@ const REPORT_LABELS: Record<string, string> = {
   geo_visibility: "GEO Visibility",
 };
 
-const DEFAULT_DISCLAIMER = "";
+const REPORT_DESCRIPTIONS: Record<string, string> = {
+  ai_vs_google_gap: "Compare brand visibility in AI answers vs traditional search; identify gaps and opportunities.",
+  market_share_of_attention: "Measure share of voice and attention across AI and organic channels.",
+  opportunity_blind_spots: "Surface untapped queries and content gaps with competitive context.",
+  geo_visibility: "Assess visibility and demand by geography; prioritize markets.",
+};
+
+const DEFAULT_DISCLAIMER =
+  "This proposal is based on publicly available data and comparative market benchmarks. It does not represent official search engine metrics and does not imply algorithm influence or guaranteed results.";
 
 interface Quote {
   id: string;
   domain: string;
   client_name: string | null;
+  client_email?: string | null;
+  contact_person?: string | null;
+  valid_until?: string | null;
   status: string;
   dcs_snapshot: {
     finalScore: number;
@@ -240,6 +251,28 @@ export default function PublicProposalPage() {
                     <dt className="text-sm text-gray-500">Domain</dt>
                     <dd className="text-sm font-medium text-gray-900 break-all">{quote.domain || "—"}</dd>
                   </div>
+                  {quote.contact_person && (
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <dt className="text-sm text-gray-500">Contact</dt>
+                      <dd className="text-sm font-medium text-gray-900">{quote.contact_person}</dd>
+                    </div>
+                  )}
+                  {quote.client_email && (
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <dt className="text-sm text-gray-500">Email</dt>
+                      <dd className="text-sm font-medium text-gray-900 break-all">{quote.client_email}</dd>
+                    </div>
+                  )}
+                  {quote.valid_until && (
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <dt className="text-sm text-gray-500">Valid until</dt>
+                      <dd className="text-sm font-medium text-gray-900">
+                        {typeof quote.valid_until === "string" && quote.valid_until.length >= 10
+                          ? new Date(quote.valid_until).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
+                          : quote.valid_until}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               </div>
               <button
@@ -474,20 +507,27 @@ export default function PublicProposalPage() {
               <p className="text-gray-600 text-sm mt-1.5 leading-relaxed">{primaryMode.description}</p>
             </div>
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mb-6">
-            <div className="p-4 rounded-lg border border-gray-100">
-              <p className="text-gray-500 font-medium mb-1">Markets</p>
-              <p className="text-gray-900">{quote.selected_markets?.length ? quote.selected_markets.join(", ") : "—"}</p>
-            </div>
-            <div className="p-4 rounded-lg border border-gray-100">
-              <p className="text-gray-500 font-medium mb-1">Reports included</p>
-              <p className="text-gray-900">
-                {quote.selected_reports?.length
-                  ? quote.selected_reports.map((r) => REPORT_LABELS[r] || r).join(", ")
-                  : "—"}
-              </p>
-            </div>
+          <div className="mb-6">
+            <p className="text-gray-500 font-medium mb-2">Markets</p>
+            <p className="text-gray-900">{quote.selected_markets?.length ? quote.selected_markets.join(", ") : "—"}</p>
           </div>
+          {quote.selected_reports?.length ? (
+            <div className="mb-6">
+              <p className="text-gray-700 font-semibold mb-3">Reports included in this proposal</p>
+              <div className="space-y-3">
+                {quote.selected_reports.map((r) => (
+                  <div key={r} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50">
+                    <p className="font-semibold text-gray-900" style={{ color: primaryColor }}>
+                      {REPORT_LABELS[r] || r}
+                    </p>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {REPORT_DESCRIPTIONS[r] || "Included in retainer scope."}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="p-5 rounded-xl border-2 flex items-center gap-4" style={{ borderColor: primaryColor, backgroundColor: `${primaryColor}08` }}>
             <DollarSign className="w-8 h-8 flex-shrink-0" style={{ color: primaryColor }} />
             <div>

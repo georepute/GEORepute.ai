@@ -39,6 +39,397 @@ interface GitHubMetrics {
   engagement?: number;
 }
 
+interface XMetrics {
+  like_count: number;
+  retweet_count: number;
+  reply_count: number;
+  quote_count: number;
+  engagement?: number;
+}
+
+/** Shopify: article info + optional store-level sessions from analytics (read_reports scope). */
+interface ShopifyMetrics {
+  views: number;
+  engagement: number;
+  published_at?: string;
+  updated_at?: string;
+  /** Store-level sessions (e.g. last 30d) when read_reports scope is granted. */
+  store_sessions?: number;
+  note?: string;
+}
+
+/** WordPress.com post stats: views (stats API), likes + comments (post + replies API). */
+interface WordPressComMetrics {
+  views: number;
+  likes: number;
+  comments: number;
+  engagement?: number;
+  note?: string;
+}
+
+/**
+ * Fetch WordPress.com post views via Stats API, then likes and comment count via Post + Replies APIs.
+ */
+async function fetchWordPressComMetrics(
+  siteId: string,
+  postId: string,
+  accessToken: string
+): Promise<WordPressComMetrics> {
+  const base = `https://public-api.wordpress.com/rest/v1.1/sites/${encodeURIComponent(siteId)}`;
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+
+  // 1) Views from stats/post
+  const statsUrl = `${base}/stats/post/${encodeURIComponent(postId)}`;
+  const statsRes = await fetch(statsUrl, { method: "GET", headers });
+  if (!statsRes.ok) {
+    const errBody = await statsRes.text();
+    let errMsg = `WordPress.com stats API error: ${statsRes.status}`;
+    try {
+      const errJson = JSON.parse(errBody);
+      errMsg = errJson.message || errJson.error || errMsg;
+    } catch (_) {
+      if (errBody) errMsg += ` - ${errBody.substring(0, 200)}`;
+    }
+    throw new Error(errMsg);
+  }
+  const statsData = await statsRes.json();
+  let totalViews = 0;
+  if (statsData.years && Array.isArray(statsData.years)) {
+    for (const y of statsData.years) {
+      if (y.months && Array.isArray(y.months)) {
+        for (const m of y.months) {
+          if (typeof m.views === "number") totalViews += m.views;
+          if (m.days && Array.isArray(m.days)) {
+            for (const d of m.days) {
+              if (typeof d.views === "number") totalViews += d.views;
+            }
+          }
+        }
+      }
+    }
+  }
+  if (statsData.weeks && Array.isArray(statsData.weeks)) {
+    for (const w of statsData.weeks) {
+      if (w.days && Array.isArray(w.days)) {
+        for (const d of w.days) {
+          if (typeof d.views === "number") totalViews += d.views;
+        }
+      }
+    }
+  }
+
+  // 2) Likes from post object (like_count)
+  let likes = 0;
+  const postUrl = `${base}/posts/${encodeURIComponent(postId)}`;
+  const postRes = await fetch(postUrl, { method: "GET", headers });
+  if (postRes.ok) {
+    const postData = await postRes.json();
+    if (typeof postData.like_count === "number") likes = postData.like_count;
+  }
+
+  // 3) Comment count from post replies (found)
+  let comments = 0;
+  const repliesUrl = `${base}/posts/${encodeURIComponent(postId)}/replies/?number=1`;
+  const repliesRes = await fetch(repliesUrl, { method: "GET", headers });
+  if (repliesRes.ok) {
+    const repliesData = await repliesRes.json();
+    if (typeof repliesData.found === "number") comments = repliesData.found;
+  }
+
+  const engagement = totalViews + likes + comments;
+  console.log(
+    `✅ WordPress.com post ${postId}: views=${totalViews} likes=${likes} comments=${comments}`
+  );
+  return { views: totalViews, likes, comments, engagement };
+}
+
+/**
+ * Resolve WordPress.com site ID for a Jetpack-connected self-hosted site by URL.
+ * Calls GET /me/sites and returns the site ID whose URL/domain/slug matches (by hostname).
+ */
+async function getWordPressComSiteIdByUrl(
+  accessToken: string,
+  siteUrl: string
+): Promise<string | null> {
+  const url = "https://public-api.wordpress.com/rest/v1.1/me/sites";
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!response.ok) {
+    const errText = await response.text();
+    console.warn(
+      `WordPress.com /me/sites failed: ${response.status}`,
+      errText?.substring?.(0, 200)
+    );
+    return null;
+  }
+  const data = await response.json();
+  const sites = data.sites || [];
+  const normalize = (u: string) => {
+    if (!u || typeof u !== "string") return "";
+    try {
+      const s = String(u).trim().toLowerCase();
+      const withScheme = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+      const host = new URL(withScheme).hostname.replace(/^www\./, "");
+      return host;
+    } catch {
+      return "";
+    }
+  };
+  const targetHost = normalize(siteUrl);
+  if (!targetHost) {
+    console.warn("WordPress.com Jetpack resolve: empty target host from", siteUrl);
+    return null;
+  }
+  console.log(
+    `WordPress.com Jetpack resolve: targetHost=${targetHost}, sites count=${sites.length}`
+  );
+  for (const site of sites) {
+    const siteUrlRaw = site.URL ?? site.url ?? site.domain ?? site.slug ?? "";
+    const siteHost = normalize(siteUrlRaw);
+    if (siteHost && siteHost === targetHost && site.ID != null) {
+      console.log(
+        `WordPress.com Jetpack resolve: matched site ID=${site.ID} (URL=${site.URL ?? site.url ?? siteUrlRaw})`
+      );
+      return String(site.ID);
+    }
+  }
+  const sampleUrls = sites.slice(0, 5).map((s: any) => s.URL ?? s.url ?? s.domain ?? s.slug ?? "");
+  console.warn(
+    `WordPress.com Jetpack resolve: no match for ${targetHost}. Sample site URLs:`,
+    sampleUrls
+  );
+  return null;
+}
+
+/**
+ * Resolve blog Id and article Id from a Shopify published_url (e.g. https://store.myshopify.com/blogs/news/my-post).
+ * Uses REST: list blogs (match handle), then list articles for that blog (match handle).
+ */
+async function resolveShopifyIdsFromUrl(
+  shopDomain: string,
+  accessToken: string,
+  publishedUrl: string
+): Promise<{ blogId: number; articleId: number } | null> {
+  try {
+    const url = publishedUrl.replace(/^https?:\/\//, "").split("/");
+    const blogsIdx = url.findIndex((s) => s === "blogs");
+    if (blogsIdx < 0 || blogsIdx + 2 > url.length) return null;
+    const blogHandle = url[blogsIdx + 1];
+    const articleHandle = url[blogsIdx + 2]?.split("?")[0];
+    if (!blogHandle || !articleHandle) return null;
+
+    const shop = shopDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const base = shop.includes(".myshopify.com") ? shop : `${shop}.myshopify.com`;
+
+    const blogsRes = await fetch(`https://${base}/admin/api/2024-01/blogs.json?limit=250`, {
+      method: "GET",
+      headers: { "X-Shopify-Access-Token": accessToken, "Content-Type": "application/json" },
+    });
+    if (!blogsRes.ok) return null;
+    const blogsData = await blogsRes.json();
+    const blogs = blogsData.blogs || [];
+    const blog = blogs.find((b: any) => (b.handle || "").toLowerCase() === blogHandle.toLowerCase());
+    if (!blog) return null;
+
+    const articlesRes = await fetch(
+      `https://${base}/admin/api/2024-01/blogs/${blog.id}/articles.json?limit=250`,
+      {
+        method: "GET",
+        headers: { "X-Shopify-Access-Token": accessToken, "Content-Type": "application/json" },
+      }
+    );
+    if (!articlesRes.ok) return null;
+    const articlesData = await articlesRes.json();
+    const articles = articlesData.articles || [];
+    const article = articles.find((a: any) => (a.handle || "").toLowerCase() === articleHandle.toLowerCase());
+    if (!article) return null;
+
+    return { blogId: blog.id, articleId: article.id };
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Fetch store-level sessions via ShopifyQL (requires read_reports scope). Returns undefined if scope missing or query fails.
+ */
+async function fetchShopifySessionsViaAnalytics(
+  shopDomain: string,
+  accessToken: string
+): Promise<number | undefined> {
+  const shop = shopDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const base = shop.includes(".myshopify.com") ? shop : `${shop}.myshopify.com`;
+  const graphqlUrl = `https://${base}/admin/api/2024-01/graphql.json`;
+  const query = `FROM sessions
+  SHOW sessions
+  SINCE -30d`;
+  const gql = `query { shopifyqlQuery(query: ${JSON.stringify(query)}) { tableData { columns { name dataType displayName } rows } parseErrors } }`;
+
+  try {
+    const response = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query: gql }),
+    });
+    if (!response.ok) return undefined;
+    const data = await response.json();
+    const errors = data?.errors || data?.data?.shopifyqlQuery?.parseErrors;
+    if (errors?.length) {
+      console.log("ShopifyQL parse/errors:", errors);
+      return undefined;
+    }
+    const rows = data?.data?.shopifyqlQuery?.tableData?.rows as unknown[] | undefined;
+    const columns = data?.data?.shopifyqlQuery?.tableData?.columns as { name: string }[] | undefined;
+    if (!Array.isArray(rows) || rows.length === 0) return undefined;
+    const sessionsIdx = columns?.findIndex((c) => c.name === "sessions") ?? 0;
+    let total = 0;
+    for (const row of rows) {
+      const arr = Array.isArray(row) ? row : Object.values(row as object);
+      const val = Number(arr[sessionsIdx]);
+      if (!Number.isNaN(val)) total += val;
+    }
+    return total;
+  } catch (e) {
+    console.warn("Shopify analytics (sessions) failed:", e);
+    return undefined;
+  }
+}
+
+/**
+ * Fetch Shopify blog article (REST) and optionally store-level sessions (GraphQL ShopifyQL when read_reports is granted).
+ */
+async function fetchShopifyMetrics(
+  shopDomain: string,
+  blogId: number,
+  articleId: string,
+  accessToken: string
+): Promise<ShopifyMetrics> {
+  try {
+    const shop = shopDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    const base = shop.includes(".myshopify.com") ? shop : `${shop}.myshopify.com`;
+    const url = `https://${base}/admin/api/2024-01/blogs/${blogId}/articles/${articleId}.json`;
+    console.log(`📊 Fetching Shopify article: blog ${blogId}, article ${articleId}`);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "X-Shopify-Access-Token": accessToken,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      let errMsg = `Shopify API error: ${response.status}`;
+      try {
+        const errJson = JSON.parse(errBody);
+        errMsg = errJson.errors || errJson.error || errMsg;
+      } catch (_) {
+        if (errBody) errMsg += ` - ${errBody.substring(0, 200)}`;
+      }
+      throw new Error(errMsg);
+    }
+
+    const data = await response.json();
+    const article = data?.article;
+    if (!article) throw new Error("Shopify API did not return article data");
+
+    const published_at = article.published_at ?? article.created_at;
+    const updated_at = article.updated_at;
+
+    let store_sessions: number | undefined;
+    try {
+      store_sessions = await fetchShopifySessionsViaAnalytics(shopDomain, accessToken);
+      if (store_sessions !== undefined) console.log(`✅ Shopify store sessions (last 30d): ${store_sessions}`);
+    } catch (_) {
+      // ignore
+    }
+
+    const note = store_sessions !== undefined
+      ? "Per-article view counts are not available; store sessions (last 30d) shown when analytics scope is granted."
+      : undefined;
+
+    return {
+      views: 0,
+      engagement: 0,
+      published_at: published_at || undefined,
+      updated_at: updated_at || undefined,
+      store_sessions,
+      note,
+    };
+  } catch (error: any) {
+    console.error("❌ Error fetching Shopify article:", error);
+    throw error;
+  }
+}
+
+/**
+ * Fetch X (Twitter) tweet metrics using API v2 (public_metrics: likes, retweets, replies, quotes)
+ */
+async function fetchXMetrics(tweetId: string, accessToken: string): Promise<XMetrics> {
+  try {
+    const id = tweetId.trim();
+    if (!id) throw new Error("Tweet ID is required");
+    console.log(`📊 Fetching X (Twitter) metrics for tweet ID: ${id}`);
+
+    const url = `https://api.x.com/2/tweets/${encodeURIComponent(id)}?tweet.fields=public_metrics`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      let errMsg = `X API error: ${response.status}`;
+      try {
+        const errJson = JSON.parse(errBody);
+        errMsg = errJson.detail || errJson.title || errJson.error?.message || errMsg;
+      } catch (_) {
+        if (errBody) errMsg += ` - ${errBody.substring(0, 200)}`;
+      }
+      throw new Error(errMsg);
+    }
+
+    const result = await response.json();
+    const tweet = result?.data;
+    if (!tweet) throw new Error("X API did not return tweet data");
+
+    const pm = tweet.public_metrics || {};
+    const like_count = typeof pm.like_count === "number" ? pm.like_count : 0;
+    const retweet_count = typeof pm.retweet_count === "number" ? pm.retweet_count : 0;
+    const reply_count = typeof pm.reply_count === "number" ? pm.reply_count : 0;
+    const quote_count = typeof pm.quote_count === "number" ? pm.quote_count : 0;
+    const engagement = like_count + retweet_count + reply_count + quote_count;
+
+    console.log(`✅ X metrics: likes=${like_count} retweets=${retweet_count} replies=${reply_count} quotes=${quote_count} engagement=${engagement}`);
+
+    return {
+      like_count,
+      retweet_count,
+      reply_count,
+      quote_count,
+      engagement,
+    };
+  } catch (error: any) {
+    console.error("❌ Error fetching X metrics:", error);
+    throw error;
+  }
+}
+
 /**
  * Fetch GitHub Discussion metrics using GraphQL API
  */
@@ -984,11 +1375,12 @@ serve(async (req) => {
         platform,
         platform_post_id,
         published_at,
+        published_url,
         user_id,
         metadata,
         status
       `)
-      .in("platform", ["instagram", "facebook", "linkedin", "github"]);
+      .in("platform", ["instagram", "facebook", "linkedin", "github", "x", "shopify", "wordpress", "wordpress_self_hosted"]);
 
     // If contentStrategyId is provided, filter to that specific content
     if (contentStrategyId) {
@@ -1019,6 +1411,18 @@ serve(async (req) => {
           hasPostIdInMetadata = true;
         } else if (post.platform === "facebook" && post.metadata.facebook?.postId) {
           hasPostIdInMetadata = true;
+        } else if (post.platform === "x" && (post.metadata?.x?.tweetId || post.metadata?.x?.postId)) {
+          hasPostIdInMetadata = true;
+        } else if (post.platform === "shopify") {
+          if (post.metadata?.shopify?.articleId || post.metadata?.shopify?.blogId) {
+            hasPostIdInMetadata = true;
+          } else if (post.published_url && typeof post.published_url === "string" && post.published_url.includes("/blogs/")) {
+            hasPostIdInMetadata = true;
+          }
+        } else if (post.platform === "wordpress" && post.metadata?.wordpress?.postId) {
+          hasPostIdInMetadata = true;
+        } else if (post.platform === "wordpress_self_hosted" && post.metadata?.wordpress_self_hosted?.postId) {
+          hasPostIdInMetadata = true;
         }
       }
       
@@ -1031,6 +1435,9 @@ serve(async (req) => {
           console.log(`   Metadata keys: ${Object.keys(post.metadata).join(', ')}`);
           if (post.platform === "linkedin") {
             console.log(`   LinkedIn metadata:`, JSON.stringify(post.metadata.linkedin || {}, null, 2));
+          }
+          if (post.platform === "shopify") {
+            console.log(`   Shopify metadata:`, JSON.stringify(post.metadata.shopify || {}, null, 2));
           }
         }
       }
@@ -1086,18 +1493,34 @@ serve(async (req) => {
           } else if (post.platform === "linkedin" && post.metadata.linkedin?.postId) {
             platformPostId = post.metadata.linkedin.postId;
             console.log(`📋 Found LinkedIn post ID in metadata: ${platformPostId}`);
+          } else if (post.platform === "x" && (post.metadata?.x?.tweetId || post.metadata?.x?.postId)) {
+            platformPostId = post.metadata.x.tweetId || post.metadata.x.postId;
+            console.log(`📋 Found X tweet ID in metadata: ${platformPostId}`);
+          } else if (post.platform === "shopify" && post.metadata?.shopify?.articleId) {
+            platformPostId = String(post.metadata.shopify.articleId);
+            console.log(`📋 Found Shopify article ID in metadata: ${platformPostId}, blogId: ${post.metadata.shopify.blogId}`);
+          } else if (post.platform === "wordpress" && post.metadata?.wordpress?.postId) {
+            platformPostId = String(post.metadata.wordpress.postId);
+            console.log(`📋 Found WordPress.com post ID in metadata: ${platformPostId}`);
+          } else if (post.platform === "wordpress_self_hosted" && post.metadata?.wordpress_self_hosted?.postId) {
+            platformPostId = String(post.metadata.wordpress_self_hosted.postId);
+            console.log(`📋 Found self-hosted WordPress post ID in metadata: ${platformPostId}`);
           }
         }
 
         if (!platformPostId) {
-          console.warn(`⚠️ Skipping ${post.platform} post: platform_post_id is missing`);
-          errorDetails.push({
-            postId: post.id,
-            platform: post.platform,
-            error: "Missing platform_post_id - post may not have been published correctly",
-          });
-          errors++;
-          continue;
+          if (post.platform === "shopify") {
+            console.log(`📋 Shopify: platform_post_id not in metadata; will try to resolve from published_url in Shopify branch`);
+          } else {
+            console.warn(`⚠️ Skipping ${post.platform} post: platform_post_id is missing`);
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: "Missing platform_post_id - post may not have been published correctly",
+            });
+            errors++;
+            continue;
+          }
         }
 
         // Get platform integration (for access token)
@@ -1550,6 +1973,260 @@ serve(async (req) => {
             console.log(`⚠️ Error state marked - existing metrics will be preserved`);
           }
           metricsFetched = true; // Mark as fetched even if it failed (we have error state)
+        } else if (post.platform === "x") {
+          console.log(`🐦 Fetching X (Twitter) metrics for tweet ID: ${platformPostId}`);
+          try {
+            const xMetrics = await fetchXMetrics(platformPostId, accessToken);
+            console.log(`✅ X metrics fetched:`, {
+              likes: xMetrics.like_count,
+              retweets: xMetrics.retweet_count,
+              replies: xMetrics.reply_count,
+              quotes: xMetrics.quote_count,
+              engagement: xMetrics.engagement,
+            });
+            metrics = {
+              engagement: xMetrics.engagement,
+              likes: xMetrics.like_count,
+              comments: xMetrics.reply_count,
+              shares: xMetrics.retweet_count,
+              retweet_count: xMetrics.retweet_count,
+              reply_count: xMetrics.reply_count,
+              quote_count: xMetrics.quote_count,
+              traffic: 0,
+              impressions: 0,
+              clicks: 0,
+              reactions: xMetrics.like_count,
+              lastUpdated: new Date().toISOString(),
+            };
+          } catch (xError: any) {
+            console.error(`❌ Error fetching X metrics:`, xError);
+            metrics = {
+              error: xError.message || "Failed to fetch X metrics",
+              lastUpdated: new Date().toISOString(),
+            };
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: `X metrics error: ${xError.message}`,
+            });
+          }
+          metricsFetched = true;
+        } else if (post.platform === "shopify") {
+          let blogId = post.metadata?.shopify?.blogId;
+          let articleId = platformPostId || (post.metadata?.shopify?.articleId != null ? String(post.metadata.shopify.articleId) : null);
+          const shopDomain = integration.metadata?.shopDomain || integration.platform_user_id;
+
+          if ((!blogId || !articleId) && post.published_url && String(post.published_url).includes("/blogs/")) {
+            const resolved = await resolveShopifyIdsFromUrl(shopDomain, accessToken, post.published_url);
+            if (resolved) {
+              blogId = resolved.blogId;
+              articleId = String(resolved.articleId);
+              console.log(`📋 Resolved Shopify IDs from URL: blogId=${blogId}, articleId=${articleId}`);
+            }
+          }
+
+          if (!shopDomain) {
+            console.warn(`⚠️ Shopify post missing shop domain`);
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: "Missing shop domain in integration",
+            });
+            errors++;
+            continue;
+          }
+          if (!blogId || !articleId) {
+            console.warn(`⚠️ Shopify post missing blogId or articleId (and could not resolve from URL): blogId=${blogId}, articleId=${articleId}`);
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: "Missing blogId or articleId. Re-publish the post or ensure published_url is a valid Shopify blog URL.",
+            });
+            errors++;
+            continue;
+          }
+          console.log(`🛒 Fetching Shopify article metrics for blog ${blogId}, article ${articleId}`);
+          try {
+            const shopifyMetrics = await fetchShopifyMetrics(
+              shopDomain,
+              Number(blogId),
+              String(articleId),
+              accessToken
+            );
+            metrics = {
+              views: shopifyMetrics.views,
+              engagement: shopifyMetrics.engagement,
+              impressions: 0,
+              likes: 0,
+              comments: 0,
+              shares: 0,
+              traffic: 0,
+              clicks: 0,
+              reactions: 0,
+              published_at: shopifyMetrics.published_at,
+              updated_at: shopifyMetrics.updated_at,
+              store_sessions: shopifyMetrics.store_sessions,
+              note: shopifyMetrics.note,
+              lastUpdated: new Date().toISOString(),
+            };
+            console.log(`✅ Shopify metrics: views=${shopifyMetrics.views} engagement=${shopifyMetrics.engagement} store_sessions=${shopifyMetrics.store_sessions} updated_at=${shopifyMetrics.updated_at}`);
+          } catch (shopifyError: any) {
+            console.error(`❌ Error fetching Shopify metrics:`, shopifyError);
+            metrics = {
+              error: shopifyError.message || "Failed to fetch Shopify article",
+              lastUpdated: new Date().toISOString(),
+            };
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: `Shopify metrics error: ${shopifyError.message}`,
+            });
+          }
+          metricsFetched = true;
+        } else if (post.platform === "wordpress") {
+          const siteId =
+            integration.platform_user_id ||
+            (integration.metadata as Record<string, unknown>)?.siteId ||
+            (post.metadata?.wordpress as Record<string, unknown>)?.siteId;
+          if (!siteId) {
+            console.warn(`⚠️ WordPress.com post ${post.id}: no siteId (platform_user_id or metadata.siteId)`);
+            metrics = {
+              error: "WordPress.com site ID not found",
+              lastUpdated: new Date().toISOString(),
+            };
+            errorDetails.push({
+              postId: post.id,
+              platform: post.platform,
+              error: "WordPress.com site ID not found",
+            });
+          } else {
+            try {
+              const wpMetrics = await fetchWordPressComMetrics(
+                String(siteId),
+                platformPostId!,
+                accessToken
+              );
+              metrics = {
+                views: wpMetrics.views,
+                likes: wpMetrics.likes,
+                comments: wpMetrics.comments,
+                engagement: wpMetrics.engagement ?? wpMetrics.views + wpMetrics.likes + wpMetrics.comments,
+                traffic: wpMetrics.views,
+                impressions: 0,
+                shares: 0,
+                clicks: 0,
+                reactions: wpMetrics.likes,
+                lastUpdated: new Date().toISOString(),
+              };
+              console.log(`✅ WordPress.com metrics: views=${wpMetrics.views} likes=${wpMetrics.likes} comments=${wpMetrics.comments}`);
+            } catch (wpError: any) {
+              console.error(`❌ Error fetching WordPress.com metrics:`, wpError);
+              metrics = {
+                error: wpError.message || "Failed to fetch WordPress.com stats",
+                lastUpdated: new Date().toISOString(),
+              };
+              errorDetails.push({
+                postId: post.id,
+                platform: post.platform,
+                error: `WordPress.com metrics error: ${wpError.message}`,
+              });
+            }
+          }
+          metricsFetched = true;
+        } else if (post.platform === "wordpress_self_hosted") {
+          const selfHostedSiteUrl =
+            integration.platform_user_id ||
+            (integration.metadata as Record<string, unknown>)?.siteUrl ||
+            "";
+          let resolved = false;
+          console.log(
+            `WordPress self-hosted: siteUrl=${selfHostedSiteUrl}, user_id=${post.user_id}, platformPostId=${platformPostId}`
+          );
+          if (selfHostedSiteUrl) {
+            const { data: wpComIntegration } = await supabase
+              .from("platform_integrations")
+              .select("access_token")
+              .eq("user_id", post.user_id)
+              .eq("platform", "wordpress")
+              .eq("status", "connected")
+              .maybeSingle();
+            const wpComToken = wpComIntegration?.access_token;
+            if (!wpComIntegration) {
+              console.warn(
+                "WordPress self-hosted: no WordPress.com integration for user (connect WordPress.com in Settings)"
+              );
+            } else if (!wpComToken) {
+              console.warn(
+                "WordPress self-hosted: WordPress.com integration has no access token"
+              );
+            }
+            if (wpComToken) {
+              const jetpackSiteId = await getWordPressComSiteIdByUrl(
+                wpComToken,
+                selfHostedSiteUrl
+              );
+              if (jetpackSiteId) {
+                try {
+                  const wpMetrics = await fetchWordPressComMetrics(
+                    jetpackSiteId,
+                    platformPostId!,
+                    wpComToken
+                  );
+                  metrics = {
+                    views: wpMetrics.views,
+                    likes: wpMetrics.likes,
+                    comments: wpMetrics.comments,
+                    engagement: wpMetrics.engagement ?? wpMetrics.views + wpMetrics.likes + wpMetrics.comments,
+                    traffic: wpMetrics.views,
+                    impressions: 0,
+                    shares: 0,
+                    clicks: 0,
+                    reactions: wpMetrics.likes,
+                    note: "Jetpack stats via WordPress.com",
+                    lastUpdated: new Date().toISOString(),
+                  };
+                  console.log(
+                    `✅ WordPress (Jetpack) metrics: views=${wpMetrics.views} likes=${wpMetrics.likes} comments=${wpMetrics.comments}`
+                  );
+                  resolved = true;
+                } catch (wpErr: any) {
+                  console.error(
+                    `❌ Error fetching Jetpack/WordPress.com metrics:`,
+                    wpErr
+                  );
+                  metrics = {
+                    error:
+                      wpErr.message ||
+                      "Failed to fetch Jetpack stats via WordPress.com",
+                    lastUpdated: new Date().toISOString(),
+                  };
+                  errorDetails.push({
+                    postId: post.id,
+                    platform: post.platform,
+                    error: `Jetpack metrics error: ${wpErr.message}`,
+                  });
+                  resolved = true;
+                }
+              }
+            }
+          }
+          if (!resolved) {
+            metrics = {
+              views: 0,
+              engagement: 0,
+              traffic: 0,
+              impressions: 0,
+              likes: 0,
+              comments: 0,
+              shares: 0,
+              clicks: 0,
+              reactions: 0,
+              note:
+                "Connect WordPress.com (same account as Jetpack) in Settings to see stats",
+              lastUpdated: new Date().toISOString(),
+            };
+          }
+          metricsFetched = true;
         }
 
         // Only proceed to save if we have metrics (either successful or error state)

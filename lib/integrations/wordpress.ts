@@ -882,13 +882,11 @@ export async function publishToSelfHostedWordPress(
     if (post.excerpt) postPayload.excerpt = post.excerpt;
     if (post.date) postPayload.date = post.date;
     if (post.slug) postPayload.slug = post.slug;
-    // Self-hosted REST API accepts category/tag names as strings (they get created/matched automatically)
-    if (post.categories && post.categories.length > 0) {
-      postPayload.categories = post.categories;
-    }
-    if (post.tags && post.tags.length > 0) {
-      postPayload.tags = post.tags;
-    }
+    // WordPress REST API expects category/tag IDs (numbers). Only send if we have numeric IDs.
+    const categoryIds: number[] = (post.categories ?? []).filter((c) => typeof c === 'number') as number[];
+    const tagIds: number[] = (post.tags ?? []).filter((t) => typeof t === 'number') as number[];
+    if (categoryIds.length > 0) postPayload.categories = categoryIds;
+    if (tagIds.length > 0) postPayload.tags = tagIds;
 
     // Featured image: upload via media endpoint if URL
     if (post.featured_image && typeof post.featured_image === 'string' && /^https?:\/\//i.test(post.featured_image)) {
@@ -926,9 +924,20 @@ export async function publishToSelfHostedWordPress(
     }
 
     const data = await response.json();
+    const linkRaw = data.link ?? data.guid?.rendered ?? data.guid;
+    const url =
+      typeof linkRaw === "string"
+        ? linkRaw
+        : typeof linkRaw === "object" && linkRaw && typeof (linkRaw as { rendered?: string }).rendered === "string"
+          ? (linkRaw as { rendered: string }).rendered
+          : undefined;
+    const finalUrl = (url && url.trim().length > 0) ? url.trim() : undefined;
+    if (!finalUrl) {
+      console.warn("Self-hosted WordPress: API response missing link/guid", { keys: Object.keys(data), link: data.link, guid: data.guid });
+    }
     return {
       success: true,
-      url: data.link || data.guid?.rendered,
+      url: finalUrl,
       postId: data.id,
     };
   } catch (error: any) {

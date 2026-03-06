@@ -9,7 +9,7 @@ import { publishToLinkedIn, LinkedInConfig } from "@/lib/integrations/linkedin";
 import { publishToInstagram, InstagramConfig } from "@/lib/integrations/instagram";
 import { publishToShopify, ShopifyConfig } from "@/lib/integrations/shopify";
 import { publishToWordPress, publishToSelfHostedWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
-import { publishToX, XConfig } from "@/lib/integrations/x";
+import { publishToX, uploadMediaToX, XConfig } from "@/lib/integrations/x";
 
 /**
  * Content Orchestrator API
@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status") || "all";
+    const contentId = searchParams.get("contentId");
 
     let query = supabase
       .from("content_strategy")
@@ -36,8 +37,14 @@ export async function GET(request: NextRequest) {
       .eq("user_id", session.user.id)
       .order("created_at", { ascending: false });
 
-    if (status !== "all") {
+    if (contentId) {
+      query = query.eq("id", contentId);
+    }
+    if (status !== "all" && status !== "failed") {
       query = query.eq("status", status);
+    }
+    if (status === "failed") {
+      query = query.eq("status", "published");
     }
 
     const { data, error } = await query;
@@ -105,11 +112,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Calculate stats
+    // Calculate stats and effective status (published but all publish attempts failed → "failed")
     const allContent = data || [];
+    const getEffectiveStatus = (item: any) => {
+      const base = item.status || "draft";
+      const records = publishedData[item.id] || [];
+      if (base === "published" && records.length > 0) {
+        const allFailed = records.every(
+          (r: any) => r.status === "failed" || (r.status === "pending" && !r.published_url)
+        );
+        if (allFailed) return "failed";
+      }
+      return base;
+    };
     const stats = {
       total: allContent.length,
-      published: allContent.filter((c) => c.status === "published").length,
+      published: allContent.filter((c) => getEffectiveStatus(c) === "published").length,
+      failed: allContent.filter((c) => getEffectiveStatus(c) === "failed").length,
       scheduled: allContent.filter((c) => c.status === "scheduled").length,
       review: allContent.filter((c) => c.status === "review").length,
       draft: allContent.filter((c) => c.status === "draft").length,
@@ -136,11 +155,13 @@ export async function GET(request: NextRequest) {
         contentType = "Article";
       }
 
+      const effectiveStatus = getEffectiveStatus(item);
+
       return {
         id: item.id,
         title: item.topic || "Untitled",
         type: contentType,
-        status: item.status || "draft",
+        status: effectiveStatus,
         platforms: item.target_platform ? [item.target_platform] : [],
         publishDate: item.scheduled_at || item.created_at,
         performance: {
@@ -154,9 +175,14 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    const content =
+      status === "failed"
+        ? formattedData.filter((item: any) => item.status === "failed")
+        : formattedData;
+
     return NextResponse.json(
       {
-        content: formattedData,
+        content,
         stats,
       },
       { status: 200 }
@@ -1181,8 +1207,19 @@ export async function POST(request: NextRequest) {
                 };
                 let xContent = contentStrategy.generated_content || "";
                 xContent = xContent.replace(/<!-- SEO Schema.*?-->/gs, "").replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "").trim();
-                console.log("X publish: calling publishToX, content length:", xContent?.length);
-                xResult = await publishToX(xConfig, { text: xContent });
+                const imageUrl = contentStrategy.metadata?.imageUrl;
+                let xMediaIds: string[] | undefined;
+                if (imageUrl) {
+                  const upload = await uploadMediaToX(xConfig, imageUrl);
+                  if ("mediaId" in upload) {
+                    xMediaIds = [upload.mediaId];
+                    console.log("X publish: image uploaded, media_id:", upload.mediaId);
+                  } else {
+                    console.warn("X publish: image upload failed, posting text only:", upload.error);
+                  }
+                }
+                console.log("X publish: calling publishToX, content length:", xContent?.length, "media:", xMediaIds?.length ?? 0);
+                xResult = await publishToX(xConfig, { text: xContent, mediaIds: xMediaIds });
                 console.log("X publish result:", xResult?.success, xResult?.url || xResult?.error);
                 if (xResult.success && xResult.url) {
                   publishUrl = xResult.url;
@@ -1319,6 +1356,7 @@ export async function POST(request: NextRequest) {
           // Auto-publish to self-hosted WordPress if platform is wordpress_self_hosted
           let wordpressSelfHostedResult: any = null;
           if (platform === "wordpress_self_hosted") {
+            console.log("🌐 Self-hosted WordPress publish: starting (platform=wordpress_self_hosted)");
             try {
               const { data: wpSelfHostedIntegration } = await supabase
                 .from("platform_integrations")
@@ -1331,6 +1369,8 @@ export async function POST(request: NextRequest) {
               if (wpSelfHostedIntegration && wpSelfHostedIntegration.access_token) {
                 const siteUrl = wpSelfHostedIntegration.metadata?.siteUrl || wpSelfHostedIntegration.platform_user_id;
                 const username = wpSelfHostedIntegration.platform_username || wpSelfHostedIntegration.metadata?.username;
+
+                console.log("🌐 Self-hosted WordPress: integration found", { hasSiteUrl: !!siteUrl, hasUsername: !!username });
 
                 if (siteUrl && username) {
                   wordpressSelfHostedResult = await publishToSelfHostedWordPress(
@@ -1354,18 +1394,32 @@ export async function POST(request: NextRequest) {
                     }
                   );
 
-                  if (wordpressSelfHostedResult.success && wordpressSelfHostedResult.url) {
-                    publishUrl = wordpressSelfHostedResult.url;
+                  const url = typeof wordpressSelfHostedResult?.url === "string"
+                    ? wordpressSelfHostedResult.url
+                    : (wordpressSelfHostedResult?.url as { rendered?: string })?.rendered;
+                  if (wordpressSelfHostedResult.success && url && url.trim().length > 0) {
+                    publishUrl = url.trim();
                     console.log("✅ Self-hosted WordPress publish successful:", publishUrl);
                     await supabase
                       .from("platform_integrations")
                       .update({ last_used_at: new Date().toISOString() })
                       .eq("id", wpSelfHostedIntegration.id);
+                  } else {
+                    console.warn("⚠️ Self-hosted WordPress: publish returned no URL", {
+                      success: wordpressSelfHostedResult?.success,
+                      urlType: typeof wordpressSelfHostedResult?.url,
+                      postId: wordpressSelfHostedResult?.postId,
+                      error: wordpressSelfHostedResult?.error,
+                    });
                   }
                 } else {
                   throw new Error("Self-hosted WordPress credentials incomplete.");
                 }
               } else {
+                console.warn("⚠️ Self-hosted WordPress: integration missing or no token", {
+                  hasIntegration: !!wpSelfHostedIntegration,
+                  hasToken: !!wpSelfHostedIntegration?.access_token,
+                });
                 throw new Error("Self-hosted WordPress integration not found or not connected.");
               }
             } catch (wpSelfHostedError: any) {
@@ -1420,6 +1474,12 @@ export async function POST(request: NextRequest) {
               url: wordpressResult.url,
               postId: wordpressResult.postId,
             } : null,
+            wordpressSelfHostedResult: wordpressSelfHostedResult ? {
+              success: wordpressSelfHostedResult.success,
+              url: wordpressSelfHostedResult.url,
+              postId: wordpressSelfHostedResult.postId,
+              error: wordpressSelfHostedResult.error,
+            } : null,
           });
 
           // Prepare insert data - ensure published_url is explicitly set
@@ -1436,6 +1496,7 @@ export async function POST(request: NextRequest) {
                               platform === "instagram" ? instagramResult?.postId :
                               platform === "linkedin" ? linkedInResult?.postId :
                               platform === "x" ? xResult?.tweetId :
+                              platform === "shopify" ? (shopifyResult?.articleId?.toString() ?? null) :
                               platform === "wordpress" ? wordpressResult?.postId?.toString() :
                               platform === "wordpress_self_hosted" ? wordpressSelfHostedResult?.postId?.toString() :
                               platformPostId) || null,
@@ -1447,9 +1508,10 @@ export async function POST(request: NextRequest) {
                            (instagramResult && !instagramResult.success && instagramResult.error) ||
                            (linkedInResult && !linkedInResult.success && linkedInResult.error) ||
                            (xResult && !xResult.success && xResult.error) ||
+                           (shopifyResult && !shopifyResult.success && shopifyResult.error) ||
                            (wordpressResult && !wordpressResult.success && wordpressResult.error) ||
                            (wordpressSelfHostedResult && !wordpressSelfHostedResult.success && wordpressSelfHostedResult.error)) ? 
-                           (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error || instagramResult?.error || linkedInResult?.error || xResult?.error || wordpressResult?.error || wordpressSelfHostedResult?.error) : null,
+                           (gitHubResult?.error || redditResult?.error || mediumResult?.error || quoraResult?.error || facebookResult?.error || instagramResult?.error || linkedInResult?.error || xResult?.error || shopifyResult?.error || wordpressResult?.error || wordpressSelfHostedResult?.error) : null,
             metadata: {
               ...contentStrategy.metadata, // Include all metadata including structuredSEO
               auto_published: true,
@@ -1528,6 +1590,13 @@ export async function POST(request: NextRequest) {
                 tweetId: xResult.tweetId,
                 error: xResult.error,
               } : null,
+              shopify: shopifyResult ? {
+                success: shopifyResult.success,
+                url: shopifyResult.url,
+                articleId: shopifyResult.articleId,
+                blogId: shopifyResult.blogId,
+                error: shopifyResult.error,
+              } : null,
             },
           };
 
@@ -1548,8 +1617,8 @@ export async function POST(request: NextRequest) {
             console.log("✅ Setting published_url to:", insertData.published_url);
           } else {
             insertData.published_url = null;
-            insertData.status = "pending";
-            console.warn("⚠️ publishUrl is invalid, setting published_url to null");
+            insertData.status = "failed";
+            console.warn("⚠️ publishUrl is invalid, setting status to failed");
           }
 
           console.log("📦 Insert data prepared:", {
@@ -2181,10 +2250,11 @@ export async function POST(request: NextRequest) {
             platform: publishPlatform,
             published_url: publishUrl,
             published_at: new Date().toISOString(),
-            status: publishUrl ? "published" : "pending",
+            status: publishUrl ? "published" : "failed",
             platform_post_id: (publishPlatform === "github" ? gitHubResult?.discussionNumber?.toString() : 
                               publishPlatform === "reddit" ? redditResult?.postId :
                               publishPlatform === "linkedin" ? linkedInResult?.postId :
+                              publishPlatform === "shopify" ? (actionData.articleId != null ? String(actionData.articleId) : platformPostId) :
                               platformPostId) || null,
             error_message: (gitHubResult?.error || redditResult?.error) || actionData.errorMessage || null,
             metadata: {
@@ -2214,6 +2284,13 @@ export async function POST(request: NextRequest) {
                 postId: redditResult.postId,
                 error: redditResult.error,
               } : null,
+              shopify: (publishPlatform === "shopify" && (actionData.articleId != null || actionData.blogId != null)) ? {
+                success: true,
+                url: publishUrl || undefined,
+                articleId: actionData.articleId,
+                blogId: actionData.blogId,
+                error: undefined,
+              } : undefined,
             },
           })
           .select()

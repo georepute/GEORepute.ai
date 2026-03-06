@@ -55,7 +55,7 @@ export interface ContentGenerationInput {
   influenceLevel: "subtle" | "moderate" | "strong";
   userContext?: string;
   brandVoice?: any; // Brand voice profile
-  language?: "en" | "he"; // Language for content generation (default: "en")
+  language?: "en" | "he" | "ar" | "fr"; // Language for content generation (default: "en")
   contentType?: "article" | "post" | "answer" | "newsletter" | "linkedin_article" | "linkedin_post" | "blog_article"; // Content type for formatting
   websiteUrl?: string; // User's website URL for backlinks (from brand project)
 }
@@ -423,13 +423,24 @@ export async function generateStrategicContent(
   };
 
   // Language instruction
-  const languageInstruction = input.language === "he" 
+  const languageInstruction = input.language === "he"
     ? `\n🌐 HEBREW-ONLY REQUIREMENT (STRICT):
 - Output ONLY valid Hebrew text: Hebrew letters (א-ת), optional niqqud, standard punctuation (. , ? ! " ' - : ;). No other characters.
 - Do NOT use Latin/English letters (e.g. "Israel", "L") or transliterations in parentheses like (Israel haGedolah). Write the concept in Hebrew only (e.g. ישראל, ישראל הגדולה).
 - Do NOT output corrupted text, random symbols, or mixed scripts (e.g. no L†)@)\\|&$^ or similar). If a word is normally written in Hebrew, use only Hebrew.
 - Write naturally in Hebrew, as a native speaker. Every word must be in Hebrew script. No English, no transliterations, no mixed/corrupted characters.
 - Length: minimum 150 words; aim for 200-300. Complete every sentence; never cut off mid-word or with garbage characters.\n`
+    : input.language === "ar"
+    ? `\n🌐 ARABIC-ONLY REQUIREMENT (STRICT):
+- Output ONLY valid Arabic text: Arabic script (right-to-left), standard punctuation. Use Modern Standard Arabic (الفصحى) or clear dialect as appropriate.
+- Do NOT mix Latin/English letters with Arabic. Write the entire content in Arabic script only.
+- Do NOT output corrupted text, random symbols, or mixed scripts. Every word must be in Arabic script.
+- Write naturally in Arabic, as a native speaker would. Length: minimum 150 words; aim for 200-300. Complete every sentence.\n`
+    : input.language === "fr"
+    ? `\n🌐 FRENCH-ONLY REQUIREMENT (STRICT):
+- Output ONLY valid French text. Use correct French grammar, accents (é, è, ê, à, ù, ç, etc.), and punctuation.
+- Do NOT mix in English or other languages. Write the entire content in French only.
+- Write naturally in French, as a native speaker would. Length: minimum 150 words; aim for 200-300. Complete every sentence.\n`
     : "";
 
   let finalReminder: string;
@@ -474,16 +485,20 @@ This MUST score 100% HUMAN on ALL AI detectors (GPTZero, Turnitin, Copyleaks, Wr
 - NO EMOJIS WHATSOEVER - Content must be completely emoji-free
 - NO EXCESSIVE CASUAL SLANG - Avoid: "LOL", "lol", "lmao", "bruh", "omg", "wtf", "smh", "fr", "deadass"
 - NO EXCESSIVE CASUAL LANGUAGE - Write naturally but professionally, like a real person's Facebook post (clean and structured)
+- NO INFORMAL WORDS - Use a professional tone on every platform; do not use informal words, colloquialisms, or slang
 - Keep language clean and professional while maintaining natural human voice
 - NO inappropriate, suggestive, provocative, offensive, or unprofessional content - suitable for business/brand audiences
 
 ✅ CONTENT REQUIREMENTS:
 - Write clean, structured, professional content
+- Be precise to the topic/query: address the user's question or topic directly; stay on topic and do not drift or add unrelated tangents
+- Every sentence should relate to and support the topic/query above
+- Be professional in tone on every platform; avoid informal words and slang
 - Keep language natural and professional
 - Focus on clear communication and value
 ${languageInstruction}
-Topic: "${input.topic}"
-Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force${input.language === "he" ? "; when writing in Hebrew use only Hebrew equivalents—never write English or other language words in the content" : ""})
+Topic/Query: "${input.topic}"
+Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force${input.language === "he" ? "; when writing in Hebrew use only Hebrew equivalents—never write English or other language words in the content" : input.language === "ar" ? "; when writing in Arabic use only Arabic equivalents—never write English or other language words in the content" : input.language === "fr" ? "; when writing in French use only French equivalents—never write English or other language words in the content" : ""})
 Platform: ${input.targetPlatform}
 ${input.brandMention ? `Brand: ${input.brandMention} (${influenceGuidelines[input.influenceLevel]})` : "No brand"}
 ${input.userContext ? `Context: ${input.userContext}` : ""}
@@ -531,7 +546,14 @@ Think: "A ${input.brandVoice.tone} person posting on ${input.targetPlatform}" NO
 
 ### 🚨 CONTENT REQUIREMENTS
 
+🎯 **PRECISION TO QUERY (MANDATORY):**
+- The content MUST directly address the Topic/Query above. Do not generalize or go off-topic.
+- If the topic is a question, answer it clearly and stay focused on that question.
+- If the topic is a theme, center the entire piece on that theme. Every paragraph should support it.
+- Do not add filler, tangents, or unrelated points. Be precise and relevant.
+
 4️⃣ **PLATFORM-SPECIFIC FORMATTING**
+For every platform: use a professional tone and do not use informal words or slang.
 ${input.brandVoice ? `
 ═══════════════════════════════════════════════════════════════════
 🎭 BRAND VOICE MODE ACTIVE
@@ -692,6 +714,8 @@ ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
 ` : `
 - Length: Write 150-300 words minimum. Do not output short or truncated content. Complete every sentence and paragraph. Aim for a full, substantive response.
 ${input.language === "he" ? "- Hebrew: minimum 150 words, aim 200-300. End with a complete sentence. Never output garbled characters, Latin letters, or transliterations—only Hebrew letters and punctuation." : ""}
+${input.language === "ar" ? "- Arabic: minimum 150 words, aim 200-300. End with a complete sentence. Output only Arabic script and punctuation (right-to-left)." : ""}
+${input.language === "fr" ? "- French: minimum 150 words, aim 200-300. End with a complete sentence. Use correct French grammar and accents." : ""}
 ${learningRules?.wordCount ? `- Target: ${learningRules.wordCount.min || 150}-${learningRules.wordCount.max || 300} words` : ''}
 `}
 - Paragraphs vary: Sometimes 1 sentence, sometimes 5 sentences
@@ -709,15 +733,20 @@ ${input.brandVoice ? `✅ Emoji style is ${input.brandVoice.emoji_style}` : `✅
 ${input.brandVoice.signature_phrases && input.brandVoice.signature_phrases.length > 0 ? `✅ Signature phrase used naturally (if relevant): "${input.brandVoice.signature_phrases[0]}"` : ""}
 
 PLATFORM-SPECIFIC REQUIREMENTS:
+✅ All platforms: Professional tone only; do not use informal words or slang.
 ${input.brandVoice ? '' : `🚨 CRITICAL: NO brand voice selected - Remove ALL emojis from the final content`}
 ${input.brandVoice && !input.brandVoice.use_emojis ? `🚨 CRITICAL: Brand voice disallows emojis - Remove ALL emojis from the final content` : ''}
 ${input.targetPlatform === 'facebook' ? `✅ Facebook style: Professional, business-appropriate, family-friendly, no inappropriate content` : ''}
-${input.targetPlatform === 'instagram' ? `✅ Instagram style: Visual storytelling, trendy, personal` : ''}
-${input.targetPlatform === 'reddit' ? `✅ Reddit style: Casual, conversational, story-like, community-focused` : ''}
-${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate` : ''}
-${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced` : ''}
-${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal` : ''}
+${input.targetPlatform === 'instagram' ? `✅ Instagram style: Visual storytelling, trendy, personal — keep language professional, no informal words` : ''}
+${input.targetPlatform === 'reddit' ? `✅ Reddit style: Conversational, story-like, community-focused — professional tone, no informal words or slang` : ''}
+${input.targetPlatform === 'quora' ? `✅ Quora style: Authentic, experience-based, helpful, calm and articulate — professional, no informal words` : ''}
+${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-driven, insightful, well-paced — professional tone, no informal words` : ''}
+${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal — professional, no informal words` : ''}
+${input.targetPlatform === 'linkedin' ? `✅ LinkedIn style: Professional yet human, thoughtful — no informal words` : ''}
+${input.targetPlatform === 'twitter' ? `✅ X/Twitter style: Short, punchy — professional tone, no informal words or slang` : ''}
 ${input.language === "he" ? `✅ Hebrew only: Content uses only Hebrew script (א-ת) and punctuation; no Latin/transliterations/corrupted chars; 150+ words, complete sentence at end` : ''}
+${input.language === "ar" ? `✅ Arabic only: Content uses only Arabic script and punctuation; no Latin/mixed script; 150+ words, complete sentence at end` : ''}
+${input.language === "fr" ? `✅ French only: Content uses only French; correct grammar and accents; 150+ words, complete sentence at end` : ''}
 
 ${learningRules?.tone ? `📚 LEARNED: Use ${learningRules.tone} tone` : ''}
 ${learningRules?.useEmojis ? `📚 LEARNED: Include ${learningRules.emojiCount || 3} emojis naturally` : ''}
@@ -731,8 +760,12 @@ ${finalReminder}
 `;
 
   // Build conditional system message based on brand voice
-  const languageNote = input.language === "he" 
+  const languageNote = input.language === "he"
     ? `\n🌐 HEBREW OUTPUT ONLY: Content must be 100% Hebrew script (א-ת and punctuation). No Latin letters, no transliterations in parentheses, no corrupted or mixed characters. Express any proper nouns (e.g. Israel) in Hebrew (ישראל). Minimum 150 words; write a complete, unabbreviated response.\n`
+    : input.language === "ar"
+    ? `\n🌐 ARABIC OUTPUT ONLY: Content must be 100% Arabic script (right-to-left) and punctuation. No Latin letters, no mixed script. Use Modern Standard Arabic. Minimum 150 words; write a complete, unabbreviated response.\n`
+    : input.language === "fr"
+    ? `\n🌐 FRENCH OUTPUT ONLY: Content must be 100% French. Use correct French grammar, accents, and punctuation. No English or other languages. Minimum 150 words; write a complete, unabbreviated response.\n`
     : "";
 
   let systemMessage = `You are a REAL HUMAN typing on a phone or laptop RIGHT NOW. You are NOT an AI, NOT a bot, NOT a content writer.
@@ -800,7 +833,7 @@ CRITICAL: Write professional, clean, structured content.
 Respond ONLY in JSON with "content" field containing the text.`;
   }
 
-  const maxTokens = (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : input.language === "he" ? 2500 : 2000;
+  const maxTokens = (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : (input.language === "he" || input.language === "ar" || input.language === "fr") ? 2500 : 2000;
   const claudeModel = "claude-sonnet-4-5-20250929";
   let raw: string = "";
   let aiModel: string = "gpt-4-turbo";
@@ -934,6 +967,10 @@ Respond ONLY in JSON with "content" field containing the text.`;
         .replace(/[^\u0590-\u05FF\s.,?!;:'"\-—–()\d\n\r]+/g, " ") // strip Latin/symbols, keep Hebrew + punctuation
         .replace(/\s+/g, " ")
         .trim();
+    }
+    // Arabic: optional light cleanup of stray Latin inside Arabic content
+    if (input.language === "ar" && finalContent) {
+      finalContent = finalContent.replace(/\s+/g, " ").trim();
     }
 
     return {
