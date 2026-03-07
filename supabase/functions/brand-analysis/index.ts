@@ -1279,15 +1279,13 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
     if (websiteUrl) {
       websiteContent = await fetchWebsiteContent(websiteUrl);
     }
-    const keywordContext = keywords.length > 0 ? `Key features/keywords: ${keywords.join(', ')}` : '';
     const competitorNamesList = (competitors || []).map((c) => (typeof c === 'string' ? c : (c?.name || ''))).filter(Boolean);
-    const competitorContext = competitorNamesList.length > 0 ? `Main competitors: ${competitorNamesList.join(', ')}` : '';
-    const websiteContext = websiteContent ? `Website content summary: ${websiteContent}` : '';
     
     // Language instruction: default is English; Hebrew and the other 10 UI languages have explicit, proper blocks
     const langCode = (language || 'en').toLowerCase().split('-')[0];
     const languageNames: Record<string, string> = { he: 'Hebrew (עברית)', ur: 'Urdu', en: 'English', de: 'German', fr: 'French', es: 'Spanish', it: 'Italian', pt: 'Portuguese', nl: 'Dutch', ja: 'Japanese', zh: 'Chinese', pl: 'Polish', ru: 'Russian', ko: 'Korean', ar: 'Arabic', tr: 'Turkish', hi: 'Hindi', th: 'Thai', vi: 'Vietnamese', id: 'Indonesian', sv: 'Swedish', no: 'Norwegian', da: 'Danish', fi: 'Finnish' };
     const languageName = languageNames[langCode] || langCode;
+    const relevanceReminder = `- The queries must still be about the brand's SPECIFIC products/services — translate the TOPIC, not just the language`;
     let languageInstruction = '';
     if (langCode === 'he') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in HEBREW (עברית).
@@ -1295,62 +1293,74 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
 - Use Hebrew question words: מה, איך, למה, איפה, מתי, מי, איזה
 - Use natural Hebrew expressions and phrasing
 - Maintain conversational Hebrew style
-- All ${maxQueries} queries must be in Hebrew\n`;
+- All ${maxQueries} queries must be in Hebrew
+${relevanceReminder}\n`;
     } else if (langCode === 'ur') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in URDU.
 - Write queries naturally in Urdu, as native Urdu speakers would search (use Urdu script)
 - Use natural Urdu question words and expressions (کیا، کیسے، کہاں، کب، کون، etc.)
 - Maintain conversational Urdu style; use common search phrasing
-- All ${maxQueries} queries must be in Urdu\n`;
+- All ${maxQueries} queries must be in Urdu
+${relevanceReminder}\n`;
     } else if (langCode === 'de') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in GERMAN.
 - Write queries naturally in German, as native German speakers would search
 - Use natural German question words: was, wie, warum, wo, wann, wer, welcher
 - Use formal (Sie) or informal (du) phrasing as appropriate for search
-- Maintain conversational German style; all ${maxQueries} queries must be in German\n`;
+- Maintain conversational German style; all ${maxQueries} queries must be in German
+${relevanceReminder}\n`;
     } else if (langCode === 'fr') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in FRENCH.
 - Write queries naturally in French, as native French speakers would search
 - Use natural French question words: quoi, comment, pourquoi, où, quand, qui, quel(le)
 - Use natural French expressions and phrasing; maintain conversational style
-- All ${maxQueries} queries must be in French\n`;
+- All ${maxQueries} queries must be in French
+${relevanceReminder}\n`;
     } else if (langCode === 'es') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in SPANISH.
 - Write queries naturally in Spanish, as native Spanish speakers would search
 - Use natural Spanish question words: qué, cómo, por qué, dónde, cuándo, quién, cuál
-- Maintain conversational Spanish style; all ${maxQueries} queries must be in Spanish\n`;
+- Maintain conversational Spanish style; all ${maxQueries} queries must be in Spanish
+${relevanceReminder}\n`;
     } else if (langCode === 'it') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ITALIAN.
 - Write queries naturally in Italian, as native Italian speakers would search
 - Use natural Italian question words: cosa, come, perché, dove, quando, chi, quale
-- Maintain conversational Italian style; all ${maxQueries} queries must be in Italian\n`;
+- Maintain conversational Italian style; all ${maxQueries} queries must be in Italian
+${relevanceReminder}\n`;
     } else if (langCode === 'pt') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in PORTUGUESE.
 - Write queries naturally in Portuguese, as native speakers would search
 - Use natural question words: o que, como, por que, onde, quando, quem, qual
-- Maintain conversational Portuguese style; all ${maxQueries} queries must be in Portuguese\n`;
+- Maintain conversational Portuguese style; all ${maxQueries} queries must be in Portuguese
+${relevanceReminder}\n`;
     } else if (langCode === 'nl') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in DUTCH.
 - Write queries naturally in Dutch, as native Dutch speakers would search
 - Use natural Dutch question words: wat, hoe, waarom, waar, wanneer, wie, welk
-- Maintain conversational Dutch style; all ${maxQueries} queries must be in Dutch\n`;
+- Maintain conversational Dutch style; all ${maxQueries} queries must be in Dutch
+${relevanceReminder}\n`;
     } else if (langCode === 'ja') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in JAPANESE.
 - Write queries naturally in Japanese, as native Japanese speakers would search
 - Use natural Japanese question words and phrasing (何、どのように、なぜ、どこ、いつ、誰、どれ)
 - Use appropriate script (Kanji, Hiragana, Katakana) as used in real search queries
-- All ${maxQueries} queries must be in Japanese\n`;
+- All ${maxQueries} queries must be in Japanese
+${relevanceReminder}\n`;
     } else if (langCode === 'zh') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in CHINESE.
 - Write queries naturally in Chinese, as native Chinese speakers would search
 - Use natural Chinese question words and phrasing (什么、怎么、为什么、哪里、什么时候、谁、哪个)
 - Use Simplified Chinese (简体) unless the context clearly requires Traditional
-- All ${maxQueries} queries must be in Chinese\n`;
+- All ${maxQueries} queries must be in Chinese
+${relevanceReminder}\n`;
     } else if (langCode !== 'en') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ${languageName}.
 - Write queries naturally as native speakers of this language would search
 - Use natural expressions, question words, and phrasing in that language
-- All ${maxQueries} queries must be in ${languageName}\n`;
+- Do NOT mix in English words unless they are common loanwords in ${languageName}
+- All ${maxQueries} queries must be in ${languageName}
+${relevanceReminder}\n`;
     }
 
     const countryNamesMap = { US: 'United States', GB: 'UK', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', SG: 'Singapore', MY: 'Malaysia', PH: 'Philippines', VN: 'Vietnam', TH: 'Thailand', ID: 'Indonesia', HK: 'Hong Kong', TW: 'Taiwan', KR: 'South Korea', JP: 'Japan', CN: 'China', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', CH: 'Switzerland', PL: 'Poland', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PT: 'Portugal', GR: 'Greece', CZ: 'Czech Republic', RO: 'Romania', HU: 'Hungary', RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IL: 'Israel', AE: 'United Arab Emirates', SA: 'Saudi Arabia', EG: 'Egypt', QA: 'Qatar', KW: 'Kuwait', BH: 'Bahrain', OM: 'Oman', JO: 'Jordan', LB: 'Lebanon', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CO: 'Colombia', CL: 'Chile', PE: 'Peru', VE: 'Venezuela', EC: 'Ecuador', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', ET: 'Ethiopia', MA: 'Morocco', EU: 'European Union' };
@@ -1362,54 +1372,72 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
 - Keep the same ${maxQueries}-query total; vary the region angle across the list\n`
       : '';
     
-    const prompt = `Generate ${maxQueries} realistic, conversational search queries that real users would type when looking for solutions like ${brandName} offers. These should sound like natural human messages, NOT direct brand mentions.
+    // Build a concise list of what the brand actually offers based on available data
+    const brandOfferingParts: string[] = [];
+    if (websiteContent) brandOfferingParts.push(`WEBSITE CONTENT (use this as the PRIMARY source of truth for what the brand does):\n${websiteContent}`);
+    if (keywords.length > 0) brandOfferingParts.push(`KEY FEATURES/SERVICES: ${keywords.join(', ')}`);
+    if (competitorNamesList.length > 0) brandOfferingParts.push(`MAIN COMPETITORS: ${competitorNamesList.join(', ')}`);
+    const brandOfferingContext = brandOfferingParts.join('\n\n');
+
+    const prompt = `You are generating ${maxQueries} search queries to measure how the brand "${brandName}" appears in AI platform responses.
 ${languageInstruction}
 ${geographyInstruction}
 
-Brand context: ${brandName} (${industry})
-${keywordContext}
-${competitorContext}
-${websiteContext}
+=== BRAND INFORMATION ===
+Brand: ${brandName}
+Industry: ${industry}
+${brandOfferingContext}
 
-Based on the brand's industry, website content, and keywords, generate highly relevant search queries that potential BUYERS would actually use. Focus on queries with COMMERCIAL INTENT — these are the searches people make when they are actively considering a purchase, comparing solutions, or ready to buy.
+=== YOUR TASK ===
+Study the WEBSITE CONTENT, FEATURES, and INDUSTRY above carefully. Identify the SPECIFIC products, services, use cases, and value propositions this brand actually offers. Then generate ${maxQueries} search queries that a potential customer of THIS SPECIFIC brand would realistically ask an AI assistant.
 
-GOAL: We need to measure not only whether our brand is mentioned (presence) but HOW OUR BRAND STACKS UP VS COMPETITORS — so prioritize queries that typically get AI answers that RANK, COMPARE, or LIST multiple solutions (e.g. "best X tools", "top 5 X", "X vs Y", "who is the market leader"). That way we can see where our brand ranks and how it is described relative to competitors.
+ABSOLUTE REQUIREMENT — RELEVANCE:
+- Every single query MUST be directly about the specific products, services, or problems that ${brandName}'s website describes.
+- Do NOT generate generic industry queries. If the website is about "online reputation management", generate queries about reputation management, review monitoring, brand perception, etc. — NOT about generic "software" or unrelated topics.
+- Read the website content and keywords. Extract the specific offerings (e.g. review management, local SEO, sentiment analysis, competitor tracking) and build queries around THOSE exact topics.
+- If the website sells shoes, ask about shoes. If it offers accounting software, ask about accounting. Match the ACTUAL domain.
 
-Generate queries in these categories. Prioritize comparison and ranking-style queries:
+QUERY CATEGORIES (distribute queries across these):
 
-1. RANKING & BRAND-VS-COMPETITOR searches (10 queries) — Queries that usually get answers comparing/ranking multiple vendors so we can see how our brand compares:
-   Examples: "What are the top 5 ${industry} tools right now?", "Best ${industry} software compared — which one leads?", "Rank the leading ${industry} platforms for 2026", "Which ${industry} solutions do experts recommend most?", "Top ${industry} vendors head-to-head", "Who leads the ${industry} market?", "Best ${industry} options ranked by value", "Compare the best ${industry} tools for teams"
-   ${competitorNamesList.length > 0 ? `Also include 2–3 queries that name these competitors for comparison: ${competitorNamesList.join(', ')}. Examples: "Best ${industry} tools like ${competitorNamesList.slice(0, 2).join(' and ')}?", "Alternatives to ${competitorNamesList[0]} for ${industry}?", "Compare top ${industry} platforms including ${competitorNamesList.slice(0, 2).join(', ')}" — so answers list and compare multiple players.` : ''}
-2. PURCHASE-READY searches (6 queries) — Queries from users ready to buy or sign up:
-   Examples: "Best ${industry} software to buy right now", "Which ${industry} tool should I switch to?", "Top rated ${industry} platform for my business"
-3. COMPARISON & DECISION searches (8 queries) — Head-to-head comparisons and decision-stage queries:
-   Examples: "${industry} tool A vs tool B which is better?", "Is it worth paying for premium ${industry} software?", "Best value ${industry} solution for the price", "Which ${industry} platform is better for [use case]?"
-4. PROBLEM-TO-SOLUTION searches (5 queries) — Users with a pain point looking for a product:
-   Examples: "I need a better way to handle ${industry} tasks", "What's the fastest ${industry} solution?", "How to fix ${industry} problems with automation"
-5. ROI & PRICING searches (5 queries) — Cost-benefit and budget-driven:
-   Examples: "${industry} software pricing comparison", "Is ${industry} tool worth the investment?", "Affordable ${industry} solutions that actually work"
-6. VENDOR EVALUATION searches (5 queries) — Due-diligence before purchase:
-   Examples: "${industry} software reviews from real users", "Most trusted ${industry} platform", "Which ${industry} companies have the best support?"
-7. USE CASE / SEGMENT searches (5 queries) — By buyer segment:
-   Examples: "Best ${industry} for startups in 2026", "${industry} for enterprise teams", "Which ${industry} is best for small business?"
-8. ALTERNATIVE & SWITCHING searches (4 queries) — Users comparing or switching:
-   Examples: "Better alternatives to my current ${industry} tool", "Top ${industry} alternatives for migration", "Switching ${industry} providers — what to consider"
-9. COMPETITIVE INTELLIGENCE searches (4 queries) — Market benchmark queries:
-   Examples: "Who is the market leader in ${industry}?", "Which ${industry} platforms are gaining market share?", "Fastest growing ${industry} companies"
+1. RANKING & COMPARISON (${Math.ceil(maxQueries * 0.22)} queries) — Queries that trigger ranked lists of solutions:
+   Pattern: "What are the best [specific service from website] tools?", "Top [specific product category] platforms compared"
+   ${competitorNamesList.length > 0 ? `Include 2–3 queries naming competitors: ${competitorNamesList.join(', ')}. Pattern: "Alternatives to ${competitorNamesList[0]} for [specific service]?", "Compare ${competitorNamesList.slice(0, 2).join(' vs ')} for [use case from website]"` : ''}
+
+2. PROBLEM-TO-SOLUTION (${Math.ceil(maxQueries * 0.16)} queries) — Queries from users who have a problem the brand solves:
+   Pattern: "How can I [solve specific problem the brand addresses]?", "I need help with [pain point from website]"
+
+3. PURCHASE & DECISION (${Math.ceil(maxQueries * 0.14)} queries) — Ready-to-buy queries about this specific category:
+   Pattern: "Best [product/service from website] to buy", "Which [specific solution category] should I choose?"
+
+4. USE CASE / SEGMENT (${Math.ceil(maxQueries * 0.14)} queries) — Queries by buyer type or use case found on the website:
+   Pattern: "Best [service] for [segment mentioned on website]", "[Service] for [specific use case from website]"
+
+5. FEATURE & CAPABILITY (${Math.ceil(maxQueries * 0.12)} queries) — Queries about specific capabilities the brand offers:
+   Pattern: "Which tools offer [specific feature from website]?", "Best [service] with [capability from website]"
+
+6. PRICING & VALUE (${Math.ceil(maxQueries * 0.10)} queries) — Cost-related queries for this specific domain:
+   Pattern: "[Specific service] pricing comparison", "Affordable [specific product from website]"
+
+7. TRUST & EVALUATION (${Math.ceil(maxQueries * 0.12)} queries) — Due-diligence queries:
+   Pattern: "[Specific service category] reviews", "Most trusted [specific product type] provider"
 
 CRITICAL RULES:
-- Every query must reflect BUYER INTENT — the person searching is spending money or making a business decision
-- Prioritize queries that lead to COMPARATIVE answers (rankings, "best X", "top N", "A vs B") so we can measure how our brand performs vs competitors
-- Queries may mention competitor names for comparison (e.g. "alternatives to [Competitor]", "compare [Competitor] and others") but must NOT mention our brand ${brandName} — these are searches a buyer would make
-- Queries should be 1-3 sentences long, conversational, as if asking an AI assistant for a recommendation
-- Format each query as a proper sentence or question with capitalization and punctuation
-- Include variations with years (2025, 2026) in 3-4 queries
-- Include business size/budget variations naturally
-- ENSURE all queries are directly relevant to the brand's actual products/services
-- Use language and terms found on the brand's website when possible
-- Think like a buyer comparing options — focus on DECISION and COMPARISON queries
+- NEVER mention the brand name "${brandName}" in any query — these are searches a buyer makes BEFORE knowing about the brand
+- Every query MUST map to a specific product, service, or problem visible on the brand's website or in the keywords
+- Queries should be 1–2 sentences, conversational, as if asking an AI assistant
+- Format each query as a proper sentence or question with punctuation
+- Include 2–3 queries with year references (${new Date().getFullYear()}, ${new Date().getFullYear() + 1})
+- DO NOT generate filler or generic queries like "best software tools" — every query must be specific to this brand's domain
+- If website content is available, extract specific terminology, product names, service descriptions, and use cases from it — use those exact terms in queries
 
 IMPORTANT: Return EXACTLY ${maxQueries} queries in a valid JSON array format. No markdown formatting, no backticks, just a clean JSON array of strings.`;
+    const systemMessageBase = `You generate highly targeted search queries for brand visibility measurement. Your queries must be DIRECTLY relevant to the specific products, services, and use cases described in the brand's website content and keywords. NEVER generate generic or off-topic queries. Study the provided website content carefully and derive every query from the brand's actual domain.`;
+    const systemMessage = langCode === 'he'
+      ? `${systemMessageBase}\n\nכל השאילתות חייבות להיות בעברית טבעית. כתוב כמו שמשתמש ישראלי היה מחפש. החזר מערך JSON בלבד, ללא markdown או הסבר.`
+      : langCode !== 'en'
+        ? `${systemMessageBase}\n\nCRITICAL: ALL queries MUST be written entirely in ${languageName}. Write as a native ${languageName} speaker would naturally search. Use natural ${languageName} question words, grammar, and phrasing. Do NOT mix in English words unless they are commonly used as loanwords in ${languageName}. Return a valid JSON array of strings only, no markdown or explanation.`
+        : `${systemMessageBase}\n\nReturn a valid JSON array of strings only, no markdown or explanation.`;
+
     const response = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -1421,11 +1449,7 @@ IMPORTANT: Return EXACTLY ${maxQueries} queries in a valid JSON array format. No
         messages: [
           {
             role: 'system',
-            content: langCode === 'he'
-              ? 'אתה מומחה בהתנהגות חיפוש משתמשים ויצירת שאילתות. צור שאילתות חיפוש מציאותיות ושיחה שהמשתמשים האמיתיים היו מקלידים למנועי חיפוש או עוזרי AI. תמיד עטוף שאילתות כמשפטים או שאלות תקינים עם רישיות וסימני פיסוק מתאימים. תמיד החזר מערכים JSON מעוצבים כראוי ללא עיצוב markdown או הסבר. כל השאילתות חייבות להיות בעברית.'
-              : langCode !== 'en'
-                ? `You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. All queries MUST be in ${languageName}. Write as a native speaker would search. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. Return a valid JSON array of strings only, no markdown or explanation.`
-              : 'You are an expert in user search behavior and query generation. Generate realistic, conversational search queries that real users would type into search engines or AI assistants. Always format queries as proper sentences or questions with appropriate capitalization and punctuation. You always return properly formatted JSON arrays without any markdown formatting or explanation.'
+            content: systemMessage
           },
           {
             role: 'user',
@@ -1433,7 +1457,7 @@ IMPORTANT: Return EXACTLY ${maxQueries} queries in a valid JSON array format. No
           }
         ],
         max_tokens: 4000,
-        temperature: 0.8
+        temperature: 0.5
       })
     });
     if (!response.ok) {
@@ -1533,194 +1557,120 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
   const competitorNamesList = (competitors || []).map((c) => (typeof c === 'string' ? c : (c?.name || ''))).filter(Boolean);
-  // Industry-specific base queries
-  const industryTerms = industry.toLowerCase().split(/\s+/);
-  const primaryIndustryTerm = industryTerms[industryTerms.length - 1]; // Last word in industry
-  // Create base queries with proper sentence formatting — prioritize ranking/comparison so we see brand vs competitors
-  const baseQueries = [
-    // Ranking & comparison (goal: see how brand stacks up vs competitors)
-    `What are the top 5 ${industry} tools right now?`,
-    `Best ${industry} software compared — which ones lead the market?`,
-    `Rank the leading ${industry} platforms for ${currentYear}.`,
-    `Which ${industry} solutions do experts recommend most?`,
-    `Who is the market leader in ${industry}?`,
-    `Compare the best ${industry} tools for teams.`,
-    `Best ${industry} options ranked by value and features.`,
-    `What are the best ${industry} software options?`,
-    `Top ${industry} tools in ${currentYear}.`,
-    `I need good ${industry} solutions. Any recommendations?`,
-    `What are the leading ${industry} platforms right now?`,
-    `Can anyone suggest popular ${industry} apps?`,
-    `How do different ${industry} software options compare?`,
-    `I'm looking for honest ${industry} tools reviews.`,
-    `What's the best ${industry} for small business?`,
-    `Which enterprise ${industry} software should we consider?`,
-    `Are there affordable ${industry} tools that actually work well?`,
-    `Can I find free ${industry} software that's actually good?`,
-    `How much does typical ${industry} software cost?`,
-    `What ${industry} tool would you recommend for a beginner?`,
-    `Which ${industry} platforms are most widely used?`,
-    `What features should I look for in ${industry} software?`,
-    `Is there ${primaryIndustryTerm} software that's easy for beginners?`,
-    `What professional ${primaryIndustryTerm} tools do experts use?`,
-    `Does anyone know ${industry} software with good customer support?`,
-    `Are there any ${industry} platforms with free trials worth checking out?`,
-    `I need ${industry} tools with a mobile app. Suggestions?`,
-    // Problem-solving queries
-    `How do I choose the right ${industry} software for my needs?`,
-    `What's the best way to implement ${industry} software in my company?`,
-    `What are the ${industry} best practices everyone should follow?`,
-    `What benefits will ${industry} software bring to my business?`,
-    `Why should I use specialized ${industry} tools instead of spreadsheets?`,
-    `What ${industry} solution works best for remote teams?`,
-    `How can I optimize my ${industry} workflow?`,
-    `Are there ${industry} automation tools that actually save time?`,
-    `What ${industry} tools integrate well with my existing systems?`,
-    `Which ${industry} software has the best reporting features?`,
-    `How can I improve ${primaryIndustryTerm} efficiency in my organization?`,
-    `What's the best way to solve common ${primaryIndustryTerm} challenges?`,
-    `Can you share some ${primaryIndustryTerm} productivity tips?`,
-    `What are the steps for implementing ${industry} software successfully?`,
-    `Is there a good guide for setting up ${industry} systems?`,
-    // Specific use cases
-    `What ${industry} tools work best for startups?`,
-    `Which ${industry} software is designed for remote teams?`,
-    `What ${industry} solutions scale well for large companies?`,
-    `Can you recommend ${industry} tools specifically for agencies?`,
-    `What ${industry} software do consultants prefer?`,
-    `Are there ${industry} tools with good mobile apps?`,
-    `What are the best cloud-based ${industry} solutions?`,
-    `Which ${industry} tools offer API access for customization?`,
-    `I need ${industry} software with custom fields. Suggestions?`,
-    `What ${industry} platforms include time tracking features?`,
-    `Which ${industry} tool is best for ${primaryIndustryTerm} professionals?`,
-    `What ${industry} software works well for small teams?`,
-    `Are there ${industry} tools designed specifically for freelancers?`,
-    `Can you recommend ${industry} software for non-profits with limited budgets?`,
-    `What ${industry} tools are used in education?`,
-    // Comparison and alternatives
-    `What are the best alternatives to mainstream ${industry} tools?`,
-    `Are there good open source ${industry} options available?`,
-    `How does dedicated ${industry} software compare to using spreadsheets?`,
-    `I need a simple, no-frills ${industry} solution. Suggestions?`,
-    `Which ${industry} tools have the most advanced features?`,
-    `What's the most comprehensive ${industry} tool comparison for ${currentYear}?`,
-    `What should I consider when switching ${industry} platforms?`,
-    `How difficult is it to migrate to a new ${industry} tool?`,
-    `Which ${industry} software offers the best free trial experience?`,
-    `How can I effectively compare ${industry} software demos?`,
-    `What's the difference between various ${primaryIndustryTerm} software options?`,
-    `How does dedicated ${industry} software compare to manual ${primaryIndustryTerm} processes?`,
-    `Should I use a specialized ${industry} tool or build a custom ${primaryIndustryTerm} solution?`,
-    `What are the pros and cons of cloud vs on-premise ${industry} software?`,
-    `How do I calculate ROI when comparing different ${industry} software options?`,
-    // Budget-conscious queries
-    `What are the most affordable ${industry} software options?`,
-    `Are there any budget-friendly ${industry} tools that actually work well?`,
-    `Where can I find deals on ${industry} software?`,
-    `Which ${industry} platforms offer the best free trials?`,
-    `Do any ${industry} tools offer student discounts?`,
-    `Are there special ${industry} pricing options for nonprofits?`,
-    `What ${industry} software is affordable for small teams?`,
-    `Which ${industry} tools let you pay per user?`,
-    `Are there any ${industry} solutions with one-time payment instead of subscriptions?`,
-    `How can I avoid ongoing subscriptions for ${industry} software?`,
-    `What are the different pricing models for ${industry} tools?`,
-    `Which ${industry} software offers the best value for money?`,
-    `How do the costs of different ${industry} platforms compare?`,
-    `Can you explain the typical pricing tiers for ${industry} software?`,
-    `What's the real difference between free and paid ${industry} features?`,
-    // Feature-specific queries
-    `Which ${industry} tools have the best dashboard features?`,
-    `I need ${industry} software with good notification systems. Suggestions?`,
-    `What ${industry} platforms integrate well with calendar apps?`,
-    `Which ${industry} tools have the best file sharing capabilities?`,
-    `What ${industry} software is best for team collaboration?`,
-    `Are there ${industry} tools with pre-built templates?`,
-    `Which ${industry} software has the most robust analytics?`,
-    `What ${industry} platforms offer flexible export options?`,
-    `How important are backup features in ${industry} software?`,
-    `Which ${industry} tools prioritize security features?`,
-    `What ${industry} software offers the most customization options?`,
-    `Which ${industry} platforms have the best automation features?`,
-    `What ${industry} tools provide comprehensive reporting?`,
-    `How do user permissions work in ${industry} software?`,
-    `Which ${industry} platforms integrate well with other tools?`,
-    // Year-specific queries
-    `What are the best ${industry} tools to use in ${nextYear}?`,
-    `What are the biggest ${industry} trends in ${currentYear}?`,
-    `What new features are ${industry} tools adding in ${currentYear}?`,
-    `Have there been significant ${industry} updates in ${currentYear}?`,
-    `What's the latest in ${industry} software development?`,
-    `What modern ${industry} solutions should I be considering?`,
-    `What innovations are happening in ${industry} tools in ${currentYear}?`,
-    `What's the future looking like for ${industry} tools?`,
-    `What technology trends are affecting ${industry} software?`,
-    `What will the next generation of ${industry} tools look like?`,
-    `Is there a roadmap for ${industry} software development in ${currentYear}?`,
-    `What upcoming features are ${industry} platforms planning?`,
-    `What's the market forecast for ${industry} tools in ${nextYear}?`,
-    `How is ${industry} technology evolving currently?`,
-    `What future developments should we expect in ${industry} software?`,
-    // Review and recommendation queries
-    `What do the reviews say about different ${industry} software options?`,
-    `How do user ratings compare for top ${industry} tools?`,
-    `What's the customer feedback like for popular ${industry} platforms?`,
-    `Where can I find honest testimonials about ${industry} tools?`,
-    `Are there case studies showing ${industry} software in action?`,
-    `What success stories exist for ${industry} implementations?`,
-    `Can you share examples of successful ${industry} software deployments?`,
-    `Is there an ROI calculator for ${industry} software?`,
-    `What productivity gains can I expect from good ${industry} tools?`,
-    `How much efficiency improvement do ${industry} solutions typically deliver?`,
-    `What do experts recommend for ${industry} software?`,
-    `Which ${industry} platforms won awards in ${currentYear}?`,
-    `What are the top-rated ${industry} tools according to users?`,
-    `Which ${industry} software has the highest customer satisfaction?`,
-    `How reliable are different ${industry} software options?`
-  ];
+  const kwList = (keywords || []).filter(Boolean);
+
+  // Use keywords to derive specific terms; fall back to industry if no keywords
+  const specificTerms = kwList.length > 0 ? kwList.slice(0, 5) : [industry];
+  const primaryTerm = specificTerms[0] || industry;
+  const secondaryTerm = specificTerms.length > 1 ? specificTerms[1] : industry;
+
+  const baseQueries: string[] = [];
+
+  // Generate keyword-anchored queries for each specific term
+  for (const term of specificTerms.slice(0, 3)) {
+    baseQueries.push(
+      `What are the best ${term} solutions available right now?`,
+      `Top ${term} tools compared for ${currentYear}.`,
+      `Which ${term} platform do experts recommend?`,
+      `How do I choose the right ${term} solution for my business?`,
+      `Best ${term} for small business vs enterprise?`,
+      `${term} pricing comparison — which offers the best value?`,
+      `What should I look for in a ${term} provider?`,
+      `Reviews of the top ${term} platforms.`,
+    );
+  }
+
+  // Ranking & comparison using primary term
+  baseQueries.push(
+    `What are the top 5 ${primaryTerm} tools right now?`,
+    `Best ${primaryTerm} software compared — which ones lead the market?`,
+    `Rank the leading ${primaryTerm} platforms for ${currentYear}.`,
+    `Who is the market leader in ${primaryTerm}?`,
+    `Compare the best ${primaryTerm} tools for teams.`,
+  );
+
+  // Problem-to-solution
+  baseQueries.push(
+    `I need a better way to handle ${primaryTerm}. Any recommendations?`,
+    `How can I improve my ${secondaryTerm} workflow?`,
+    `What's the best way to get started with ${primaryTerm}?`,
+    `Are there ${primaryTerm} tools that actually save time?`,
+    `How do I automate ${secondaryTerm} tasks?`,
+  );
+
+  // Use case / segment queries
+  baseQueries.push(
+    `Best ${primaryTerm} for startups in ${currentYear}.`,
+    `Which ${primaryTerm} software is best for agencies?`,
+    `What ${primaryTerm} solution works for remote teams?`,
+    `${primaryTerm} tools for freelancers — any good options?`,
+    `Enterprise ${secondaryTerm} platforms worth considering.`,
+  );
+
+  // Year-specific
+  baseQueries.push(
+    `What are the best ${primaryTerm} tools to use in ${nextYear}?`,
+    `${primaryTerm} trends in ${currentYear}.`,
+    `What's new in ${secondaryTerm} for ${currentYear}?`,
+  );
+
+  // Competitor-anchored
   if (competitorNamesList.length > 0) {
     const c1 = competitorNamesList[0];
-    const c2 = competitorNamesList[1];
-    baseQueries.push(`Best ${industry} tools like ${c1} and ${competitorNamesList.length > 1 ? c2 : 'similar platforms'}?`);
-    baseQueries.push(`Alternatives to ${c1} for ${industry}.`);
+    baseQueries.push(`Best ${primaryTerm} tools like ${c1}?`);
+    baseQueries.push(`Alternatives to ${c1} for ${primaryTerm}.`);
     if (competitorNamesList.length > 1) {
-      baseQueries.push(`Compare ${industry} platforms: ${c1} vs ${c2} and others.`);
+      const c2 = competitorNamesList[1];
+      baseQueries.push(`Compare ${primaryTerm} platforms: ${c1} vs ${c2}.`);
+      baseQueries.push(`${c1} vs ${c2} — which is better for ${secondaryTerm}?`);
     }
   }
+
+  // Region-specific
   const regionLabels = { US: 'the US', GB: 'the UK', CA: 'Canada', AU: 'Australia', IE: 'Ireland', NZ: 'New Zealand', ZA: 'South Africa', IN: 'India', PK: 'Pakistan', BD: 'Bangladesh', SG: 'Singapore', MY: 'Malaysia', PH: 'Philippines', VN: 'Vietnam', TH: 'Thailand', ID: 'Indonesia', HK: 'Hong Kong', TW: 'Taiwan', KR: 'South Korea', JP: 'Japan', CN: 'China', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain', NL: 'Netherlands', BE: 'Belgium', AT: 'Austria', CH: 'Switzerland', PL: 'Poland', SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PT: 'Portugal', GR: 'Greece', CZ: 'Czech Republic', RO: 'Romania', HU: 'Hungary', RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IL: 'Israel', AE: 'UAE', SA: 'Saudi Arabia', EG: 'Egypt', QA: 'Qatar', KW: 'Kuwait', BH: 'Bahrain', OM: 'Oman', JO: 'Jordan', LB: 'Lebanon', BR: 'Brazil', MX: 'Mexico', AR: 'Argentina', CO: 'Colombia', CL: 'Chile', PE: 'Peru', VE: 'Venezuela', EC: 'Ecuador', NG: 'Nigeria', KE: 'Kenya', GH: 'Ghana', ET: 'Ethiopia', MA: 'Morocco', EU: 'the EU' };
   if (countries && countries.length > 0) {
     countries.slice(0, 5).forEach((c) => {
       const label = regionLabels[c] || c;
-      baseQueries.push(`Best ${industry} tools available in ${label}.`);
-      baseQueries.push(`What are good ${industry} options for the ${label} market?`);
-      baseQueries.push(`${industry} software that works well in ${label}.`);
+      baseQueries.push(`Best ${primaryTerm} tools available in ${label}.`);
+      baseQueries.push(`Top ${secondaryTerm} providers in ${label}.`);
     });
   }
-  // Ensure we have exactly 50 queries
-  if (baseQueries.length > 50) {
-    baseQueries.length = 50;
-  }
-  // If we have fewer than 50, add some variations
-  const queries = [
-    ...baseQueries
-  ];
-  const modifiers = [
-    'Really need help with',
-    'Looking for advice on',
-    'Can anyone recommend',
-    'Need suggestions for',
-    'Trying to find'
-  ];
-  while(queries.length < 50){
-    const originalQuery = baseQueries[Math.floor(Math.random() * baseQueries.length)];
-    const modifier = modifiers[Math.floor(Math.random() * modifiers.length)];
-    queries.push(`${modifier} ${originalQuery.charAt(0).toLowerCase() + originalQuery.slice(1)}`);
-    if (queries.length >= 95) break;
-  }
-  const final = queries.slice(0, 50);
 
-  // For non-English languages, prepend a language instruction so AI platforms respond accordingly
+  // Deduplicate and cap at 50
+  const seen = new Set<string>();
+  const deduped = baseQueries.filter(q => {
+    const key = q.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (deduped.length > 50) {
+    deduped.length = 50;
+  }
+
+  // Fill remaining slots with keyword-varied queries
+  const fillerPatterns = [
+    (t: string) => `What do users say about ${t} tools?`,
+    (t: string) => `Is there a good ${t} solution with free trial?`,
+    (t: string) => `How much does ${t} software typically cost?`,
+    (t: string) => `Which ${t} platform has the best customer support?`,
+    (t: string) => `Best affordable ${t} options for ${currentYear}.`,
+  ];
+  let patternIdx = 0;
+  while (deduped.length < 50 && patternIdx < fillerPatterns.length * specificTerms.length) {
+    const term = specificTerms[patternIdx % specificTerms.length];
+    const pattern = fillerPatterns[Math.floor(patternIdx / specificTerms.length) % fillerPatterns.length];
+    const q = pattern(term);
+    if (!seen.has(q.toLowerCase())) {
+      deduped.push(q);
+      seen.add(q.toLowerCase());
+    }
+    patternIdx++;
+  }
+
+  const final = deduped.slice(0, 50);
+
   const langCode = (language || 'en').toLowerCase().split('-')[0];
   if (langCode !== 'en') {
     const fallbackLangNames: Record<string, string> = {
