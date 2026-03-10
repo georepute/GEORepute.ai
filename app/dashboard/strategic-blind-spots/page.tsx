@@ -106,34 +106,7 @@ const LLM_COLORS: Record<string, string> = {
 };
 
 const POLL_INTERVAL_MS = 12000; // 12 seconds
-const POLL_MAX_COUNT = 75; // 75 × 12s ≈ 15 min — then stop polling
-
-const VIDEO_LANGUAGE_OPTIONS: { code: string; name: string }[] = [
-  { code: "en", name: "English" },
-  { code: "ar", name: "Arabic" },
-  { code: "zh", name: "Chinese" },
-  { code: "da", name: "Danish" },
-  { code: "nl", name: "Dutch" },
-  { code: "fi", name: "Finnish" },
-  { code: "fr", name: "French" },
-  { code: "de", name: "German" },
-  { code: "he", name: "Hebrew" },
-  { code: "hi", name: "Hindi" },
-  { code: "id", name: "Indonesian" },
-  { code: "it", name: "Italian" },
-  { code: "ja", name: "Japanese" },
-  { code: "ko", name: "Korean" },
-  { code: "no", name: "Norwegian" },
-  { code: "pl", name: "Polish" },
-  { code: "pt", name: "Portuguese" },
-  { code: "ru", name: "Russian" },
-  { code: "es", name: "Spanish" },
-  { code: "sv", name: "Swedish" },
-  { code: "th", name: "Thai" },
-  { code: "tr", name: "Turkish" },
-  { code: "ur", name: "Urdu" },
-  { code: "vi", name: "Vietnamese" },
-];
+const POLL_MAX_COUNT = 175; // 175 × 12s ≈ 35 min — 2 videos + merge
 
 export default function StrategicBlindSpotsPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -151,9 +124,6 @@ export default function StrategicBlindSpotsPage() {
     requestId: null,
   });
   const [generatingVideo, setGeneratingVideo] = useState(false);
-  const [videoLanguage, setVideoLanguage] = useState("en");
-  const videoLanguageRef = useRef(videoLanguage);
-  videoLanguageRef.current = videoLanguage;
   const [showVideoModal, setShowVideoModal] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollCountRef = useRef(0);
@@ -259,7 +229,7 @@ export default function StrategicBlindSpotsPage() {
         const { videoUrl, videoStatus, videoGeneratedAt } = data.data;
         if (videoStatus === "done" && videoUrl) {
           setVideo({ status: "done", url: videoUrl, generatedAt: videoGeneratedAt, requestId: null });
-        } else if (videoStatus === "pending") {
+        } else if (videoStatus === "pending" || videoStatus === "pending_part1" || videoStatus === "pending_part2" || videoStatus === "pending_parallel") {
           setVideo({ status: "pending", url: null, generatedAt: null, requestId: null });
         } else if (videoStatus === "failed") {
           setVideo({ status: "failed", url: null, generatedAt: null, requestId: null });
@@ -326,14 +296,14 @@ export default function StrategicBlindSpotsPage() {
       const res = await fetch("/api/reports/strategic-blind-spots/video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ domainId: selectedDomain, reportData: report, language: videoLanguageRef.current }),
+        body: JSON.stringify({ domainId: selectedDomain, reportData: report }),
       });
       const data = await res.json();
 
       if (data.success && data.requestId) {
         setVideo({ status: "pending", url: null, generatedAt: null, requestId: data.requestId });
         toast.success(
-          "Video generation started! A 15-second video usually takes 2–8 minutes. We'll check automatically.",
+          "30-second video started! Generating sequentially (Part 1 → Part 2). Usually 5–15 minutes. We'll check automatically.",
           { id: "generate-video", duration: 6000 }
         );
       } else {
@@ -585,23 +555,10 @@ export default function StrategicBlindSpotsPage() {
                 <div className="flex-1 min-w-0">
                   <h3 className="font-semibold text-gray-900">Video Report</h3>
                   <p className="text-sm text-gray-600 mt-0.5">
-                    Generate an AI-powered video presentation of this report — all charts, data, and insights visualized with professional animations, powered by xAI Aurora.
+                    Generate a 30-second AI video with professional English voiceover — all charts, data, and insights. Slower, clearer narration. Powered by xAI Aurora.
                   </p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-2">
-                  <select
-                    value={videoLanguage}
-                    onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }}
-                    disabled={generatingVideo}
-                    className="px-3 py-2.5 border border-violet-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[120px]"
-                    title="Video language"
-                  >
-                    {VIDEO_LANGUAGE_OPTIONS.map((opt) => (
-                      <option key={opt.code} value={opt.code}>
-                        {opt.name}
-                      </option>
-                    ))}
-                  </select>
                   <button
                     onClick={generateVideoReport}
                     disabled={generatingVideo}
@@ -623,7 +580,7 @@ export default function StrategicBlindSpotsPage() {
                   <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-gray-900">Generating Video Report…</h3>
                     <p className="text-sm text-gray-600 mt-0.5">
-                      xAI Aurora is rendering your 15-second professional video with all charts and data. This typically takes <strong>2–8 minutes</strong>. We&apos;re checking automatically every 12 seconds.
+                      Both parts generating in parallel. Typically <strong>2–8 minutes</strong>. We&apos;re checking automatically every 12 seconds.
                     </p>
                     <div className="mt-3 flex items-center gap-2">
                       <div className="flex gap-1">
@@ -657,19 +614,6 @@ export default function StrategicBlindSpotsPage() {
                   </p>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-2">
-                  <select
-                    value={videoLanguage}
-                    onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }}
-                    disabled={generatingVideo}
-                    className="px-3 py-2 border border-red-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[120px]"
-                    title="Video language"
-                  >
-                    {VIDEO_LANGUAGE_OPTIONS.map((opt) => (
-                      <option key={opt.code} value={opt.code}>
-                        {opt.name}
-                      </option>
-                    ))}
-                  </select>
                   <button
                     onClick={generateVideoReport}
                     disabled={generatingVideo}
@@ -706,19 +650,6 @@ export default function StrategicBlindSpotsPage() {
                       <Play className="w-4 h-4" />
                       Preview Video
                     </button>
-                    <select
-                      value={videoLanguage}
-                      onChange={(e) => { const v = e.target.value; setVideoLanguage(v); videoLanguageRef.current = v; }}
-                      disabled={generatingVideo}
-                      className="px-3 py-2 border border-gray-200 rounded-lg bg-white text-gray-700 text-sm font-medium disabled:opacity-50 min-w-[100px]"
-                      title="Video language for regeneration"
-                    >
-                      {VIDEO_LANGUAGE_OPTIONS.map((opt) => (
-                        <option key={opt.code} value={opt.code}>
-                          {opt.name}
-                        </option>
-                      ))}
-                    </select>
                     <button
                       onClick={generateVideoReport}
                       disabled={generatingVideo}
