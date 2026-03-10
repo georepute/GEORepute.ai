@@ -224,6 +224,7 @@ function AIVisibilityContent() {
   const [brandSummary, setBrandSummary] = useState<any>(null);
   const [loadingBrandSummary, setLoadingBrandSummary] = useState(false);
   const [resultsView, setResultsView] = useState<'mentioned' | 'missed'>('mentioned');
+  const [promptsSearch, setPromptsSearch] = useState('');
   const [runHistory, setRunHistory] = useState<any[]>([]);
   const [loadingRunHistory, setLoadingRunHistory] = useState(false);
   const [showCompletionNotification, setShowCompletionNotification] = useState(false);
@@ -236,7 +237,7 @@ function AIVisibilityContent() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [showProjectDetailsSettings, setShowProjectDetailsSettings] = useState(false);
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
-  const [viewResponseModal, setViewResponseModal] = useState<{ open: boolean; response: any; prompt: string } | null>(null);
+  const [viewResponseModal, setViewResponseModal] = useState<{ open: boolean; response?: any; responses?: any[]; prompt: string } | null>(null);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
   const exportDropdownRef = useRef<HTMLDivElement>(null);
   const [showConfigureModal, setShowConfigureModal] = useState(false);
@@ -5301,179 +5302,229 @@ function AIVisibilityContent() {
                               groupedByPrompt[promptKey].push(response);
                             });
 
-                            // Helper function to get model badge color
-                            const getModelBadgeColor = (platform: string) => {
-                              const platformLower = platform?.toLowerCase() || '';
-                              if (platformLower.includes('claude')) return 'bg-orange-100 text-orange-800';
-                              if (platformLower.includes('chatgpt') || platformLower.includes('gpt')) return 'bg-green-100 text-green-800';
-                              if (platformLower.includes('gemini')) return 'bg-blue-100 text-blue-800';
-                              if (platformLower.includes('perplexity')) return 'bg-purple-100 text-purple-800';
-                              if (platformLower.includes('groq') || platformLower.includes('grok')) return 'bg-pink-100 text-pink-800';
-                              return 'bg-gray-100 text-gray-800';
+                            const allEntries = Object.entries(groupedByPrompt);
+                            const searchLower = promptsSearch.trim().toLowerCase();
+                            const tableRows = searchLower
+                              ? allEntries.filter(([, responses]) => (responses[0].prompt || '').toLowerCase().includes(searchLower))
+                              : allEntries;
+
+                            // Total platforms in this session (e.g. 5) — visibility = mentionedCount / totalPlatforms
+                            const totalPlatformsInSession = new Set(projectResponses.map((r: any) => r.platform)).size;
+
+                            // Country code to flag emoji (regional indicators)
+                            const getFlagEmoji = (cc: string) => {
+                              if (!cc || cc.length !== 2) return '';
+                              return [...cc.toUpperCase()].map(c => String.fromCodePoint(0x1F1E6 - 65 + c.charCodeAt(0))).join('');
                             };
 
-                            // Helper function to get model display name
-                            const getModelDisplayName = (platform: string) => {
-                              const platformLower = platform?.toLowerCase() || '';
-                              if (platformLower.includes('claude')) return 'Claude';
-                              if (platformLower.includes('chatgpt') || platformLower.includes('gpt')) return 'GPT';
-                              if (platformLower.includes('gemini')) return 'Gemini';
-                              if (platformLower.includes('perplexity')) return 'Perplexity';
-                              if (platformLower.includes('groq') || platformLower.includes('grok')) return 'Groq';
-                              return platform?.charAt(0).toUpperCase() + platform?.slice(1) || 'Unknown';
-                            };
-
-                            return Object.entries(groupedByPrompt).map(([promptKey, responses]) => {
-                              const firstResponse = responses[0];
-                              const uniquePrompt = firstResponse.prompt;
-
+                            // Intent to letter + color (first image style); hover shows full form
+                            const getIntentPill = (intent: string) => {
+                              const map: Record<string, { letter: string; fullForm: string; className: string }> = {
+                                transactional: { letter: 'T', fullForm: 'Transactional', className: 'bg-amber-200 text-amber-900' },
+                                commercial_investigation: { letter: 'C', fullForm: 'Commercial Investigation', className: 'bg-sky-200 text-sky-900' },
+                                consideration: { letter: 'B', fullForm: 'Consideration', className: 'bg-gray-200 text-gray-700' },
+                                informational: { letter: 'I', fullForm: 'Informational', className: 'bg-sky-200 text-sky-900' }
+                              };
+                              const v = map[intent?.toLowerCase?.()] || { letter: '?', fullForm: 'Unknown intent', className: 'bg-gray-200 text-gray-700' };
                               return (
-                                <div
-                                  key={promptKey}
-                                  className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                                <span
+                                  className={`inline-flex items-center justify-center w-6 h-5 rounded text-xs font-medium ${v.className}`}
+                                  title={v.fullForm}
                                 >
-                                  {/* Query Section - Show once at top */}
-                                  <div className="mb-4">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <div className="text-sm font-medium text-gray-700">Query:</div>
-                                      {resultsView === 'missed' && (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            // Store data in sessionStorage for the edit page
-                                            const editData = {
-                                              prompt: uniquePrompt,
-                                              responses: responses.map(r => ({
-                                                id: r.id,
-                                                platform: r.platform,
-                                                response: r.response,
-                                                response_metadata: r.response_metadata
-                                              })),
-                                              projectId: selectedProject?.id,
-                                              brandName: selectedProject?.brand_name,
-                                              industry: selectedProject?.industry,
-                                              keywords: selectedProject?.keywords || [],
-                                              competitors: selectedProject?.competitors || []
-                                            };
-                                            sessionStorage.setItem('editPromptData', JSON.stringify(editData));
-                                            router.push('/dashboard/content?source=ai-visibility&step=content-generation');
-                                          }}
-                                          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-purple-600 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors"
-                                          title="Generate new optimized content for this prompt"
-                                        >
-                                          <Pencil className="w-3.5 h-3.5" />
-                                          Generate New Content
-                                        </button>
-                                      )}
-                                    </div>
-                                    <div className="text-sm text-gray-900 bg-gray-50 p-2 rounded">
-                                      {uniquePrompt}
-                                    </div>
-                                  </div>
+                                  {v.letter}
+                                </span>
+                              );
+                            };
 
-                                  {/* Status Badge + Intent Score */}
-                                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      {/* Commercial Intent Badge */}
-                                      {firstResponse.response_metadata?.intent && (
-                                        <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                          firstResponse.response_metadata.revenue_potential === 'high' ? 'bg-red-100 text-red-800' :
-                                          firstResponse.response_metadata.revenue_potential === 'medium' ? 'bg-orange-100 text-orange-800' :
-                                          firstResponse.response_metadata.revenue_potential === 'low' ? 'bg-yellow-100 text-yellow-800' :
-                                          'bg-gray-100 text-gray-600'
-                                        }`}>
-                                          {firstResponse.response_metadata.revenue_potential === 'high' ? '🔥' :
-                                           firstResponse.response_metadata.revenue_potential === 'medium' ? '⚡' :
-                                           firstResponse.response_metadata.revenue_potential === 'low' ? '💡' : 'ℹ️'}{' '}
-                                          {firstResponse.response_metadata.intent === 'transactional' ? 'Purchase Intent' :
-                                           firstResponse.response_metadata.intent === 'commercial_investigation' ? 'Buyer Research' :
-                                           firstResponse.response_metadata.intent === 'consideration' ? 'Considering' :
-                                           'Informational'}
-                                        </span>
-                                      )}
-                                      {/* Revenue opportunity for missed high-intent */}
-                                      {resultsView === 'missed' && firstResponse.response_metadata?.intent_score >= 45 && (
-                                        <span className="px-2 py-1 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200">
-                                          💰 Revenue at risk — you are invisible to this buyer
-                                        </span>
-                                      )}
-                                    </div>
-                                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                      resultsView === 'mentioned'
-                                        ? 'bg-green-100 text-green-800'
-                                        : 'bg-red-100 text-red-800'
-                                    }`}>
-                                      {resultsView === 'mentioned' ? 'Brand Mentioned' : 'Brand Not Mentioned'}
-                                    </span>
-                                  </div>
+                            // Per-prompt region: backend stores response_metadata.country per query when run with multiple regions
 
-                                  {/* All Responses from Different Models */}
-                                  <div className="space-y-3">
-                                    {responses.map((response) => (
-                                      <div
-                                        key={response.id}
-                                        className="border-l-2 border-gray-200 pl-3 py-2 bg-gray-50 rounded-r"
-                                      >
-                                        <div className="flex items-center justify-between mb-2">
-                                          <span className={`px-2 py-1 rounded text-xs font-medium capitalize ${getModelBadgeColor(response.platform)}`}>
-                                            {getModelDisplayName(response.platform)}
-                                          </span>
-                                          {resultsView === 'mentioned' && response.response_metadata?.sentiment_score !== null && (
-                                            <span className={`px-2 py-1 rounded text-xs ${
-                                              response.response_metadata.sentiment_score > 0.3
-                                                ? 'bg-green-100 text-green-800'
-                                                : response.response_metadata.sentiment_score < -0.3
-                                                ? 'bg-red-100 text-red-800'
-                                                : 'bg-gray-100 text-gray-800'
-                                            }`}>
-                                              Sentiment: {response.response_metadata.sentiment_score?.toFixed(2)}
-                                            </span>
-                                          )}
-                                        </div>
-                                        <div className="flex items-start gap-2">
-                                          <div className="flex-1 text-sm text-gray-700 line-clamp-3">
-                                            {response.response}
-                                          </div>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.preventDefault();
-                                              e.stopPropagation();
-                                              console.log('View button clicked', { response: response.id, prompt: uniquePrompt });
-                                              setViewResponseModal({ open: true, response, prompt: uniquePrompt });
-                                            }}
-                                            className="flex-shrink-0 p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors cursor-pointer"
-                                            title="View full response"
-                                          >
-                                            <Eye className="w-4 h-4" />
-                                          </button>
-                                        </div>
-                                        {resultsView === 'mentioned' && response.response_metadata?.sources && response.response_metadata.sources.length > 0 && (
-                                          <div className="mt-2 pt-2 border-t border-gray-200">
-                                            <div className="text-xs font-medium text-gray-600 mb-1">Sources:</div>
-                                            <div className="flex flex-wrap gap-2">
-                                              {response.response_metadata.sources.slice(0, 3).map((source: any, idx: number) => (
-                                                <a
-                                                  key={idx}
-                                                  href={source.url}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="text-xs text-blue-600 hover:underline truncate max-w-xs"
+                            // Rank: prefer stored brand_rank on response (from Supabase), else from session competitor rankings
+                            const rankings = activeSession?.competitor_analysis?.rankings || [];
+                            const brandRankFromSession = rankings.find((r: any) =>
+                              parseCompetitorNameGlobal(r.name).name === selectedProject?.brand_name
+                            )?.rank ?? null;
+
+                            return (
+                              <>
+                                <div className="flex items-center justify-between gap-4 flex-wrap">
+                                  <div className="relative flex-1 min-w-[200px] max-w-sm">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <input
+                                      type="text"
+                                      placeholder="Search"
+                                      value={promptsSearch}
+                                      onChange={(e) => setPromptsSearch(e.target.value)}
+                                      className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                    />
+                                  </div>
+                                  <span className="text-sm text-gray-600">
+                                    {tableRows.length} out of {allEntries.length} Prompts Used
+                                  </span>
+                                </div>
+
+                                <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                      <thead>
+                                        <tr className="border-b border-gray-200 bg-gray-50 text-left text-gray-600 font-medium">
+                                          <th className="py-3 px-3 w-10">
+                                            <input type="checkbox" className="rounded border-gray-300" readOnly aria-label="Select all" />
+                                          </th>
+                                          <th className="py-3 px-3">Prompts</th>
+                                          <th className="py-3 px-3 w-20">Volume</th>
+                                          <th className="py-3 px-3 w-24">Regions</th>
+                                          <th className="py-3 px-3 w-28">Intent</th>
+                                          <th className="py-3 px-3 w-24">Visibility</th>
+                                          <th className="py-3 px-3 w-20">Sentiment</th>
+                                          <th className="py-3 px-3 w-16">Rank</th>
+                                          <th className="py-3 px-3 w-28">Created</th>
+                                          <th className="py-3 px-3 w-16 text-center">Actions</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {tableRows.map(([promptKey, responses]) => {
+                                          const firstResponse = responses[0];
+                                          const uniquePrompt = firstResponse.prompt;
+                                          const sentiment = firstResponse.response_metadata?.sentiment_score;
+                                          // Integer 0–100: stored value is 0–1 (e.g. 0.5 → 50) or -1–1 (e.g. 0 → 50)
+                                          const numSent = Number(sentiment);
+                                          const sentimentDisplay = sentiment != null
+                                            ? Math.min(100, Math.max(0, numSent >= 0 && numSent <= 1
+                                                ? Math.round(numSent * 100)
+                                                : Math.round((numSent + 1) * 50)))
+                                            : '—';
+                                          // Visibility = % of all session platforms where brand was mentioned (count each platform at most once; cap at 100%)
+                                          const platformsThatMentioned = new Set(
+                                            responses.filter((r: any) => r.response_metadata?.brand_mentioned).map((r: any) => r.platform)
+                                          );
+                                          const mentionedCount = platformsThatMentioned.size;
+                                          const visibilityPct = totalPlatformsInSession > 0
+                                            ? Math.min(100, Math.round((mentionedCount / totalPlatformsInSession) * 100))
+                                            : 0;
+                                          const uniquePlatformCount = new Set(responses.map((r: any) => r.platform)).size;
+                                          const brandRank = firstResponse.brand_rank ?? brandRankFromSession;
+                                          const createdDate = firstResponse.created_at
+                                            ? new Date(firstResponse.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                            : '—';
+
+                                          return (
+                                            <tr
+                                              key={promptKey}
+                                              className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                                            >
+                                              <td className="py-2.5 px-3">
+                                                <input type="checkbox" className="rounded border-gray-300" readOnly aria-label="Select row" />
+                                              </td>
+                                              <td className="py-2.5 px-3 text-gray-900 max-w-xs">
+                                                <span className="line-clamp-2">{uniquePrompt}</span>
+                                              </td>
+                                              <td className="py-2.5 px-3">
+                                                <span
+                                                  className="inline-flex items-end gap-0.5 h-5"
+                                                  title="Volume = platform coverage for this prompt (signal strength)"
+                                                  aria-label={`Volume: ${uniquePlatformCount} of 5 bars`}
                                                 >
-                                                  {source.domain || source.url}
-                                                </a>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
+                                                  {[1, 2, 3, 4, 5].map((i) => {
+                                                    const filled = uniquePlatformCount >= i;
+                                                    return (
+                                                      <span
+                                                        key={i}
+                                                        className="w-1 min-w-[3px] rounded-sm transition-colors"
+                                                        style={{
+                                                          height: `${4 + (i - 1) * 4}px`,
+                                                          backgroundColor: filled ? '#16a34a' : '#e5e7eb'
+                                                        }}
+                                                      />
+                                                    );
+                                                  })}
+                                                </span>
+                                              </td>
+                                              <td className="py-2.5 px-3">
+                                                {(() => {
+                                                  const regionCode = firstResponse.response_metadata?.country ?? (selectedProject?.analysis_countries?.[0]) ?? 'US';
+                                                  return (
+                                                    <span className="inline-flex items-center gap-1">
+                                                      <span aria-hidden>{getFlagEmoji(regionCode)}</span>
+                                                      <span>{regionCode}</span>
+                                                    </span>
+                                                  );
+                                                })()}
+                                              </td>
+                                              <td className="py-2.5 px-3">
+                                                <div className="flex items-center gap-1">
+                                                  {getIntentPill(firstResponse.response_metadata?.intent)}
+                                                </div>
+                                              </td>
+                                              <td className="py-2.5 px-3">
+                                                <div
+                                                  className="flex items-center justify-center w-12 h-12 rounded-full border-2 border-gray-200 relative"
+                                                  style={{ background: `conic-gradient(#22c55e 0% ${visibilityPct}%, #e5e7eb ${visibilityPct}% 100%)` }}
+                                                  title={`${mentionedCount} of ${totalPlatformsInSession} platform${totalPlatformsInSession !== 1 ? 's' : ''} mentioned your brand`}
+                                                >
+                                                  <span className="absolute inset-0 flex items-center justify-center rounded-full bg-white m-0.5 text-xs font-medium text-gray-700">
+                                                    {visibilityPct}%
+                                                  </span>
+                                                </div>
+                                              </td>
+                                              <td className="py-2.5 px-3">
+                                                <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                                  {sentimentDisplay}
+                                                </span>
+                                              </td>
+                                              <td className="py-2.5 px-3 text-gray-700 font-medium" title="Your brand’s position from Competitor Rankings">
+                                                {brandRank != null ? brandRank : '—'}
+                                              </td>
+                                              <td className="py-2.5 px-3 text-gray-600">{createdDate}</td>
+                                              <td className="py-2.5 px-3">
+                                                <div className="flex items-center justify-center gap-1">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                      // One row per platform (dedupe so same platform is not shown twice)
+                                                      const byPlatform = new Map<string, any>();
+                                                      responses.forEach((r: any) => {
+                                                        if (!byPlatform.has(r.platform)) byPlatform.set(r.platform, r);
+                                                      });
+                                                      setViewResponseModal({ open: true, responses: Array.from(byPlatform.values()), prompt: uniquePrompt });
+                                                    }}
+                                                    className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                                    title="View all platform responses"
+                                                  >
+                                                    <Eye className="w-4 h-4" />
+                                                  </button>
+                                                  {resultsView === 'missed' && (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => {
+                                                        const editData = {
+                                                          prompt: uniquePrompt,
+                                                          responses: responses.map((r: any) => ({ id: r.id, platform: r.platform, response: r.response, response_metadata: r.response_metadata })),
+                                                          projectId: selectedProject?.id,
+                                                          brandName: selectedProject?.brand_name,
+                                                          industry: selectedProject?.industry,
+                                                          keywords: selectedProject?.keywords || [],
+                                                          competitors: selectedProject?.competitors || []
+                                                        };
+                                                        sessionStorage.setItem('editPromptData', JSON.stringify(editData));
+                                                        router.push('/dashboard/content?source=ai-visibility&step=content-generation');
+                                                      }}
+                                                      className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                                      title="Generate new content"
+                                                    >
+                                                      <Pencil className="w-4 h-4" />
+                                                    </button>
+                                                  )}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
                                   </div>
                                 </div>
-                              );
-                            });
+                              </>
+                            );
                           })()}
                         </div>
                       )}
@@ -7419,8 +7470,8 @@ function AIVisibilityContent() {
           </div>
         )}
 
-      {/* View Response Modal for Details View */}
-      {viewResponseModal?.open && viewResponseModal?.response && (
+      {/* View Response Modal – shows all platform responses for this query */}
+      {viewResponseModal?.open && (viewResponseModal?.responses?.length || viewResponseModal?.response) && (
         <div 
           className="fixed inset-0 flex items-center justify-center p-4"
           style={{ 
@@ -7443,7 +7494,7 @@ function AIVisibilityContent() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Full Response</h3>
+              <h3 className="text-lg font-semibold text-gray-900">All platform responses</h3>
               <button
                 onClick={() => setViewResponseModal(null)}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -7458,86 +7509,42 @@ function AIVisibilityContent() {
                   {viewResponseModal.prompt}
                 </div>
               </div>
-              <div className="mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className={`px-3 py-1 rounded text-sm font-medium capitalize ${
-                    viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'bg-orange-100 text-orange-800' :
-                    viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'bg-green-100 text-green-800' :
-                    viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'bg-blue-100 text-blue-800' :
-                    viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'bg-purple-100 text-purple-800' :
-                    viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'bg-pink-100 text-pink-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
-                    {viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'Claude' :
-                     viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'GPT' :
-                     viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'Gemini' :
-                     viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'Perplexity' :
-                     viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'Groq' :
-                     viewResponseModal.response.platform || 'Unknown'}
-                  </span>
-                </div>
-                <div className="text-sm font-medium text-gray-700 mb-2">Response:</div>
-                <div className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded max-h-80 overflow-y-auto">
-                  {viewResponseModal.response.response}
-                </div>
-              </div>
-
-              {/* Brand Detection Verification & Intent */}
-              {viewResponseModal.response.response_metadata && (
-                <div className="space-y-3 mb-4">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      viewResponseModal.response.response_metadata.brand_mentioned
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'
-                    }`}>
-                      {viewResponseModal.response.response_metadata.brand_mentioned ? '✓ Brand Mentioned' : '✗ Brand Not Mentioned'}
-                    </span>
-                    {viewResponseModal.response.response_metadata.intent && (
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        viewResponseModal.response.response_metadata.revenue_potential === 'high' ? 'bg-red-100 text-red-800' :
-                        viewResponseModal.response.response_metadata.revenue_potential === 'medium' ? 'bg-orange-100 text-orange-800' :
-                        viewResponseModal.response.response_metadata.revenue_potential === 'low' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>
-                        Intent: {viewResponseModal.response.response_metadata.intent.replace('_', ' ')} ({viewResponseModal.response.response_metadata.intent_score}/100)
+              {((viewResponseModal.responses?.length ? viewResponseModal.responses : [viewResponseModal.response]) as any[]).map((resp: any, idx: number) => {
+                const platform = resp?.platform || '';
+                const platformLower = platform.toLowerCase();
+                const platformLabel = platformLower.includes('claude') ? 'Claude' : platformLower.includes('chatgpt') || platformLower.includes('gpt') ? 'GPT' : platformLower.includes('gemini') ? 'Gemini' : platformLower.includes('perplexity') ? 'Perplexity' : platformLower.includes('groq') ? 'Groq' : platform || 'Unknown';
+                const platformClass = platformLower.includes('claude') ? 'bg-orange-100 text-orange-800' : platformLower.includes('chatgpt') || platformLower.includes('gpt') ? 'bg-green-100 text-green-800' : platformLower.includes('gemini') ? 'bg-blue-100 text-blue-800' : platformLower.includes('perplexity') ? 'bg-purple-100 text-purple-800' : platformLower.includes('groq') ? 'bg-pink-100 text-pink-800' : 'bg-gray-100 text-gray-800';
+                const meta = resp?.response_metadata;
+                return (
+                  <div key={resp?.id || idx} className="mb-6 last:mb-0 border border-gray-200 rounded-lg p-4 bg-gray-50/50">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`px-3 py-1 rounded text-sm font-medium capitalize ${platformClass}`}>
+                        {platformLabel}
                       </span>
+                      {meta && (
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${meta.brand_mentioned ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                          {meta.brand_mentioned ? '✓ Brand Mentioned' : '✗ Brand Not Mentioned'}
+                        </span>
+                      )}
+                      {meta?.intent && (
+                        <span className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-700">
+                          {meta.intent.replace('_', ' ')} ({meta.intent_score ?? '—'}/100)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm font-medium text-gray-700 mb-1">Response:</div>
+                    <div className="text-sm text-gray-700 whitespace-pre-wrap bg-white p-4 rounded border border-gray-100 max-h-64 overflow-y-auto">
+                      {resp?.response || '—'}
+                    </div>
+                    {meta?.verified_mention_text && meta.brand_mentioned && (
+                      <div className="mt-2 bg-green-50 border border-green-200 rounded p-2">
+                        <div className="text-xs font-medium text-green-800 mb-0.5">Verified mention:</div>
+                        <div className="text-sm text-green-900">&ldquo;{meta.verified_mention_text}&rdquo;</div>
+                      </div>
                     )}
                   </div>
-                  {viewResponseModal.response.response_metadata.verified_mention_text && (
-                    <div className="bg-green-50 border border-green-200 rounded p-3">
-                      <div className="text-xs font-medium text-green-800 mb-1">Verified brand text found in response:</div>
-                      <div className="text-xs text-green-700 mb-1.5">
-                        Found in: {viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'Claude (Anthropic)' :
-                         viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'ChatGPT (OpenAI)' :
-                         viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'Gemini (Google)' :
-                         viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'Perplexity' :
-                         viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'Groq' :
-                         viewResponseModal.response.platform || 'Unknown'}
-                      </div>
-                      <div className="text-sm text-green-900">
-                        &ldquo;{viewResponseModal.response.response_metadata.verified_mention_text}&rdquo;
-                      </div>
-                    </div>
-                  )}
-                  {!viewResponseModal.response.response_metadata.brand_mentioned && viewResponseModal.response.response_metadata.intent_score >= 45 && (
-                    <div className="bg-red-50 border border-red-200 rounded p-3">
-                      <div className="text-xs font-bold text-red-800 mb-1">💰 Revenue Opportunity Lost</div>
-                      <div className="text-sm text-red-700">
-                        {viewResponseModal.response.response_metadata.opportunity_label || 'This is a high-intent buyer query where your brand is invisible.'}
-                      </div>
-                    </div>
-                  )}
-                  {viewResponseModal.response.response_metadata.competitors_found?.length > 0 && !viewResponseModal.response.response_metadata.brand_mentioned && (
-                    <div className="bg-amber-50 border border-amber-200 rounded p-3">
-                      <div className="text-xs font-bold text-amber-800 mb-1">⚠️ Competitors visible instead</div>
-                      <div className="text-sm text-amber-700">
-                        {viewResponseModal.response.response_metadata.competitors_found.join(', ')} {viewResponseModal.response.response_metadata.competitors_found.length === 1 ? 'is' : 'are'} mentioned while your brand is not.
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                );
+              })}
             </div>
             <div className="p-6 border-t border-gray-200">
               <button
@@ -8372,80 +8379,6 @@ function AIVisibilityContent() {
         </div>
       </div>
 
-      {/* View Response Modal - Simple fixed modal */}
-      {viewResponseModal?.open && viewResponseModal?.response && (
-        <div 
-          className="fixed inset-0 flex items-center justify-center p-4"
-          style={{ 
-            zIndex: 99999,
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)'
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setViewResponseModal(null);
-            }
-          }}
-        >
-          <div 
-            className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Full Response</h3>
-              <button
-                onClick={() => setViewResponseModal(null)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1">
-              <div className="mb-4">
-                <div className="text-sm font-medium text-gray-700 mb-2">Query:</div>
-                <div className="text-sm text-gray-900 bg-gray-50 p-3 rounded">
-                  {viewResponseModal.prompt}
-                </div>
-              </div>
-              <div className="mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className={`px-3 py-1 rounded text-sm font-medium capitalize ${
-                    viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'bg-orange-100 text-orange-800' :
-                    viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'bg-green-100 text-green-800' :
-                    viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'bg-blue-100 text-blue-800' :
-                    viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'bg-purple-100 text-purple-800' :
-                    viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'bg-pink-100 text-pink-800' :
-                    'bg-gray-100 text-gray-800'
-                  }`}>
-                    {viewResponseModal.response.platform?.toLowerCase().includes('claude') ? 'Claude' :
-                     viewResponseModal.response.platform?.toLowerCase().includes('chatgpt') || viewResponseModal.response.platform?.toLowerCase().includes('gpt') ? 'GPT' :
-                     viewResponseModal.response.platform?.toLowerCase().includes('gemini') ? 'Gemini' :
-                     viewResponseModal.response.platform?.toLowerCase().includes('perplexity') ? 'Perplexity' :
-                     viewResponseModal.response.platform?.toLowerCase().includes('groq') ? 'Groq' :
-                     viewResponseModal.response.platform || 'Unknown'}
-                  </span>
-                </div>
-                <div className="text-sm font-medium text-gray-700 mb-2">Response:</div>
-                <div className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-4 rounded max-h-80 overflow-y-auto">
-                  {viewResponseModal.response.response}
-                </div>
-              </div>
-            </div>
-            <div className="p-6 border-t border-gray-200">
-              <button
-                onClick={() => setViewResponseModal(null)}
-                className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

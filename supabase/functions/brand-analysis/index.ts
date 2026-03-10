@@ -1769,12 +1769,16 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
     }
   }
 
+  // Return type: { text: string, country?: string | null }[] so UI can show "which query is for what region"
+  const toItem = (text, country = null) => (typeof text === 'string' ? { text: text.trim(), country } : { text: String(text).trim(), country: null });
+
   if (mode === 'manual') {
     if (manualTexts.length === 0) {
       console.log(`Manual mode but no manual queries; using fallback generated queries (max ${N})`);
-      return generateFallbackQueries(project.brand_name, project.industry, keywords, project.competitors || [], queryLanguage, analysisCountriesRun).slice(0, N);
+      const fallback = generateFallbackQueries(project.brand_name, project.industry, keywords, project.competitors || [], queryLanguage, analysisCountriesRun).slice(0, N);
+      return fallback.map((q) => toItem(q, null));
     }
-    return manualTexts.slice(0, N);
+    return manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null));
   }
 
   // Option A: distribute N across (language × region) buckets
@@ -1785,7 +1789,7 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
   const allQueries = [];
 
   if (mode === 'auto_manual') {
-    const combined = [...manualTexts];
+    const combined = manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null));
     const bucketPromises = buckets.map((b, i) => {
       const count = perBucket + (i < remainder ? 1 : 0);
       if (count <= 0) return Promise.resolve([]);
@@ -1793,13 +1797,15 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
       return generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', lang, { languages: [lang], countries: country ? [country] : [], maxQueries: count });
     });
     const bucketResults = await Promise.all(bucketPromises);
-    for (const generated of bucketResults) {
+    for (let i = 0; i < bucketResults.length; i++) {
+      const generated = bucketResults[i];
+      const country = buckets[i].country;
       for (const q of generated) {
         if (combined.length >= N) break;
-        if (!combined.includes(q)) combined.push(q);
+        if (!combined.some((c) => c.text === q)) combined.push(toItem(q, country));
       }
     }
-    console.log(`Auto+manual: ${manualTexts.length} manual + generated, total ${combined.length} (cap ${N}, ${bucketCount} buckets)`);
+    console.log(`Auto+manual: ${manualList.length} manual + generated, total ${combined.length} (cap ${N}, ${bucketCount} buckets)`);
     return combined.slice(0, N);
   }
 
@@ -1810,7 +1816,11 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
     return generateRealisticUserQueries(project.brand_name, project.industry, keywords, project.competitors || [], project.website_url || '', lang, { languages: [lang], countries: country ? [country] : [], maxQueries: count });
   });
   const bucketResults = await Promise.all(bucketPromises);
-  for (const generated of bucketResults) allQueries.push(...generated);
+  for (let i = 0; i < bucketResults.length; i++) {
+    const generated = bucketResults[i];
+    const country = buckets[i].country;
+    for (const q of generated) allQueries.push(toItem(q, country));
+  }
   console.log(`Option A: ${allQueries.length} queries across ${bucketCount} (lang×region) buckets (parallel generation)`);
   return allQueries.slice(0, N);
 }
@@ -2193,11 +2203,12 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
       ? (analysisLangs[0].toLowerCase().startsWith('he') ? 'he' : analysisLangs[0].split('-')[0].toLowerCase() || 'en')
       : 'en';
     const selectedQueries = await getQueriesForAnalysis(project, queryLanguage, analysisLangs, analysisCountriesRun);
+    const queryStrings = selectedQueries.map((q) => (typeof q === 'string' ? q : q.text));
     console.log(`Using ${selectedQueries.length} queries for analysis across each platform (mode: ${project.query_mode || 'auto'})`);
-    console.log("Sample queries:", selectedQueries.slice(0, 5));
+    console.log("Sample queries:", queryStrings.slice(0, 5));
     // Use existing session or create a new one
     let session;
-    const totalQueries = availablePlatforms.length * selectedQueries.length;
+    const totalQueries = availablePlatforms.length * queryStrings.length;
     if (existingSessionId) {
       // Use the existing session
       const { data: existingSession, error: fetchError } = await supabase.from('brand_analysis_sessions').select('*').eq('id', existingSessionId).single();
@@ -2234,7 +2245,7 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
     const BATCH_SIZE = 10;
     // Split queries into batches
     const queryBatches = [];
-    for(let i = 0; i < selectedQueries.length; i += BATCH_SIZE){
+    for (let i = 0; i < selectedQueries.length; i += BATCH_SIZE) {
       queryBatches.push(selectedQueries.slice(i, i + BATCH_SIZE));
     }
     console.log(`Split ${selectedQueries.length} queries into ${queryBatches.length} batches of ${BATCH_SIZE}`);
@@ -2248,11 +2259,13 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
         let platformSuccess = false;
         let batchQueries = 0;
         // Process each query in the batch for this platform
-        for (const query of queryBatch){
+        for (const queryItem of queryBatch) {
+          const queryText = typeof queryItem === 'string' ? queryItem : queryItem.text;
+          const queryCountry = typeof queryItem === 'object' && queryItem && 'country' in queryItem ? queryItem.country : null;
           try {
-            const response = await queryAIPlatform(platform, query, language);
+            const response = await queryAIPlatform(platform, queryText, language);
             if (response) {
-              console.log(`Got response from ${platform} for query "${query.substring(0, 50)}...": ${response.substring(0, 50)}...`);
+              console.log(`Got response from ${platform} for query "${queryText.substring(0, 50)}...": ${response.substring(0, 50)}...`);
               platformSuccess = true;
               batchQueries++;
               // Extract sources from the response
@@ -2264,23 +2277,24 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
                 analysis.sources = extractedSources;
               }
               // Store results for cross-platform comparison
-              platformResults[platform][query] = {
+              platformResults[platform][queryText] = {
                 response: response,
                 analysis: analysis
               };
               if (analysis?.brand_mentioned) {
                 totalMentions++;
-                console.log(`✓ Brand mentioned in response to: "${query}"`);
+                console.log(`✓ Brand mentioned in response to: "${queryText}"`);
               }
               // Classify query commercial intent
-              const queryIntent = classifyQueryIntent(query);
+              const queryIntent = classifyQueryIntent(queryText);
               const enrichedAnalysis = analysis ? { ...analysis, ...queryIntent } : queryIntent;
-              // Store the response with metadata
+              if (queryCountry != null) enrichedAnalysis.country = queryCountry;
+              // Store the response with metadata (including country/region for this query)
               await supabase.from('ai_platform_responses').insert({
                 project_id: projectId,
                 session_id: session.id,
                 platform: platform,
-                prompt: query,
+                prompt: queryText,
                 response: response,
                 response_metadata: enrichedAnalysis
               });
@@ -2292,10 +2306,10 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
                 }).eq('id', session.id);
               }
             } else {
-              console.log(`No response received from ${platform} for query: "${query}"`);
+              console.log(`No response received from ${platform} for query: "${queryText}"`);
             }
           } catch (error) {
-            console.error(`Error processing query "${query}" for ${platform}:`, error);
+            console.error(`Error processing query "${queryText}" for ${platform}:`, error);
           // Continue with next query
           }
           // Small delay between requests to avoid rate limiting
@@ -2501,32 +2515,35 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
     
     // Build one task per (query, platform) pair; each task catches errors so one failing platform does not break others
     const tasks = [];
-    for (const query of currentBatch) {
+    for (const queryItem of currentBatch) {
+      const queryText = typeof queryItem === 'string' ? queryItem : queryItem.text;
+      const queryCountry = typeof queryItem === 'object' && queryItem && 'country' in queryItem ? queryItem.country : null;
       for (const platform of platforms) {
         tasks.push(async () => {
           try {
-            const response = await queryAIPlatform(platform, query, language);
+            const response = await queryAIPlatform(platform, queryText, language);
             if (!response) {
-              console.log(`No response from ${platform} for query "${query.substring(0, 30)}..."`);
+              console.log(`No response from ${platform} for query "${queryText.substring(0, 30)}..."`);
               return { ok: true, platform, stored: false, brandMentioned: false };
             }
             const extractedSources = extractSourcesFromResponse(response);
             const analysis = await analyzeBrandMention(response, project.brand_name, project.competitors || []);
             if (analysis && extractedSources.length > 0) analysis.sources = extractedSources;
-            const queryIntent = classifyQueryIntent(query);
+            const queryIntent = classifyQueryIntent(queryText);
             const enrichedAnalysis = analysis ? { ...analysis, ...queryIntent } : queryIntent;
+            if (queryCountry != null) enrichedAnalysis.country = queryCountry;
             await supabase.from('ai_platform_responses').insert({
               project_id: projectId,
               session_id: sessionId,
               platform,
-              prompt: query,
+              prompt: queryText,
               response,
               response_metadata: enrichedAnalysis
             });
             return { ok: true, platform, stored: true, brandMentioned: analysis?.brand_mentioned };
           } catch (err) {
             const msg = err?.message || String(err);
-            console.error(`Platform ${platform} error for query "${query.substring(0, 30)}...":`, msg);
+            console.error(`Platform ${platform} error for query "${queryText.substring(0, 30)}...":`, msg);
             return { ok: false, platform, error: msg };
           }
         });
@@ -2751,17 +2768,20 @@ Deno.serve(async (req) => {
         throw new Error(`Failed to fetch project: ${projectError?.message}`);
       }
       
-      // Get already processed query indices
-      const { data: existingResponses, error: responsesError } = await supabase
+      // Get already processed prompts (table column is "prompt" not "query")
+      const { data: existingResponses } = await supabase
         .from('ai_platform_responses')
-        .select('query')
+        .select('prompt')
         .eq('session_id', sessionId);
       
-      const processedQueries = new Set((existingResponses || []).map(r => r.query));
+      const processedPrompts = new Set((existingResponses || []).map((r: any) => r.prompt));
       const allQueries = sessionData.queries || [];
       
-      // Find remaining queries that haven't been processed
-      const remainingQueries = allQueries.filter((q: string) => !processedQueries.has(q));
+      // Find remaining queries that haven't been processed (support both string and { text, country })
+      const remainingQueries = allQueries.filter((q: any) => {
+        const text = typeof q === 'string' ? q : q?.text;
+        return text && !processedPrompts.has(text);
+      });
       
       console.log(`📊 Total queries: ${allQueries.length}, Already processed: ${processedQueries.size}, Remaining: ${remainingQueries.length}`);
       
@@ -3071,9 +3091,9 @@ Deno.serve(async (req) => {
     const preferredLangForQueries = analysisLanguages.length > 0
       ? (analysisLanguages[0].toLowerCase().startsWith('he') ? 'he' : analysisLanguages[0].split('-')[0].toLowerCase() || 'en')
       : 'en';
-    let selectedQueriesForRun: string[];
+    let selectedQueriesForRun: Array<string | { text: string; country?: string | null }>;
     if (Array.isArray(rerunQueries) && rerunQueries.length > 0) {
-      selectedQueriesForRun = rerunQueries;
+      selectedQueriesForRun = rerunQueries.map((q) => (typeof q === 'string' ? q : { text: q.text || '', country: q.country ?? null }));
       console.log(`♻️ Re-run mode: using ${selectedQueriesForRun.length} queries from previous session`);
     } else {
       selectedQueriesForRun = await getQueriesForAnalysis(project, preferredLangForQueries, analysisLanguages, analysisCountries, allKeywords);

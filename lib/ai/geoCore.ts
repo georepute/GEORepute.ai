@@ -422,25 +422,27 @@ export async function generateStrategicContent(
     neutral: "Balanced, objective, informative. Present facts without strong emotion. Even-keeled and measured.",
   };
 
-  // Language instruction
+  // Language instruction (blog gets longer length and same quality standards in all languages)
+  const isBlogLang = input.contentType === "blog_article" || input.targetPlatform === "shopify";
+  const lengthForLang = isBlogLang ? "1200-2000 words (full blog). Same blog quality standards apply: structure (intro, 3–5 insights, conclusion), Spark, H2/H3, authority links, two structural elements." : "minimum 150 words; aim for 200-300.";
   const languageInstruction = input.language === "he"
     ? `\n🌐 HEBREW-ONLY REQUIREMENT (STRICT):
 - Output ONLY valid Hebrew text: Hebrew letters (א-ת), optional niqqud, standard punctuation (. , ? ! " ' - : ;). No other characters.
 - Do NOT use Latin/English letters (e.g. "Israel", "L") or transliterations in parentheses like (Israel haGedolah). Write the concept in Hebrew only (e.g. ישראל, ישראל הגדולה).
 - Do NOT output corrupted text, random symbols, or mixed scripts (e.g. no L†)@)\\|&$^ or similar). If a word is normally written in Hebrew, use only Hebrew.
 - Write naturally in Hebrew, as a native speaker. Every word must be in Hebrew script. No English, no transliterations, no mixed/corrupted characters.
-- Length: minimum 150 words; aim for 200-300. Complete every sentence; never cut off mid-word or with garbage characters.\n`
+- Length: ${lengthForLang} Complete every sentence; never cut off mid-word or with garbage characters.\n`
     : input.language === "ar"
     ? `\n🌐 ARABIC-ONLY REQUIREMENT (STRICT):
 - Output ONLY valid Arabic text: Arabic script (right-to-left), standard punctuation. Use Modern Standard Arabic (الفصحى) or clear dialect as appropriate.
 - Do NOT mix Latin/English letters with Arabic. Write the entire content in Arabic script only.
 - Do NOT output corrupted text, random symbols, or mixed scripts. Every word must be in Arabic script.
-- Write naturally in Arabic, as a native speaker would. Length: minimum 150 words; aim for 200-300. Complete every sentence.\n`
+- Write naturally in Arabic, as a native speaker would. Length: ${lengthForLang} Complete every sentence.\n`
     : input.language === "fr"
     ? `\n🌐 FRENCH-ONLY REQUIREMENT (STRICT):
 - Output ONLY valid French text. Use correct French grammar, accents (é, è, ê, à, ù, ç, etc.), and punctuation.
 - Do NOT mix in English or other languages. Write the entire content in French only.
-- Write naturally in French, as a native speaker would. Length: minimum 150 words; aim for 200-300. Complete every sentence.\n`
+- Write naturally in French, as a native speaker would. Length: ${lengthForLang} Complete every sentence.\n`
     : "";
 
   let finalReminder: string;
@@ -677,6 +679,14 @@ ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
 - TONE: Professional, informative, engaging, helpful—but human and conversational
 - NO EMOJIS in blog content
 - Write like a professional blogger who sounds like a real person, not a generic content machine
+
+**BLOG QUALITY STANDARDS (MANDATORY – every generated blog must meet these):**
+- STRUCTURE: Use a clear three-part structure: (1) a short introduction that presents the topic and hooks the reader, (2) a main body with 3–5 key insights or sections, and (3) a positive, actionable conclusion that leaves the reader with a clear takeaway.
+- SPARK: Include at least one original idea or "Spark" that adds real value and offers an interesting, distinctive perspective on the topic—something that makes this piece stand out, not generic.
+- HEADINGS & READABILITY: Use proper heading hierarchy: one <h1> (or clear title) for the topic, <h2> for main sections, <h3> for subsections. Keep paragraphs short (2–4 sentences) to maintain readability and support both SEO and AI search visibility.
+- AUTHORITY LINKS: When referencing data, research, or industry trends, link to relevant authority sources using <a href="URL">anchor text</a>. Use credible, well-known sources (studies, official reports, respected publications). At least 1–2 such links in the body where they add value.
+- VISUAL / STRUCTURAL ELEMENTS: Include at least TWO of the following within the article: a table (use <table>, <tr>, <td>, <th>), a checklist (<ul><li> with checkmarks or numbered steps), a bullet list, a key quote in a highlight style (<blockquote> or <strong>), a practical example or short case-style illustration, or a clear "key takeaway" or summary box. This improves scannability and value.
+- GOAL: Every piece must be a high-quality knowledge asset: platform-optimized (WordPress/Shopify), strong for SEO and GEO (AI search visibility), and structured so it can be expanded, repurposed, or distributed elsewhere.
 ${input.brandVoice ? `- Maintain your ${input.brandVoice.tone} brand voice tone throughout` : ""}` : ''}
 
 5️⃣ **KEYWORD INTEGRATION (NATURAL, NOT FORCED)**
@@ -703,14 +713,13 @@ ${(input.websiteUrl && ['medium', 'github', 'quora', 'shopify'].includes(input.t
 7️⃣ **LENGTH & FORMATTING**
 ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
 - BLOG ARTICLE FORMAT: Write a comprehensive, long-form blog post (1200-2000 words)
-- Include an engaging introduction that hooks the reader
-- Use HTML headings: <h2> for main sections, <h3> for subsections
-- Include 4-6 main sections with detailed content in each
-- Add practical tips, examples, and actionable advice
-- Use bullet points (<ul><li>) and numbered lists (<ol><li>) where appropriate
-- Include a conclusion with a call-to-action
-- Format with proper HTML tags for Shopify: <p>, <h2>, <h3>, <ul>, <li>, <strong>, <em>
-- Make content SEO-optimized with keywords in headings and throughout
+- Structure: Short intro → 3–5 key insights in the body → positive, actionable conclusion
+- Use HTML headings: <h2> for main sections, <h3> for subsections; keep paragraphs short (2–4 sentences)
+- Include at least TWO structural elements: e.g. table, checklist, bullet list, blockquote/key quote, practical example, or highlight box
+- When citing data or research, add 1–2 <a href="..."> links to authority sources
+- Include an engaging introduction, 4–6 main sections, and a conclusion with a clear call-to-action
+- Format with proper HTML tags: <p>, <h2>, <h3>, <ul>, <li>, <ol>, <table>, <blockquote>, <strong>, <em>, <a>
+- Make content SEO- and GEO-optimized (keywords in headings and throughout; readable for both humans and AI)
 ` : `
 - Length: Write 150-300 words minimum. Do not output short or truncated content. Complete every sentence and paragraph. Aim for a full, substantive response.
 ${input.language === "he" ? "- Hebrew: minimum 150 words, aim 200-300. End with a complete sentence. Never output garbled characters, Latin letters, or transliterations—only Hebrew letters and punctuation." : ""}
@@ -744,6 +753,7 @@ ${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-d
 ${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal — professional, no informal words` : ''}
 ${input.targetPlatform === 'linkedin' ? `✅ LinkedIn style: Professional yet human, thoughtful — no informal words` : ''}
 ${input.targetPlatform === 'twitter' ? `✅ X/Twitter style: Short, punchy — professional tone, no informal words or slang` : ''}
+${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `✅ Blog quality: Short intro + 3–5 key insights + positive conclusion; at least one original Spark; H2/H3 + short paragraphs; 1–2 authority links; at least two of: table, checklist, bullets, quote, example, highlight box` : ''}
 ${input.language === "he" ? `✅ Hebrew only: Content uses only Hebrew script (א-ת) and punctuation; no Latin/transliterations/corrupted chars; 150+ words, complete sentence at end` : ''}
 ${input.language === "ar" ? `✅ Arabic only: Content uses only Arabic script and punctuation; no Latin/mixed script; 150+ words, complete sentence at end` : ''}
 ${input.language === "fr" ? `✅ French only: Content uses only French; correct grammar and accents; 150+ words, complete sentence at end` : ''}
@@ -760,12 +770,16 @@ ${finalReminder}
 `;
 
   // Build conditional system message based on brand voice
+  const isBlog = input.contentType === "blog_article" || input.targetPlatform === "shopify";
+  const blogLangNote = isBlog && (input.language === "he" || input.language === "ar" || input.language === "fr")
+    ? ` Apply the SAME blog quality standards: clear structure (short intro, 3–5 key insights, positive conclusion), at least one Spark, proper H2/H3 and short paragraphs, 1–2 authority links, at least two structural elements (table, checklist, bullets, quote, example). Length 1200–2000 words.`
+    : "";
   const languageNote = input.language === "he"
-    ? `\n🌐 HEBREW OUTPUT ONLY: Content must be 100% Hebrew script (א-ת and punctuation). No Latin letters, no transliterations in parentheses, no corrupted or mixed characters. Express any proper nouns (e.g. Israel) in Hebrew (ישראל). Minimum 150 words; write a complete, unabbreviated response.\n`
+    ? `\n🌐 HEBREW OUTPUT ONLY: Content must be 100% Hebrew script (א-ת and punctuation). No Latin letters, no transliterations in parentheses, no corrupted or mixed characters. Express any proper nouns (e.g. Israel) in Hebrew (ישראל).${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
     : input.language === "ar"
-    ? `\n🌐 ARABIC OUTPUT ONLY: Content must be 100% Arabic script (right-to-left) and punctuation. No Latin letters, no mixed script. Use Modern Standard Arabic. Minimum 150 words; write a complete, unabbreviated response.\n`
+    ? `\n🌐 ARABIC OUTPUT ONLY: Content must be 100% Arabic script (right-to-left) and punctuation. No Latin letters, no mixed script. Use Modern Standard Arabic.${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
     : input.language === "fr"
-    ? `\n🌐 FRENCH OUTPUT ONLY: Content must be 100% French. Use correct French grammar, accents, and punctuation. No English or other languages. Minimum 150 words; write a complete, unabbreviated response.\n`
+    ? `\n🌐 FRENCH OUTPUT ONLY: Content must be 100% French. Use correct French grammar, accents, and punctuation. No English or other languages.${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
     : "";
 
   let systemMessage = `You are a REAL HUMAN typing on a phone or laptop RIGHT NOW. You are NOT an AI, NOT a bot, NOT a content writer.

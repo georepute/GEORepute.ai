@@ -154,6 +154,23 @@ async function runFullCompetitorAnalysis(params: any, supabase: any): Promise<Co
   } else {
     console.log(`✅ Stored competitor analysis and marked session as COMPLETED: ${sessionId}`);
   }
+
+  // Persist brand rank on all ai_platform_responses for this session (for AI visibility prompts table)
+  const brandRankEntry = rankings.ranked_competitors.find(
+    (c: any) => (c.name || '').toLowerCase() === (brandName || '').toLowerCase()
+  );
+  const brandRank = brandRankEntry?.rank ?? null;
+  if (brandRank != null) {
+    const { error: rankUpdateError } = await supabase
+      .from('ai_platform_responses')
+      .update({ brand_rank: brandRank })
+      .eq('session_id', sessionId);
+    if (rankUpdateError) {
+      console.warn('Failed to set brand_rank on ai_platform_responses:', rankUpdateError.message);
+    } else {
+      console.log(`✅ Set brand_rank=${brandRank} on ai_platform_responses for session ${sessionId}`);
+    }
+  }
   
   // Update project last analysis timestamp
   await supabase.from('brand_analysis_projects').update({

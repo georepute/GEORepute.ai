@@ -62,6 +62,27 @@ interface BlogPost {
 
 type PublishPlatform = "shopify" | "wordpress" | "wordpress_self_hosted";
 
+/**
+ * Ensure HTML has block-level elements so Quill creates separate blocks.
+ * When content is one big block, applying H1 to a selection turns the whole content into H1.
+ * This splits plain text or a single <p> into multiple <p> blocks so formatting applies per block only.
+ */
+function ensureBlockStructure(html: string): string {
+  if (!html || typeof html !== "string") return html;
+  const trimmed = html.trim();
+  // Multiple block-level elements already: leave as-is so H1 applies per block
+  const blockTagCount = (trimmed.match(/<\s*(p|h[1-6]|div|blockquote)[\s>]/gi) || []).length;
+  if (blockTagCount >= 2) return trimmed;
+  // Single <p>...</p> or no block tags: get inner text and split into paragraphs
+  let text = trimmed;
+  const singleP = trimmed.match(/^<p[^>]*>([\s\S]*)<\/p>$/i);
+  if (singleP) text = singleP[1].replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ").trim();
+  else text = trimmed.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const paragraphs = text.split(/\n\s*\n/).filter((s) => s.trim().length > 0);
+  if (paragraphs.length <= 1) return trimmed.includes("<p>") ? trimmed : `<p>${trimmed.replace(/\n/g, "<br/>")}</p>`;
+  return paragraphs.map((p) => `<p>${p.trim().replace(/\n/g, "<br/>")}</p>`).join("");
+}
+
 function BlogPageContent() {
   const { isRtl, t, language } = useLanguage();
   const router = useRouter();
@@ -367,10 +388,11 @@ function BlogPageContent() {
 
         // Update the post with generated content and summary
         // NOTE: Schema will be generated separately when clicking "Send to Publication"
+        // Ensure content has block structure so Quill shows separate blocks; applying H1 then only affects one block
         setPost({
           ...post,
           title: topic.trim(),
-          content: data.content,
+          content: ensureBlockStructure(data.content),
           tags: targetKeywords || "",
           summary: generatedSummary,
         });
