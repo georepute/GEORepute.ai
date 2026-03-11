@@ -73,6 +73,8 @@ import {
   Line
 } from 'recharts';
 import { CompetitorLogo } from '@/components/CompetitorLogo';
+import { AiVisibilityErrorBoundary } from '@/components/AiVisibilityErrorBoundary';
+import { reportAiVisibilityError } from '@/lib/ai-visibility-error-report';
 
 // Register Chart.js components
 Chart.register(
@@ -256,7 +258,8 @@ function AIVisibilityContent() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historySessions, setHistorySessions] = useState<Session[]>([]);
   const [historySessionsLoading, setHistorySessionsLoading] = useState(false);
-  
+  const [previousSessionResponses, setPreviousSessionResponses] = useState<any[]>([]);
+
   // Domain Intelligence state
   const [domainIntelligenceJobs, setDomainIntelligenceJobs] = useState<any[]>([]);
   const [selectedDomainJob, setSelectedDomainJob] = useState<any | null>(null);
@@ -545,6 +548,38 @@ function AIVisibilityContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProject?.id, activeTab, projectSessions.length, viewMode, historySessionId]);
 
+  // Fetch previous session responses for Trend column (compare current run to last run)
+  useEffect(() => {
+    if (viewMode !== 'details' || !selectedProject || activeTab !== 'results' || projectResponses.length === 0) {
+      setPreviousSessionResponses([]);
+      return;
+    }
+    const projectId = selectedProject.id;
+    const completedSessions = projectSessions
+      .filter((s: Session) => s.project_id === projectId && s.status === 'completed')
+      .sort((a: Session, b: Session) =>
+        new Date(b.completed_at || b.started_at).getTime() - new Date(a.completed_at || a.started_at).getTime()
+      );
+    const currentSessionId = historySessionId || completedSessions[0]?.id;
+    const currentIdx = completedSessions.findIndex((s: Session) => s.id === currentSessionId);
+    const previousSession = currentIdx > 0 ? completedSessions[currentIdx - 1] : null;
+    if (!previousSession?.id) {
+      setPreviousSessionResponses([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('ai_platform_responses')
+        .select('*')
+        .eq('session_id', previousSession.id)
+        .order('created_at', { ascending: false });
+      if (!cancelled && !error) setPreviousSessionResponses(data || []);
+      else if (!cancelled) setPreviousSessionResponses([]);
+    })();
+    return () => { cancelled = true; };
+  }, [viewMode, selectedProject?.id, activeTab, projectResponses.length, historySessionId, projectSessions]);
+
   // Auto-select latest completed session when sessions are loaded
   useEffect(() => {
     if (!selectedProject || projectSessions.length === 0) return;
@@ -832,6 +867,7 @@ function AIVisibilityContent() {
       }
     } catch (error) {
       console.error('Error fetching project details:', error);
+      reportAiVisibilityError(error, { source: 'Fetch project details' });
     }
   };
 
@@ -864,6 +900,7 @@ function AIVisibilityContent() {
     } catch (error) {
       console.error('Error fetching responses:', error);
       setProjectResponses([]);
+      reportAiVisibilityError(error, { source: 'Fetch project responses' });
     }
   };
 
@@ -923,6 +960,7 @@ function AIVisibilityContent() {
     } catch (error) {
       console.error('Error fetching brand summary:', error);
       setBrandSummary(null);
+      reportAiVisibilityError(error, { source: 'Fetch brand summary' });
     } finally {
       setLoadingBrandSummary(false);
     }
@@ -1394,6 +1432,10 @@ function AIVisibilityContent() {
       }
     } catch (error: any) {
       console.error('Error starting analysis:', error);
+      reportAiVisibilityError(error, {
+        source: 'Start analysis / modal',
+        context: { projectId: project?.id, projectName: project?.brand_name },
+      });
       alert(`Error: ${error.message}`);
     } finally {
       setIsAnalyzing(false);
@@ -5338,11 +5380,82 @@ function AIVisibilityContent() {
 
                             // Per-prompt region: backend stores response_metadata.country per query when run with multiple regions
 
-                            // Rank: prefer stored brand_rank on response (from Supabase), else from session competitor rankings
+                            // Per-prompt rank: for this prompt only, rank brand vs competitors by mention count across its responses
+                            const getPerPromptRank = (promptResponses: any[]): number | null => {
+                              const brandName = (selectedProject?.brand_name || '').trim().toLowerCase();
+                              if (!brandName) return null;
+                              const mentionCount: Record<string, number> = { [brandName]: 0 };
+                              const add = (name: string) => {
+                                const key = name.trim().toLowerCase();
+                                if (!key) return;
+                                mentionCount[key] = (mentionCount[key] ?? 0) + 1;
+                              };
+                              promptResponses.forEach((r: any) => {
+                                const meta = r.response_metadata;
+                                if (meta?.brand_mentioned === true) add(brandName);
+                                const found = meta?.competitors_found || [];
+                                found.forEach((c: string | { name?: string }) => {
+                                  const n = typeof c === 'string' ? c : (c?.name ?? '');
+                                  if (n) add(n);
+                                });
+                              });
+                              const entities = Object.entries(mentionCount).sort((a, b) => b[1] - a[1]);
+                              const brandIdx = entities.findIndex(([k]) => k === brandName);
+                              if (brandIdx === -1) return null;
+                              return brandIdx + 1;
+                            };
+
+                            // Session-level brand rank (fallback when per-prompt rank not available)
                             const rankings = activeSession?.competitor_analysis?.rankings || [];
                             const brandRankFromSession = rankings.find((r: any) =>
                               parseCompetitorNameGlobal(r.name).name === selectedProject?.brand_name
                             )?.rank ?? null;
+
+                            // Previous-run metrics per prompt (for Trend column)
+                            const totalPlatformsInPreviousSession = new Set(previousSessionResponses.map((r: any) => r.platform)).size;
+                            const prevGroupedByPrompt: Record<string, any[]> = {};
+                            previousSessionResponses.forEach((r: any) => {
+                              const key = (r.prompt || '').trim().toLowerCase();
+                              if (!prevGroupedByPrompt[key]) prevGroupedByPrompt[key] = [];
+                              prevGroupedByPrompt[key].push(r);
+                            });
+                            const prevMetricsByPrompt: Record<string, { volume: number; visibility: number; rank: number | null; sentiment: number | null }> = {};
+                            Object.entries(prevGroupedByPrompt).forEach(([key, resps]) => {
+                              const platformsMentioned = new Set(resps.filter((r: any) => r.response_metadata?.brand_mentioned).map((r: any) => r.platform)).size;
+                              const visibility = totalPlatformsInPreviousSession > 0
+                                ? Math.min(100, Math.round((platformsMentioned / totalPlatformsInPreviousSession) * 100))
+                                : 0;
+                              const sentimentRaw = resps[0]?.response_metadata?.sentiment_score;
+                              const numSent = Number(sentimentRaw);
+                              const sentiment = sentimentRaw != null
+                                ? Math.min(100, Math.max(0, numSent >= 0 && numSent <= 1 ? Math.round(numSent * 100) : Math.round((numSent + 1) * 50)))
+                                : null;
+                              prevMetricsByPrompt[key] = {
+                                volume: new Set(resps.map((r: any) => r.platform)).size,
+                                visibility,
+                                rank: getPerPromptRank(resps),
+                                sentiment
+                              };
+                            });
+
+                            const formatTrend = (
+                              promptKey: string,
+                              curr: { volume: number; visibility: number; rank: number | null; sentiment: number | string }
+                            ): string => {
+                              const prev = prevMetricsByPrompt[promptKey];
+                              if (!prev) return '—';
+                              const parts: string[] = [];
+                              if (prev.volume !== curr.volume) parts.push(`Vol ${curr.volume > prev.volume ? '+' : ''}${curr.volume - prev.volume}`);
+                              if (prev.visibility !== curr.visibility) parts.push(`Vis ${curr.visibility > prev.visibility ? '+' : ''}${curr.visibility - prev.visibility}%`);
+                              if (prev.rank != null && curr.rank != null && prev.rank !== curr.rank) {
+                                parts.push(curr.rank < prev.rank ? `Rank ${prev.rank}→${curr.rank}` : `Rank ${prev.rank}→${curr.rank}`);
+                              }
+                              const currSent = typeof curr.sentiment === 'number' ? curr.sentiment : (typeof curr.sentiment === 'string' && curr.sentiment !== '—' ? parseInt(curr.sentiment, 10) : null);
+                              if (prev.sentiment != null && currSent != null && !Number.isNaN(currSent) && prev.sentiment !== currSent) {
+                                parts.push(`Sent ${currSent > prev.sentiment ? '+' : ''}${currSent - prev.sentiment}`);
+                              }
+                              return parts.length === 0 ? '—' : parts.join(' · ');
+                            };
 
                             return (
                               <>
@@ -5377,6 +5490,7 @@ function AIVisibilityContent() {
                                           <th className="py-3 px-3 w-24">Visibility</th>
                                           <th className="py-3 px-3 w-20">Sentiment</th>
                                           <th className="py-3 px-3 w-16">Rank</th>
+                                          <th className="py-3 px-3 w-32" title="Change vs previous analysis run">Trend</th>
                                           <th className="py-3 px-3 w-28">Created</th>
                                           <th className="py-3 px-3 w-16 text-center">Actions</th>
                                         </tr>
@@ -5402,7 +5516,8 @@ function AIVisibilityContent() {
                                             ? Math.min(100, Math.round((mentionedCount / totalPlatformsInSession) * 100))
                                             : 0;
                                           const uniquePlatformCount = new Set(responses.map((r: any) => r.platform)).size;
-                                          const brandRank = firstResponse.brand_rank ?? brandRankFromSession;
+                                          const perPromptRank = getPerPromptRank(responses);
+                                          const brandRank = firstResponse.brand_rank ?? perPromptRank ?? brandRankFromSession;
                                           const createdDate = firstResponse.created_at
                                             ? new Date(firstResponse.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                                             : '—';
@@ -5473,6 +5588,14 @@ function AIVisibilityContent() {
                                               </td>
                                               <td className="py-2.5 px-3 text-gray-700 font-medium" title="Your brand’s position from Competitor Rankings">
                                                 {brandRank != null ? brandRank : '—'}
+                                              </td>
+                                              <td className="py-2.5 px-3 text-gray-600 text-xs" title="Change vs previous analysis">
+                                                {formatTrend(promptKey, {
+                                                  volume: uniquePlatformCount,
+                                                  visibility: visibilityPct,
+                                                  rank: brandRank ?? null,
+                                                  sentiment: sentimentDisplay
+                                                })}
                                               </td>
                                               <td className="py-2.5 px-3 text-gray-600">{createdDate}</td>
                                               <td className="py-2.5 px-3">
@@ -8608,8 +8731,8 @@ function KeywordsTab({ selectedProject }: { selectedProject: Project }) {
             </button>
           </div>
         )}
+        </div>
       </div>
-    </div>
   );
 }
 
@@ -8624,7 +8747,9 @@ export default function AIVisibility() {
         </div>
       </div>
     }>
-      <AIVisibilityContent />
+      <AiVisibilityErrorBoundary>
+        <AIVisibilityContent />
+      </AiVisibilityErrorBoundary>
     </Suspense>
   );
 }
