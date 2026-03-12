@@ -55,7 +55,7 @@ export interface ContentGenerationInput {
   influenceLevel: "subtle" | "moderate" | "strong";
   userContext?: string;
   brandVoice?: any; // Brand voice profile
-  language?: "en" | "he" | "ar" | "fr"; // Language for content generation (default: "en")
+  language?: "en" | "he" | "ar" | "fr" | "pt" | "it"; // Language for content generation (default: "en")
   contentType?: "article" | "post" | "answer" | "newsletter" | "linkedin_article" | "linkedin_post" | "blog_article"; // Content type for formatting
   websiteUrl?: string; // User's website URL for backlinks (from brand project)
 }
@@ -443,6 +443,16 @@ export async function generateStrategicContent(
 - Output ONLY valid French text. Use correct French grammar, accents (é, è, ê, à, ù, ç, etc.), and punctuation.
 - Do NOT mix in English or other languages. Write the entire content in French only.
 - Write naturally in French, as a native speaker would. Length: ${lengthForLang} Complete every sentence.\n`
+    : input.language === "pt"
+    ? `\n🌐 PORTUGUESE-ONLY REQUIREMENT (STRICT):
+- Output ONLY valid Portuguese text. Use correct Portuguese grammar, accents (á, à, â, ã, é, ê, í, ó, ô, õ, ú, ç, etc.), and punctuation.
+- Do NOT mix in English or other languages. Write the entire content in Portuguese only.
+- Write naturally in Portuguese, as a native speaker would. Length: ${lengthForLang} Complete every sentence.\n`
+    : input.language === "it"
+    ? `\n🌐 ITALIAN-ONLY REQUIREMENT (STRICT):
+- Output ONLY valid Italian text. Use correct Italian grammar, accents (à, è, é, ì, ò, ù, etc.), and punctuation.
+- Do NOT mix in English or other languages. Write the entire content in Italian only.
+- Write naturally in Italian, as a native speaker would. Length: ${lengthForLang} Complete every sentence.\n`
     : "";
 
   let finalReminder: string;
@@ -500,7 +510,7 @@ This MUST score 100% HUMAN on ALL AI detectors (GPTZero, Turnitin, Copyleaks, Wr
 - Focus on clear communication and value
 ${languageInstruction}
 Topic/Query: "${input.topic}"
-Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force${input.language === "he" ? "; when writing in Hebrew use only Hebrew equivalents—never write English or other language words in the content" : input.language === "ar" ? "; when writing in Arabic use only Arabic equivalents—never write English or other language words in the content" : input.language === "fr" ? "; when writing in French use only French equivalents—never write English or other language words in the content" : ""})
+Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force${input.language === "he" ? "; when writing in Hebrew use only Hebrew equivalents—never write English or other language words in the content" : input.language === "ar" ? "; when writing in Arabic use only Arabic equivalents—never write English or other language words in the content" : input.language === "fr" ? "; when writing in French use only French equivalents—never write English or other language words in the content" : input.language === "pt" ? "; when writing in Portuguese use only Portuguese equivalents—never write English or other language words in the content" : input.language === "it" ? "; when writing in Italian use only Italian equivalents—never write English or other language words in the content" : ""})
 Platform: ${input.targetPlatform}
 ${input.brandMention ? `Brand: ${input.brandMention} (${influenceGuidelines[input.influenceLevel]})` : "No brand"}
 ${input.userContext ? `Context: ${input.userContext}` : ""}
@@ -725,6 +735,8 @@ ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
 ${input.language === "he" ? "- Hebrew: minimum 150 words, aim 200-300. End with a complete sentence. Never output garbled characters, Latin letters, or transliterations—only Hebrew letters and punctuation." : ""}
 ${input.language === "ar" ? "- Arabic: minimum 150 words, aim 200-300. End with a complete sentence. Output only Arabic script and punctuation (right-to-left)." : ""}
 ${input.language === "fr" ? "- French: minimum 150 words, aim 200-300. End with a complete sentence. Use correct French grammar and accents." : ""}
+${input.language === "pt" ? "- Portuguese: minimum 150 words, aim 200-300. End with a complete sentence. Use correct Portuguese grammar and accents." : ""}
+${input.language === "it" ? "- Italian: minimum 150 words, aim 200-300. End with a complete sentence. Use correct Italian grammar and accents." : ""}
 ${learningRules?.wordCount ? `- Target: ${learningRules.wordCount.min || 150}-${learningRules.wordCount.max || 300} words` : ''}
 `}
 - Paragraphs vary: Sometimes 1 sentence, sometimes 5 sentences
@@ -757,6 +769,8 @@ ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
 ${input.language === "he" ? `✅ Hebrew only: Content uses only Hebrew script (א-ת) and punctuation; no Latin/transliterations/corrupted chars; 150+ words, complete sentence at end` : ''}
 ${input.language === "ar" ? `✅ Arabic only: Content uses only Arabic script and punctuation; no Latin/mixed script; 150+ words, complete sentence at end` : ''}
 ${input.language === "fr" ? `✅ French only: Content uses only French; correct grammar and accents; 150+ words, complete sentence at end` : ''}
+${input.language === "pt" ? `✅ Portuguese only: Content uses only Portuguese; correct grammar and accents; 150+ words, complete sentence at end` : ''}
+${input.language === "it" ? `✅ Italian only: Content uses only Italian; correct grammar and accents; 150+ words, complete sentence at end` : ''}
 
 ${learningRules?.tone ? `📚 LEARNED: Use ${learningRules.tone} tone` : ''}
 ${learningRules?.useEmojis ? `📚 LEARNED: Include ${learningRules.emojiCount || 3} emojis naturally` : ''}
@@ -771,7 +785,7 @@ ${finalReminder}
 
   // Build conditional system message based on brand voice
   const isBlog = input.contentType === "blog_article" || input.targetPlatform === "shopify";
-  const blogLangNote = isBlog && (input.language === "he" || input.language === "ar" || input.language === "fr")
+  const blogLangNote = isBlog && (input.language === "he" || input.language === "ar" || input.language === "fr" || input.language === "pt" || input.language === "it")
     ? ` Apply the SAME blog quality standards: clear structure (short intro, 3–5 key insights, positive conclusion), at least one Spark, proper H2/H3 and short paragraphs, 1–2 authority links, at least two structural elements (table, checklist, bullets, quote, example). Length 1200–2000 words.`
     : "";
   const languageNote = input.language === "he"
@@ -780,6 +794,10 @@ ${finalReminder}
     ? `\n🌐 ARABIC OUTPUT ONLY: Content must be 100% Arabic script (right-to-left) and punctuation. No Latin letters, no mixed script. Use Modern Standard Arabic.${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
     : input.language === "fr"
     ? `\n🌐 FRENCH OUTPUT ONLY: Content must be 100% French. Use correct French grammar, accents, and punctuation. No English or other languages.${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
+    : input.language === "pt"
+    ? `\n🌐 PORTUGUESE OUTPUT ONLY: Content must be 100% Portuguese. Use correct Portuguese grammar, accents, and punctuation. No English or other languages.${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
+    : input.language === "it"
+    ? `\n🌐 ITALIAN OUTPUT ONLY: Content must be 100% Italian. Use correct Italian grammar, accents, and punctuation. No English or other languages.${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
     : "";
 
   let systemMessage = `You are a REAL HUMAN typing on a phone or laptop RIGHT NOW. You are NOT an AI, NOT a bot, NOT a content writer.
@@ -847,7 +865,7 @@ CRITICAL: Write professional, clean, structured content.
 Respond ONLY in JSON with "content" field containing the text.`;
   }
 
-  const maxTokens = (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : (input.language === "he" || input.language === "ar" || input.language === "fr") ? 2500 : 2000;
+  const maxTokens = (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : (input.language === "he" || input.language === "ar" || input.language === "fr" || input.language === "pt" || input.language === "it") ? 2500 : 2000;
   const claudeModel = "claude-sonnet-4-5-20250929";
   let raw: string = "";
   let aiModel: string = "gpt-4-turbo";

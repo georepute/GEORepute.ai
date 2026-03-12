@@ -117,7 +117,7 @@ function BlogPageContent() {
   // Blog post form state
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
-  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr">("en");
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr" | "pt" | "it">("en");
   const [brandVoices, setBrandVoices] = useState<Array<{ id: string; brand_name: string; is_default?: boolean }>>([]);
   const [selectedBrandVoiceId, setSelectedBrandVoiceId] = useState<string | null>(null);
   const [loadingVoices, setLoadingVoices] = useState(false);
@@ -1113,13 +1113,15 @@ function BlogPageContent() {
                         </label>
                         <select
                           value={contentGenerationLanguage}
-                          onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
+                          onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he" | "ar" | "fr" | "pt" | "it")}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
                         >
                           <option value="en">{t.dashboard.blogPage.english}</option>
                           <option value="he">{t.dashboard.blogPage.hebrew}</option>
                           <option value="ar">{t.dashboard.blogPage.arabic}</option>
                           <option value="fr">{t.dashboard.blogPage.french}</option>
+                          <option value="pt">{t.dashboard.blogPage.portuguese}</option>
+                          <option value="it">{t.dashboard.blogPage.italian}</option>
                         </select>
                       </div>
 

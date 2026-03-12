@@ -142,7 +142,7 @@ function ContentInner() {
     };
   } | null>(null);
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
-  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr">("en");
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr" | "pt" | "it">("en");
 
   // Humanization State
   const [isHumanizing, setIsHumanizing] = useState(false);
@@ -3974,13 +3974,15 @@ function ContentInner() {
                         <label className="block text-xs font-medium text-gray-600 mb-1">{t.dashboard.content.generateContentIn}</label>
                         <select
                           value={contentGenerationLanguage}
-                          onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
+                          onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he" | "ar" | "fr" | "pt" | "it")}
                           className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none text-gray-800 bg-white"
                         >
                           <option value="en">{t.dashboard.content.english}</option>
                           <option value="he">{t.dashboard.content.hebrew}</option>
                           <option value="ar">{t.dashboard.content.arabic}</option>
                           <option value="fr">{t.dashboard.content.french}</option>
+                          <option value="pt">{t.dashboard.content.portuguese}</option>
+                          <option value="it">{t.dashboard.content.italian}</option>
                         </select>
                       </div>
                     </div>

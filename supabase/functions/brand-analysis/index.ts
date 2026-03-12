@@ -1389,6 +1389,13 @@ ${relevanceReminder}\n`;
 - Use Simplified Chinese (简体) unless the context clearly requires Traditional
 - All ${maxQueries} queries must be in Chinese
 ${relevanceReminder}\n`;
+    } else if (langCode === 'ar') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ARABIC (العربية).
+- Write queries naturally in Arabic, as native Arabic speakers would search in Arab markets
+- Use natural Arabic question words and phrasing (ما، كيف، لماذا، أين، متى، من، أي)
+- Use proper Arabic script; UI may display in RTL — generate natural Arabic only
+- All ${maxQueries} queries must be in Arabic
+${relevanceReminder}\n`;
     } else if (langCode !== 'en') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ${languageName}.
 - Write queries naturally as native speakers of this language would search
@@ -1722,17 +1729,53 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
 }
 const MAX_QUERIES = 50;
 
-// Option A: equal split across (language × region) buckets. Returns list of (lang, country) with country null for "general".
+// Language -> country codes where that language is primary. Used so each language only targets matching countries (e.g. Arabic only for SA/AE, Portuguese only for PT/BR).
+const LANG_TO_COUNTRIES = {
+  ar: ['SA', 'AE', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO', 'LB', 'SY', 'IQ', 'YE', 'MA', 'DZ', 'TN', 'LY', 'SD', 'PS'],
+  pt: ['PT', 'BR'],
+  fr: ['FR', 'BE', 'LU', 'MC', 'CH'],
+  en: ['US', 'GB', 'AU', 'IE', 'NZ', 'ZA', 'IN', 'CA', 'SG', 'PH', 'MY', 'HK'],
+  de: ['DE', 'AT', 'CH'],
+  es: ['ES', 'MX', 'AR', 'CO', 'CL', 'PE', 'VE', 'EC', 'UY', 'PY', 'BO', 'CR', 'PA', 'DO', 'CU'],
+  it: ['IT', 'CH', 'SM'],
+  he: ['IL'],
+  nl: ['NL', 'BE'],
+  ja: ['JP'],
+  zh: ['CN', 'TW', 'HK'],
+  tr: ['TR'],
+  ru: ['RU', 'BY', 'KZ'],
+  hi: ['IN'],
+  ur: ['PK'],
+  ko: ['KR'],
+  pl: ['PL'],
+  th: ['TH'],
+  vi: ['VN'],
+  id: ['ID'],
+};
+
+// Returns (lang, country) buckets so each language only targets countries that match that language. No Portuguese for UAE/SA, no Arabic for Portugal.
 function getLanguageRegionBuckets(analysisLangs, analysisCountriesRun, queryLanguage) {
-  const L = (analysisLangs && analysisLangs.length) ? analysisLangs.length : 1;
-  const R = (analysisCountriesRun && analysisCountriesRun.length) ? analysisCountriesRun.length : 1;
   const langs = (analysisLangs && analysisLangs.length) ? analysisLangs : [queryLanguage || 'en'];
   const countries = (analysisCountriesRun && analysisCountriesRun.length) ? analysisCountriesRun : [null];
   const buckets = [];
   for (const lang of langs) {
+    const langCode = lang.split('-')[0].toLowerCase();
+    const allowedCountries = LANG_TO_COUNTRIES[langCode];
     for (const country of countries) {
-      buckets.push({ lang: lang.split('-')[0].toLowerCase(), country });
+      if (country == null) {
+        buckets.push({ lang: langCode, country: null });
+        continue;
+      }
+      const countryUpper = String(country).toUpperCase();
+      if (allowedCountries && allowedCountries.length > 0) {
+        if (!allowedCountries.includes(countryUpper)) continue;
+      }
+      buckets.push({ lang: langCode, country: countryUpper });
     }
+  }
+  if (buckets.length === 0) {
+    const langCode = (langs[0] || queryLanguage || 'en').split('-')[0].toLowerCase();
+    buckets.push({ lang: langCode, country: countries[0] ? String(countries[0]).toUpperCase() : null });
   }
   return buckets;
 }
@@ -1754,16 +1797,16 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
     }
   }
 
-  // Return type: { text: string, country?: string | null }[] so UI can show "which query is for what region"
-  const toItem = (text, country = null) => (typeof text === 'string' ? { text: text.trim(), country } : { text: String(text).trim(), country: null });
+  // Return type: { text, country?, language? } so each query gets the right language when calling AI
+  const toItem = (text, country = null, lang = null) => (typeof text === 'string' ? { text: text.trim(), country, language: lang } : { text: String(text).trim(), country: null, language: lang });
 
   if (mode === 'manual') {
     if (manualTexts.length === 0) {
       console.log(`Manual mode but no manual queries; using fallback generated queries (max ${N})`);
       const fallback = generateFallbackQueries(project.brand_name, project.industry, keywords, project.competitors || [], queryLanguage, analysisCountriesRun).slice(0, N);
-      return fallback.map((q) => toItem(q, null));
+      return fallback.map((q) => toItem(q, null, queryLanguage));
     }
-    return manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null));
+    return manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null, q && q.language ? q.language : queryLanguage));
   }
 
   // Option A: distribute N across (language × region) buckets
@@ -1774,7 +1817,7 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
   const allQueries = [];
 
   if (mode === 'auto_manual') {
-    const combined = manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null));
+    const combined = manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null, q && q.language ? q.language : queryLanguage));
     const bucketPromises = buckets.map((b, i) => {
       const count = perBucket + (i < remainder ? 1 : 0);
       if (count <= 0) return Promise.resolve([]);
@@ -1784,10 +1827,10 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
     const bucketResults = await Promise.all(bucketPromises);
     for (let i = 0; i < bucketResults.length; i++) {
       const generated = bucketResults[i];
-      const country = buckets[i].country;
+      const { lang, country } = buckets[i];
       for (const q of generated) {
         if (combined.length >= N) break;
-        if (!combined.some((c) => c.text === q)) combined.push(toItem(q, country));
+        if (!combined.some((c) => c.text === q)) combined.push(toItem(q, country, lang));
       }
     }
     console.log(`Auto+manual: ${manualList.length} manual + generated, total ${combined.length} (cap ${N}, ${bucketCount} buckets)`);
@@ -1803,8 +1846,8 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
   const bucketResults = await Promise.all(bucketPromises);
   for (let i = 0; i < bucketResults.length; i++) {
     const generated = bucketResults[i];
-    const country = buckets[i].country;
-    for (const q of generated) allQueries.push(toItem(q, country));
+    const { lang, country } = buckets[i];
+    for (const q of generated) allQueries.push(toItem(q, country, lang));
   }
   console.log(`Option A: ${allQueries.length} queries across ${bucketCount} (lang×region) buckets (parallel generation)`);
   return allQueries.slice(0, N);
@@ -2247,8 +2290,9 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
         for (const queryItem of queryBatch) {
           const queryText = typeof queryItem === 'string' ? queryItem : queryItem.text;
           const queryCountry = typeof queryItem === 'object' && queryItem && 'country' in queryItem ? queryItem.country : null;
+          const queryLang = (typeof queryItem === 'object' && queryItem && queryItem.language != null ? queryItem.language : language).toString().toLowerCase().split('-')[0];
           try {
-            const response = await queryAIPlatform(platform, queryText, language);
+            const response = await queryAIPlatform(platform, queryText, queryLang);
             if (response) {
               console.log(`Got response from ${platform} for query "${queryText.substring(0, 50)}...": ${response.substring(0, 50)}...`);
               platformSuccess = true;
@@ -2274,7 +2318,8 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
               const queryIntent = classifyQueryIntent(queryText);
               const enrichedAnalysis = analysis ? { ...analysis, ...queryIntent } : queryIntent;
               if (queryCountry != null) enrichedAnalysis.country = queryCountry;
-              // Store the response with metadata (including country/region for this query)
+              enrichedAnalysis.language = queryLang;
+              // Store the response with metadata (country + language for this query)
               await supabase.from('ai_platform_responses').insert({
                 project_id: projectId,
                 session_id: session.id,
@@ -2503,10 +2548,11 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
     for (const queryItem of currentBatch) {
       const queryText = typeof queryItem === 'string' ? queryItem : queryItem.text;
       const queryCountry = typeof queryItem === 'object' && queryItem && 'country' in queryItem ? queryItem.country : null;
+      const queryLang = (typeof queryItem === 'object' && queryItem && queryItem.language != null ? queryItem.language : language).toString().toLowerCase().split('-')[0];
       for (const platform of platforms) {
         tasks.push(async () => {
           try {
-            const response = await queryAIPlatform(platform, queryText, language);
+            const response = await queryAIPlatform(platform, queryText, queryLang);
             if (!response) {
               console.log(`No response from ${platform} for query "${queryText.substring(0, 30)}..."`);
               return { ok: true, platform, stored: false, brandMentioned: false };
@@ -2517,6 +2563,7 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
             const queryIntent = classifyQueryIntent(queryText);
             const enrichedAnalysis = analysis ? { ...analysis, ...queryIntent } : queryIntent;
             if (queryCountry != null) enrichedAnalysis.country = queryCountry;
+            enrichedAnalysis.language = queryLang;
             await supabase.from('ai_platform_responses').insert({
               project_id: projectId,
               session_id: sessionId,

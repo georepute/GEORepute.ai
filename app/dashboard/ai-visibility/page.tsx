@@ -271,7 +271,7 @@ function AIVisibilityContent() {
     "Sports & Fitness", "Non-Profit", "Other"
   ];
 
-  // 12 languages supported for global analysis (query generation in selected language)
+  // Languages for global analysis (query generation in selected language; Arabic has RTL support)
   const analysisLanguageOptions = [
     { value: "en-US", label: "English (US)" },
     { value: "en-GB", label: "English (UK)" },
@@ -282,6 +282,7 @@ function AIVisibilityContent() {
     { value: "es", label: "Spanish" },
     { value: "it", label: "Italian" },
     { value: "pt", label: "Portuguese" },
+    { value: "ar", label: "Arabic" },
     { value: "nl", label: "Dutch" },
     { value: "ja", label: "Japanese" },
     { value: "zh", label: "Chinese" },
@@ -8006,7 +8007,7 @@ function AIVisibilityContent() {
               {/* Select Languages for Global Analysis - shown first so visible without scrolling */}
               <div className="p-4 rounded-xl bg-teal-50 border border-teal-100">
                 <h3 className="text-base font-semibold text-gray-900 mb-1">Select Languages for Global Analysis</h3>
-                <p className="text-sm text-gray-600 mb-3">Track your brand visibility across different languages and regions. {analysisLanguageOptions.length} languages supported (e.g. English, Hebrew, Urdu, German, French, Spanish, and more).</p>
+                <p className="text-sm text-gray-600 mb-3">Track your brand visibility across different languages and regions. {analysisLanguageOptions.length} languages supported (e.g. English, French, Italian, Portuguese, Arabic, Hebrew, and more).</p>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {analysisLanguages.map((code) => {
                     const opt = analysisLanguageOptions.find((o) => o.value === code);

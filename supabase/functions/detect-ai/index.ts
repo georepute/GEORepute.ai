@@ -15,7 +15,7 @@ const corsHeaders = {
 
 // MASSIVELY EXPANDED AI DETECTION PATTERNS
 // Helper function to get patterns based on language
-function getAiPatterns(language: 'en' | 'he' | 'ar' | 'fr' = 'en') {
+function getAiPatterns(language: 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it' = 'en') {
   if (language === 'he') {
     return {
       // TIER 1: DEAD GIVEAWAYS (99% confidence) - Hebrew AI patterns
@@ -226,6 +226,70 @@ function getAiPatterns(language: 'en' | 'he' | 'ar' | 'fr' = 'en') {
       sentencePatterns: [
         { pattern: /\b(qu'est-ce que cela signifie|pourquoi est-ce important|comment pouvons-nous)\s*\?/gi, reason: "RHETORICAL QUESTION: AI in French", confidence: 93, category: "rhetorical" },
         { pattern: /\b(d'une part|d'autre part|en revanche|par contre)\b/gi, reason: "BALANCED PERSPECTIVE: AI in French", confidence: 88, category: "balance" }
+      ]
+    };
+  }
+
+  if (language === 'pt') {
+    return {
+      deadGiveaways: [
+        { pattern: /\b(em conclusão|para concluir|em resumo|em suma|para resumir)\b/gi, reason: "DEAD GIVEAWAY: AI conclusion in Portuguese", confidence: 99, category: "tier1" },
+        { pattern: /\b(é importante notar|convém salientar|importa referir|é essencial compreender)\b/gi, reason: "DEAD GIVEAWAY: AI meta-commentary in Portuguese", confidence: 98, category: "tier1" },
+        { pattern: /\b(no mundo moderno|na era digital|nos dias de hoje|atualmente)\b/gi, reason: "DEAD GIVEAWAY: AI temporal cliché in Portuguese", confidence: 97, category: "tier1" },
+        { pattern: /\b(além disso|por outro lado|ademais|igualmente|do mesmo modo)\b/gi, reason: "DEAD GIVEAWAY: AI transition in Portuguese", confidence: 96, category: "tier1" },
+        { pattern: /\b(abrangente|holístico|multifacetado|abordagem global)\b/gi, reason: "DEAD GIVEAWAY: AI descriptor in Portuguese", confidence: 95, category: "tier1" }
+      ],
+      extremelyHigh: [
+        { pattern: /\b(crucial|fundamental|essencial|primordial|paramount)\b/gi, reason: "AI importance in Portuguese", confidence: 96, category: "importance" },
+        { pattern: /\b(facilitar|fomentar|otimizar|melhorar|reforçar)\b/gi, reason: "AI action verbs in Portuguese", confidence: 95, category: "action" },
+        { pattern: /\b(inovador|revolucionário|transformador|moderno|avançado)\b/gi, reason: "AI hype in Portuguese", confidence: 94, category: "hype" }
+      ],
+      veryHigh: [
+        { pattern: /\b(consequentemente|por conseguinte|assim|portanto|deste modo)\b/gi, reason: "Formal transitions in Portuguese", confidence: 91, category: "transition" },
+        { pattern: /\b(diversos|numerosos|múltiplos|amplo|considerável)\b/gi, reason: "AI variety in Portuguese", confidence: 90, category: "variety" }
+      ],
+      high: [
+        { pattern: /\b(significativo|considerável|substancial|notável|importante)\b/gi, reason: "AI emphasis in Portuguese", confidence: 87, category: "emphasis" }
+      ],
+      highConfidence: [],
+      mediumConfidence: [],
+      lowConfidence: [],
+      structure: [],
+      sentencePatterns: [
+        { pattern: /\b(o que isso significa|por que isso é importante|como podemos)\s*\?/gi, reason: "RHETORICAL QUESTION: AI in Portuguese", confidence: 93, category: "rhetorical" },
+        { pattern: /\b(por um lado|por outro lado|em contrapartida|em contraste)\b/gi, reason: "BALANCED PERSPECTIVE: AI in Portuguese", confidence: 88, category: "balance" }
+      ]
+    };
+  }
+
+  if (language === 'it') {
+    return {
+      deadGiveaways: [
+        { pattern: /\b(in conclusione|per concludere|in sintesi|in breve|per riassumere)\b/gi, reason: "DEAD GIVEAWAY: AI conclusion in Italian", confidence: 99, category: "tier1" },
+        { pattern: /\b(è importante notare|va sottolineato|è essenziale capire|conviene notare)\b/gi, reason: "DEAD GIVEAWAY: AI meta-commentary in Italian", confidence: 98, category: "tier1" },
+        { pattern: /\b(nel mondo moderno|nell'era digitale|al giorno d'oggi|al momento)\b/gi, reason: "DEAD GIVEAWAY: AI temporal cliché in Italian", confidence: 97, category: "tier1" },
+        { pattern: /\b(inoltre|d'altra parte|inoltre|parimenti|analogamente)\b/gi, reason: "DEAD GIVEAWAY: AI transition in Italian", confidence: 96, category: "tier1" },
+        { pattern: /\b(completo|olistico|multifaccettato|approccio globale)\b/gi, reason: "DEAD GIVEAWAY: AI descriptor in Italian", confidence: 95, category: "tier1" }
+      ],
+      extremelyHigh: [
+        { pattern: /\b(cruciale|fondamentale|essenziale|primario|paramount)\b/gi, reason: "AI importance in Italian", confidence: 96, category: "importance" },
+        { pattern: /\b(facilitare|favorire|ottimizzare|migliorare|rafforzare)\b/gi, reason: "AI action verbs in Italian", confidence: 95, category: "action" },
+        { pattern: /\b(innovativo|rivoluzionario|trasformativo|moderno|avanzato)\b/gi, reason: "AI hype in Italian", confidence: 94, category: "hype" }
+      ],
+      veryHigh: [
+        { pattern: /\b(di conseguenza|pertanto|così|quindi|in tal modo)\b/gi, reason: "Formal transitions in Italian", confidence: 91, category: "transition" },
+        { pattern: /\b(varie|numerosi|multipli|ampio|considerevole)\b/gi, reason: "AI variety in Italian", confidence: 90, category: "variety" }
+      ],
+      high: [
+        { pattern: /\b(significativo|considerevole|sostanziale|notevole|importante)\b/gi, reason: "AI emphasis in Italian", confidence: 87, category: "emphasis" }
+      ],
+      highConfidence: [],
+      mediumConfidence: [],
+      lowConfidence: [],
+      structure: [],
+      sentencePatterns: [
+        { pattern: /\b(cosa significa questo|perché è importante|come possiamo)\s*\?/gi, reason: "RHETORICAL QUESTION: AI in Italian", confidence: 93, category: "rhetorical" },
+        { pattern: /\b(d'un lato|d'altro lato|invece|al contrario)\b/gi, reason: "BALANCED PERSPECTIVE: AI in Italian", confidence: 88, category: "balance" }
       ]
     };
   }
@@ -1084,7 +1148,7 @@ interface WordDetection {
   phraseEnd?: number; // End position of the phrase
 }
 
-function analyzeTextDetailed(text: string, language: 'en' | 'he' | 'ar' | 'fr' = 'en'): {
+function analyzeTextDetailed(text: string, language: 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it' = 'en'): {
   words: WordDetection[];
   aiPercentage: number;
   summary: string;
@@ -1972,14 +2036,14 @@ function generateHighlightedHtml(text: string, detections: WordDetection[]): str
   return highlighted;
 }
 
-function applyHighlightsToHtml(originalHtml: string, plainText: string, detections: WordDetection[], language: 'en' | 'he' | 'ar' | 'fr' = 'en'): string {
+function applyHighlightsToHtml(originalHtml: string, plainText: string, detections: WordDetection[], language: 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it' = 'en'): string {
   // If original is not HTML, just use plain text highlighting
   if (!originalHtml.includes('<') || (!originalHtml.includes('<p>') && !originalHtml.includes('<h') && !originalHtml.includes('<div>'))) {
     return generateHighlightedHtml(plainText, detections);
   }
   
   // For Hebrew and Arabic, avoid \b (word boundaries don't work well with non-Latin scripts)
-  const useWordBoundaries = language === 'en' || language === 'fr';
+  const useWordBoundaries = language === 'en' || language === 'fr' || language === 'pt' || language === 'it';
   
   // Group detections by phrase - prioritize complete phrases over individual words
   const phraseGroups = new Map<string, {
@@ -2168,7 +2232,7 @@ serve(async (req) => {
 
     // Determine language preference (from body or cookie)
     const preferredLanguage = language || req.headers.get('cookie')?.split('; ').find(row => row.startsWith('preferred-language='))?.split('=')[1] || 'en';
-    const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en' || preferredLanguage === 'ar' || preferredLanguage === 'fr') ? preferredLanguage : 'en';
+    const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en' || preferredLanguage === 'ar' || preferredLanguage === 'fr' || preferredLanguage === 'pt' || preferredLanguage === 'it') ? preferredLanguage : 'en';
 
     // Store original HTML for proper highlighting
     const originalHtml = text;
@@ -2200,7 +2264,7 @@ serve(async (req) => {
     console.log(`Text sample (first 100 chars): ${plainText.substring(0, 100)}`);
 
     // Perform detailed analysis with language parameter
-    const analysis = analyzeTextDetailed(plainText, validLanguage as 'en' | 'he' | 'ar' | 'fr');
+    const analysis = analyzeTextDetailed(plainText, validLanguage as 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it');
     
     console.log(`Detection results: ${analysis.words.length} words detected, ${analysis.topPhrases.length} phrases found`);
     if (analysis.topPhrases.length > 0) {
@@ -2268,7 +2332,7 @@ serve(async (req) => {
     };
     
     // Generate highlighted HTML by mapping detections back to original HTML structure
-    const highlightedHtml = applyHighlightsToHtml(originalHtml, plainText, analysis.words, validLanguage as 'en' | 'he' | 'ar' | 'fr');
+    const highlightedHtml = applyHighlightsToHtml(originalHtml, plainText, analysis.words, validLanguage as 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it');
 
     return new Response(
       JSON.stringify({

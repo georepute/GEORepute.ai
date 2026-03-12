@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     } = body;
 
     // Get language preference: from request body, or from cookies as fallback
-    let preferredLanguage: "en" | "he" | "ar" | "fr" = language || "en";
+    let preferredLanguage: "en" | "he" | "ar" | "fr" | "pt" | "it" = language || "en";
     if (!language) {
       // Try to get from cookies
       const cookieHeader = request.headers.get("cookie");
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
           return acc;
         }, {} as Record<string, string>);
         const cookieLanguage = cookies["preferred-language"];
-        if (cookieLanguage === "he" || cookieLanguage === "en" || cookieLanguage === "ar" || cookieLanguage === "fr") {
+        if (cookieLanguage === "he" || cookieLanguage === "en" || cookieLanguage === "ar" || cookieLanguage === "fr" || cookieLanguage === "pt" || cookieLanguage === "it") {
           preferredLanguage = cookieLanguage;
         }
       }

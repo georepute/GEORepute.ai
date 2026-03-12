@@ -11,7 +11,7 @@ const corsHeaders = {
 // ============================================================================
 
 // Helper function to get replacements based on language
-function getReplacements(language: 'en' | 'he' | 'ar' | 'fr' = 'en'): {
+function getReplacements(language: 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it' = 'en'): {
   deadGiveaway: { [key: string]: string[] };
   highFrequency: { [key: string]: string[] };
   removePhrases: string[];
@@ -183,6 +183,82 @@ function getReplacements(language: 'en' | 'he' | 'ar' | 'fr' = 'en'): {
         "à l'heure actuelle": "aujourd'hui",
         "de ce fait": "donc",
         "par conséquent": "donc"
+      }
+    };
+  }
+
+  if (language === 'pt') {
+    return {
+      deadGiveaway: {
+        "em conclusão": ["em resumo", "em suma", "para concluir"],
+        "é importante notar": ["note-se que", "convém notar"],
+        "convém salientar": ["saliente-se", "note-se"],
+        "no mundo moderno": ["hoje", "atualmente"],
+        "além disso": ["também", "ademais"],
+        "por outro lado": ["também", "além disso"],
+        "crucial": ["importante", "essencial"],
+        "fundamental": ["importante", "básico"],
+        "essencial": ["importante", "necessário"]
+      },
+      highFrequency: {
+        "facilitar": ["ajudar", "permitir"],
+        "fomentar": ["estimular", "promover"],
+        "otimizar": ["melhorar", "aperfeiçoar"],
+        "consequentemente": ["portanto", "assim"],
+        "por conseguinte": ["portanto", "assim"],
+        "significativo": ["importante", "relevante"],
+        "considerável": ["grande", "importante"]
+      },
+      removePhrases: [
+        "em conclusão", "para concluir", "em resumo", "em suma",
+        "é importante notar", "convém salientar", "importa referir",
+        "no mundo moderno", "na era digital", "nos dias de hoje",
+        "além disso", "por outro lado", "ademais", "por um lado", "por outro lado"
+      ],
+      simplifyMap: {
+        "é importante notar que": "note-se que",
+        "convém salientar que": "saliente-se que",
+        "no momento atual": "agora",
+        "deste modo": "assim",
+        "por conseguinte": "portanto"
+      }
+    };
+  }
+
+  if (language === 'it') {
+    return {
+      deadGiveaway: {
+        "in conclusione": ["in sintesi", "in breve", "per concludere"],
+        "è importante notare": ["notiamo che", "va notato"],
+        "va sottolineato": ["sottolineiamo", "notiamo"],
+        "nel mondo moderno": ["oggi", "al giorno d'oggi"],
+        "inoltre": ["anche", "inoltre"],
+        "d'altra parte": ["anche", "inoltre"],
+        "cruciale": ["importante", "chiave"],
+        "fondamentale": ["importante", "essenziale"],
+        "essenziale": ["importante", "necessario"]
+      },
+      highFrequency: {
+        "facilitare": ["aiutare", "permettere"],
+        "favorire": ["aiutare", "sostenere"],
+        "ottimizzare": ["migliorare", "rafforzare"],
+        "di conseguenza": ["quindi", "così"],
+        "pertanto": ["quindi", "così"],
+        "significativo": ["importante", "notevole"],
+        "considerevole": ["grande", "importante"]
+      },
+      removePhrases: [
+        "in conclusione", "per concludere", "in sintesi", "in breve",
+        "è importante notare", "va sottolineato", "conviene notare",
+        "nel mondo moderno", "nell'era digitale", "al giorno d'oggi",
+        "inoltre", "d'altra parte", "d'un lato", "d'altro lato"
+      ],
+      simplifyMap: {
+        "è importante notare che": "notiamo che",
+        "va sottolineato che": "sottolineiamo che",
+        "al momento": "oggi",
+        "di conseguenza": "quindi",
+        "pertanto": "quindi"
       }
     };
   }
@@ -375,14 +451,14 @@ const SIMPLIFY_MAP_EN: { [key: string]: string } = {
 
 class MultiPassHumanizer {
   private passCount: number = 0;
-  private language: 'en' | 'he' | 'ar' | 'fr' = 'en';
+  private language: 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it' = 'en';
   private replacements: ReturnType<typeof getReplacements>;
   /** Hebrew and Arabic don't use \b for word boundaries; use space/start/end instead */
   private get useWordBoundaries(): boolean {
-    return this.language === 'en' || this.language === 'fr';
+    return this.language === 'en' || this.language === 'fr' || this.language === 'pt' || this.language === 'it';
   }
   
-  constructor(language: 'en' | 'he' | 'ar' | 'fr' = 'en') {
+  constructor(language: 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it' = 'en') {
     this.language = language;
     this.replacements = getReplacements(language);
   }
@@ -568,6 +644,20 @@ class MultiPassHumanizer {
           { pattern: /, /, minWords: 4 },
           { pattern: / (que|qui|dont|parce que) /, minWords: 4 }
         ]
+      : this.language === 'pt'
+      ? [
+          { pattern: /, (e|mas|ou|que|porque|por que) /, minWords: 3 },
+          { pattern: / (e|mas|ou|que) /, minWords: 4 },
+          { pattern: /, /, minWords: 4 },
+          { pattern: / (que|quando|onde|porque) /, minWords: 4 }
+        ]
+      : this.language === 'it'
+      ? [
+          { pattern: /, (e|ma|o|che|perché|perchè) /, minWords: 3 },
+          { pattern: / (e|ma|o|che) /, minWords: 4 },
+          { pattern: /, /, minWords: 4 },
+          { pattern: / (che|quando|dove|perché) /, minWords: 4 }
+        ]
       : [
           { pattern: /, (and|but|so|because|which|that|when|where) /, minWords: 3 },
           { pattern: / (and|but|so|or) /, minWords: 4 },
@@ -589,7 +679,7 @@ class MultiPassHumanizer {
         let broken = false;
         
         for (const bp of breakPatterns) {
-          const regex = new RegExp(bp.pattern, this.language === 'he' ? 'g' : 'i');
+          const regex = new RegExp(bp.pattern, (this.language === 'he' || this.language === 'ar') ? 'g' : 'i');
           const match = sent.match(regex);
           
           if (match && match.index !== undefined) {
@@ -611,6 +701,10 @@ class MultiPassHumanizer {
                   ? ["Voilà.", "Simple.", "Clair?", "D'accord.", "Logique."]
                   : this.language === 'ar'
                   ? ["بسيط.", "واضح؟", "تمام."]
+                  : this.language === 'pt'
+                  ? ["Simples.", "Certo?", "Pronto.", "Então.", "Assim."]
+                  : this.language === 'it'
+                  ? ["Semplice.", "Chiaro?", "Ecco.", "Va bene.", "Logico."]
                   : ["Simple.", "Got it?", "See?", "Makes sense.", "Here's why.", "Clear?", "Right?", "You know?", "Think about it.", "Here's the thing."];
                 result.push(connectors[Math.floor(Math.random() * connectors.length)]);
               }
@@ -648,9 +742,9 @@ class MultiPassHumanizer {
     return result.join(' ');
   }
   
-  // Step 3: Vary vocabulary aggressively (English/French only - Hebrew/Arabic use different structure)
+  // Step 3: Vary vocabulary aggressively (English/French only - Hebrew/Arabic/PT/IT use different structure or no list)
   varyVocabulary(text: string): string {
-    if (this.language === 'he' || this.language === 'ar') return text;
+    if (this.language === 'he' || this.language === 'ar' || this.language === 'pt' || this.language === 'it') return text;
     const alternatives: { [key: string]: string[] } = {
       "is": ["was", "'s", "seems", "looks"],
       "are": ["were", "seem", "look"],
@@ -705,9 +799,9 @@ class MultiPassHumanizer {
     return result;
   }
   
-  // Step 4: Add contractions (English/French only - Hebrew/Arabic don't use same contractions)
+  // Step 4: Add contractions (English/French only - Hebrew/Arabic/PT/IT use different or no contraction list)
   addContractions(text: string): string {
-    if (this.language === 'he' || this.language === 'ar') return text;
+    if (this.language === 'he' || this.language === 'ar' || this.language === 'pt' || this.language === 'it') return text;
     const contractions = [
       { full: "do not", short: "don't", chance: 0.8 },
       { full: "cannot", short: "can't", chance: 0.9 },
@@ -753,6 +847,16 @@ class MultiPassHumanizer {
           fillers: ["حسناً، ", "في الواقع، ", "باختصار، ", "على أي حال، ", "كما ترى، ", "طيب، "],
           shortInserts: ["بسيط.", "واضح؟", "تمام.", "لا تعقيد.", "منطقي."]
         }
+      : this.language === 'pt'
+      ? {
+          fillers: ["Bem, ", "Então, ", "Na verdade, ", "Em resumo, ", "De qualquer forma, ", "Olhe, ", "Certo, ", "Ok, "],
+          shortInserts: ["Simples.", "Certo?", "Pronto.", "É isso.", "Faz sentido.", "Tranquilo.", "Então.", "Perfeito."]
+        }
+      : this.language === 'it'
+      ? {
+          fillers: ["Allora, ", "In realtà, ", "In breve, ", "Comunque, ", "Vedete, ", "Va bene, ", "Ok, ", "Dunque, "],
+          shortInserts: ["Semplice.", "Chiaro?", "Ecco.", "Tutto qui.", "Ha senso.", "Va bene.", "Logico.", "Perfetto."]
+        }
       : {
           fillers: [
             "Well, ", "Now, ", "So, ", "Look, ", "Actually, ", "Honestly, ",
@@ -775,7 +879,7 @@ class MultiPassHumanizer {
       const fillerChance = wordCount > 15 ? 0.3 : (wordCount > 8 ? 0.2 : 0.1);
       if (Math.random() < fillerChance) {
         const filler = fillers[Math.floor(Math.random() * fillers.length)];
-        processed = (this.language === 'he' || this.language === 'ar') ? filler + sent : filler + sent.charAt(0).toLowerCase() + sent.slice(1);
+        processed = (this.language === 'he' || this.language === 'ar' || this.language === 'pt' || this.language === 'it') ? filler + sent : filler + sent.charAt(0).toLowerCase() + sent.slice(1);
       }
       
       result.push(processed);
@@ -1134,6 +1238,8 @@ function processHTML(html: string, humanizer: MultiPassHumanizer, passes: number
 const SENTENCE_END_BY_LANG: Record<string, string> = {
   en: ".!?",
   fr: ".!?",
+  pt: ".!?",
+  it: ".!?",
   he: ".!?\u05C3",   // Latin + Hebrew sof pasuq (׃)
   ar: ".!?\u061F\u06D4", // Latin + Arabic question mark (؟) + Arabic full stop (۔)
 };
@@ -1210,7 +1316,7 @@ serve(async (req) => {
     
     // Determine language preference (from body or cookie)
     const preferredLanguage = language || req.headers.get('cookie')?.split('; ').find(row => row.startsWith('preferred-language='))?.split('=')[1] || 'en';
-    const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en' || preferredLanguage === 'ar' || preferredLanguage === 'fr') ? preferredLanguage : 'en';
+    const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en' || preferredLanguage === 'ar' || preferredLanguage === 'fr' || preferredLanguage === 'pt' || preferredLanguage === 'it') ? preferredLanguage : 'en';
     
     // Validate passes parameter
     const numPasses = Math.min(Math.max(1, parseInt(passes) || 5), 5); // 1-5 passes max, default 5
@@ -1231,7 +1337,7 @@ serve(async (req) => {
       console.log(`🧩 HTML detected in content, preserving tag structure during humanization`);
     }
     
-    const humanizer = new MultiPassHumanizer(validLanguage as 'en' | 'he' | 'ar' | 'fr');
+    const humanizer = new MultiPassHumanizer(validLanguage as 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it');
     const humanized = processHTML(text, humanizer, numPasses, validDetectedPhrases);
     const formatted = applyFormattingLayer(humanized, validLanguage);
     

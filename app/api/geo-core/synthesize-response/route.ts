@@ -42,7 +42,7 @@ interface SynthesizeRequest {
   competitors: string[];
   influenceLevel?: "subtle" | "moderate" | "strong";
   brandVoice?: BrandVoice | null;
-  language?: "en" | "he" | "ar" | "fr";
+  language?: "en" | "he" | "ar" | "fr" | "pt" | "it";
 }
 
 export async function POST(request: NextRequest) {
@@ -157,7 +157,19 @@ ${language === "fr" ? `
 - The user's query is in French. You MUST write the ENTIRE synthesized response in FRENCH only.
 - Use correct French grammar, accents (é, è, ê, à, ù, ç, etc.), and punctuation. Do not mix in English or other languages.
 - If any source response is in French, prefer and preserve French. If sources are in English, translate the synthesized answer into natural French.
-- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in French.` : ""}`;
+- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in French.` : ""}
+${language === "pt" ? `
+## CRITICAL - Portuguese Output:
+- The user's query is in Portuguese. You MUST write the ENTIRE synthesized response in PORTUGUESE only.
+- Use correct Portuguese grammar, accents (á, à, â, ã, é, ê, í, ó, ô, õ, ú, ç, etc.), and punctuation. Do not mix in English or other languages.
+- If any source response is in Portuguese, prefer and preserve Portuguese. If sources are in English, translate the synthesized answer into natural Portuguese.
+- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in Portuguese.` : ""}
+${language === "it" ? `
+## CRITICAL - Italian Output:
+- The user's query is in Italian. You MUST write the ENTIRE synthesized response in ITALIAN only.
+- Use correct Italian grammar, accents (à, è, é, ì, ò, ù, etc.), and punctuation. Do not mix in English or other languages.
+- If any source response is in Italian, prefer and preserve Italian. If sources are in English, translate the synthesized answer into natural Italian.
+- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in Italian.` : ""}`;
 
     const userPrompt = `## Original User Query:
 "${prompt}"
@@ -175,6 +187,8 @@ Now synthesize the best possible response that:
 ${language === "he" ? "5. Write the ENTIRE response in HEBREW (עברית) only - no English or other languages in the output." : ""}
 ${language === "ar" ? "5. Write the ENTIRE response in ARABIC only - no English or other languages in the output." : ""}
 ${language === "fr" ? "5. Write the ENTIRE response in FRENCH only - no English or other languages in the output." : ""}
+${language === "pt" ? "5. Write the ENTIRE response in PORTUGUESE only - no English or other languages in the output." : ""}
+${language === "it" ? "5. Write the ENTIRE response in ITALIAN only - no English or other languages in the output." : ""}
 
 Write the optimized response:`;
 
