@@ -29,6 +29,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Prepend a full-width hero image to the post body so the title image displays large in the article
+    // (themes often show the featured image small in the header)
+    const escapeAttr = (s: string) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    let finalContent = content;
+    if (featuredImage && typeof featuredImage === "string" && /^https?:\/\//i.test(featuredImage)) {
+      const heroBlock = `<figure class="wp-block-image size-full" style="margin:0 0 1.5em 0;"><img src="${escapeAttr(featuredImage)}" alt="${escapeAttr(title)}" style="width:100%;height:auto;max-width:100%;display:block;" /></figure>`;
+      finalContent = heroBlock + content;
+    }
+
     // Get WordPress.com integration
     const { data: integration, error: integrationError } = await supabase
       .from("platform_integrations")
@@ -73,7 +82,7 @@ export async function POST(request: NextRequest) {
     // Publish to WordPress.com
     const result = await publishToWordPress(config, {
       title,
-      content,
+      content: finalContent,
       excerpt,
       status: status || 'publish',
       tags: tags ? (Array.isArray(tags) ? tags : tags.split(',').map((t: string) => t.trim())) : undefined,

@@ -60,6 +60,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Prepend a full-width hero image to the post body so the title image displays large in the article
+    const escapeAttr = (s: string) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    let finalContent = content;
+    if (imageUrl && typeof imageUrl === "string" && /^https?:\/\//i.test(imageUrl)) {
+      const heroBlock = `<figure style="margin:0 0 1.5em 0;"><img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(title)}" style="width:100%;height:auto;max-width:100%;display:block;" /></figure>`;
+      finalContent = heroBlock + content;
+    }
+
     // Publish to Shopify
     const result = await publishToShopify(
       {
@@ -68,7 +76,7 @@ export async function POST(request: NextRequest) {
       },
       {
         title,
-        body_html: content,
+        body_html: finalContent,
         author: author || "GeoRepute.ai",
         tags: tags || "",
         published,

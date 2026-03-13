@@ -31,6 +31,34 @@ import Link from "next/link";
 import Image from "next/image";
 import "react-quill/dist/quill.snow.css";
 
+// Structured blog (charts, tables, sources) from Claude
+interface StructuredSectionText {
+  type: "text";
+  heading: string;
+  content: string;
+}
+interface StructuredSectionChart {
+  type: "chart";
+  heading: string;
+  caption?: string;
+  chartType: "bar" | "line" | "pie" | "doughnut";
+  labels: string[];
+  datasets: { label: string; data: number[] }[];
+}
+interface StructuredSectionTable {
+  type: "table";
+  heading: string;
+  headers: string[];
+  rows: string[][];
+}
+type StructuredSection = StructuredSectionText | StructuredSectionChart | StructuredSectionTable;
+interface StructuredBlog {
+  title: string;
+  subtitle: string;
+  sections: StructuredSection[];
+  sources: { title: string; url: string }[];
+}
+
 // Dynamic import for React Quill (client-side only)
 const ReactQuill = dynamic(() => import("react-quill"), { 
   ssr: false,
@@ -133,6 +161,7 @@ function BlogPageContent() {
   
   const [generatingContent, setGeneratingContent] = useState(false);
   const [contentGenerated, setContentGenerated] = useState(false);
+  const [generatingStructured, setGeneratingStructured] = useState(false);
   const [sendingToPublication, setSendingToPublication] = useState(false);
   const sendingToPublicationRef = useRef(false);
 
@@ -439,6 +468,111 @@ function BlogPageContent() {
       setGeneratingContent(false);
     }
   };
+
+  // Generate structured blog and always put content in the editor (charts as images, tables, sources)
+  const handleGenerateStructured = async () => {
+    if (!topic.trim()) {
+      toast.error(t.dashboard.blogPage.enterTopic);
+      return;
+    }
+    setGeneratingStructured(true);
+    try {
+      const res = await fetch("/api/blog/generate-structured", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic.trim(), language: contentGenerationLanguage }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Failed (${res.status})`);
+      }
+      const blog: StructuredBlog = await res.json();
+
+      // Convert to HTML and set in editor (charts as images)
+      const parts: string[] = [];
+      for (const section of blog.sections) {
+        if (section.type === "text") {
+          if (section.heading) parts.push(`<h2>${escapeHtml(section.heading)}</h2>`);
+          parts.push(`<p>${escapeHtml(section.content).replace(/\n/g, "<br/>")}</p>`);
+        } else if (section.type === "chart") {
+          const chartRes = await fetch("/api/blog/chart-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chartType: section.chartType,
+              labels: section.labels,
+              datasets: section.datasets,
+            }),
+          });
+          if (!chartRes.ok) throw new Error("Chart image failed");
+          const { url } = await chartRes.json();
+          parts.push(`<figure class="blog-chart"><img src="${escapeHtml(url)}" alt="${escapeHtml(section.heading)}" style="max-width:100%;height:auto;" /></figure>`);
+          if (section.heading) parts.push(`<p><strong>${escapeHtml(section.heading)}</strong></p>`);
+          if (section.caption) parts.push(`<p class="text-gray-500 text-sm">${escapeHtml(section.caption)}</p>`);
+        } else if (section.type === "table") {
+          // Use div-based layout (display:table) so Quill and CMS don't strip table tags; renders like a table
+          const headers = section.headers || [];
+          const rows = section.rows || [];
+          const tableStyle = "display:table; width:100%; border-collapse:collapse; margin:1em 0;";
+          const rowStyle = "display:table-row;";
+          const thStyle = "display:table-cell; padding:8px 12px; border:1px solid #d1d5db; background:#f3f4f6; font-weight:600; text-align:left;";
+          const tdStyle = "display:table-cell; padding:8px 12px; border:1px solid #d1d5db; text-align:left;";
+          let tableHtml = "";
+          if (section.heading) tableHtml += `<p><strong>${escapeHtml(section.heading)}</strong></p>`;
+          tableHtml += `<div class="blog-table" style="${tableStyle}">`;
+          if (headers.length) {
+            tableHtml += `<div style="${rowStyle}">`;
+            headers.forEach((h) => { tableHtml += `<div style="${thStyle}">${escapeHtml(h)}</div>`; });
+            tableHtml += "</div>";
+          }
+          rows.forEach((row) => {
+            tableHtml += `<div style="${rowStyle}">`;
+            (row || []).forEach((cell) => { tableHtml += `<div style="${tdStyle}">${escapeHtml(cell)}</div>`; });
+            tableHtml += "</div>";
+          });
+          tableHtml += "</div>";
+          parts.push(tableHtml);
+        }
+      }
+      if (blog.sources?.length) {
+        parts.push("<h3>Sources</h3><ul>");
+        for (const s of blog.sources) {
+          const hasValidUrl = s.url && s.url.trim() !== "" && s.url !== "#" && /^https?:\/\//i.test(s.url.trim());
+          if (hasValidUrl) {
+            parts.push(`<li><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title)}</a></li>`);
+          } else {
+            parts.push(`<li>${escapeHtml(s.title)}</li>`);
+          }
+        }
+        parts.push("</ul>");
+      }
+      const html = parts.join("");
+      setPost((prev) => ({
+        ...prev,
+        title: blog.title,
+        content: ensureBlockStructure(html),
+        summary: blog.subtitle || prev.summary,
+      }));
+      setContentGenerated(true);
+      setImageSearchQuery(topic.trim());
+      setShowImageModal(true);
+      toast.success("Blog generated. Content is in the editor. Add a featured image when ready.");
+    } catch (e: any) {
+      console.error("Structured blog error:", e);
+      toast.error(e.message || "Failed to generate blog");
+    } finally {
+      setGeneratingStructured(false);
+    }
+  };
+
+  function escapeHtml(s: string): string {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
 
   // Fetch images from Pixabay
   const handleFetchImages = async () => {
@@ -1156,21 +1290,22 @@ function BlogPageContent() {
                         )}
                       </div>
 
-                      {/* Generate Button */}
+                      {/* Generate Blog (structured: charts, tables, sources) */}
                       <button
-                        onClick={handleGenerateContent}
-                        disabled={generatingContent || !topic.trim()}
+                        type="button"
+                        onClick={handleGenerateStructured}
+                        disabled={generatingStructured || !topic.trim()}
                         className="w-full px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
-                        {generatingContent ? (
+                        {generatingStructured ? (
                           <>
                             <Loader2 className="w-5 h-5 animate-spin" />
-                            {t.dashboard.blogPage.generatingContent}
+                            Generating blog…
                           </>
                         ) : (
                           <>
                             <Sparkles className="w-5 h-5" />
-                            {t.dashboard.blogPage.generateBlogContent}
+                            Generate Blog
                           </>
                         )}
                       </button>
