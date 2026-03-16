@@ -144,7 +144,7 @@ function BlogPageContent() {
 
   // Blog post form state
   const [topic, setTopic] = useState("");
-  const [targetKeywords, setTargetKeywords] = useState("");
+  const [generatedTags, setGeneratedTags] = useState<string[]>([]);
   const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr" | "pt" | "it">("en");
   const [brandVoices, setBrandVoices] = useState<Array<{ id: string; brand_name: string; is_default?: boolean }>>([]);
   const [selectedBrandVoiceId, setSelectedBrandVoiceId] = useState<string | null>(null);
@@ -164,6 +164,10 @@ function BlogPageContent() {
   const [generatingStructured, setGeneratingStructured] = useState(false);
   const [sendingToPublication, setSendingToPublication] = useState(false);
   const sendingToPublicationRef = useRef(false);
+
+  // WordPress article template (script format): user-filled org name, theme colour, CTA text
+  const [organizationName, setOrganizationName] = useState("");
+  const [wordpressArticleTheme, setWordpressArticleTheme] = useState<"default" | "green" | "purple" | "navy">("default");
 
   // Image selection state (Pixabay + manual upload)
   const [showImageModal, setShowImageModal] = useState(false);
@@ -213,7 +217,7 @@ function BlogPageContent() {
     const keywordsParam = searchParams.get("keywords");
     const platformParam = searchParams.get("platform");
     if (topicParam) setTopic(topicParam);
-    if (keywordsParam) setTargetKeywords(keywordsParam);
+    if (keywordsParam) setGeneratedTags(keywordsParam.split(",").map((k: string) => k.trim()).filter(Boolean));
     if (platformParam === "wordpress" || platformParam === "shopify" || platformParam === "wordpress_self_hosted") {
       setSelectedPlatform(platformParam);
     }
@@ -404,13 +408,22 @@ function BlogPageContent() {
     setGeneratingContent(true);
     try {
       // Call the content generation API (skip schema - will be generated when sending to publication)
+      const tagsRes = await fetch("/api/blog/generate-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic.trim() }),
+      });
+      const tagsData = tagsRes.ok ? await tagsRes.json() : { tags: [] };
+      const tags = Array.isArray(tagsData.tags) ? tagsData.tags : topic.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+      setGeneratedTags(tags);
+
       const response = await fetch("/api/geo-core/content-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: topic.trim(),
           targetPlatform: selectedPlatform,
-          targetKeywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
+          targetKeywords: tags,
           influenceLevel: "moderate",
           contentType: "blog_article",
           language: contentGenerationLanguage,
@@ -447,7 +460,7 @@ function BlogPageContent() {
           ...post,
           title: topic.trim(),
           content: ensureBlockStructure(data.content),
-          tags: targetKeywords || "",
+          tags: tags.join(", "),
           summary: generatedSummary,
         });
         
@@ -477,6 +490,15 @@ function BlogPageContent() {
     }
     setGeneratingStructured(true);
     try {
+      const tagsRes = await fetch("/api/blog/generate-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic.trim() }),
+      });
+      const tagsData = tagsRes.ok ? await tagsRes.json() : { tags: [] };
+      const tags = Array.isArray(tagsData.tags) ? tagsData.tags : topic.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+      setGeneratedTags(tags);
+
       const res = await fetch("/api/blog/generate-structured", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -552,6 +574,7 @@ function BlogPageContent() {
         title: blog.title,
         content: ensureBlockStructure(html),
         summary: blog.subtitle || prev.summary,
+        tags: tags.join(", "),
       }));
       setContentGenerated(true);
       setImageSearchQuery(topic.trim());
@@ -590,7 +613,7 @@ function BlogPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: imageSearchQuery,
-          keywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
+          keywords: generatedTags,
         }),
       });
 
@@ -736,7 +759,7 @@ function BlogPageContent() {
 
   const handleStartOver = () => {
     setTopic("");
-    setTargetKeywords("");
+    setGeneratedTags([]);
     setPost({
       title: "",
       content: "",
@@ -782,7 +805,7 @@ function BlogPageContent() {
 
       // Clean up imageUrl - don't store base64 data URLs (too large)
       const cleanImageUrl = post.imageUrl && !post.imageUrl.startsWith('data:') ? post.imageUrl : "";
-      const keywordsArray = post.tags ? post.tags.split(",").map(t => t.trim()) : [];
+      const keywordsArray = generatedTags.length > 0 ? generatedTags : (post.tags ? post.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : []);
 
       let schemaData = null;
       let structuredSEO = null;
@@ -844,7 +867,7 @@ function BlogPageContent() {
       // Build metadata with schema (platform-specific)
       const contentMetadata: Record<string, any> = {
         author: post.author || "GeoRepute.ai",
-        tags: post.tags,
+        tags: generatedTags.length > 0 ? generatedTags.join(", ") : post.tags,
         imageUrl: cleanImageUrl,
         summary: post.summary,
         contentType: "blog_article",
@@ -857,15 +880,13 @@ function BlogPageContent() {
         contentMetadata.shopifyBlogId = selectedBlogId;
       } else if (selectedPlatform === "wordpress") {
         contentMetadata.wordpressSiteId = selectedWordPressSiteId;
-        // Add WordPress-specific categories
-        if (post.categories) {
-          contentMetadata.categories = post.categories;
-        }
+        contentMetadata.useWordPressArticleTemplate = true;
+        contentMetadata.organizationName = organizationName || "";
+        contentMetadata.wordpressArticleTheme = wordpressArticleTheme;
       } else if (selectedPlatform === "wordpress_self_hosted") {
-        // Self-hosted uses single site from integration; no site ID needed
-        if (post.categories) {
-          contentMetadata.categories = post.categories;
-        }
+        contentMetadata.useWordPressArticleTemplate = true;
+        contentMetadata.organizationName = organizationName || "";
+        contentMetadata.wordpressArticleTheme = wordpressArticleTheme;
       }
 
       if (existingContent) {
@@ -927,8 +948,8 @@ function BlogPageContent() {
       
       // Clear form and reset state
       setTopic("");
-      setTargetKeywords("");
-      setPost({
+      setGeneratedTags([]);
+    setPost({
         title: "",
         content: "",
         author: "",
@@ -1223,23 +1244,6 @@ function BlogPageContent() {
                         </p>
                       </div>
 
-                      {/* Target Keywords */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          {t.dashboard.blogPage.targetKeywords}
-                        </label>
-                        <input
-                          type="text"
-                          value={targetKeywords}
-                          onChange={(e) => setTargetKeywords(e.target.value)}
-                          placeholder={t.dashboard.blogPage.keywordsPlaceholder}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          {t.dashboard.blogPage.keywordsHint}
-                        </p>
-                      </div>
-
                       {/* Content language */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1371,30 +1375,46 @@ function BlogPageContent() {
                           </label>
                           <input
                             type="text"
-                            value={post.tags}
-                            onChange={(e) => setPost({ ...post, tags: e.target.value })}
-                            placeholder={t.dashboard.blogPage.tagsPlaceholder}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
+                            value={generatedTags.join(", ")}
+                            readOnly
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 cursor-default"
                           />
-                          <p className="text-xs text-gray-500 mt-1">{t.dashboard.blogPage.commaSeparated}</p>
+                          <p className="text-xs text-gray-500 mt-1">Generated from your blog topic when you clicked Generate.</p>
                         </div>
 
-                        {/* Categories - WordPress only */}
+                        {/* Organization name & theme (WordPress article template) */}
                         {(selectedPlatform === "wordpress" || selectedPlatform === "wordpress_self_hosted") && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              {t.dashboard.blogPage.categories}
-                              <span className="ml-2 text-xs font-normal text-blue-600">({t.dashboard.blogPage.wordpress})</span>
-                            </label>
-                            <input
-                              type="text"
-                              value={post.categories || ""}
-                              onChange={(e) => setPost({ ...post, categories: e.target.value })}
-                              placeholder={t.dashboard.blogPage.categoriesPlaceholder}
-                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">{t.dashboard.blogPage.categoriesHint}</p>
-                          </div>
+                          <>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Organization name
+                              </label>
+                              <input
+                                type="text"
+                                value={organizationName}
+                                onChange={(e) => setOrganizationName(e.target.value)}
+                                placeholder="Your company or brand name"
+                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
+                              />
+                              <p className="text-xs text-gray-500 mt-1">Used in article template (brand bar, footer, schema).</p>
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Article theme (colour)
+                              </label>
+                              <select
+                                value={wordpressArticleTheme}
+                                onChange={(e) => setWordpressArticleTheme(e.target.value as "default" | "green" | "purple" | "navy")}
+                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all bg-white"
+                              >
+                                <option value="default">Default (blue / navy)</option>
+                                <option value="green">Green</option>
+                                <option value="purple">Purple</option>
+                                <option value="navy">Navy</option>
+                              </select>
+                              <p className="text-xs text-gray-500 mt-1">Background and accent colours for the published article.</p>
+                            </div>
+                          </>
                         )}
                       </div>
 

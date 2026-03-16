@@ -773,10 +773,20 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** Remove Markdown bold/emphasis markers (** and __) so they don't show in content. */
+function stripMarkdownBoldMarkers(html: string): string {
+  if (!html || typeof html !== "string") return html;
+  let out = html
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(.+?)__/g, "<em>$1</em>");
+  return out.replace(/\*\*/g, "").replace(/__/g, "");
+}
+
 /** Sanitize HTML for safe preview: strip script/iframe and event handlers so content can be rendered. */
 function sanitizeHtmlForPreview(html: string): string {
   if (!html || typeof html !== "string") return "";
-  return html
+  const noMarkdownMarkers = stripMarkdownBoldMarkers(html);
+  return noMarkdownMarkers
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
     .replace(/\s+on\w+=["'][^"']*["']/gi, "")

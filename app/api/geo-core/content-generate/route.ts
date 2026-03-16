@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       sourceMissedPrompt, // Optional: Original missed prompt this content was created from
       skipSchema, // Skip schema generation (generate content only, schema later)
       schemaOnly, // When true with skipGeneration: return schema only, do not insert (caller inserts, e.g. blog)
-      websiteUrl: bodyWebsiteUrl, // Optional: website URL for backlinks
+      websiteUrl: bodyWebsiteUrl, // Optional: for third-party platforms = backlinks; for own site = internal links
       projectId, // Optional: brand project ID to look up website URL
       regenerateForContentId, // Optional: update this content_strategy row instead of inserting (preview Regenerate)
     } = body;
@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Resolve website URL for backlinks: prefer explicit URL, then look up from brand project
+    // Resolve website URL for links to user's site (backlinks when on third-party platform, internal links when on own site)
     let websiteUrl: string | undefined = bodyWebsiteUrl;
     if (!websiteUrl && projectId) {
       const { data: project } = await supabase
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       }
     }
     if (websiteUrl) {
-      console.log("🔗 Backlink URL resolved:", websiteUrl);
+      console.log("🔗 Website URL resolved for links to user's site:", websiteUrl);
     }
 
     // Use provided content (e.g. humanized from publication flow) when given; otherwise generate

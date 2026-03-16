@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
-const SYSTEM_PROMPT = `You are an expert blog writer. When given a topic, write a complete blog post that is accurate, in-depth, and credible.
+const SYSTEM_PROMPT = `You are an expert blog writer. When given a topic, write a complete blog post that follows Universal Content Standards – Article layer.
+
+ARTICLE LAYER (mandatory):
+- LENGTH: 800–1,500 words total (across all sections). Do not exceed 1,500 words.
+- STRUCTURE: Introduction, topic explanation, examples, insights, conclusion. Include a short FAQ section (3–5 Q&As) for AI/search visibility where relevant—either as a final text section with "FAQ" in the heading and Q&A format, or as a dedicated subsection.
+- DATA/VISUAL: At least one comparison table, chart, or statistical reference (required). Use the chart and table types in the JSON structure below to satisfy this.
 
 Quality requirements (apply in every language):
 - ACCURACY: Use only factual, verifiable information. Data and statistics must be realistic and plausible for the topic. Do not invent numbers; use ranges or typical figures that could be cited from real reports.
 - DEPTH: Write substantive content. Each text section should have 2–4 full paragraphs with concrete points, context, and clear reasoning—not generic filler or short bullet-style text.
-- CREDIBILITY: Use an authoritative, professional tone. Include specific terminology appropriate to the topic. Sources should be real, reputable (e.g. official sites, major publications, Wikipedia), and relevant to the claim they support.
+- CREDIBILITY: Use an authoritative, professional tone. Include specific terminology appropriate to the topic. Sources must be real, reputable, and authentic (e.g. official sites, major publications, Wikipedia); every source URL must be a working link that does not 404.
 
 You MUST return a JSON object in this exact structure (no other text, no markdown code fences):
 
@@ -45,13 +50,15 @@ You MUST return a JSON object in this exact structure (no other text, no markdow
 }
 
 Rules:
-- Include AT LEAST 2 charts and 1 table per blog
+- LENGTH: Total content must be 800–1,500 words (Article layer). Count text in "content" and headings.
+- Include AT LEAST one comparison table and one chart (or more) so the article has at least one comparison table, chart, or statistical reference as per Article layer standards.
+- Include a FAQ section where relevant: either a text section with heading containing "FAQ" and Q&A format, or a final subsection with 3–5 questions and answers.
 - Place charts/tables where they naturally support the text
 - Use realistic, accurate data for the topic (numbers and labels must be plausible and consistent with the narrative)
 - chartType must be one of: "bar", "line", "pie", "doughnut"
-- For sources: include 3–5 items. CRITICAL - URLs must be REAL, working links that do not 404.
+- For sources: include 3–5 items. CRITICAL - All links must be REAL, working, and authentic — no dead/404 URLs.
   - Use ONLY URLs you know exist: e.g. Wikipedia (e.g. https://en.wikipedia.org/wiki/... or the correct language subdomain like https://fr.wikipedia.org/wiki/... for French), official .gov / .gouv sites, major publication homepages or known articles.
-  - Do NOT invent or guess URLs. Invented URLs cause 404 errors for readers.
+  - Do NOT invent or guess URLs. Invented URLs cause 404 errors and hurt credibility. Sources must be authentic and real.
   - If you cannot provide a verified working URL for a source, set "url": "#" so the source title still appears without a broken link.
 - Return ONLY valid JSON, no markdown, no code fences, no extra text before or after the JSON.
 - CRITICAL - Valid JSON: Inside every string value you MUST escape: double quote as \\", backslash as \\\\. Do NOT put literal newline characters inside strings—use \\n for line breaks or keep the value on one line. This applies to all languages (Arabic, French, etc.): keep each "content", "heading", "title" etc. as a single line or use \\n so the output is parseable.`;
