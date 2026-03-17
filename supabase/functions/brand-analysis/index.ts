@@ -6,6 +6,41 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
+/**
+ * Report an error to the Next.js API so admin gets a PDF email (AI Visibility error report).
+ * Call from catch blocks; does not throw. Set APP_URL and AI_VISIBILITY_ERROR_REPORT_SECRET in Supabase secrets.
+ */
+async function reportErrorToAdmin(error: unknown, context: Record<string, unknown> = {}) {
+  const appUrl = Deno.env.get('APP_URL') || Deno.env.get('NEXT_PUBLIC_APP_URL') || Deno.env.get('NEXT_PUBLIC_SITE_URL');
+  const secret = Deno.env.get('AI_VISIBILITY_ERROR_REPORT_SECRET');
+  if (!appUrl) {
+    console.warn('reportErrorToAdmin: APP_URL not set, skipping');
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+  const stack = error instanceof Error ? error.stack : undefined;
+  try {
+    const res = await fetch(`${appUrl.replace(/\/$/, '')}/api/ai-visibility/error-report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(secret ? { 'x-error-report-secret': secret } : {}),
+      },
+      body: JSON.stringify({
+        message,
+        stack,
+        source: 'Supabase brand-analysis',
+        context: { ...context, timestamp: new Date().toISOString() },
+      }),
+    });
+    if (!res.ok) {
+      console.warn('reportErrorToAdmin: API returned', res.status, await res.text());
+    }
+  } catch (e) {
+    console.warn('reportErrorToAdmin: fetch failed', e);
+  }
+}
+
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SERVICE_ROLE_KEY')!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -2844,6 +2879,7 @@ Deno.serve(async (req) => {
         });
       } catch (error) {
         console.error('Batch processing failed:', error);
+        reportErrorToAdmin(error, { projectId, sessionId, batchStartIndex, batchSize, phase: 'batch' }).catch(() => {});
         return new Response(JSON.stringify({
           error: error.message,
           success: false
@@ -3109,6 +3145,7 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     console.error('Brand analysis initialization failed:', error);
+    reportErrorToAdmin(error, { projectId: body?.projectId, phase: 'initialization' }).catch(() => {});
     return new Response(JSON.stringify({
       error: error.message,
       success: false

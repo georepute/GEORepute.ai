@@ -77,6 +77,24 @@ export async function sendEmail(options: EmailOptions): Promise<{ success: boole
 }
 
 /**
+ * Send AI Visibility error report email to admin (with PDF attachment).
+ */
+export async function sendErrorReportEmail(
+  to: string,
+  subject: string,
+  html: string,
+  pdfBuffer: Buffer,
+  pdfFilename: string
+): Promise<{ success: boolean; error?: string }> {
+  return sendEmail({
+    to,
+    subject,
+    html,
+    attachments: [{ filename: pdfFilename, content: pdfBuffer }],
+  });
+}
+
+/**
  * Send report email
  */
 export async function sendReportEmail(

@@ -155,21 +155,32 @@ async function runFullCompetitorAnalysis(params: any, supabase: any): Promise<Co
     console.log(`✅ Stored competitor analysis and marked session as COMPLETED: ${sessionId}`);
   }
 
-  // Persist brand rank on all ai_platform_responses for this session (for AI visibility prompts table)
-  const brandRankEntry = rankings.ranked_competitors.find(
-    (c: any) => (c.name || '').toLowerCase() === (brandName || '').toLowerCase()
-  );
-  const brandRank = brandRankEntry?.rank ?? null;
-  if (brandRank != null) {
-    const { error: rankUpdateError } = await supabase
-      .from('ai_platform_responses')
-      .update({ brand_rank: brandRank })
-      .eq('session_id', sessionId);
-    if (rankUpdateError) {
-      console.warn('Failed to set brand_rank on ai_platform_responses:', rankUpdateError.message);
-    } else {
-      console.log(`✅ Set brand_rank=${brandRank} on ai_platform_responses for session ${sessionId}`);
+  // Persist per-prompt brand rank on ai_platform_responses (for AI visibility prompts table)
+  const brandNameNorm = (brandName || '').trim().toLowerCase();
+  if (brandNameNorm) {
+    const promptToRank = computePerPromptRanks(brandNameNorm, responses);
+    const idToRank = new Map<string, number>();
+    for (const r of responses) {
+      const key = (r.prompt || '').trim().toLowerCase();
+      const rank = promptToRank.get(key);
+      if (rank != null && r.id) idToRank.set(r.id, rank);
     }
+    const rankToIds = new Map<number, string[]>();
+    for (const [id, rank] of idToRank) {
+      const ids = rankToIds.get(rank) ?? [];
+      ids.push(id);
+      rankToIds.set(rank, ids);
+    }
+    for (const [rank, ids] of rankToIds) {
+      const { error: rankUpdateError } = await supabase
+        .from('ai_platform_responses')
+        .update({ brand_rank: rank })
+        .in('id', ids);
+      if (rankUpdateError) {
+        console.warn(`Failed to set brand_rank=${rank} on ai_platform_responses:`, rankUpdateError.message);
+      }
+    }
+    console.log(`✅ Set per-prompt brand_rank on ai_platform_responses for session ${sessionId} (${idToRank.size} rows)`);
   }
   
   // Update project last analysis timestamp
@@ -254,6 +265,41 @@ function textMentionsName(text: string, name: string): boolean {
     }
     return lowerText.includes(variation);
   });
+}
+
+/**
+ * Compute per-prompt rank: for each prompt, rank the brand vs competitors by mention count
+ * across that prompt's responses. Returns Map<normalizedPromptKey, 1BasedRank>.
+ */
+function computePerPromptRanks(brandNameNorm: string, responses: any[]): Map<string, number> {
+  const byPrompt = new Map<string, any[]>();
+  for (const r of responses) {
+    const key = (r.prompt || '').trim().toLowerCase();
+    if (!byPrompt.has(key)) byPrompt.set(key, []);
+    byPrompt.get(key)!.push(r);
+  }
+  const promptToRank = new Map<string, number>();
+  for (const [promptKey, promptResponses] of byPrompt) {
+    const mentionCount: Record<string, number> = { [brandNameNorm]: 0 };
+    const add = (name: string) => {
+      const k = name.trim().toLowerCase();
+      if (!k) return;
+      mentionCount[k] = (mentionCount[k] ?? 0) + 1;
+    };
+    for (const r of promptResponses) {
+      const meta = r.response_metadata;
+      if (meta?.brand_mentioned === true) add(brandNameNorm);
+      const found = meta?.competitors_found || [];
+      for (const c of found) {
+        const n = typeof c === 'string' ? c : (c?.name ?? '');
+        if (n) add(n);
+      }
+    }
+    const entities = Object.entries(mentionCount).sort((a, b) => b[1] - a[1]);
+    const brandIdx = entities.findIndex(([k]) => k === brandNameNorm);
+    if (brandIdx !== -1) promptToRank.set(promptKey, brandIdx + 1);
+  }
+  return promptToRank;
 }
 
 /**

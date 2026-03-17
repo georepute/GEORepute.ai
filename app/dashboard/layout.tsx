@@ -36,20 +36,38 @@ import {
   Package,
   Map,
   Trophy,
+  CreditCard,
+  Lock,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { filterNavigationByRole, NavigationItem } from "@/lib/permissions/permissions";
 import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/LanguageToggle";
+import { BillingProvider, useBillingContext } from "@/lib/billing/billing-context";
+import BillingGate from "@/components/billing/BillingGate";
+import { getNavItemLockReason } from "@/lib/billing/route-access";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  return (
+    <BillingProvider>
+      <DashboardLayoutInner>{children}</DashboardLayoutInner>
+    </BillingProvider>
+  );
+}
+
+function DashboardLayoutInner({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const router = useRouter();
   const { isRtl, t } = useLanguage();
+  const billing = useBillingContext();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>(["analytics", "strategyReports"]); // Track expanded parent items (stable keys)
@@ -181,6 +199,8 @@ export default function DashboardLayout({
     // { name: t.dashboard.sidebar.learning, href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
     // { name: t.dashboard.sidebar.videoReports, href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
     { name: t.dashboard.sidebar.quoteBuilder, href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
+    { name: t.dashboard.sidebar.modules, href: "/dashboard/modules", icon: Package, requiredCapability: "canManageSettings" },
+    { name: t.dashboard.sidebar.billing, href: "/dashboard/billing", icon: CreditCard, requiredCapability: "canManageSettings" },
     { name: t.dashboard.sidebar.team, href: "/dashboard/team", icon: Users, requiredCapability: "canManageTeam" },
     { name: t.dashboard.sidebar.settings, href: "/dashboard/settings", icon: Settings, requiredCapability: "canManageSettings" },
   ];
@@ -242,62 +262,124 @@ export default function DashboardLayout({
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 overflow-y-auto">
             <ul className="space-y-1">
-              {navigation.map((item) => (
-                <li key={item.expandKey || item.href || item.name}>
-                  {item.children ? (
-                    // Parent item with children
-                    <div>
-                      <button
-                        onClick={() => toggleExpanded(item.expandKey!)}
-                        className={`w-full flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
+              {navigation.map((item) => {
+                const itemLock = item.href
+                  ? getNavItemLockReason(item.href, billing.activeModules, billing.purchasedReportSlugs, billing.hasPlan)
+                  : null;
+                const isLocked = !!itemLock;
+
+                // For parent groups: check if every child is locked
+                const childLocks = item.children?.map((child) =>
+                  child.href
+                    ? getNavItemLockReason(child.href, billing.activeModules, billing.purchasedReportSlugs, billing.hasPlan)
+                    : null
+                );
+                const allChildrenLocked = !!childLocks?.length && childLocks.every(Boolean);
+
+                return (
+                  <li key={item.expandKey || item.href || item.name}>
+                    {item.children ? (
+                      // Parent item with children
+                      <div>
+                        <button
+                          onClick={() => toggleExpanded(item.expandKey!)}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                            sidebarCollapsed ? "justify-center" : ""
+                          } ${
+                            allChildrenLocked
+                              ? "text-gray-400 hover:bg-gray-50"
+                              : "text-gray-700 hover:bg-primary-50 hover:text-primary-600"
+                          }`}
+                          title={sidebarCollapsed ? item.name : undefined}
+                        >
+                          <item.icon className="w-5 h-5 flex-shrink-0" />
+                          {!sidebarCollapsed && (
+                            <>
+                              <span className="font-medium flex-1 text-left">{item.name}</span>
+                              {allChildrenLocked && (
+                                <Lock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mr-1" />
+                              )}
+                              {expandedItems.includes(item.expandKey!) ? (
+                                <ChevronUp className="w-4 h-4" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
+                            </>
+                          )}
+                        </button>
+                        {/* Child items */}
+                        {!sidebarCollapsed && expandedItems.includes(item.expandKey!) && (
+                          <ul className="mt-1 ml-4 space-y-1">
+                            {item.children.map((child) => {
+                              const childLock = child.href
+                                ? getNavItemLockReason(child.href, billing.activeModules, billing.purchasedReportSlugs, billing.hasPlan)
+                                : null;
+                              return (
+                                <li key={child.name}>
+                                  <Link
+                                    href={child.href || '#'}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                                      childLock
+                                        ? "text-gray-400 hover:bg-gray-50 cursor-not-allowed"
+                                        : "text-gray-600 hover:bg-primary-50 hover:text-primary-600"
+                                    }`}
+                                    onClick={childLock ? (e) => e.preventDefault() : undefined}
+                                    title={
+                                      childLock?.type === "module"
+                                        ? `Requires ${childLock.label} module`
+                                        : childLock?.type === "report"
+                                        ? `Requires ${childLock.label}`
+                                        : childLock?.type === "plan"
+                                        ? "Requires an active plan"
+                                        : undefined
+                                    }
+                                  >
+                                    <child.icon className="w-4 h-4 flex-shrink-0" />
+                                    <span className="flex-1">{child.name}</span>
+                                    {childLock && <Lock className="w-3 h-3 text-gray-400 flex-shrink-0" />}
+                                  </Link>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    ) : (
+                      // Regular item without children
+                      <Link
+                        href={isLocked ? '#' : (item.href || '#')}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
                           sidebarCollapsed ? "justify-center" : ""
+                        } ${
+                          isLocked
+                            ? "text-gray-400 hover:bg-gray-50 cursor-not-allowed"
+                            : "text-gray-700 hover:bg-primary-50 hover:text-primary-600"
                         }`}
-                        title={sidebarCollapsed ? item.name : undefined}
+                        onClick={isLocked ? (e) => e.preventDefault() : undefined}
+                        title={
+                          sidebarCollapsed
+                            ? item.name
+                            : itemLock?.type === "module"
+                            ? `Requires ${itemLock.label} module`
+                            : itemLock?.type === "report"
+                            ? `Requires ${itemLock.label}`
+                            : itemLock?.type === "plan"
+                            ? "Requires an active plan"
+                            : undefined
+                        }
                       >
                         <item.icon className="w-5 h-5 flex-shrink-0" />
                         {!sidebarCollapsed && (
                           <>
-                            <span className="font-medium flex-1 text-left">{item.name}</span>
-                            {expandedItems.includes(item.expandKey!) ? (
-                              <ChevronUp className="w-4 h-4" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4" />
-                            )}
+                            <span className="font-medium flex-1">{item.name}</span>
+                            {isLocked && <Lock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
                           </>
                         )}
-                      </button>
-                      {/* Child items */}
-                      {!sidebarCollapsed && expandedItems.includes(item.expandKey!) && (
-                        <ul className="mt-1 ml-4 space-y-1">
-                          {item.children.map((child) => (
-                            <li key={child.name}>
-                              <Link
-                                href={child.href || '#'}
-                                className="flex items-center gap-3 px-3 py-2 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors text-sm"
-                              >
-                                <child.icon className="w-4 h-4 flex-shrink-0" />
-                                <span>{child.name}</span>
-                              </Link>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ) : (
-                    // Regular item without children
-                    <Link
-                      href={item.href || '#'}
-                      className={`flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
-                        sidebarCollapsed ? "justify-center" : ""
-                      }`}
-                      title={sidebarCollapsed ? item.name : undefined}
-                    >
-                      <item.icon className="w-5 h-5 flex-shrink-0" />
-                      {!sidebarCollapsed && <span className="font-medium">{item.name}</span>}
-                    </Link>
-                  )}
-                </li>
-              ))}
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </nav>
 
@@ -427,7 +509,7 @@ export default function DashboardLayout({
 
         {/* Page Content */}
         <main className="pt-16">
-          {children}
+          <BillingGate>{children}</BillingGate>
         </main>
       </div>
     </div>

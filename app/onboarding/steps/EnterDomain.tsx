@@ -231,15 +231,30 @@ export default function EnterDomain() {
     }
   };
 
-  const handleConfirmAndContinue = () => {
+  const handleConfirmAndContinue = async () => {
+    const finalDomain = normalizedDomain || domain;
+    const validation = validateDomain(finalDomain);
     if (typeof window !== "undefined") {
-      const finalDomain = normalizedDomain || domain;
-      const validation = validateDomain(finalDomain);
       if (validation.normalized) localStorage.setItem("onboarding-domain", validation.normalized);
       localStorage.setItem(ONBOARDING_KEYWORDS_KEY, JSON.stringify(keywords));
       localStorage.setItem(ONBOARDING_COMPETITORS_KEY, JSON.stringify(competitors));
     }
     setModalOpen(false);
+    try {
+      if (validation.normalized) {
+        const res = await fetch("/api/domains/add", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ domain: validation.normalized }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.success && !data.noOrganization) {
+          toast.success("Domain saved to Domain Management");
+        }
+      }
+    } catch {
+      // Non-blocking: onboarding continues even if save fails
+    }
     nextStep();
   };
 

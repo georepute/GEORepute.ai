@@ -82,14 +82,13 @@ export default function Settings() {
     { id: "notifications", label: t.dashboard.settings.notifications, icon: Bell },
     { id: "integrations", label: t.dashboard.settings.integrations, icon: Zap },
     { id: "security", label: t.dashboard.settings.security, icon: Lock },
-    { id: "billing", label: t.dashboard.settings.billing, icon: CreditCard },
   ];
 
   // Open tab from URL (?tab=white-label etc.)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tabFromUrl = urlParams.get("tab");
-    const validTabs = ["profile", "brand-voice", "white-label", "notifications", "integrations", "security", "billing"];
+    const validTabs = ["profile", "brand-voice", "white-label", "notifications", "integrations", "security"];
     if (tabFromUrl && validTabs.includes(tabFromUrl)) {
       setActiveTab(tabFromUrl);
     }
@@ -1101,74 +1100,7 @@ export default function Settings() {
               </div>
             )}
 
-            {/* Billing Tab */}
-            {activeTab === "billing" && (
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">Billing & Subscription</h2>
-                
-                {/* Current Plan */}
-                <div className="p-6 bg-gradient-to-br from-primary-50 to-accent-50 rounded-lg border border-primary-200 mb-8">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-2xl font-bold text-gray-900 mb-1">Professional Plan</h3>
-                      <p className="text-gray-600">$299/month • Renews on Nov 20, 2024</p>
-                    </div>
-                    <button className="px-6 py-3 bg-white text-primary-600 rounded-lg font-semibold hover:shadow-lg transition-all">
-                      Upgrade Plan
-                    </button>
-                  </div>
-                </div>
-
-                {/* Payment Method */}
-                <div className="mb-8">
-                  <h3 className="font-semibold text-gray-900 mb-4">Payment Method</h3>
-                  <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-8 bg-gradient-to-r from-blue-600 to-blue-400 rounded flex items-center justify-center text-white font-bold text-xs">
-                        VISA
-                      </div>
-                      <div>
-                        <p className="font-medium text-gray-900">•••• •••• •••• 4242</p>
-                        <p className="text-sm text-gray-600">Expires 12/2025</p>
-                      </div>
-                    </div>
-                    <button className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-                      Update
-                    </button>
-                  </div>
-                </div>
-
-                {/* Billing History */}
-                <div>
-                  <h3 className="font-semibold text-gray-900 mb-4">Billing History</h3>
-                  <div className="space-y-3">
-                    {[
-                      { date: "Oct 20, 2024", amount: "$299.00", status: "Paid" },
-                      { date: "Sep 20, 2024", amount: "$299.00", status: "Paid" },
-                      { date: "Aug 20, 2024", amount: "$299.00", status: "Paid" },
-                    ].map((invoice, index) => (
-                      <div key={index} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                        <div className="flex items-center gap-4">
-                          <CreditCard className="w-5 h-5 text-gray-400" />
-                          <div>
-                            <p className="font-medium text-gray-900">{invoice.date}</p>
-                            <p className="text-sm text-gray-600">{invoice.amount}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
-                            {invoice.status}
-                          </span>
-                          <button className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-                            Download
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Billing Tab - Redirects to dedicated billing page */}
 
             {/* Save Button */}
             <div className="mt-8 pt-6 border-t border-gray-200 flex items-center justify-between">
