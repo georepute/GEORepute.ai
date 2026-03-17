@@ -1,14 +1,12 @@
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { generateAnnualStrategicPlan } from "@/lib/ai/geoCore";
 
 // ─── GET: load stored annual plan for a project ───────────────────────────────
 export async function GET(request: Request) {
   const supabase = await createServerSupabaseClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthenticatedUser(supabase);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const projectId = new URL(request.url).searchParams.get("projectId");
   if (!projectId) return NextResponse.json({ error: "projectId required" }, { status: 400 });
@@ -16,7 +14,7 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from("annual_plans")
     .select("plan_data, generated_at")
-    .eq("user_id", session.user.id)
+    .eq("user_id", user.id)
     .eq("project_id", projectId)
     .maybeSingle();
 
@@ -31,10 +29,8 @@ export async function GET(request: Request) {
 // ─── POST: generate + save annual plan ───────────────────────────────────────
 export async function POST(request: Request) {
   const supabase = await createServerSupabaseClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthenticatedUser(supabase);
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: any;
   try {
@@ -51,7 +47,7 @@ export async function POST(request: Request) {
     .from("brand_analysis_projects")
     .select("id, brand_name, industry, website_url, company_description, keywords, domain_id")
     .eq("id", projectId)
-    .eq("user_id", session.user.id)
+    .eq("user_id", user.id)
     .maybeSingle();
 
   const project = {
@@ -130,12 +126,12 @@ export async function POST(request: Request) {
           .from("gsc_queries")
           .select("query, clicks, impressions, ctr, position")
           .eq("domain_id", domainId)
-          .eq("user_id", session.user.id),
+          .eq("user_id", user.id),
         supabase
           .from("gsc_pages")
           .select("page, clicks, impressions, ctr, position")
           .eq("domain_id", domainId)
-          .eq("user_id", session.user.id),
+          .eq("user_id", user.id),
       ]);
 
       // Aggregate by query name — identical to GSC Analytics page logic
@@ -209,7 +205,7 @@ export async function POST(request: Request) {
     .from("annual_plans")
     .upsert(
       {
-        user_id: session.user.id,
+        user_id: user.id,
         project_id: projectId,
         plan_data: plan,
         generated_at: plan.generatedAt,

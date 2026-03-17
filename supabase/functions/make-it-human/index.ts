@@ -6,6 +6,16 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
 };
 
+/** Remove ** and __ from generated content before humanization (all languages, all flows). */
+function stripMarkdownBoldMarkersFromText(str: string): string {
+  if (!str || typeof str !== "string") return str;
+  return str
+    .replace(/\*\*([\s\S]+?)\*\*/g, "$1")
+    .replace(/__([\s\S]+?)__/g, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "");
+}
+
 // ============================================================================
 // MULTI-PASS HUMANIZER - KEEPS HUMANIZING UNTIL TARGET IS REACHED
 // ============================================================================
@@ -1313,6 +1323,9 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Remove ** and __ from generated content before humanization (all languages, all flows)
+    const textStripped = stripMarkdownBoldMarkersFromText(text);
     
     // Determine language preference (from body or cookie)
     const preferredLanguage = language || req.headers.get('cookie')?.split('; ').find(row => row.startsWith('preferred-language='))?.split('=')[1] || 'en';
@@ -1326,29 +1339,29 @@ serve(async (req) => {
       ? detectedPhrases.filter(p => typeof p === 'string' && p.trim().length > 0)
       : [];
     
-    console.log(`🔥 Processing ${text.length} characters with ${numPasses} passes, language: ${validLanguage}...`);
+    console.log(`🔥 Processing ${textStripped.length} characters with ${numPasses} passes, language: ${validLanguage}...`);
     if (validDetectedPhrases.length > 0) {
       console.log(`📋 Targeting ${validDetectedPhrases.length} detected AI phrases for removal`);
     }
     
     // Check if HTML is present
-    const hasHTML = /<[^>]+>/.test(text);
+    const hasHTML = /<[^>]+>/.test(textStripped);
     if (hasHTML) {
       console.log(`🧩 HTML detected in content, preserving tag structure during humanization`);
     }
     
     const humanizer = new MultiPassHumanizer(validLanguage as 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it');
-    const humanized = processHTML(text, humanizer, numPasses, validDetectedPhrases);
+    const humanized = processHTML(textStripped, humanizer, numPasses, validDetectedPhrases);
     const formatted = applyFormattingLayer(humanized, validLanguage);
     
-    const ratio = text.length > 0 ? (formatted.length / text.length) : 1;
+    const ratio = textStripped.length > 0 ? (formatted.length / textStripped.length) : 1;
     
-    console.log(`✅ Humanization complete (${formatted.length} chars, was ${text.length} chars, ratio: ${(ratio * 100).toFixed(1)}%)`);
+    console.log(`✅ Humanization complete (${formatted.length} chars, was ${textStripped.length} chars, ratio: ${(ratio * 100).toFixed(1)}%)`);
     
     return new Response(
       JSON.stringify({
         humanVersion: formatted,
-        original: text,
+        original: textStripped,
         success: true,
         passes: numPasses,
         detectedPhrasesRemoved: validDetectedPhrases.length,

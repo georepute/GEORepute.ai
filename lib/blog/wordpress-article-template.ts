@@ -71,12 +71,12 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** Remove Markdown bold/emphasis markers (** and __) from content: convert to HTML tags then strip any remaining markers. */
-function stripMarkdownBoldMarkers(html: string): string {
+/** Remove Markdown bold/emphasis markers (** and __) from content: convert to HTML tags then strip any remaining markers. Use for all generated content (all languages, new content, missed prompt, multiple platform). */
+export function stripMarkdownBoldMarkers(html: string): string {
   if (!html || typeof html !== "string") return html;
   let out = html
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/__(.+?)__/g, "<em>$1</em>");
+    .replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([\s\S]+?)__/g, "<em>$1</em>");
   out = out.replace(/\*\*/g, "").replace(/__/g, "");
   return out;
 }

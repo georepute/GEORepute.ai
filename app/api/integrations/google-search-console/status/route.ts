@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase/server';
 
 /**
  * GET /api/integrations/google-search-console/status
@@ -8,9 +8,8 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -18,7 +17,7 @@ export async function GET(request: NextRequest) {
     const { data: integration, error } = await supabase
       .from('platform_integrations')
       .select('*')
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
       .eq('platform', 'google_search_console')
       .maybeSingle();
 
@@ -74,9 +73,8 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -93,7 +91,7 @@ export async function DELETE(request: NextRequest) {
           disconnected_at: new Date().toISOString(),
         },
       })
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
       .eq('platform', 'google_search_console');
 
     if (error) throw error;

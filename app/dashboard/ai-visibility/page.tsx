@@ -8737,17 +8737,32 @@ function KeywordsTab({ selectedProject }: { selectedProject: Project }) {
   );
 }
 
-// Wrap the component with Suspense to handle useSearchParams
-export default function AIVisibility() {
+// Loading fallback for SSR and useSearchParams
+function AIVisibilityFallback() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
-        </div>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-gray-600">Loading...</p>
       </div>
-    }>
+    </div>
+  );
+}
+
+// Wrap with Suspense and render content only after mount to avoid "location is not defined"
+// (useSearchParams/layout-router can touch `location` during SSR; deferring to client fixes it)
+export default function AIVisibility() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return <AIVisibilityFallback />;
+  }
+
+  return (
+    <Suspense fallback={<AIVisibilityFallback />}>
       <AiVisibilityErrorBoundary>
         <AIVisibilityContent />
       </AiVisibilityErrorBoundary>

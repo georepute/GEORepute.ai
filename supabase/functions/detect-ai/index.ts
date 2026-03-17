@@ -13,6 +13,16 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
+/** Remove ** and __ from generated content so they don't appear in analysis or highlighted HTML. */
+function stripMarkdownBoldMarkersFromText(str: string): string {
+  if (!str || typeof str !== "string") return str;
+  return str
+    .replace(/\*\*([\s\S]+?)\*\*/g, "$1")
+    .replace(/__([\s\S]+?)__/g, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/__/g, "");
+}
+
 // MASSIVELY EXPANDED AI DETECTION PATTERNS
 // Helper function to get patterns based on language
 function getAiPatterns(language: 'en' | 'he' | 'ar' | 'fr' | 'pt' | 'it' = 'en') {
@@ -2230,15 +2240,18 @@ serve(async (req) => {
       );
     }
 
+    // Remove ** and __ from generated content before analysis (all languages, all flows)
+    const textStripped = stripMarkdownBoldMarkersFromText(text);
+
     // Determine language preference (from body or cookie)
     const preferredLanguage = language || req.headers.get('cookie')?.split('; ').find(row => row.startsWith('preferred-language='))?.split('=')[1] || 'en';
     const validLanguage = (preferredLanguage === 'he' || preferredLanguage === 'en' || preferredLanguage === 'ar' || preferredLanguage === 'fr' || preferredLanguage === 'pt' || preferredLanguage === 'it') ? preferredLanguage : 'en';
 
-    // Store original HTML for proper highlighting
-    const originalHtml = text;
+    // Store original HTML for proper highlighting (use stripped text so **/__ don't appear)
+    const originalHtml = textStripped;
     
     // Extract plain text from HTML if needed
-    const plainText = extractTextFromHtml(text);
+    const plainText = extractTextFromHtml(textStripped);
     
     if (plainText.length > 50000) {
       return new Response(

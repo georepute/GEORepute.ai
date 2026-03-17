@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createGSCClientFromTokens, normalizeSiteUrl } from '@/lib/integrations/google-search-console';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient, getAuthenticatedUser } from '@/lib/supabase/server';
 
 /**
  * GET /api/integrations/google-search-console/domains
@@ -9,9 +9,8 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -19,7 +18,7 @@ export async function GET(request: NextRequest) {
     const { data: orgUser, error: orgError } = await supabase
       .from('organization_users')
       .select('organization_id')
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
       .eq('status', 'active')
       .single();
 
@@ -31,7 +30,7 @@ export async function GET(request: NextRequest) {
       const result = await supabase
         .from('domains')
         .select('*')
-        .eq('user_id', session.user.id)
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
       
       domains = result.data;
@@ -70,9 +69,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -112,7 +110,7 @@ export async function POST(request: NextRequest) {
     const { data: integration, error: integrationError } = await supabase
       .from('platform_integrations')
       .select('*')
-      .eq('user_id', session.user.id)
+      .eq('user_id', user.id)
       .eq('platform', 'google_search_console')
       .single();
 
@@ -190,7 +188,7 @@ export async function POST(request: NextRequest) {
     const { data: updatedDomain, error: updateError } = await supabase
       .from('domains')
       .update({
-        user_id: session.user.id,
+        user_id: user.id,
         gsc_integration: {
           integration_id: integration.id,
           domain_url: domainUrl,
@@ -258,9 +256,8 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

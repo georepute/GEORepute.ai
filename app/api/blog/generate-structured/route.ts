@@ -8,10 +8,12 @@ ARTICLE LAYER (mandatory):
 - STRUCTURE: Introduction, topic explanation, examples, insights, conclusion. Include a short FAQ section (3–5 Q&As) for AI/search visibility where relevant—either as a final text section with "FAQ" in the heading and Q&A format, or as a dedicated subsection.
 - DATA/VISUAL: At least one comparison table, chart, or statistical reference (required). Use the chart and table types in the JSON structure below to satisfy this.
 
-Quality requirements (apply in every language):
+Quality requirements (apply in EVERY language: English, Hebrew, French, Portuguese, Arabic, Italian, Spanish, etc.):
 - ACCURACY: Use only factual, verifiable information. Data and statistics must be realistic and plausible for the topic. Do not invent numbers; use ranges or typical figures that could be cited from real reports.
 - DEPTH: Write substantive content. Each text section should have 2–4 full paragraphs with concrete points, context, and clear reasoning—not generic filler or short bullet-style text.
 - CREDIBILITY: Use an authoritative, professional tone. Include specific terminology appropriate to the topic. Sources must be real, reputable, and authentic (e.g. official sites, major publications, Wikipedia); every source URL must be a working link that does not 404.
+- PROFESSIONAL QUALITY IN ALL LANGUAGES: Content must be publication-ready with no grammar, spelling, or punctuation errors. In Hebrew, French, Portuguese, Arabic, Italian, Spanish, and any other language: use correct grammar, spelling, accents, and punctuation as expected by native readers. Quality must match a professional article in that language.
+- HUMANIZED CONTENT: Write naturally, as a skilled human writer would—never robotic or machine-like. Vary sentence structure, use appropriate idioms and phrasing for the target language, and avoid repetitive or stiff wording. Content should read as if written by a native or fluent professional in that language.
 
 You MUST return a JSON object in this exact structure (no other text, no markdown code fences):
 
@@ -56,6 +58,8 @@ Rules:
 - Place charts/tables where they naturally support the text
 - Use realistic, accurate data for the topic (numbers and labels must be plausible and consistent with the narrative)
 - chartType must be one of: "bar", "line", "pie", "doughnut"
+- Tables (apply in ALL languages - English, Hebrew, French, Portuguese, Arabic, Italian, Spanish, etc.): "headers" must be an array of separate column names (one string per column). "rows" must be an array of rows, each row an array of cell strings with one cell per column. Do not concatenate all headers or all cells into a single string. Keep table content in proper columns for every language.
+- Do NOT use em dashes (—) or en dashes (–) in any "content" or "heading" text, in ANY language (English, Hebrew, French, Portuguese, Arabic, Italian, Spanish, etc.). Use commas, parentheses, or " - " (space hyphen space) instead. Example: "in the morning - before getting out of bed - or last thing" not "in the morning—before getting out of bed—or last thing". Same rule for Hebrew, French, Arabic, and all other languages.
 - For sources: include 3–5 items. CRITICAL - All links must be REAL, working, and authentic — no dead/404 URLs.
   - Use ONLY URLs you know exist: e.g. Wikipedia (e.g. https://en.wikipedia.org/wiki/... or the correct language subdomain like https://fr.wikipedia.org/wiki/... for French), official .gov / .gouv sites, major publication homepages or known articles.
   - Do NOT invent or guess URLs. Invented URLs cause 404 errors and hurt credibility. Sources must be authentic and real.
@@ -202,7 +206,7 @@ export async function POST(request: NextRequest) {
 
 CRITICAL - Language: You MUST write ALL user-facing content ONLY in ${languageName}. Every title, subtitle, section heading, paragraph, chart title/caption, table heading, cell text, and source title must be in ${languageName}. Do NOT use English or any other language for that content. Keep only the JSON keys (e.g. "title", "sections") in English.
 
-CRITICAL - Quality for ${languageName}: The article must be as accurate, in-depth, and credible as a professional piece in ${languageName}. Use proper terminology and style expected by native readers. Write substantial paragraphs (not short or generic). Prefer sources in ${languageName} where they exist (e.g. fr.wikipedia.org, .gouv.fr for French); otherwise use well-known international sources. Data in charts and tables must be realistic and consistent with the text.`
+CRITICAL - Professional quality for ${languageName}: The article must be publication-ready with ZERO grammar, spelling, or punctuation errors. Use correct ${languageName} grammar, accents, and punctuation as a native or fluent professional would. Content must be humanized: natural, varied sentence structure, appropriate idioms and phrasing—never robotic or machine-like. The article must be as accurate, in-depth, and credible as a professional piece in ${languageName}. Write substantial paragraphs (not short or generic). Prefer sources in ${languageName} where they exist (e.g. fr.wikipedia.org, .gouv.fr for French); otherwise use well-known international sources. Data in charts and tables must be realistic and consistent with the text. Do NOT use em dashes (—) or en dashes (–); use commas, parentheses, or " - " instead. Keep table headers and row cells as separate array elements (one per column).`
         : `Write a blog about: ${topic.trim()}`;
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -231,6 +235,18 @@ CRITICAL - Quality for ${languageName}: The article must be as accurate, in-dept
 
     const data = await response.json();
     const rawText = data.content?.[0]?.text?.trim() || "";
+
+    // Log raw AI response preview in terminal (format inspection)
+    console.log("\n" + "=".repeat(60));
+    console.log("📄 GENERATED CONTENT (raw from AI – /api/blog/generate-structured)");
+    console.log("   Topic:", topic?.slice(0, 50) + (topic && topic.length > 50 ? "..." : ""));
+    console.log("   Raw length:", rawText.length, "chars");
+    console.log("   First 800 chars (format check):");
+    console.log("-".repeat(40));
+    console.log(rawText.slice(0, 800));
+    if (rawText.length > 800) console.log("\n... [truncated]");
+    console.log("=".repeat(60) + "\n");
+
     let jsonStr = extractJson(rawText);
 
     let blog: StructuredBlog;
@@ -256,6 +272,28 @@ CRITICAL - Quality for ${languageName}: The article must be as accurate, in-dept
       );
     }
     if (!Array.isArray(blog.sources)) blog.sources = [];
+
+    // Log parsed structured blog summary in terminal
+    console.log("\n" + "=".repeat(60));
+    console.log("📄 PARSED STRUCTURED BLOG (summary)");
+    console.log("   Topic:", topic?.slice(0, 50) + (topic && topic.length > 50 ? "..." : ""));
+    console.log("   Title:", blog.title?.slice(0, 60) + (blog.title && blog.title.length > 60 ? "..." : ""));
+    console.log("   Subtitle:", blog.subtitle?.slice(0, 60) + (blog.subtitle && blog.subtitle.length > 60 ? "..." : ""));
+    console.log("   Sections:", blog.sections?.length ?? 0);
+    (blog.sections || []).forEach((sec: StructuredSection, i: number) => {
+      if (sec.type === "text") {
+        const preview = (sec.content || "").slice(0, 80).replace(/\n/g, " ");
+        console.log(`   [${i + 1}] text | heading: "${(sec.heading || "").slice(0, 40)}" | content preview: ${preview}...`);
+      } else if (sec.type === "table") {
+        const t = sec as StructuredSectionTable;
+        console.log(`   [${i + 1}] table | heading: "${(t.heading || "").slice(0, 40)}" | headers: ${(t.headers || []).join(", ")} | rows: ${(t.rows || []).length}`);
+      } else if (sec.type === "chart") {
+        const c = sec as StructuredSectionChart;
+        console.log(`   [${i + 1}] chart | heading: "${(c.heading || "").slice(0, 40)}" | type: ${c.chartType} | labels: ${(c.labels || []).slice(0, 4).join(", ")}`);
+      }
+    });
+    console.log("   Sources:", blog.sources?.length ?? 0);
+    console.log("=".repeat(60) + "\n");
 
     return NextResponse.json(blog);
   } catch (err) {

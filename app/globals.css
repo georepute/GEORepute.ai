@@ -103,6 +103,27 @@
   font-style: italic;
 }
 
+/* Blog tables: keep content in columns, wrap long text inside cells */
+.ql-editor .blog-table,
+.ql-editor table.blog-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+.ql-editor .blog-table th,
+.ql-editor .blog-table td {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  vertical-align: top;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+}
+.ql-editor .blog-table th {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
 .ql-toolbar.ql-snow {
   border: none;
   border-bottom: 1px solid #e5e7eb;

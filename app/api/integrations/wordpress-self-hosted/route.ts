@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import {
   verifySelfHostedWordPress,
   normalizeSelfHostedSiteUrl,
@@ -15,18 +15,15 @@ import {
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { data: integration, error } = await supabase
       .from("platform_integrations")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .eq("platform", "wordpress_self_hosted")
       .maybeSingle();
 
@@ -72,11 +69,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -114,12 +108,12 @@ export async function POST(request: NextRequest) {
     const { data: existingIntegration } = await supabase
       .from("platform_integrations")
       .select("id")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .eq("platform", "wordpress_self_hosted")
       .maybeSingle();
 
     const integrationData = {
-      user_id: session.user.id,
+      user_id: user.id,
       platform: "wordpress_self_hosted",
       platform_user_id: normalizedUrl,
       platform_username: username.trim(),
@@ -167,18 +161,15 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { error: deleteError } = await supabase
       .from("platform_integrations")
       .delete()
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .eq("platform", "wordpress_self_hosted");
 
     if (deleteError) throw deleteError;

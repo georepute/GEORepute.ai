@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import { publishToGitHub, GitHubConfig } from "@/lib/integrations/github";
 import { publishToReddit, RedditConfig, refreshRedditToken } from "@/lib/integrations/reddit";
 import { publishToMedium, MediumConfig } from "@/lib/integrations/medium";
@@ -20,11 +20,8 @@ import { buildWordPressArticleHtml, type ThemePreset } from "@/lib/blog/wordpres
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -35,7 +32,7 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from("content_strategy")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (contentId) {
@@ -63,7 +60,7 @@ export async function GET(request: NextRequest) {
         .from("published_content")
         .select("*")
         .in("content_strategy_id", contentIds)
-        .eq("user_id", session.user.id);
+        .eq("user_id", user.id);
 
       if (published) {
         published.forEach((pub) => {
@@ -89,7 +86,7 @@ export async function GET(request: NextRequest) {
         .from("keyword_forecast")
         .select("keyword, opportunity_score, metadata")
         .in("keyword", Array.from(allKeywords))
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
       if (forecasts) {
@@ -200,11 +197,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -236,7 +230,7 @@ export async function POST(request: NextRequest) {
         .from("content_strategy")
         .select("*")
         .eq("id", contentId)
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .single();
 
       if (fetchError || !fetchedContentStrategy) {
@@ -272,7 +266,7 @@ export async function POST(request: NextRequest) {
             }),
           })
           .eq("id", contentId)
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .select()
           .single();
 
@@ -312,7 +306,7 @@ export async function POST(request: NextRequest) {
             const { data: githubIntegrationData } = await supabase
               .from("platform_integrations")
               .select("*")
-              .eq("user_id", session.user.id)
+              .eq("user_id", user.id)
               .eq("platform", "github")
               .eq("status", "connected")
               .maybeSingle();
@@ -473,7 +467,7 @@ export async function POST(request: NextRequest) {
               const { data: redditIntegrationData } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "reddit")
               .eq("status", "connected")
               .maybeSingle();
@@ -604,7 +598,7 @@ export async function POST(request: NextRequest) {
               const { data: mediumIntegrationData } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "medium")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -711,7 +705,7 @@ export async function POST(request: NextRequest) {
               const { data: quoraIntegrationData } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "quora")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -813,7 +807,7 @@ export async function POST(request: NextRequest) {
               const { data: facebookIntegrationData } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "facebook")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -911,7 +905,7 @@ export async function POST(request: NextRequest) {
               const { data: linkedInIntegrationData } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "linkedin")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -1025,7 +1019,7 @@ export async function POST(request: NextRequest) {
               const { data: instagramIntegrationData } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "instagram")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -1188,7 +1182,7 @@ export async function POST(request: NextRequest) {
               const { data: xIntegration } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "x")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -1244,7 +1238,7 @@ export async function POST(request: NextRequest) {
               const { data: shopifyIntegration } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "shopify")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -1329,7 +1323,7 @@ export async function POST(request: NextRequest) {
               const { data: wordpressIntegration } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "wordpress")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -1390,7 +1384,7 @@ export async function POST(request: NextRequest) {
               const { data: wpSelfHostedIntegration } = await supabase
                 .from("platform_integrations")
                 .select("*")
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .eq("platform", "wordpress_self_hosted")
                 .eq("status", "connected")
                 .maybeSingle();
@@ -1513,7 +1507,7 @@ export async function POST(request: NextRequest) {
 
           // Prepare insert data - ensure published_url is explicitly set
           const insertData: any = {
-            user_id: session.user.id,
+            user_id: user.id,
             content_strategy_id: contentId,
             platform: platform === "github" ? "github" : platform === "reddit" ? "reddit" : platform === "medium" ? "medium" : platform === "quora" ? "quora" : platform === "facebook" ? "facebook" : platform === "x" ? "x" : platform === "wordpress_self_hosted" ? "wordpress_self_hosted" : platform,
             published_at: new Date().toISOString(),
@@ -1544,7 +1538,7 @@ export async function POST(request: NextRequest) {
             metadata: {
               ...contentStrategy.metadata, // Include all metadata including structuredSEO
               auto_published: true,
-              approved_by: session.user.id,
+              approved_by: user.id,
               // Include schema in published_content metadata
               schema: schemaData ? {
                 jsonLd: schemaData.jsonLd,
@@ -1717,7 +1711,7 @@ export async function POST(request: NextRequest) {
                 .from("action_plan")
                 .select("steps")
                 .eq("id", contentStrategy.metadata.actionPlanId)
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .single();
 
               if (fetchError) {
@@ -1770,7 +1764,7 @@ export async function POST(request: NextRequest) {
                 .from("action_plan")
                 .update({ steps })
                 .eq("id", contentStrategy.metadata.actionPlanId)
-                .eq("user_id", session.user.id)
+                .eq("user_id", user.id)
                 .select()
                 .single();
 
@@ -1832,7 +1826,7 @@ export async function POST(request: NextRequest) {
             },
           })
           .eq("id", contentId)
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .select()
           .single();
 
@@ -1846,14 +1840,14 @@ export async function POST(request: NextRequest) {
         break;
 
       case "delete":
-        console.log(`🗑️ Attempting to delete content: ${contentId} for user: ${session.user.id}`);
+        console.log(`🗑️ Attempting to delete content: ${contentId} for user: ${user.id}`);
         console.log(`✅ Content already verified: ${contentStrategy.topic} (${contentId}), user_id: ${contentStrategy.user_id}`);
         
         // Verify user_id matches (contentStrategy is already fetched at the top)
-        if (contentStrategy.user_id !== session.user.id) {
+        if (contentStrategy.user_id !== user.id) {
           console.error(`❌ User ID mismatch:`, {
             contentUserId: contentStrategy.user_id,
-            sessionUserId: session.user.id,
+            sessionUserId: user.id,
             contentId
           });
           return NextResponse.json(
@@ -1914,7 +1908,7 @@ export async function POST(request: NextRequest) {
             errorDetails: (deleteError as any).details,
             errorHint: (deleteError as any).hint,
             contentId,
-            userId: session.user.id
+            userId: user.id
           });
           throw deleteError;
         }
@@ -1925,7 +1919,7 @@ export async function POST(request: NextRequest) {
           console.error(`❌ Delete query returned 0 rows for contentId: ${contentId}`, {
             contentId,
             verifiedUserId: contentStrategy.user_id,
-            sessionUserId: session.user.id,
+            sessionUserId: user.id,
             verifiedContent: contentStrategy
           });
           
@@ -1934,14 +1928,14 @@ export async function POST(request: NextRequest) {
             .from("content_strategy")
             .select("id, user_id, topic")
             .eq("id", contentId)
-            .eq("user_id", session.user.id)
+            .eq("user_id", user.id)
             .maybeSingle();
           
           if (stillExists) {
             console.error(`❌ Content still exists after delete attempt!`, {
               contentId,
               foundUserId: stillExists.user_id,
-              requestUserId: session.user.id,
+              requestUserId: user.id,
               topic: stillExists.topic
             });
             return NextResponse.json(
@@ -1981,14 +1975,14 @@ export async function POST(request: NextRequest) {
         break;
 
       case "deleteMultiple":
-        console.log(`🗑️ Attempting to delete multiple content items: ${contentIds.length} items for user: ${session.user.id}`);
+        console.log(`🗑️ Attempting to delete multiple content items: ${contentIds.length} items for user: ${user.id}`);
         
         // Verify all content items exist and belong to the user
         const { data: verifyContents, error: verifyError } = await supabase
           .from("content_strategy")
           .select("id, topic, user_id")
           .in("id", contentIds)
-          .eq("user_id", session.user.id);
+          .eq("user_id", user.id);
 
         if (verifyError) {
           console.error(`❌ Error verifying contents:`, verifyError);
@@ -2034,7 +2028,7 @@ export async function POST(request: NextRequest) {
           .from("content_strategy")
           .delete()
           .in("id", verifiedIds)
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .select();
 
         if (batchDeleteError) {
@@ -2059,7 +2053,7 @@ export async function POST(request: NextRequest) {
           .from("content_strategy")
           .select("id")
           .in("id", verifiedIds)
-          .eq("user_id", session.user.id);
+          .eq("user_id", user.id);
 
         if (stillExists && stillExists.length > 0) {
           console.warn(`⚠️ ${stillExists.length} content item(s) still exist after deletion attempt`);
@@ -2104,7 +2098,7 @@ export async function POST(request: NextRequest) {
             const { data: githubIntegrationData } = await supabase
               .from("platform_integrations")
               .select("*")
-              .eq("user_id", session.user.id)
+              .eq("user_id", user.id)
               .eq("platform", "github")
               .eq("status", "connected")
               .maybeSingle();
@@ -2183,7 +2177,7 @@ export async function POST(request: NextRequest) {
             const { data: redditIntegrationData } = await supabase
               .from("platform_integrations")
               .select("*")
-              .eq("user_id", session.user.id)
+              .eq("user_id", user.id)
               .eq("platform", "reddit")
               .eq("status", "connected")
               .maybeSingle();
@@ -2274,7 +2268,7 @@ export async function POST(request: NextRequest) {
         const { data: publishedRecord, error: publishRecordError } = await supabase
           .from("published_content")
           .insert({
-            user_id: session.user.id,
+            user_id: user.id,
             content_strategy_id: contentId,
             platform: publishPlatform,
             published_url: publishUrl,
@@ -2288,7 +2282,7 @@ export async function POST(request: NextRequest) {
             error_message: (gitHubResult?.error || redditResult?.error) || actionData.errorMessage || null,
             metadata: {
               ...contentStrategy.metadata, // Include all metadata including structuredSEO
-              published_by: session.user.id,
+              published_by: user.id,
               // Include schema in published_content metadata
               schema: schemaData ? {
                 jsonLd: schemaData.jsonLd,
@@ -2352,7 +2346,7 @@ export async function POST(request: NextRequest) {
             updated_at: new Date().toISOString(),
           })
           .eq("id", contentId)
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .select()
           .single();
 
@@ -2373,7 +2367,7 @@ export async function POST(request: NextRequest) {
               .from("action_plan")
               .select("steps")
               .eq("id", contentStrategy.metadata.actionPlanId)
-              .eq("user_id", session.user.id)
+              .eq("user_id", user.id)
               .single();
 
             if (fetchError) {
@@ -2426,7 +2420,7 @@ export async function POST(request: NextRequest) {
               .from("action_plan")
               .update({ steps })
               .eq("id", contentStrategy.metadata.actionPlanId)
-              .eq("user_id", session.user.id)
+              .eq("user_id", user.id)
               .select()
               .single();
 

@@ -19,9 +19,9 @@ import {
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase/client";
 import ImageUpload from "@/components/ImageUpload";
-import "react-quill/dist/quill.snow.css";
+import "react-quill-new/dist/quill.snow.css";
 
-const ReactQuill = dynamic(() => import("react-quill"), {
+const ReactQuill = dynamic(() => import("react-quill-new"), {
   ssr: false,
   loading: () => (
     <div className="h-64 bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
@@ -87,8 +87,10 @@ export default function PublicationPreviewPage() {
         [{ align: [] }],
         ["blockquote", "code-block"],
         ["link", "image"],
+        [{ table: [] }],
         ["clean"],
       ],
+      table: true,
     }),
     []
   );
@@ -100,6 +102,7 @@ export default function PublicationPreviewPage() {
     "align",
     "blockquote", "code-block",
     "link", "image",
+    "table",
   ];
 
   const fetchContent = useCallback(async () => {

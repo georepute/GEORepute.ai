@@ -4,6 +4,7 @@ import { generateStrategicContent } from "@/lib/ai/geoCore";
 import { applyLearningRules } from "@/lib/learning/rulesEngine";
 import { generatePlatformSchema, schemaToScriptTag } from "@/lib/seo/schemaGenerator";
 import { generatePlatformStructuredContent } from "@/lib/seo/structuredContent";
+import { stripMarkdownBoldMarkers } from "@/lib/blog/wordpress-article-template";
 
 const MAX_PLATFORMS = 5;
 const ALLOWED_PLATFORMS = [
@@ -137,7 +138,8 @@ export async function POST(request: NextRequest) {
           learningRules
         );
 
-        let contentToStore = result.content;
+        // Remove ** and __ (all languages, multiple-platform flow)
+        let contentToStore = stripMarkdownBoldMarkers(result.content);
         let aiPercentage: number | undefined;
         let topPhrases: string[] = [];
         let detectionResult: {
@@ -155,7 +157,7 @@ export async function POST(request: NextRequest) {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${supabaseEdgeKey}`,
               },
-              body: JSON.stringify({ text: result.content, language: preferredLanguage }),
+              body: JSON.stringify({ text: contentToStore, language: preferredLanguage }),
             });
             if (detectRes.ok) {
               const detectData = await detectRes.json();
@@ -316,7 +318,7 @@ export async function POST(request: NextRequest) {
           results.push({
             platform,
             contentId: inserted?.id ?? null,
-            generatedContent: result.content,
+            generatedContent: contentToStore,
             humanizedContent: contentToStore,
             aiPercentage,
             detectionResult: detectionResult ?? undefined,

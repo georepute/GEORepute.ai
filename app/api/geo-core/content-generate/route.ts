@@ -1,19 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import { generateStrategicContent } from "@/lib/ai/geoCore";
 import { applyLearningRules } from "@/lib/learning/rulesEngine";
 import { generatePlatformSchema, schemaToScriptTag } from "@/lib/seo/schemaGenerator";
 import { generatePlatformStructuredContent } from "@/lib/seo/structuredContent";
+import { stripMarkdownBoldMarkers } from "@/lib/blog/wordpress-article-template";
 
 export async function POST(request: NextRequest) {
   try {
     // Auth check
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -102,7 +100,7 @@ export async function POST(request: NextRequest) {
         .from("brand_voice_profiles")
         .select("*")
         .eq("id", brandVoiceId)
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .single();
       
       if (!voiceError && voice) {
@@ -118,7 +116,7 @@ export async function POST(request: NextRequest) {
         .from("brand_projects")
         .select("website_url")
         .eq("id", projectId)
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .single();
       if (project?.website_url) {
         websiteUrl = project.website_url;
@@ -129,7 +127,7 @@ export async function POST(request: NextRequest) {
       const { data: recentProject } = await supabase
         .from("brand_projects")
         .select("website_url")
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .not("website_url", "is", null)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -149,21 +147,22 @@ export async function POST(request: NextRequest) {
     if (generatedContent) {
       // Use provided content (humanized or pre-generated) - for both schema-only and DB insert flows
       console.log("⏭️ Using provided content (no AI generation)");
+      const contentStripped = stripMarkdownBoldMarkers(generatedContent);
       result = {
-        content: generatedContent,
+        content: contentStripped,
         keywordDensity: 0,
         seoScore: 70,
         readabilityScore: 75,
         contentType: contentType || "answer",
         tone: tone || "informative",
-        wordCount: generatedContent.split(/\s+/).length,
+        wordCount: contentStripped.split(/\s+/).length,
         neutralityScore: 0,
         ai_model: "schema-only",
       };
     } else {
       // Apply learning rules from previous outcomes
       learningRules = await applyLearningRules(
-        session.user.id,
+        user.id,
         {
           platform: targetPlatform,
           keywords: targetKeywords || [],
@@ -185,6 +184,22 @@ export async function POST(request: NextRequest) {
         contentType: contentType,
         websiteUrl: websiteUrl,
       }, learningRules);
+    }
+
+    // Remove ** and __ from generated content (all languages, new content / missed prompt / multi-platform)
+    if (result?.content) {
+      result = { ...result, content: stripMarkdownBoldMarkers(result.content) };
+    }
+
+    // Log generated content in terminal for debugging / format inspection
+    if (result?.content) {
+      const len = result.content.length;
+      console.log("\n" + "=".repeat(60));
+      console.log("📄 GENERATED CONTENT (raw format from AI)");
+      console.log("   Length:", len, "chars | Platform:", normalizedPlatform, "| ContentType:", contentType || "—");
+      console.log("=".repeat(60));
+      console.log(result.content);
+      console.log("=".repeat(60) + "\n");
     }
 
     // Generate Structured SEO Elements (headings, FAQs, meta description, OG tags, internal links, canonical) for SCHEMA DATA
@@ -381,7 +396,7 @@ export async function POST(request: NextRequest) {
         : [];
     
     const insertPayload = {
-      user_id: session.user.id,
+      user_id: user.id,
       topic,
       target_keywords: targetKeywordsArray,
       target_platform: normalizedPlatform,
@@ -402,7 +417,7 @@ export async function POST(request: NextRequest) {
           .from("content_strategy")
           .select("id, metadata")
           .eq("id", regenerateForContentId)
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .maybeSingle();
         if (existingRow) {
           const existingMeta = (existingRow.metadata as Record<string, unknown>) || {};
@@ -456,7 +471,7 @@ export async function POST(request: NextRequest) {
         const { data: existingDraft } = await supabase
           .from("content_strategy")
           .select("id")
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .eq("topic", topic)
           .eq("target_platform", normalizedPlatform)
           .in("status", ["draft", "review"])
@@ -603,7 +618,7 @@ export async function POST(request: NextRequest) {
           .from("action_plan")
           .select("steps")
           .eq("id", actionPlanId)
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .single();
 
         if (plan) {
@@ -626,7 +641,7 @@ export async function POST(request: NextRequest) {
               .from("action_plan")
               .update({ steps })
               .eq("id", actionPlanId)
-              .eq("user_id", session.user.id);
+              .eq("user_id", user.id);
 
             console.log(`✅ Linked content ${data.id} to action plan ${actionPlanId}, step ${actionPlanStepId}`);
           }
@@ -680,11 +695,8 @@ export async function GET(request: NextRequest) {
   try {
     // Auth check
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -692,7 +704,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await supabase
       .from("content_strategy")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(50);
 

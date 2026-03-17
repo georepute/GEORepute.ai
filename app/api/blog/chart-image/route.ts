@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 
 const CHART_WIDTH = 640;
 const CHART_HEIGHT = 360;
@@ -54,10 +54,8 @@ function buildChartConfig(
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -109,7 +107,7 @@ export async function POST(request: NextRequest) {
     }
 
     const imageBuffer = Buffer.from(await qcRes.arrayBuffer());
-    const fileName = `${session.user.id}/blog-chart-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.png`;
+    const fileName = `${user.id}/blog-chart-${Date.now()}-${Math.random().toString(36).slice(2, 10)}.png`;
 
     const { error: uploadError } = await supabase.storage
       .from("platform-content-images")
