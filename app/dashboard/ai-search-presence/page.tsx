@@ -535,8 +535,8 @@ export default function AiSearchPresencePage() {
               </div>
             )}
 
-            {/* Video Report Section */}
-            {enginesWithData.length > 0 && computedSummary && (
+            {/* Video Report Section (commented out - add back later) */}
+            {/* {enginesWithData.length > 0 && computedSummary && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
@@ -607,10 +607,10 @@ export default function AiSearchPresencePage() {
                   </div>
                 )}
               </div>
-            )}
+            )} */}
 
-            {/* Video Preview Modal */}
-            {showVideoModal && video.url && (
+            {/* Video Preview Modal (commented out - add back later) */}
+            {/* {showVideoModal && video.url && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={() => setShowVideoModal(false)}>
                 <div className="relative bg-black rounded-xl overflow-hidden max-w-4xl w-full shadow-2xl" onClick={e => e.stopPropagation()}>
                   <button onClick={() => setShowVideoModal(false)} className="absolute top-3 right-3 z-10 p-1.5 bg-black/50 rounded-full text-white hover:bg-black/80">
@@ -625,7 +625,7 @@ export default function AiSearchPresencePage() {
                   </div>
                 </div>
               </div>
-            )}
+            )} */}
 
             {/* AI Engine Cards */}
             {enginesWithData.length > 0 && (

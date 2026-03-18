@@ -292,7 +292,7 @@ export default function OpportunityBlindSpotsPage() {
         setUsingGapReport(true);
         resetVideo();
         setReportMeta({ domain: data.data.domain || '', summary: data.data.summary, enginesUsed: data.data.enginesUsed || [], generatedAt: data.data.generatedAt });
-        toast.success('Report generated and saved! Generate a video report to visualize your data.', { id: 'gen-opp' });
+        toast.success('Report generated and saved!', { id: 'gen-opp' });
       } else {
         toast.error(data.error || 'Failed to generate report', { id: 'gen-opp' });
       }
@@ -494,8 +494,8 @@ export default function OpportunityBlindSpotsPage() {
           )}
         </div>
 
-        {/* ========== VIDEO REPORT SECTION ========== */}
-        {rows.length > 0 && (
+        {/* ========== VIDEO REPORT SECTION (commented out - add back later) ========== */}
+        {/* {rows.length > 0 && (
           <div className="mb-6">
             {video.status === 'idle' && (
               <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -548,7 +548,7 @@ export default function OpportunityBlindSpotsPage() {
               </div>
             )}
           </div>
-        )}
+        )} */}
 
         {loadingData ? (
           <div className="flex justify-center py-12">

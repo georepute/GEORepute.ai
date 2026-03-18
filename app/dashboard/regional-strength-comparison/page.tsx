@@ -910,8 +910,8 @@ export default function RegionalStrengthComparisonPage() {
               </div>
             ) : aiMatrixData.length > 0 ? (
               <>
-                {/* ========== VIDEO REPORT SECTION (Region vs AI) ========== */}
-                <div className="mb-6">
+                {/* ========== VIDEO REPORT SECTION (Region vs AI) - commented out, add back later ========== */}
+                {/* <div className="mb-6">
                   {videoAi.status === 'idle' && (
                     <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
                       <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-violet-600" /></div>
@@ -954,7 +954,7 @@ export default function RegionalStrengthComparisonPage() {
                       </div>
                     </div>
                   )}
-                </div>
+                </div> */}
 
                 {/* AI Summary Stats - Focus on Weak Regions */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
@@ -1359,8 +1359,8 @@ export default function RegionalStrengthComparisonPage() {
               </div>
             ) : (
               <>
-                {/* ========== VIDEO REPORT SECTION (Region vs Google Search) ========== */}
-                {countries.length > 0 && (
+                {/* ========== VIDEO REPORT SECTION (Region vs Google Search) - commented out, add back later ========== */}
+                {/* {countries.length > 0 && (
                   <div className="mb-6">
                     {videoGoogle.status === 'idle' && (
                       <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -1405,7 +1405,7 @@ export default function RegionalStrengthComparisonPage() {
                       </div>
                     )}
                   </div>
-                )}
+                )} */}
 
                 {/* Summary Stats */}
                 {countries.length > 0 && (
@@ -1860,15 +1860,15 @@ export default function RegionalStrengthComparisonPage() {
           </>
         )}
 
-        {/* Shared Video Modal */}
-        {showVideoModal && (showVideoModalTab === 'ai' ? videoAi.url : videoGoogle.url) && (
+        {/* Shared Video Modal - commented out, add back later */}
+        {/* {showVideoModal && (showVideoModalTab === 'ai' ? videoAi.url : videoGoogle.url) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={() => setShowVideoModal(false)}>
             <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50"><h3 className="font-semibold text-gray-900">{showVideoModalTab === 'ai' ? 'Region vs AI Video Report' : 'Region vs Google Video Report'}</h3><div className="flex items-center gap-2"><button onClick={() => downloadVideo(showVideoModalTab)} className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg flex items-center gap-1.5">Download</button><button onClick={() => setShowVideoModal(false)} className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors" aria-label="Close"><X className="w-5 h-5" /></button></div></div>
               <div className="flex-1 min-h-0 bg-gray-950 flex items-center justify-center p-4"><video src={showVideoModalTab === 'ai' ? videoAi.url! : videoGoogle.url!} controls autoPlay className="max-w-full max-h-[calc(90vh-80px)]">Your browser does not support the video tag.</video></div>
             </div>
           </div>
-        )}
+        )} */}
       </div>
     </div>
   );

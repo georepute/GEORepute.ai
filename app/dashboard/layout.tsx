@@ -70,7 +70,7 @@ function DashboardLayoutInner({
   const billing = useBillingContext();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<string[]>(["analytics", "strategyReports"]); // Track expanded parent items (stable keys)
+  const [expandedItems, setExpandedItems] = useState<string[]>(["aiVisibilitySearchIntelligence", "contentPublishing", "analyticsCompetitorIntelligence", "strategyReports"]); // Track expanded parent items (stable keys)
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { role, capabilities, loading: permissionsLoading } = usePermissions();
@@ -122,51 +122,71 @@ function DashboardLayoutInner({
   const allNavigation: NavigationItem[] = [
     { name: t.dashboard.sidebar.dashboard, href: "/dashboard", icon: LayoutDashboard, requiredCapability: undefined },
     { name: t.dashboard.sidebar.domainManagement, href: "/dashboard/domains", icon: Server, requiredCapability: "canManageSettings" },
-    { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
-    { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
-    { 
-      name: t.dashboard.sidebar.contentGenerator, 
-      icon: Sparkles, 
+    // AI Visibility & AI Search Intelligence (billing module)
+    {
+      name: t.dashboard.sidebar.aiVisibilitySearchIntelligence,
+      icon: Globe,
+      requiredCapability: undefined, // Mixed: canViewAIVisibility, canViewReports
+      expandKey: "aiVisibilitySearchIntelligence",
+      children: [
+        { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
+        { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.googleSearchConsole, href: "/dashboard/google-search-console", icon: Search, requiredCapability: "canViewAnalytics" },
+      ]
+    },
+    // Content & Publishing (billing module)
+    {
+      name: t.dashboard.sidebar.contentPublishing,
+      icon: Sparkles,
       requiredCapability: "canManageContent",
-      expandKey: "contentGenerator",
+      expandKey: "contentPublishing",
       children: [
         { name: t.dashboard.sidebar.newContent, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.multiplePlatform, href: "/dashboard/content-generator/multiple-platform", icon: Layers, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.missedPrompts, href: "/dashboard/missed-prompts", icon: FileText, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.blog, href: "/dashboard/blog", icon: Globe, requiredCapability: "canManageContent" },
+        { name: t.dashboard.sidebar.publication, href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
       ]
     },
-    { name: t.dashboard.sidebar.publication, href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
-    { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
-    // { name: t.dashboard.sidebar.adSync, href: "/dashboard/ad-sync", icon: Zap, requiredCapability: "canViewAnalytics" },
-    // { name: t.dashboard.sidebar.keywords, href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
-    // { name: t.dashboard.sidebar.rankings, href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
-    // // { name: t.dashboard.sidebar.reputation, href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
-    // { name: t.dashboard.sidebar.leads, href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
-    { 
-      name: t.dashboard.sidebar.assetsHub, 
-      icon: Package, 
-      requiredCapability: "canViewAnalytics",
-      expandKey: "assetsHub",
+    // Analytics & Competitor Intelligence (billing module)
+    {
+      name: t.dashboard.sidebar.analyticsCompetitorIntelligence,
+      icon: BarChart3,
+      requiredCapability: undefined, // Mixed: canManageKeywords, canViewAnalytics, canViewReports
+      expandKey: "analyticsCompetitorIntelligence",
       children: [
-        { name: t.dashboard.sidebar.googleSearchConsole, href: "/dashboard/google-search-console", icon: Search, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
+        { name: t.dashboard.sidebar.keywordForecastAnalytics, href: "/dashboard/analytics", icon: TrendingUp, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.gscAnalytics, href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.biReports, href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" },
         { name: t.dashboard.sidebar.googleMaps, href: "/dashboard/google-maps", icon: Map, requiredCapability: "canViewAnalytics" },
       ]
     },
-    { 
-      name: t.dashboard.sidebar.analytics, 
-      icon: BarChart3, 
-      requiredCapability: "canViewAnalytics",
-      expandKey: "analytics",
+    // Reputation Monitoring (billing module)
+    {
+      name: t.dashboard.sidebar.reputationMonitoring,
+      icon: Shield,
+      requiredCapability: "canViewReports",
+      expandKey: "reputationMonitoring",
       children: [
-        { name: t.dashboard.sidebar.keywordForecastAnalytics, href: "/dashboard/analytics", icon: TrendingUp, requiredCapability: "canViewAnalytics" },
-        { name: t.dashboard.sidebar.gscAnalytics, href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
-        { name: t.dashboard.sidebar.biReports, href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" }
+        { name: t.dashboard.sidebar.reputation, href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
       ]
     },
-    { 
-      name: t.dashboard.sidebar.coreReports, 
-      icon: Activity, 
+    // Opportunity & Sales Intelligence (billing module)
+    {
+      name: t.dashboard.sidebar.opportunitySalesIntelligence,
+      icon: Target,
+      requiredCapability: "canBuildQuotes",
+      expandKey: "opportunitySalesIntelligence",
+      children: [
+        { name: t.dashboard.sidebar.quoteBuilder, href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
+      ]
+    },
+
+    // Core Reports (report-gated)
+    {
+      name: t.dashboard.sidebar.coreReports,
+      icon: Activity,
       requiredCapability: "canViewReports",
       expandKey: "coreReports",
       children: [
@@ -177,18 +197,20 @@ function DashboardLayoutInner({
         { name: t.dashboard.sidebar.opportunityBlindSpots, href: "/dashboard/opportunity-blind-spots", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
-    { 
-      name: t.dashboard.sidebar.strategyReports, 
-      icon: Crosshair, 
+    // Strategy Reports (report-gated)
+    {
+      name: t.dashboard.sidebar.strategyReports,
+      icon: Crosshair,
       requiredCapability: "canViewReports",
       expandKey: "strategyReports",
       children: [
         { name: t.dashboard.sidebar.strategicBlindSpots, href: "/dashboard/strategic-blind-spots", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
-    { 
-      name: t.dashboard.sidebar.globalReports, 
-      icon: Globe, 
+    // Global Reports (report-gated)
+    {
+      name: t.dashboard.sidebar.globalReports,
+      icon: Globe,
       requiredCapability: "canViewReports",
       expandKey: "globalReports",
       children: [
@@ -196,16 +218,17 @@ function DashboardLayoutInner({
         { name: t.dashboard.sidebar.globalVisibilityMatrix, href: "/dashboard/global-visibility-matrix", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
-    // { name: t.dashboard.sidebar.learning, href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
-    // { name: t.dashboard.sidebar.videoReports, href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
-    { name: t.dashboard.sidebar.quoteBuilder, href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
     { name: t.dashboard.sidebar.modules, href: "/dashboard/modules", icon: Package, requiredCapability: "canManageSettings" },
     { name: t.dashboard.sidebar.billing, href: "/dashboard/billing", icon: CreditCard, requiredCapability: "canManageSettings" },
     { name: t.dashboard.sidebar.team, href: "/dashboard/team", icon: Users, requiredCapability: "canManageTeam" },
     { name: t.dashboard.sidebar.settings, href: "/dashboard/settings", icon: Settings, requiredCapability: "canManageSettings" },
   ];
 
-  const navigation = filterNavigationByRole(role, allNavigation);
+  const filteredByRole = filterNavigationByRole(role, allNavigation);
+  // Hide parent groups that have no visible children after role filtering
+  const navigation = filteredByRole.filter(
+    (item) => !item.children || item.children.length > 0
+  );
 
   return (
     <div className="min-h-screen bg-gray-50" dir={isRtl ? 'rtl' : 'ltr'}>

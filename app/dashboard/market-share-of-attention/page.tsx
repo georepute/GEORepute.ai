@@ -318,7 +318,7 @@ export default function MarketShareOfAttentionPage() {
       toast.dismiss("msa-gen");
       if (data.success) {
         setReport(data.data?.report || null);
-        toast.success("Market Share of Attention report generated! Generate a video report to visualize your data.");
+        toast.success("Market Share of Attention report generated!");
         loadData(selectedDomainId);
       } else {
         toast.error(data.error || "Failed to generate report");
@@ -554,8 +554,8 @@ export default function MarketShareOfAttentionPage() {
       {/* ── Report body ── */}
       {report && (
         <>
-          {/* ========== VIDEO REPORT SECTION ========== */}
-          <div className="mb-6">
+          {/* ========== VIDEO REPORT SECTION (commented out - add back later) ========== */}
+          {/* <div className="mb-6">
             {video.status === "idle" && (
               <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
                 <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-violet-600" /></div>
@@ -609,7 +609,7 @@ export default function MarketShareOfAttentionPage() {
                 </div>
               </div>
             )}
-          </div>
+          </div> */}
 
           {/* Default Leader badge */}
           {report.is_default_leader && (

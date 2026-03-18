@@ -27,14 +27,13 @@ const PLAN_ONLY_ROUTES = [
   "/dashboard/team",
   "/dashboard/modules",
   "/dashboard/live-view",
-  "/dashboard/google-search-console",
   "/dashboard/google-maps",
 ];
 
 // Module → route prefixes
 const MODULE_ROUTE_MAP: Record<string, { prefixes: string[]; label: string }> = {
   ai_visibility: {
-    prefixes: ["/dashboard/ai-visibility", "/dashboard/action-plans"],
+    prefixes: ["/dashboard/ai-visibility", "/dashboard/action-plans", "/dashboard/google-search-console"],
     label: "AI Visibility & AI Search Intelligence",
   },
   content_publishing: {

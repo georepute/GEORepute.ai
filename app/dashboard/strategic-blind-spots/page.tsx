@@ -269,7 +269,7 @@ export default function StrategicBlindSpotsPage() {
       const data = await res.json();
       if (data.success && data.data) {
         setReport(data.data);
-        toast.success("Report generated! Generate a video report to visualize your data.", {
+        toast.success("Report generated!", {
           id: "generate-blind-spots",
         });
       } else {
@@ -545,7 +545,8 @@ export default function StrategicBlindSpotsPage() {
 
       {report && (
         <>
-          {/* ========== VIDEO REPORT SECTION ========== */}
+          {/* ========== VIDEO REPORT SECTION (commented out - add back later) ========== */}
+          {false && (
           <div className="mb-6">
             {video.status === "idle" && (
               <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -713,6 +714,7 @@ export default function StrategicBlindSpotsPage() {
               </div>
             )}
           </div>
+          )}
 
           {/* Executive Answer: What Are We Missing? (LLMs don't mention us) */}
           {(() => {

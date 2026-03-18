@@ -845,6 +845,11 @@ export const landingContent = {
         globalReports: "Global Reports",
         regionalStrengthComparison: "Regional Strength Comparison",
         globalVisibilityMatrix: "Global Visibility Matrix",
+        aiVisibilitySearchIntelligence: "AI Visibility & AI Search Intelligence",
+        contentPublishing: "Content & Publishing",
+        analyticsCompetitorIntelligence: "Analytics & Competitor Intelligence",
+        reputationMonitoring: "Reputation Monitoring",
+        opportunitySalesIntelligence: "Opportunity & Sales Intelligence",
       },
       // Action Plans Page
       actionPlansPage: {
@@ -2927,6 +2932,11 @@ export const landingContent = {
         globalReports: "דוחות גלובליים",
         regionalStrengthComparison: "השוואת חוזק אזורי",
         globalVisibilityMatrix: "מטריצת נראות גלובלית",
+        aiVisibilitySearchIntelligence: "נראות AI ואינטליגנציית חיפוש AI",
+        contentPublishing: "תוכן ופרסום",
+        analyticsCompetitorIntelligence: "אנליטיקס ואינטליגנציית מתחרים",
+        reputationMonitoring: "ניטור מוניטין",
+        opportunitySalesIntelligence: "הזדמנות ואינטליגנציית מכירות",
       },
       // Action Plans Page
       actionPlansPage: {

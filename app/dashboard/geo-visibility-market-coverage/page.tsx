@@ -559,8 +559,8 @@ export default function GeoVisibilityMarketCoveragePage() {
           </div>
         ) : (
           <>
-            {/* ========== VIDEO REPORT SECTION ========== */}
-            <div className="mb-6">
+            {/* ========== VIDEO REPORT SECTION (commented out - add back later) ========== */}
+            {/* <div className="mb-6">
               {video.status === 'idle' && (
                 <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
                   <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-violet-600" /></div>
@@ -611,7 +611,7 @@ export default function GeoVisibilityMarketCoveragePage() {
                   </div>
                 </div>
               )}
-            </div>
+            </div> */}
 
             {/* Summary cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
