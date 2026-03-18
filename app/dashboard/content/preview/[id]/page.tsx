@@ -644,6 +644,7 @@ export default function PublicationPreviewPage() {
                 ctaUrl={ctaUrl}
                 metaTitle={metaTitle}
                 platformDisplayName={platformUsernames[selectedPlatform]}
+                contentLanguage={contentItem?.raw?.metadata?.contentLanguage}
               />
             </div>
           </div>
@@ -816,6 +817,7 @@ function PlatformPreview({
   ctaUrl,
   metaTitle,
   platformDisplayName,
+  contentLanguage,
 }: {
   platform: string;
   title: string;
@@ -825,6 +827,7 @@ function PlatformPreview({
   ctaUrl: string;
   metaTitle: string;
   platformDisplayName?: string;
+  contentLanguage?: string;
 }) {
   const plain = stripHtml(body);
   const truncated = plain.length > 200 ? plain.slice(0, 200) + "…" : plain;
@@ -832,17 +835,18 @@ function PlatformPreview({
   const blogBodyHtml = platform === "blog" || platform === "wordpress" || platform === "medium" || platform === "shopify"
     ? sanitizeHtmlForPreview(body)
     : "";
+  const isRtlContent = contentLanguage === "he" || contentLanguage === "ar";
 
   if (platform === "blog" || platform === "wordpress" || platform === "medium" || platform === "shopify") {
     return (
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden text-left flex flex-col max-h-[70vh]">
-        <h3 className="text-lg font-semibold text-gray-900 p-3 border-b flex-shrink-0">{title || "Untitled"}</h3>
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col max-h-[70vh]" dir={isRtlContent ? "rtl" : "ltr"}>
+        <h3 className="text-lg font-semibold text-gray-900 p-3 border-b flex-shrink-0" style={isRtlContent ? { textAlign: "right" } : undefined}>{title || "Untitled"}</h3>
         {imageUrl && (
           <div className="aspect-video bg-gray-100 flex-shrink-0">
             <img src={imageUrl} alt="" className="w-full h-full object-cover" />
           </div>
         )}
-        <div className="p-3 text-sm text-gray-700 overflow-y-auto flex-1 min-h-0 blog-preview-content [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:my-2 [&_ul]:my-2 [&_ul]:pl-6 [&_ul]:list-disc [&_ol]:my-2 [&_ol]:pl-6 [&_ol]:list-decimal [&_li]:my-0.5 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-300 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:my-2 [&_table]:border [&_table]:border-gray-300 [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_td]:border [&_td]:border-gray-300 [&_td]:px-2 [&_td]:py-1 [&_div]:my-1">
+        <div className={`p-3 text-sm text-gray-700 overflow-y-auto flex-1 min-h-0 blog-preview-content ${isRtlContent ? "content-view-rtl " : ""}[&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:my-2 [&_ul]:my-2 [&_ul]:pl-6 [&_ul]:list-disc [&_ol]:my-2 [&_ol]:pl-6 [&_ol]:list-decimal [&_li]:my-0.5 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-300 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:my-2 [&_table]:border [&_table]:border-gray-300 [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_td]:border [&_td]:border-gray-300 [&_td]:px-2 [&_td]:py-1 [&_div]:my-1`}>
           {blogBodyHtml ? (
             <div dangerouslySetInnerHTML={{ __html: blogBodyHtml }} />
           ) : (

@@ -7,23 +7,28 @@ const CHART_HEIGHT = 360;
 function buildChartConfig(
   chartType: "bar" | "line" | "pie" | "doughnut",
   labels: string[],
-  datasets: { label: string; data: number[] }[]
+  datasets: { label: string; data: number[] }[],
+  rtl: boolean = false
 ) {
   const colors = [
     "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
     "#f43f5e", "#f97316", "#eab308", "#22c55e", "#14b8a6",
   ];
+  const labelsFinal = rtl ? [...labels].reverse() : labels;
+  const datasetsReversed = rtl
+    ? datasets.map((ds) => ({ ...ds, data: [...(ds.data ?? [])].reverse() }))
+    : datasets;
   const datasetsFormatted =
     chartType === "pie" || chartType === "doughnut"
       ? [
           {
-            data: datasets[0]?.data ?? [],
-            backgroundColor: labels.map((_, i) => colors[i % colors.length]),
+            data: datasetsReversed[0]?.data ?? [],
+            backgroundColor: labelsFinal.map((_, i) => colors[i % colors.length]),
             borderColor: "#fff",
             borderWidth: 1,
           },
         ]
-      : datasets.map((ds, i) => ({
+      : datasetsReversed.map((ds, i) => ({
           label: ds.label,
           data: ds.data,
           backgroundColor: colors[i % colors.length],
@@ -35,17 +40,20 @@ function buildChartConfig(
   return {
     type: chartType,
     data: {
-      labels,
+      labels: labelsFinal,
       datasets: datasetsFormatted,
     },
     options: {
       responsive: true,
       plugins: {
-        legend: { position: "top" },
+        legend: { position: rtl ? "right" : "top" },
       },
       scales:
         chartType === "bar" || chartType === "line"
-          ? { y: { beginAtZero: true } }
+          ? {
+              y: { beginAtZero: true },
+              x: rtl ? { reverse: true } : undefined,
+            }
           : undefined,
     },
   };
@@ -64,11 +72,14 @@ export async function POST(request: NextRequest) {
       chartType,
       labels,
       datasets,
+      language,
     } = body as {
       chartType?: "bar" | "line" | "pie" | "doughnut";
       labels?: string[];
       datasets?: { label: string; data: number[] }[];
+      language?: string;
     };
+    const rtl = language === "he" || language === "ar";
 
     if (
       !chartType ||
@@ -82,7 +93,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const chartConfig = buildChartConfig(chartType, labels, datasets);
+    const chartConfig = buildChartConfig(chartType, labels, datasets, rtl);
     const quickchartBody = {
       width: CHART_WIDTH,
       height: CHART_HEIGHT,

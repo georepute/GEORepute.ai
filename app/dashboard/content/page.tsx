@@ -3552,9 +3552,22 @@ function ContentInner() {
                         ? sessionResponse.response
                         : null;
                       const displayContent = humanizedFromSession || viewContent.raw?.generated_content;
+                      const contentLanguage = viewContent.raw?.metadata?.contentLanguage;
+                      const hasRtlMetadata = contentLanguage === "he" || contentLanguage === "ar";
+                      const sample = typeof displayContent === "string" ? displayContent.replace(/<[^>]+>/g, " ").slice(0, 300) : "";
+                      const hasRtlScript = /[\u0590-\u05FF\u0600-\u06FF]/.test(sample);
+                      const isRtlContent = hasRtlMetadata || hasRtlScript;
+                      const isHtml = typeof displayContent === "string" && /<(?:\w+|[\/]\w+)[\s>]/.test(displayContent);
                       return displayContent ? (
-                        <div className="whitespace-pre-wrap text-gray-700 leading-relaxed">
-                          {displayContent}
+                        <div
+                          dir={isRtlContent ? "rtl" : "ltr"}
+                          className={isRtlContent ? "content-view-rtl prose prose-sm max-w-none text-gray-700" : "text-gray-700 leading-relaxed"}
+                        >
+                          {isHtml ? (
+                            <div dangerouslySetInnerHTML={{ __html: displayContent }} />
+                          ) : (
+                            <div className="whitespace-pre-wrap">{displayContent}</div>
+                          )}
                         </div>
                       ) : (
                         <div className="text-gray-500 text-center py-12">

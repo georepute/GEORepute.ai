@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from '@/lib/supabase/client';
 import { useLanguage } from "@/lib/language-context";
-import dynamic from "next/dynamic";
 import { 
   FileText,
   Send,
@@ -29,8 +28,6 @@ import {
 import toast from "react-hot-toast";
 import Link from "next/link";
 import Image from "next/image";
-import "react-quill-new/dist/quill.snow.css";
-
 // Structured blog (charts, tables, sources) from Claude
 interface StructuredSectionText {
   type: "text";
@@ -51,19 +48,18 @@ interface StructuredSectionTable {
   headers: string[];
   rows: string[][];
 }
-type StructuredSection = StructuredSectionText | StructuredSectionChart | StructuredSectionTable;
+interface StructuredSectionInfographic {
+  type: "infographic";
+  svg: string;
+  url?: string;
+}
+type StructuredSection = StructuredSectionText | StructuredSectionChart | StructuredSectionTable | StructuredSectionInfographic;
 interface StructuredBlog {
   title: string;
   subtitle: string;
   sections: StructuredSection[];
   sources: { title: string; url: string }[];
 }
-
-// Dynamic import for React Quill (client-side only)
-const ReactQuill = dynamic(() => import("react-quill-new"), { 
-  ssr: false,
-  loading: () => <div className="h-64 bg-gray-100 rounded-lg animate-pulse flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
-});
 
 interface ShopifyBlog {
   id: number;
@@ -102,13 +98,13 @@ function stripMarkdownBoldMarkers(html: string): string {
   return out;
 }
 
-/** Replace em dashes (—) and en dashes (–) with " - " so they don't appear in the editor. */
+/** Remove em dashes (—) and en dashes (–) from generated content; replace with comma per client requirement. */
 function replaceEmDashes(html: string): string {
   if (!html || typeof html !== "string") return html;
   return html
-    .replace(/\u2014/g, " - ")
-    .replace(/\u2013/g, " - ")
-    .replace(/\u2012/g, " - ");
+    .replace(/\u2014/g, ", ")
+    .replace(/\u2013/g, ", ")
+    .replace(/\u2012/g, ", ");
 }
 
 /** Escape HTML for safe insertion. */
@@ -119,6 +115,50 @@ function escapeHtmlForTable(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/**
+ * Build table HTML for Quill v2: prevents collapsed rows by using &nbsp; for empty cells,
+ * normalizes row length, and uses explicit column widths + inline styles (Quill strips classes).
+ */
+function buildTableHTML(
+  headers: string[],
+  rows: string[][],
+  isRtl: boolean,
+  escapeHtml: (s: string) => string
+): string {
+  const colCount = Math.max(headers.length, 1);
+  const colWidth = Math.floor(100 / colCount);
+  const safeCell = (val: string) => {
+    const t = val?.trim();
+    return t ? escapeHtml(t) : "&nbsp;";
+  };
+  const normalizeRow = (row: string[]): string[] => {
+    const normalized = [...row];
+    while (normalized.length < colCount) normalized.push("");
+    return normalized.slice(0, colCount);
+  };
+  const textAlign = isRtl ? "right" : "left";
+  const dirAttr = isRtl ? ' dir="rtl"' : "";
+  const colgroup = `<colgroup>${headers.map(() => `<col style="width:${colWidth}%;" />`).join("")}</colgroup>`;
+  const thead = `<thead><tr>${headers
+    .map(
+      (h) =>
+        `<th style="border:1px solid #e5e7eb;padding:10px 14px;background:#f1f5f9;color:#334155;font-weight:600;text-align:${textAlign};min-width:${colWidth}%;word-break:break-word;">${safeCell(h)}</th>`
+    )
+    .join("")}</tr></thead>`;
+  const tbody = `<tbody>${rows
+    .map(
+      (row) =>
+        `<tr>${normalizeRow(row)
+          .map(
+            (cell) =>
+              `<td style="border:1px solid #e5e7eb;padding:10px 14px;text-align:${textAlign};min-width:${colWidth}%;word-break:break-word;vertical-align:top;background:#fff;">${safeCell(cell)}</td>`
+          )
+          .join("")}</tr>`
+    )
+    .join("")}</tbody>`;
+  return `<table class="blog-table"${dirAttr} style="width:100%;border-collapse:collapse;margin:1em 0;border:1px solid #e5e7eb;table-layout:fixed;direction:${isRtl ? "rtl" : "ltr"};">${colgroup}${thead}${tbody}</table>`;
 }
 
 /**
@@ -332,34 +372,6 @@ function BlogPageContent() {
   // Published posts state
   const [publishedPosts, setPublishedPosts] = useState<any[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
-
-  // React Quill editor configuration (table: true for Quill v2 table module; no-op on Quill 1.x)
-  const quillModules = useMemo(() => ({
-    toolbar: [
-      [{ header: [1, 2, 3, 4, 5, 6, false] }],
-      ["bold", "italic", "underline", "strike"],
-      [{ color: [] }, { background: [] }],
-      [{ list: "ordered" }, { list: "bullet" }],
-      [{ indent: "-1" }, { indent: "+1" }],
-      [{ align: [] }],
-      ["blockquote", "code-block"],
-      ["link", "image"],
-      [{ table: [] }],
-      ["clean"],
-    ],
-    table: true,
-  }), []);
-
-  const quillFormats = [
-    "header",
-    "bold", "italic", "underline", "strike",
-    "color", "background",
-    "list", "bullet", "indent",
-    "align",
-    "blockquote", "code-block",
-    "link", "image",
-    "table",
-  ];
 
   // Pre-fill from action plan when redirected from action-plans (e.g. blog step)
   useEffect(() => {
@@ -660,12 +672,23 @@ function BlogPageContent() {
       }
       const blog: StructuredBlog = await res.json();
 
-      // Convert to HTML and set in editor (charts as images)
+      // Convert to HTML with proper heading hierarchy (h1, h2, h3) and paragraph spacing so generated preview matches published styling
       const parts: string[] = [];
+      parts.push(`<h1 class="blog-article-title">${escapeHtml(blog.title || "")}</h1>`);
+      let sectionIndex = 0;
       for (const section of blog.sections) {
         if (section.type === "text") {
           if (section.heading) parts.push(`<h2>${escapeHtml(section.heading)}</h2>`);
-          parts.push(`<p>${escapeHtml(section.content).replace(/\n/g, "<br/>")}</p>`);
+          const content = (section as StructuredSectionText).content || "";
+          const paragraphs = content.split(/\n\s*\n/).filter((p) => p.trim());
+          if (paragraphs.length > 0) {
+            for (const para of paragraphs) {
+              parts.push(`<p>${escapeHtml(para.trim()).replace(/\n/g, "<br/>")}</p>`);
+            }
+          } else {
+            parts.push(`<p>${escapeHtml(content).replace(/\n/g, "<br/>")}</p>`);
+          }
+          sectionIndex++;
         } else if (section.type === "chart") {
           const chartRes = await fetch("/api/blog/chart-image", {
             method: "POST",
@@ -674,51 +697,63 @@ function BlogPageContent() {
               chartType: section.chartType,
               labels: section.labels,
               datasets: section.datasets,
+              language: contentGenerationLanguage,
             }),
           });
           if (!chartRes.ok) throw new Error("Chart image failed");
           const { url } = await chartRes.json();
           parts.push(`<figure class="blog-chart"><img src="${escapeHtml(url)}" alt="${escapeHtml(section.heading)}" style="max-width:100%;height:auto;" /></figure>`);
-          if (section.heading) parts.push(`<p><strong>${escapeHtml(section.heading)}</strong></p>`);
+          if (section.heading) parts.push(`<h3>${escapeHtml(section.heading)}</h3>`);
           if (section.caption) parts.push(`<p class="text-gray-500 text-sm">${escapeHtml(section.caption)}</p>`);
+        } else if (section.type === "infographic") {
+          const inf = section as StructuredSectionInfographic;
+          const url = inf.url;
+          const svg = inf.svg;
+          // Prefer inline SVG (data URL) when available so preview works even if storage URL is private or fails to load
+          if (svg && typeof svg === "string") {
+            try {
+              const base64 = btoa(unescape(encodeURIComponent(svg)));
+              const dataUrl = `data:image/svg+xml;base64,${base64}`;
+              parts.push(`<figure class="blog-chart"><img src="${dataUrl.replace(/"/g, "&quot;")}" alt="Infographic" style="max-width:100%;height:auto;display:block;" /></figure>`);
+            } catch {
+              if (url && typeof url === "string") {
+                parts.push(`<figure class="blog-chart"><img src="${escapeHtml(url)}" alt="Infographic" style="max-width:100%;height:auto;" /></figure>`);
+              } else {
+                parts.push(`<p style="margin:1em 0;color:#666;">[Infographic could not be embedded]</p>`);
+              }
+            }
+          } else if (url && typeof url === "string") {
+            parts.push(`<figure class="blog-chart"><img src="${escapeHtml(url)}" alt="Infographic" style="max-width:100%;height:auto;" /></figure>`);
+          }
         } else if (section.type === "table") {
-          // Use real <table> so Quill 2 table module preserves it and it shows as a table in the editor
-          let headers = section.headers || [];
-          let rows = section.rows || [];
-          // Fix "one column" formatting: if AI returns concatenated headers/rows, split by pipe or tab
+          // Parse headers/rows (flatten nested arrays, split by pipe/tab); then build table HTML for Quill v2
           const splitIntoColumns = (val: string): string[] => {
             const s = String(val).trim();
             if (s.includes("|")) return s.split(/\s*\|\s*/).map((c) => c.trim()).filter(Boolean);
             if (s.includes("\t")) return s.split(/\t/).map((c) => c.trim()).filter(Boolean);
             return [s];
           };
+          let headers: string[] = (section.headers || []).flatMap((h: unknown) =>
+            Array.isArray(h) ? (h as string[]).map((x) => String(x).trim()) : [String(h ?? "").trim()]
+          ).filter(Boolean);
           if (headers.length === 1 && (headers[0].includes("|") || headers[0].includes("\t"))) {
             headers = splitIntoColumns(headers[0]);
           }
-          const colCount = headers.length;
-          rows = rows.map((row) => {
-            const arr = Array.isArray(row) ? row : [row];
-            if (arr.length === 1 && colCount > 1 && (arr[0].includes("|") || arr[0].includes("\t"))) {
-              return splitIntoColumns(arr[0]);
-            }
-            return arr.map((c) => String(c ?? "").trim());
+          const colCount = Math.max(headers.length, 1);
+          const rows: string[][] = (section.rows || []).map((row: unknown) => {
+            const arr = Array.isArray(row) ? (row as unknown[]).flatMap((c) => (Array.isArray(c) ? (c as string[]) : [c])) : [row];
+            const strCells = arr.map((c) => String(c ?? "").trim());
+            const single = strCells.length === 1 ? strCells[0] : null;
+            const split = single && colCount > 1 && (single.includes("|") || single.includes("\t")) ? splitIntoColumns(single) : strCells;
+            const padded = split.length >= colCount ? split.slice(0, colCount) : [...split, ...Array(colCount - split.length).fill("")];
+            return padded;
           });
-          const tableStyle = "width:100%; border-collapse:collapse; margin:1em 0; border:1px solid #d1d5db;";
-          const thStyle = "padding:8px 12px; border:1px solid #d1d5db; background:#f3f4f6; font-weight:600; text-align:left;";
-          const tdStyle = "padding:8px 12px; border:1px solid #d1d5db; text-align:left;";
-          let tableHtml = "";
-          if (section.heading) tableHtml += `<p><strong>${escapeHtml(section.heading)}</strong></p>`;
-          tableHtml += `<table class="blog-table" style="${tableStyle}"><thead><tr>`;
-          headers.forEach((h) => { tableHtml += `<th style="${thStyle}">${escapeHtml(h)}</th>`; });
-          tableHtml += "</tr></thead><tbody>";
-          rows.forEach((row) => {
-            tableHtml += "<tr>";
-            const cells = row.length >= colCount ? row : [...row, ...Array(colCount - row.length).fill("")];
-            cells.slice(0, colCount).forEach((cell) => { tableHtml += `<td style="${tdStyle}">${escapeHtml(cell)}</td>`; });
-            tableHtml += "</tr>";
-          });
-          tableHtml += "</tbody></table>";
-          parts.push(tableHtml);
+          const isRtlTable = contentGenerationLanguage === "he" || contentGenerationLanguage === "ar";
+          const tableHtml = buildTableHTML(headers, rows, isRtlTable, escapeHtml);
+          let block = "";
+          if (section.heading) block += `<h3>${escapeHtml(section.heading)}</h3>`;
+          block += tableHtml;
+          parts.push(block);
         }
       }
       if (blog.sources?.length) {
@@ -734,17 +769,18 @@ function BlogPageContent() {
         parts.push("</ul>");
       }
       const html = parts.join("");
+      const fullHtml = ensureBlockStructure(replaceEmDashes(stripMarkdownBoldMarkers(html)));
       setPost((prev) => ({
         ...prev,
         title: blog.title,
-        content: ensureBlockStructure(replaceEmDashes(stripMarkdownBoldMarkers(html))),
+        content: fullHtml,
         summary: blog.subtitle || prev.summary,
         tags: tags.join(", "),
       }));
       setContentGenerated(true);
       setImageSearchQuery(topic.trim());
       setShowImageModal(true);
-      toast.success("Blog generated. Content is in the editor. Add a featured image when ready.");
+      toast.success("Blog generated. View full content below (including infographic). Add a featured image when ready.");
     } catch (e: any) {
       console.error("Structured blog error:", e);
       toast.error(e.message || "Failed to generate blog");
@@ -1038,6 +1074,7 @@ function BlogPageContent() {
         contentType: "blog_article",
         schema: schemaData,
         structuredSEO: structuredSEO,
+        contentLanguage: contentGenerationLanguage,
       };
       
       // Add platform-specific fields
@@ -1148,7 +1185,7 @@ function BlogPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50" dir={isRtl ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen bg-gray-50" dir={isRtl ? "rtl" : "ltr"}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
@@ -1498,26 +1535,17 @@ function BlogPageContent() {
                         />
                       </div>
 
-                      {/* Content - Rich Text Editor */}
-                      <div>
+                      {/* Content: generated content only (read-only preview; no Quill editor) */}
+                      <div dir={contentGenerationLanguage === "he" || contentGenerationLanguage === "ar" ? "rtl" : "ltr"} className={contentGenerationLanguage === "he" || contentGenerationLanguage === "ar" ? "blog-editor-rtl" : ""}>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           {t.dashboard.blogPage.contentLabel}
                         </label>
-                        <div className="border border-gray-300 rounded-lg overflow-hidden focus-within:border-purple-500 focus-within:ring-2 focus-within:ring-purple-500/20 transition-all">
-                          <ReactQuill
-                            theme="snow"
-                            value={post.content}
-                            onChange={(content) => setPost({ ...post, content })}
-                            modules={quillModules}
-                            formats={quillFormats}
-                            placeholder={t.dashboard.blogPage.contentPlaceholder}
-                            className="bg-white"
-                            style={{ minHeight: '350px' }}
+                        <div className="border border-gray-300 rounded-lg overflow-hidden bg-white max-h-[70vh] overflow-y-auto">
+                          <div
+                            className="blog-generated-preview prose prose-sm max-w-none p-6 min-h-[350px] text-gray-800"
+                            dangerouslySetInnerHTML={{ __html: post.content }}
                           />
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {t.dashboard.blogPage.toolbarHint}
-                        </p>
                       </div>
 
                       {/* Author & Tags Row */}

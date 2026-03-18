@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { publishToWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
 import { buildWordPressArticleHtml } from "@/lib/blog/wordpress-article-template";
 import type { ThemePreset } from "@/lib/blog/wordpress-article-template";
+import { wrapHtmlForRtl } from "@/lib/blog/rtl";
 
 /**
  * WordPress.com Publish API
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
       themeColors,
       publishedDate,
       ctaText,
+      contentLanguage,
     } = body;
 
     // Validate required fields
@@ -50,6 +52,7 @@ export async function POST(request: NextRequest) {
     }
 
     const escapeAttr = (s: string) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const bodyHtmlForPublish = wrapHtmlForRtl(content, contentLanguage);
     let finalContent: string;
 
     if (useArticleTemplate) {
@@ -64,7 +67,7 @@ export async function POST(request: NextRequest) {
         author: author || "Author",
         organizationName: organizationName || "Brand",
         organizationUrl: organizationUrl || undefined,
-        bodyHtml: content,
+        bodyHtml: bodyHtmlForPublish,
         featuredImageUrl: featuredImage,
         themePreset: (themePreset as ThemePreset) || "default",
         themeColors: themeColors || undefined,
@@ -74,10 +77,10 @@ export async function POST(request: NextRequest) {
         ctaText: ctaText || undefined,
       });
     } else {
-      finalContent = content;
+      finalContent = bodyHtmlForPublish;
       if (featuredImage && typeof featuredImage === "string" && /^https?:\/\//i.test(featuredImage)) {
         const heroBlock = `<figure class="wp-block-image size-full" style="margin:0 0 1.5em 0;"><img src="${escapeAttr(featuredImage)}" alt="${escapeAttr(title)}" style="width:100%;height:auto;max-width:100%;display:block;" /></figure>`;
-        finalContent = heroBlock + content;
+        finalContent = heroBlock + bodyHtmlForPublish;
       }
     }
 

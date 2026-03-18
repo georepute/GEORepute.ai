@@ -116,12 +116,216 @@
   overflow-wrap: break-word;
   word-wrap: break-word;
   vertical-align: top;
-  padding: 8px 12px;
-  border: 1px solid #d1d5db;
+  padding: 10px 14px;
+  border: 1px solid #e5e7eb;
 }
 .ql-editor .blog-table th {
-  background: #f3f4f6;
+  background: #f1f5f9;
+  color: #334155;
   font-weight: 600;
+}
+
+/* RTL (Hebrew/Arabic) blog editor: right-aligned text, correct punctuation flow */
+.blog-editor-rtl .ql-container,
+.blog-editor-rtl .ql-editor {
+  direction: rtl;
+  text-align: right;
+}
+.blog-editor-rtl .ql-editor ul,
+.blog-editor-rtl .ql-editor ol {
+  padding-left: 0;
+  padding-right: 1.5rem;
+}
+.blog-editor-rtl .ql-editor blockquote {
+  border-left: none;
+  border-right: 4px solid #9333ea;
+  padding-left: 0;
+  padding-right: 1rem;
+}
+.blog-editor-rtl .ql-editor .blog-table {
+  direction: rtl;
+}
+.blog-editor-rtl .ql-editor .blog-table th,
+.blog-editor-rtl .ql-editor .blog-table td {
+  text-align: right !important;
+}
+.blog-editor-rtl .ql-editor .blog-chart {
+  direction: rtl;
+  text-align: right;
+}
+.blog-editor-rtl .ql-editor .blog-chart figcaption {
+  text-align: right;
+}
+
+.ql-editor .blog-infographic,
+.blog-infographic {
+  max-width: 100%;
+  overflow: auto;
+}
+.ql-editor .blog-infographic svg,
+.blog-infographic svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Generated content preview: match published article styling (clear H1/H2/H3 hierarchy, paragraph spacing) */
+.blog-generated-preview h1,
+.blog-generated-preview .blog-article-title {
+  font-size: 2rem;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 1rem;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+.blog-generated-preview h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.3;
+  padding-bottom: 0.25rem;
+}
+.blog-generated-preview h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.35;
+}
+.blog-generated-preview p {
+  margin-bottom: 1rem;
+  line-height: 1.65;
+}
+.blog-generated-preview p:last-child {
+  margin-bottom: 0;
+}
+.blog-generated-preview ul,
+.blog-generated-preview ol {
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+  padding-left: 1.5rem;
+}
+.blog-generated-preview li {
+  margin-bottom: 0.35rem;
+}
+.blog-generated-preview .blog-chart,
+.blog-generated-preview figure.blog-chart {
+  margin: 1em 0;
+}
+.blog-generated-preview .blog-chart img,
+.blog-generated-preview figure.blog-chart img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Blog tables: published look – light gray borders, light blue-gray header, padding */
+.blog-generated-preview .blog-table,
+.blog-generated-preview table.blog-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  border: 1px solid #e5e7eb;
+  table-layout: fixed;
+}
+.blog-generated-preview .blog-table th,
+.blog-generated-preview .blog-table td,
+.blog-generated-preview table.blog-table th,
+.blog-generated-preview table.blog-table td {
+  border: 1px solid #e5e7eb;
+  padding: 10px 14px;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  vertical-align: top;
+}
+.blog-generated-preview .blog-table th,
+.blog-generated-preview table.blog-table th {
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 600;
+}
+.blog-generated-preview .blog-table td,
+.blog-generated-preview table.blog-table td {
+  background: #fff;
+}
+
+/* RTL: generated content preview (Hebrew, Arabic) */
+.blog-editor-rtl .blog-generated-preview {
+  direction: rtl;
+  text-align: right;
+}
+.blog-editor-rtl .blog-generated-preview p,
+.blog-editor-rtl .blog-generated-preview li,
+.blog-editor-rtl .blog-generated-preview h1,
+.blog-editor-rtl .blog-generated-preview h2,
+.blog-editor-rtl .blog-generated-preview h3,
+.blog-editor-rtl .blog-generated-preview blockquote,
+.blog-editor-rtl .blog-generated-preview td,
+.blog-editor-rtl .blog-generated-preview th {
+  text-align: right !important;
+}
+/* RTL: charts and graphs – figure and image aligned right */
+.blog-editor-rtl .blog-generated-preview .blog-chart,
+.blog-editor-rtl .blog-generated-preview figure.blog-chart {
+  direction: rtl;
+  text-align: right;
+}
+.blog-editor-rtl .blog-generated-preview .blog-chart img,
+.blog-editor-rtl .blog-generated-preview figure.blog-chart img {
+  margin-right: 0;
+  margin-left: auto;
+  display: block;
+}
+.blog-editor-rtl .blog-generated-preview .blog-chart figcaption,
+.blog-editor-rtl .blog-generated-preview figure.blog-chart figcaption,
+.blog-editor-rtl .blog-generated-preview .blog-chart + p,
+.blog-editor-rtl .blog-generated-preview figure.blog-chart + p {
+  text-align: right !important;
+}
+/* RTL: tables */
+.blog-editor-rtl .blog-generated-preview .blog-table,
+.blog-editor-rtl .blog-generated-preview table {
+  direction: rtl;
+}
+.blog-editor-rtl .blog-generated-preview .blog-table th,
+.blog-editor-rtl .blog-generated-preview .blog-table td,
+.blog-editor-rtl .blog-generated-preview table th,
+.blog-editor-rtl .blog-generated-preview table td {
+  text-align: right;
+}
+/* RTL: strong/caption text after charts */
+.blog-editor-rtl .blog-generated-preview strong {
+  text-align: right !important;
+}
+
+/* Published / view content RTL (Hebrew, Arabic) – content page view modal & preview */
+.content-view-rtl {
+  direction: rtl;
+  text-align: right;
+}
+.content-view-rtl p,
+.content-view-rtl li,
+.content-view-rtl h1,
+.content-view-rtl h2,
+.content-view-rtl h3,
+.content-view-rtl blockquote,
+.content-view-rtl td,
+.content-view-rtl th,
+.content-view-rtl strong {
+  text-align: right !important;
+}
+.content-view-rtl .blog-chart,
+.content-view-rtl figure.blog-chart,
+.content-view-rtl table,
+.content-view-rtl .blog-table {
+  direction: rtl;
+}
+.content-view-rtl .blog-chart img,
+.content-view-rtl figure.blog-chart img {
+  margin-right: 0;
+  margin-left: auto;
 }
 
 .ql-toolbar.ql-snow {

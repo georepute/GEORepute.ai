@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import { publishToShopify } from "@/lib/integrations/shopify";
+import { wrapHtmlForRtl } from "@/lib/blog/rtl";
 
 /**
  * POST: Publish a blog post to Shopify
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
       summary,
       blogId,
       published = true,
+      contentLanguage,
     } = body;
 
     // Validate required fields
@@ -57,12 +59,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Prepend a full-width hero image to the post body so the title image displays large in the article
+    // Prepend a full-width hero image to the post body; wrap in RTL when Hebrew/Arabic
     const escapeAttr = (s: string) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    let finalContent = content;
+    let finalContent = wrapHtmlForRtl(content, contentLanguage);
     if (imageUrl && typeof imageUrl === "string" && /^https?:\/\//i.test(imageUrl)) {
       const heroBlock = `<figure style="margin:0 0 1.5em 0;"><img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(title)}" style="width:100%;height:auto;max-width:100%;display:block;" /></figure>`;
-      finalContent = heroBlock + content;
+      finalContent = heroBlock + finalContent;
     }
 
     // Publish to Shopify

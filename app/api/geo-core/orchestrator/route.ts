@@ -11,6 +11,7 @@ import { publishToShopify, ShopifyConfig } from "@/lib/integrations/shopify";
 import { publishToWordPress, publishToSelfHostedWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
 import { publishToX, uploadMediaToX, XConfig } from "@/lib/integrations/x";
 import { buildWordPressArticleHtml, type ThemePreset } from "@/lib/blog/wordpress-article-template";
+import { wrapHtmlForRtl } from "@/lib/blog/rtl";
 
 /**
  * Content Orchestrator API
@@ -1254,7 +1255,7 @@ export async function POST(request: NextRequest) {
 
                   shopifyResult = await publishToShopify(shopifyConfig, {
                     title: contentStrategy.topic || "Untitled",
-                    body_html: contentStrategy.generated_content || "",
+                    body_html: wrapHtmlForRtl(contentStrategy.generated_content || "", contentStrategy.metadata?.contentLanguage),
                     author: "GeoRepute.ai",
                     tags: contentStrategy.target_keywords?.join(", ") || "",
                     published: true,
@@ -1289,13 +1290,16 @@ export async function POST(request: NextRequest) {
           }
 
           // Prepare WordPress post content (optionally use article template from blog page)
-          let wordpressContent = contentStrategy.generated_content || "";
+          const contentLanguage = contentStrategy.metadata?.contentLanguage;
+          const rawBodyHtml = contentStrategy.generated_content || "";
+          const bodyHtmlRtl = wrapHtmlForRtl(rawBodyHtml, contentLanguage);
+          let wordpressContent = bodyHtmlRtl;
           if ((platform === "wordpress" || platform === "wordpress_self_hosted") && contentStrategy.metadata?.useWordPressArticleTemplate) {
             const meta = contentStrategy.metadata;
             const publishedDate = contentStrategy.scheduled_at || contentStrategy.created_at;
             const dateStr = publishedDate ? new Date(publishedDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
             const keywordsArr = contentStrategy.target_keywords || [];
-            const bodyLen = (contentStrategy.generated_content || "").length;
+            const bodyLen = rawBodyHtml.length;
             const readTimeMinutes = bodyLen > 0 ? Math.max(1, Math.round(bodyLen / 2200)) : undefined;
             wordpressContent = buildWordPressArticleHtml({
               title: contentStrategy.topic || "Untitled",
@@ -1305,7 +1309,7 @@ export async function POST(request: NextRequest) {
               author: meta?.author || "GeoRepute.ai",
               organizationName: meta?.organizationName || "",
               organizationUrl: meta?.organizationUrl,
-              bodyHtml: contentStrategy.generated_content || "",
+              bodyHtml: bodyHtmlRtl,
               featuredImageUrl: meta?.imageUrl,
               themePreset: (meta?.wordpressArticleTheme as ThemePreset) || "default",
               categoryTag: meta?.categories ? (Array.isArray(meta.categories) ? meta.categories.join(" · ") : String(meta.categories)) : undefined,
