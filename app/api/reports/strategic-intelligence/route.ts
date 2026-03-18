@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -460,11 +460,8 @@ function generateDecisionLogic(scores: IntelligenceScores): {
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -482,7 +479,7 @@ export async function GET(request: NextRequest) {
       .from("brand_analysis_projects")
       .select("id, brand_name, industry, website_url, company_description, domain_id, keywords, competitors")
       .eq("id", projectId)
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .single();
 
     if (!project) {
@@ -553,7 +550,7 @@ export async function GET(request: NextRequest) {
     const { data: marketShareRow } = await supabase
       .from("market_share_reports")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .eq("project_id", projectId)
       .order("generated_at", { ascending: false })
       .limit(1)
@@ -565,7 +562,7 @@ export async function GET(request: NextRequest) {
       ? await supabase
           .from("blind_spot_reports")
           .select("*")
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .eq("domain_id", domainId)
           .maybeSingle()
       : { data: null };
@@ -576,7 +573,7 @@ export async function GET(request: NextRequest) {
       ? await supabase
           .from("ai_google_gap_reports")
           .select("*")
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .eq("domain_id", domainId)
           .maybeSingle()
       : { data: null };
@@ -590,14 +587,14 @@ export async function GET(request: NextRequest) {
             .from("gsc_queries")
             .select("query, clicks, impressions, ctr, position")
             .eq("domain_id", domainId)
-            .eq("user_id", session.user.id)
+            .eq("user_id", user.id)
         : Promise.resolve({ data: null }),
       domainId
         ? supabase
             .from("gsc_pages")
             .select("page, clicks, impressions, ctr, position")
             .eq("domain_id", domainId)
-            .eq("user_id", session.user.id)
+            .eq("user_id", user.id)
         : Promise.resolve({ data: null }),
       // gsc_analytics summary — same table as /analytics/summary route uses
       domainId
@@ -605,7 +602,7 @@ export async function GET(request: NextRequest) {
             .from("gsc_analytics")
             .select("clicks, impressions, ctr, position, date")
             .eq("domain_id", domainId)
-            .eq("user_id", session.user.id)
+            .eq("user_id", user.id)
             .eq("data_type", "summary")
             .order("date", { ascending: true })
         : Promise.resolve({ data: null }),

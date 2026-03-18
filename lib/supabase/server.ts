@@ -1,5 +1,8 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import type { User } from '@supabase/supabase-js'
+
+export type ServerSupabaseClient = ReturnType<typeof createServerSupabaseClient>
 
 /**
  * Create a Supabase client for server-side use (Route Handlers, Server Components, Server Actions).
@@ -25,4 +28,15 @@ export function createServerSupabaseClient() {
       },
     },
   })
+}
+
+/**
+ * Get the authenticated user (validated with Supabase Auth server).
+ * Use this instead of getSession() to avoid the "user may not be authentic" warning.
+ * Returns null if not authenticated.
+ */
+export async function getAuthenticatedUser(supabase: ServerSupabaseClient): Promise<User | null> {
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (error || !user) return null
+  return user
 }

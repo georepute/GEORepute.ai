@@ -1324,10 +1324,9 @@ async function generateRealisticUserQueries(brandName, industry, keywords = [], 
     let languageInstruction = '';
     if (langCode === 'he') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in HEBREW (עברית).
-- Write queries naturally in Hebrew, as native Hebrew speakers would search
+- Write queries naturally in Hebrew, as native Hebrew speakers would search — humanized, professional, not robotic
 - Use Hebrew question words: מה, איך, למה, איפה, מתי, מי, איזה
-- Use natural Hebrew expressions and phrasing
-- Maintain conversational Hebrew style
+- Use natural Hebrew expressions and phrasing; sound like a real person typing, not AI
 - All ${maxQueries} queries must be in Hebrew
 ${relevanceReminder}\n`;
     } else if (langCode === 'ur') {
@@ -1346,9 +1345,9 @@ ${relevanceReminder}\n`;
 ${relevanceReminder}\n`;
     } else if (langCode === 'fr') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in FRENCH.
-- Write queries naturally in French, as native French speakers would search
+- Write queries naturally in French, as native French speakers would search — humanized, professional, not robotic
 - Use natural French question words: quoi, comment, pourquoi, où, quand, qui, quel(le)
-- Use natural French expressions and phrasing; maintain conversational style
+- Sound like a real person typing; conversational, varied; no AI-sounding phrasing
 - All ${maxQueries} queries must be in French
 ${relevanceReminder}\n`;
     } else if (langCode === 'es') {
@@ -1359,15 +1358,15 @@ ${relevanceReminder}\n`;
 ${relevanceReminder}\n`;
     } else if (langCode === 'it') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ITALIAN.
-- Write queries naturally in Italian, as native Italian speakers would search
+- Write queries naturally in Italian, as native Italian speakers would search — humanized, professional, not robotic
 - Use natural Italian question words: cosa, come, perché, dove, quando, chi, quale
-- Maintain conversational Italian style; all ${maxQueries} queries must be in Italian
+- Sound like a real person typing; conversational, varied; all ${maxQueries} queries in Italian
 ${relevanceReminder}\n`;
     } else if (langCode === 'pt') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in PORTUGUESE.
-- Write queries naturally in Portuguese, as native speakers would search
+- Write queries naturally in Portuguese, as native speakers would search — humanized, professional, not robotic
 - Use natural question words: o que, como, por que, onde, quando, quem, qual
-- Maintain conversational Portuguese style; all ${maxQueries} queries must be in Portuguese
+- Sound like a real person typing; conversational, varied; no AI-sounding phrasing; all ${maxQueries} queries in Portuguese
 ${relevanceReminder}\n`;
     } else if (langCode === 'nl') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in DUTCH.
@@ -1389,10 +1388,17 @@ ${relevanceReminder}\n`;
 - Use Simplified Chinese (简体) unless the context clearly requires Traditional
 - All ${maxQueries} queries must be in Chinese
 ${relevanceReminder}\n`;
+    } else if (langCode === 'ar') {
+      languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ARABIC (العربية).
+- Write queries naturally in Arabic, as native Arabic speakers would search — humanized, professional, not robotic
+- Use natural Arabic question words and phrasing (ما، كيف، لماذا، أين، متى، من، أي)
+- Use proper Arabic script; UI may display in RTL — generate natural Arabic only; sound like a real person
+- All ${maxQueries} queries must be in Arabic
+${relevanceReminder}\n`;
     } else if (langCode !== 'en') {
       languageInstruction = `\n🌐 LANGUAGE REQUIREMENT: Generate ALL queries in ${languageName}.
-- Write queries naturally as native speakers of this language would search
-- Use natural expressions, question words, and phrasing in that language
+- Write queries naturally as native speakers would search — humanized, professional, not robotic
+- Use natural expressions, question words, and phrasing; sound like a real person typing
 - Do NOT mix in English words unless they are common loanwords in ${languageName}
 - All ${maxQueries} queries must be in ${languageName}
 ${relevanceReminder}\n`;
@@ -1423,8 +1429,15 @@ Brand: ${brandName}
 Industry: ${industry}
 ${brandOfferingContext}
 
+=== CRITICAL — HUMANIZED, REALISTIC QUERIES (ALL LANGUAGES) ===
+- Queries must read as if written by a REAL HUMAN: natural phrasing, varied sentence length, the way people actually type into ChatGPT, Perplexity, or Gemini.
+- NO robotic, template-like, or AI-sounding wording. Avoid stiff or corporate phrasing. No "Please provide a comprehensive list of..." or "Could you kindly recommend...".
+- Professional but natural: like a knowledgeable person asking a quick question — conversational, direct, sometimes incomplete sentences (e.g. "best tool for X?" or "alternatives to Y for Z").
+- Vary style: some questions, some statements, some with context ("I need...", "Looking for...", "Which..."). Mix short and slightly longer queries.
+- This applies in EVERY language (English, Hebrew, French, Portuguese, Arabic, Italian, Spanish, etc.): write as a native or fluent professional would actually search — natural idioms and phrasing, no literal translation feel.
+
 === YOUR TASK ===
-Study the WEBSITE CONTENT, FEATURES, and INDUSTRY above carefully. Identify the SPECIFIC products, services, use cases, and value propositions this brand actually offers. Then generate ${maxQueries} search queries that a potential customer of THIS SPECIFIC brand would realistically ask an AI assistant.
+Study the WEBSITE CONTENT, FEATURES, and INDUSTRY above carefully. Identify the SPECIFIC products, services, use cases, and value propositions this brand actually offers. Then generate ${maxQueries} search queries that a potential customer of THIS SPECIFIC brand would realistically ask an AI assistant — as a human would type them, with natural and professional tone in the target language.
 
 ABSOLUTE REQUIREMENT — RELEVANCE:
 - Every single query MUST be directly about the specific products, services, or problems that ${brandName}'s website describes.
@@ -1459,14 +1472,16 @@ QUERY CATEGORIES (distribute queries across these):
 CRITICAL RULES:
 - NEVER mention the brand name "${brandName}" in any query — these are searches a buyer makes BEFORE knowing about the brand
 - Every query MUST map to a specific product, service, or problem visible on the brand's website or in the keywords
-- Queries should be 1–2 sentences, conversational, as if asking an AI assistant
-- Format each query as a proper sentence or question with punctuation
+- Queries must sound HUMAN: natural, varied, professional but conversational — as a real person would type into an AI search. No robotic or template-like phrasing in any language.
+- Format each query as a proper sentence or question with punctuation; mix short and longer queries
 - Include 2–3 queries with year references (${new Date().getFullYear()}, ${new Date().getFullYear() + 1})
 - DO NOT generate filler or generic queries like "best software tools" — every query must be specific to this brand's domain
 - If website content is available, extract specific terminology, product names, service descriptions, and use cases from it — use those exact terms in queries
 
 IMPORTANT: Return EXACTLY ${maxQueries} queries in a valid JSON array format. No markdown formatting, no backticks, just a clean JSON array of strings.`;
-    const systemMessageBase = `You generate highly targeted search queries for brand visibility measurement. Your queries must be DIRECTLY relevant to the specific products, services, and use cases described in the brand's website content and keywords. NEVER generate generic or off-topic queries. Study the provided website content carefully and derive every query from the brand's actual domain.`;
+    const systemMessageBase = `You generate highly targeted search queries for brand visibility measurement. Your queries must be DIRECTLY relevant to the specific products, services, and use cases described in the brand's website content and keywords. NEVER generate generic or off-topic queries. Study the provided website content carefully and derive every query from the brand's actual domain.
+
+CRITICAL — HUMANIZED QUERIES: Every query must read as if written by a real human: natural phrasing, varied length, professional but conversational. No robotic, template-like, or AI-sounding wording in any language (English, Hebrew, French, Arabic, Portuguese, Italian, Spanish, etc.). Write as a native or fluent professional would actually type into ChatGPT, Perplexity, or Gemini.`;
     const systemMessage = langCode === 'he'
       ? `${systemMessageBase}\n\nכל השאילתות חייבות להיות בעברית טבעית. כתוב כמו שמשתמש ישראלי היה מחפש. החזר מערך JSON בלבד, ללא markdown או הסבר.`
       : langCode !== 'en'
@@ -1722,17 +1737,53 @@ function generateFallbackQueries(brandName, industry, keywords = [], competitors
 }
 const MAX_QUERIES = 50;
 
-// Option A: equal split across (language × region) buckets. Returns list of (lang, country) with country null for "general".
+// Language -> country codes where that language is primary. Used so each language only targets matching countries (e.g. Arabic only for SA/AE, Portuguese only for PT/BR).
+const LANG_TO_COUNTRIES = {
+  ar: ['SA', 'AE', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO', 'LB', 'SY', 'IQ', 'YE', 'MA', 'DZ', 'TN', 'LY', 'SD', 'PS'],
+  pt: ['PT', 'BR'],
+  fr: ['FR', 'BE', 'LU', 'MC', 'CH'],
+  en: ['US', 'GB', 'AU', 'IE', 'NZ', 'ZA', 'IN', 'CA', 'SG', 'PH', 'MY', 'HK'],
+  de: ['DE', 'AT', 'CH'],
+  es: ['ES', 'MX', 'AR', 'CO', 'CL', 'PE', 'VE', 'EC', 'UY', 'PY', 'BO', 'CR', 'PA', 'DO', 'CU'],
+  it: ['IT', 'CH', 'SM'],
+  he: ['IL'],
+  nl: ['NL', 'BE'],
+  ja: ['JP'],
+  zh: ['CN', 'TW', 'HK'],
+  tr: ['TR'],
+  ru: ['RU', 'BY', 'KZ'],
+  hi: ['IN'],
+  ur: ['PK'],
+  ko: ['KR'],
+  pl: ['PL'],
+  th: ['TH'],
+  vi: ['VN'],
+  id: ['ID'],
+};
+
+// Returns (lang, country) buckets so each language only targets countries that match that language. No Portuguese for UAE/SA, no Arabic for Portugal.
 function getLanguageRegionBuckets(analysisLangs, analysisCountriesRun, queryLanguage) {
-  const L = (analysisLangs && analysisLangs.length) ? analysisLangs.length : 1;
-  const R = (analysisCountriesRun && analysisCountriesRun.length) ? analysisCountriesRun.length : 1;
   const langs = (analysisLangs && analysisLangs.length) ? analysisLangs : [queryLanguage || 'en'];
   const countries = (analysisCountriesRun && analysisCountriesRun.length) ? analysisCountriesRun : [null];
   const buckets = [];
   for (const lang of langs) {
+    const langCode = lang.split('-')[0].toLowerCase();
+    const allowedCountries = LANG_TO_COUNTRIES[langCode];
     for (const country of countries) {
-      buckets.push({ lang: lang.split('-')[0].toLowerCase(), country });
+      if (country == null) {
+        buckets.push({ lang: langCode, country: null });
+        continue;
+      }
+      const countryUpper = String(country).toUpperCase();
+      if (allowedCountries && allowedCountries.length > 0) {
+        if (!allowedCountries.includes(countryUpper)) continue;
+      }
+      buckets.push({ lang: langCode, country: countryUpper });
     }
+  }
+  if (buckets.length === 0) {
+    const langCode = (langs[0] || queryLanguage || 'en').split('-')[0].toLowerCase();
+    buckets.push({ lang: langCode, country: countries[0] ? String(countries[0]).toUpperCase() : null });
   }
   return buckets;
 }
@@ -1754,16 +1805,16 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
     }
   }
 
-  // Return type: { text: string, country?: string | null }[] so UI can show "which query is for what region"
-  const toItem = (text, country = null) => (typeof text === 'string' ? { text: text.trim(), country } : { text: String(text).trim(), country: null });
+  // Return type: { text, country?, language? } so each query gets the right language when calling AI
+  const toItem = (text, country = null, lang = null) => (typeof text === 'string' ? { text: text.trim(), country, language: lang } : { text: String(text).trim(), country: null, language: lang });
 
   if (mode === 'manual') {
     if (manualTexts.length === 0) {
       console.log(`Manual mode but no manual queries; using fallback generated queries (max ${N})`);
       const fallback = generateFallbackQueries(project.brand_name, project.industry, keywords, project.competitors || [], queryLanguage, analysisCountriesRun).slice(0, N);
-      return fallback.map((q) => toItem(q, null));
+      return fallback.map((q) => toItem(q, null, queryLanguage));
     }
-    return manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null));
+    return manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null, q && q.language ? q.language : queryLanguage));
   }
 
   // Option A: distribute N across (language × region) buckets
@@ -1774,7 +1825,7 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
   const allQueries = [];
 
   if (mode === 'auto_manual') {
-    const combined = manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null));
+    const combined = manualList.slice(0, N).map((q) => toItem(q && q.text ? q.text.trim() : '', q && q.country ? q.country : null, q && q.language ? q.language : queryLanguage));
     const bucketPromises = buckets.map((b, i) => {
       const count = perBucket + (i < remainder ? 1 : 0);
       if (count <= 0) return Promise.resolve([]);
@@ -1784,10 +1835,10 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
     const bucketResults = await Promise.all(bucketPromises);
     for (let i = 0; i < bucketResults.length; i++) {
       const generated = bucketResults[i];
-      const country = buckets[i].country;
+      const { lang, country } = buckets[i];
       for (const q of generated) {
         if (combined.length >= N) break;
-        if (!combined.some((c) => c.text === q)) combined.push(toItem(q, country));
+        if (!combined.some((c) => c.text === q)) combined.push(toItem(q, country, lang));
       }
     }
     console.log(`Auto+manual: ${manualList.length} manual + generated, total ${combined.length} (cap ${N}, ${bucketCount} buckets)`);
@@ -1803,8 +1854,8 @@ async function getQueriesForAnalysis(project, queryLanguage, analysisLangs, anal
   const bucketResults = await Promise.all(bucketPromises);
   for (let i = 0; i < bucketResults.length; i++) {
     const generated = bucketResults[i];
-    const country = buckets[i].country;
-    for (const q of generated) allQueries.push(toItem(q, country));
+    const { lang, country } = buckets[i];
+    for (const q of generated) allQueries.push(toItem(q, country, lang));
   }
   console.log(`Option A: ${allQueries.length} queries across ${bucketCount} (lang×region) buckets (parallel generation)`);
   return allQueries.slice(0, N);
@@ -2247,8 +2298,9 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
         for (const queryItem of queryBatch) {
           const queryText = typeof queryItem === 'string' ? queryItem : queryItem.text;
           const queryCountry = typeof queryItem === 'object' && queryItem && 'country' in queryItem ? queryItem.country : null;
+          const queryLang = (typeof queryItem === 'object' && queryItem && queryItem.language != null ? queryItem.language : language).toString().toLowerCase().split('-')[0];
           try {
-            const response = await queryAIPlatform(platform, queryText, language);
+            const response = await queryAIPlatform(platform, queryText, queryLang);
             if (response) {
               console.log(`Got response from ${platform} for query "${queryText.substring(0, 50)}...": ${response.substring(0, 50)}...`);
               platformSuccess = true;
@@ -2274,7 +2326,8 @@ async function runEnhancedBrandAnalysis(projectId, platforms = [
               const queryIntent = classifyQueryIntent(queryText);
               const enrichedAnalysis = analysis ? { ...analysis, ...queryIntent } : queryIntent;
               if (queryCountry != null) enrichedAnalysis.country = queryCountry;
-              // Store the response with metadata (including country/region for this query)
+              enrichedAnalysis.language = queryLang;
+              // Store the response with metadata (country + language for this query)
               await supabase.from('ai_platform_responses').insert({
                 project_id: projectId,
                 session_id: session.id,
@@ -2503,10 +2556,11 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
     for (const queryItem of currentBatch) {
       const queryText = typeof queryItem === 'string' ? queryItem : queryItem.text;
       const queryCountry = typeof queryItem === 'object' && queryItem && 'country' in queryItem ? queryItem.country : null;
+      const queryLang = (typeof queryItem === 'object' && queryItem && queryItem.language != null ? queryItem.language : language).toString().toLowerCase().split('-')[0];
       for (const platform of platforms) {
         tasks.push(async () => {
           try {
-            const response = await queryAIPlatform(platform, queryText, language);
+            const response = await queryAIPlatform(platform, queryText, queryLang);
             if (!response) {
               console.log(`No response from ${platform} for query "${queryText.substring(0, 30)}..."`);
               return { ok: true, platform, stored: false, brandMentioned: false };
@@ -2517,6 +2571,7 @@ async function processBatchOfQueries(projectId, platforms, sessionId, queries, b
             const queryIntent = classifyQueryIntent(queryText);
             const enrichedAnalysis = analysis ? { ...analysis, ...queryIntent } : queryIntent;
             if (queryCountry != null) enrichedAnalysis.country = queryCountry;
+            enrichedAnalysis.language = queryLang;
             await supabase.from('ai_platform_responses').insert({
               project_id: projectId,
               session_id: sessionId,

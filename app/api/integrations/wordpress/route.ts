@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import { verifyWordPressConnection, generateWordPressAuthUrl, getWordPressSites } from "@/lib/integrations/wordpress";
 
 /**
@@ -12,11 +12,8 @@ import { verifyWordPressConnection, generateWordPressAuthUrl, getWordPressSites 
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -24,7 +21,7 @@ export async function GET(request: NextRequest) {
     const { data: integration, error } = await supabase
       .from("platform_integrations")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .eq("platform", "wordpress")
       .maybeSingle();
 
@@ -74,11 +71,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -96,18 +90,18 @@ export async function POST(request: NextRequest) {
       }
 
       // Generate state for CSRF protection
-      const state = `${session.user.id}:${Date.now()}:${Math.random().toString(36).substring(7)}`;
+      const state = `${user.id}:${Date.now()}:${Math.random().toString(36).substring(7)}`;
 
       // Check if integration already exists
       const { data: existingIntegration } = await supabase
         .from("platform_integrations")
         .select("id")
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .eq("platform", "wordpress")
         .maybeSingle();
 
       const integrationData = {
-        user_id: session.user.id,
+        user_id: user.id,
         platform: "wordpress",
         status: "disconnected",
         metadata: {
@@ -172,7 +166,7 @@ export async function POST(request: NextRequest) {
       const { data: integration } = await supabase
         .from("platform_integrations")
         .select("*")
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .eq("platform", "wordpress")
         .maybeSingle();
 
@@ -218,7 +212,7 @@ export async function POST(request: NextRequest) {
       const { data: integration } = await supabase
         .from("platform_integrations")
         .select("*")
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .eq("platform", "wordpress")
         .maybeSingle();
 
@@ -264,7 +258,7 @@ export async function POST(request: NextRequest) {
       const { data: integration } = await supabase
         .from("platform_integrations")
         .select("*")
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .eq("platform", "wordpress")
         .maybeSingle();
 
@@ -320,11 +314,8 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -332,7 +323,7 @@ export async function DELETE(request: NextRequest) {
     const { error: deleteError } = await supabase
       .from("platform_integrations")
       .delete()
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .eq("platform", "wordpress");
 
     if (deleteError) {

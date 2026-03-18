@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 import { publishToShopify } from "@/lib/integrations/shopify";
 
 /**
@@ -8,11 +8,8 @@ import { publishToShopify } from "@/lib/integrations/shopify";
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -40,7 +37,7 @@ export async function POST(request: NextRequest) {
     const { data: integration, error } = await supabase
       .from("platform_integrations")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .eq("platform", "shopify")
       .eq("status", "connected")
       .maybeSingle();
@@ -60,6 +57,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Prepend a full-width hero image to the post body so the title image displays large in the article
+    const escapeAttr = (s: string) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    let finalContent = content;
+    if (imageUrl && typeof imageUrl === "string" && /^https?:\/\//i.test(imageUrl)) {
+      const heroBlock = `<figure style="margin:0 0 1.5em 0;"><img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(title)}" style="width:100%;height:auto;max-width:100%;display:block;" /></figure>`;
+      finalContent = heroBlock + content;
+    }
+
     // Publish to Shopify
     const result = await publishToShopify(
       {
@@ -68,7 +73,7 @@ export async function POST(request: NextRequest) {
       },
       {
         title,
-        body_html: content,
+        body_html: finalContent,
         author: author || "GeoRepute.ai",
         tags: tags || "",
         published,
@@ -95,7 +100,7 @@ export async function POST(request: NextRequest) {
     const { data: contentRecord } = await supabase
       .from("content_strategy")
       .insert({
-        user_id: session.user.id,
+        user_id: user.id,
         topic: title,
         generated_content: content,
         target_platform: "shopify",
@@ -117,7 +122,7 @@ export async function POST(request: NextRequest) {
       await supabase
         .from("published_content")
         .insert({
-          user_id: session.user.id,
+          user_id: user.id,
           content_strategy_id: contentRecord.id,
           platform: "shopify",
           published_url: result.url,

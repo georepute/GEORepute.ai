@@ -188,10 +188,25 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'url and brandName are required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Always generate a fresh summary; use actual website content for exact details
-    console.log(`📄 Fetching website content from ${url}...`);
-    const siteData = await getSiteContent(url);
-    const meta = { title: siteData.title, description: siteData.description, icon: siteData.icon };
+    // Fetch website content when possible; if DNS/network fails, still generate summary from brand + web search
+    let siteData: { title?: string | null; description?: string | null; icon?: string | null; headings?: string[]; bodyExcerpt?: string };
+    let meta: { title?: string | null; description?: string | null; icon?: string | null };
+    try {
+      console.log(`📄 Fetching website content from ${url}...`);
+      siteData = await getSiteContent(url);
+      meta = { title: siteData.title, description: siteData.description, icon: siteData.icon };
+    } catch (fetchErr) {
+      const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      console.warn(`⚠️ Could not fetch website (${url}):`, msg);
+      siteData = {
+        title: null,
+        description: null,
+        icon: getGoogleFaviconUrl(url) || null,
+        headings: [],
+        bodyExcerpt: `[Website could not be reached: ${msg.includes('dns') ? 'domain may be unavailable or not resolvable from this region' : 'connection failed'}. Summary will use brand name, industry, and web search only.]`,
+      };
+      meta = { title: siteData.title, description: siteData.description, icon: siteData.icon };
+    }
 
     console.log(`🔍 Fetching brand information for ${brandName} from web sources...`);
     const webSearchResults = await searchBrandInformation(brandName, url, industry || undefined);

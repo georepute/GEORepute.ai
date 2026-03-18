@@ -16,6 +16,12 @@
 import OpenAI from "openai";
 import type { DomainEnrichmentData } from "@/lib/utils/domainEnrichment";
 import { formatDomainDataForPrompt } from "@/lib/utils/domainEnrichment";
+import {
+  getContentLayer,
+  ARTICLE_LAYER,
+  POST_LAYER,
+} from "@/lib/content/universal-content-standards";
+import { stripMarkdownBoldMarkers } from "@/lib/blog/wordpress-article-template";
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -55,9 +61,9 @@ export interface ContentGenerationInput {
   influenceLevel: "subtle" | "moderate" | "strong";
   userContext?: string;
   brandVoice?: any; // Brand voice profile
-  language?: "en" | "he" | "ar" | "fr"; // Language for content generation (default: "en")
+  language?: "en" | "he" | "ar" | "fr" | "pt" | "it"; // Language for content generation (default: "en")
   contentType?: "article" | "post" | "answer" | "newsletter" | "linkedin_article" | "linkedin_post" | "blog_article"; // Content type for formatting
-  websiteUrl?: string; // User's website URL for backlinks (from brand project)
+  websiteUrl?: string; // User's website URL: for third-party platforms = backlinks; for own site = internal links
 }
 
 export interface ContentGenerationOutput {
@@ -422,27 +428,53 @@ export async function generateStrategicContent(
     neutral: "Balanced, objective, informative. Present facts without strong emotion. Even-keeled and measured.",
   };
 
-  // Language instruction (blog gets longer length and same quality standards in all languages)
-  const isBlogLang = input.contentType === "blog_article" || input.targetPlatform === "shopify";
-  const lengthForLang = isBlogLang ? "1200-2000 words (full blog). Same blog quality standards apply: structure (intro, 3–5 insights, conclusion), Spark, H2/H3, authority links, two structural elements." : "minimum 150 words; aim for 200-300.";
+  // Universal Content Standards (Post 300–600 words, Article 800–1,500 words) – PDF aligned
+  const contentLayer = getContentLayer({
+    contentType: input.contentType,
+    targetPlatform: input.targetPlatform,
+  });
+  const isArticleLayer = contentLayer === "article";
+  const isBlogLang = isArticleLayer;
+  const lengthForLang = isArticleLayer
+    ? `${ARTICLE_LAYER.wordCountLabel} (Article layer). ${ARTICLE_LAYER.structure} ${ARTICLE_LAYER.seo} ${ARTICLE_LAYER.dataVisual}`
+    : `${POST_LAYER.wordCountLabel} (Post layer). ${POST_LAYER.structure} ${POST_LAYER.seo} ${POST_LAYER.dataVisual}`;
   const languageInstruction = input.language === "he"
     ? `\n🌐 HEBREW-ONLY REQUIREMENT (STRICT):
 - Output ONLY valid Hebrew text: Hebrew letters (א-ת), optional niqqud, standard punctuation (. , ? ! " ' - : ;). No other characters.
 - Do NOT use Latin/English letters (e.g. "Israel", "L") or transliterations in parentheses like (Israel haGedolah). Write the concept in Hebrew only (e.g. ישראל, ישראל הגדולה).
 - Do NOT output corrupted text, random symbols, or mixed scripts (e.g. no L†)@)\\|&$^ or similar). If a word is normally written in Hebrew, use only Hebrew.
 - Write naturally in Hebrew, as a native speaker. Every word must be in Hebrew script. No English, no transliterations, no mixed/corrupted characters.
+- PROFESSIONAL QUALITY: Zero grammar or spelling errors. Content must be humanized (natural, as a fluent professional would write). Publication-ready.
 - Length: ${lengthForLang} Complete every sentence; never cut off mid-word or with garbage characters.\n`
     : input.language === "ar"
     ? `\n🌐 ARABIC-ONLY REQUIREMENT (STRICT):
 - Output ONLY valid Arabic text: Arabic script (right-to-left), standard punctuation. Use Modern Standard Arabic (الفصحى) or clear dialect as appropriate.
 - Do NOT mix Latin/English letters with Arabic. Write the entire content in Arabic script only.
 - Do NOT output corrupted text, random symbols, or mixed scripts. Every word must be in Arabic script.
-- Write naturally in Arabic, as a native speaker would. Length: ${lengthForLang} Complete every sentence.\n`
+- Write naturally in Arabic, as a native speaker would.
+- PROFESSIONAL QUALITY: Zero grammar or spelling errors. Content must be humanized (natural, as a fluent professional would write). Publication-ready.
+- Length: ${lengthForLang} Complete every sentence.\n`
     : input.language === "fr"
     ? `\n🌐 FRENCH-ONLY REQUIREMENT (STRICT):
 - Output ONLY valid French text. Use correct French grammar, accents (é, è, ê, à, ù, ç, etc.), and punctuation.
 - Do NOT mix in English or other languages. Write the entire content in French only.
-- Write naturally in French, as a native speaker would. Length: ${lengthForLang} Complete every sentence.\n`
+- Write naturally in French, as a native speaker would.
+- PROFESSIONAL QUALITY: Zero grammar or spelling errors. Content must be humanized (natural, as a fluent professional would write). Publication-ready.
+- Length: ${lengthForLang} Complete every sentence.\n`
+    : input.language === "pt"
+    ? `\n🌐 PORTUGUESE-ONLY REQUIREMENT (STRICT):
+- Output ONLY valid Portuguese text. Use correct Portuguese grammar, accents (á, à, â, ã, é, ê, í, ó, ô, õ, ú, ç, etc.), and punctuation.
+- Do NOT mix in English or other languages. Write the entire content in Portuguese only.
+- Write naturally in Portuguese, as a native speaker would.
+- PROFESSIONAL QUALITY: Zero grammar or spelling errors. Content must be humanized (natural, as a fluent professional would write). Publication-ready.
+- Length: ${lengthForLang} Complete every sentence.\n`
+    : input.language === "it"
+    ? `\n🌐 ITALIAN-ONLY REQUIREMENT (STRICT):
+- Output ONLY valid Italian text. Use correct Italian grammar, accents (à, è, é, ì, ò, ù, etc.), and punctuation.
+- Do NOT mix in English or other languages. Write the entire content in Italian only.
+- Write naturally in Italian, as a native speaker would.
+- PROFESSIONAL QUALITY: Zero grammar or spelling errors. Content must be humanized (natural, as a fluent professional would write). Publication-ready.
+- Length: ${lengthForLang} Complete every sentence.\n`
     : "";
 
   let finalReminder: string;
@@ -500,7 +532,7 @@ This MUST score 100% HUMAN on ALL AI detectors (GPTZero, Turnitin, Copyleaks, Wr
 - Focus on clear communication and value
 ${languageInstruction}
 Topic/Query: "${input.topic}"
-Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force${input.language === "he" ? "; when writing in Hebrew use only Hebrew equivalents—never write English or other language words in the content" : input.language === "ar" ? "; when writing in Arabic use only Arabic equivalents—never write English or other language words in the content" : input.language === "fr" ? "; when writing in French use only French equivalents—never write English or other language words in the content" : ""})
+Keywords: ${input.targetKeywords.join(", ")} (sneak them in naturally, don't force${input.language === "he" ? "; when writing in Hebrew use only Hebrew equivalents—never write English or other language words in the content" : input.language === "ar" ? "; when writing in Arabic use only Arabic equivalents—never write English or other language words in the content" : input.language === "fr" ? "; when writing in French use only French equivalents—never write English or other language words in the content" : input.language === "pt" ? "; when writing in Portuguese use only Portuguese equivalents—never write English or other language words in the content" : input.language === "it" ? "; when writing in Italian use only Italian equivalents—never write English or other language words in the content" : ""})
 Platform: ${input.targetPlatform}
 ${input.brandMention ? `Brand: ${input.brandMention} (${influenceGuidelines[input.influenceLevel]})` : "No brand"}
 ${input.userContext ? `Context: ${input.userContext}` : ""}
@@ -614,16 +646,15 @@ ${input.contentType === 'linkedin_article' || input.contentType === 'article' ? 
 - Must be written in clearly human tone - natural, conversational, but professional
 - Professional article format suitable for LinkedIn Articles
 ` : input.contentType === 'linkedin_post' || input.contentType === 'post' ? `
-- 📝 FORMAT: POST
-- Length: Short to medium (typically 300-800 words)
-- Purpose: Update, share, engage with audience
-- Tone: Casual, conversational, approachable
-- Research: Opinion or quick information, personal insights
-- Structure: Flexible, informal, can use line breaks for readability
+- 📝 FORMAT: POST (Universal Content Standards – Post layer)
+- Length: STRICT ${POST_LAYER.wordCountLabel} – do not exceed 600 words
+- Purpose: ${POST_LAYER.objective}
+- Structure: ${POST_LAYER.structure}
+- SEO: ${POST_LAYER.seo}
+- Data/visual: ${POST_LAYER.dataVisual}
 - Paragraphs: Shorter paragraphs (1-3 sentences each)
-- Content: Quick updates, thoughts, or engaging questions
+- Tone: Casual, conversational, approachable; professional post format
 - Must be written in clearly human tone - natural, conversational, but professional
-- Professional post format suitable for LinkedIn Posts
 ` : `
 - Content can be formatted as an ARTICLE (longer form, structured with headings, sections) or POST (shorter, conversational)
 - Default to POST format if not specified
@@ -650,43 +681,32 @@ ${input.targetPlatform === 'twitter' ? `- Twitter style: ${input.brandVoice ? "F
 - Thread-like thinking, stream of consciousness
 ${input.brandVoice ? `- IGNORE "casual punchy" suggestion above - maintain your ${input.brandVoice.tone} brand voice tone` : ""}` : ''}
 ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
-- 📝 BLOG ARTICLE FORMAT (WordPress / Shopify – HUMANISED LONG-FORM):
+- 📝 BLOG ARTICLE FORMAT (Universal Content Standards – Article layer, WordPress / Shopify):
+
+**LENGTH & OBJECTIVE (MANDATORY):**
+- LENGTH: STRICT ${ARTICLE_LAYER.wordCountLabel} – do not exceed 1,500 words
+- Purpose: ${ARTICLE_LAYER.objective}
+- Structure: ${ARTICLE_LAYER.structure}
+- SEO: ${ARTICLE_LAYER.seo}
+- Data/visual: ${ARTICLE_LAYER.dataVisual} (e.g. one comparison table, chart, or statistical reference in HTML)
+- Include a short FAQ section (3–5 Q&As) for AI/search queries where relevant to the topic.
 
 **HUMANISED CONTENT FRAMEWORK (apply throughout):**
-- ROLE: Write like you're explaining something to a smart friend over coffee. You genuinely care about helping the reader and want to engage authentically. Show a high degree of emotional intelligence.
-- VOICE: Use contractions (you're, don't, can't, we'll). Vary sentence length dramatically—short punchy ones, then longer sentences that take their time. Add natural pauses... like this. Include occasional tangents (that's how real people think). Keep language simple. Use relatable metaphors instead of jargon.
-- CONNECTION: Show you understand what the reader's going through. Include unique connections with ideas, secondary thoughts, and light observations like a human would. Make content slightly "messy"—a perfect structure feels inauthentic. Connect emotionally first, then provide value. Write like you've actually lived through what you're discussing.
-- AVOID: Don't start every paragraph the same way. No hedging with "it's important to note that". Never use "delve" or "rich tapestry". Avoid three-item lists when one or two would do. Don't end with vague optimism ("the future looks bright").
+- ROLE: Write like you're explaining something to a smart friend over coffee. You genuinely care about helping the reader and want to engage authentically.
+- VOICE: Use contractions (you're, don't, we'll). Vary sentence length. Keep language simple. Use relatable metaphors instead of jargon.
+- CONNECTION: Show you understand what the reader's going through. Connect emotionally first, then provide value.
+- AVOID: No hedging with "it's important to note that". Never use "delve" or "rich tapestry". Don't end with vague optimism.
 
-- LENGTH: 1200-2000 words - this is a FULL blog article, NOT a short post
-- STRUCTURE: Use proper HTML formatting for WordPress/Shopify:
-  * <h2> for main section headings (4-6 sections minimum)
-  * <h3> for subsections
-  * <p> for paragraphs
-  * <ul><li> for bullet points
-  * <ol><li> for numbered lists
-  * <strong> for emphasis
-  * <em> for italic text
-  * <a href="..."> for links if relevant
-- INTRODUCTION: Hook the reader with a compelling opening paragraph
-- BODY: Comprehensive coverage with multiple sections:
-  * Each section should have 2-4 paragraphs
-  * Include practical tips and examples
-  * Add actionable advice readers can implement
-  * Use subheadings to break up content
-- CONCLUSION: Summary with clear call-to-action (concrete, not vague optimism)
-- SEO: Include target keywords in at least 2 headings, first paragraph, and throughout naturally (2-3% density)
-- TONE: Professional, informative, engaging, helpful—but human and conversational
-- NO EMOJIS in blog content
-- Write like a professional blogger who sounds like a real person, not a generic content machine
-
-**BLOG QUALITY STANDARDS (MANDATORY – every generated blog must meet these):**
-- STRUCTURE: Use a clear three-part structure: (1) a short introduction that presents the topic and hooks the reader, (2) a main body with 3–5 key insights or sections, and (3) a positive, actionable conclusion that leaves the reader with a clear takeaway.
-- SPARK: Include at least one original idea or "Spark" that adds real value and offers an interesting, distinctive perspective on the topic—something that makes this piece stand out, not generic.
-- HEADINGS & READABILITY: Use proper heading hierarchy: one <h1> (or clear title) for the topic, <h2> for main sections, <h3> for subsections. Keep paragraphs short (2–4 sentences) to maintain readability and support both SEO and AI search visibility.
-- AUTHORITY LINKS: When referencing data, research, or industry trends, link to relevant authority sources using <a href="URL">anchor text</a>. Use credible, well-known sources (studies, official reports, respected publications). At least 1–2 such links in the body where they add value.
-- VISUAL / STRUCTURAL ELEMENTS: Include at least TWO of the following within the article: a table (use <table>, <tr>, <td>, <th>), a checklist (<ul><li> with checkmarks or numbered steps), a bullet list, a key quote in a highlight style (<blockquote> or <strong>), a practical example or short case-style illustration, or a clear "key takeaway" or summary box. This improves scannability and value.
-- GOAL: Every piece must be a high-quality knowledge asset: platform-optimized (WordPress/Shopify), strong for SEO and GEO (AI search visibility), and structured so it can be expanded, repurposed, or distributed elsewhere.
+- STRUCTURE: Use proper HTML for WordPress/Shopify: <h2> for main sections, <h3> for subsections, <p>, <ul><li>, <ol><li>, <strong>, <em>, <a href="...">. For comparison tables use the pipe format below (not raw <table>).
+- TABLES: When including a comparison table, format it with one line per row and columns separated by a pipe with spaces: " | ". Example:
+  Column One | Column Two | Column Three
+  Row one value | Row one value 2 | Row one value 3
+  Row two value | Row two value 2 | Row two value 3
+  Do not concatenate columns (e.g. "MethodCore Principle" with no separator). Always use " | " between columns so the table can be rendered.
+- INTRODUCTION: Hook the reader; then body with examples and insights; conclusion with clear takeaway/CTA.
+- SEO: Primary and secondary keywords in headings and body; internal and external links; FAQ section for AI visibility.
+- TONE: Professional, informative, engaging; NO EMOJIS in blog content.
+- SPARK: Include at least one original idea or distinctive perspective. At least one comparison table, chart, or statistical reference. Authority links where they add value — only real, working URLs (no 404), authentic and credible sources; do not invent or guess URLs.
 ${input.brandVoice ? `- Maintain your ${input.brandVoice.tone} brand voice tone throughout` : ""}` : ''}
 
 5️⃣ **KEYWORD INTEGRATION (NATURAL, NOT FORCED)**
@@ -700,31 +720,44 @@ ${input.brandMention ? `- ${influenceGuidelines[input.influenceLevel]}
 - Mention like a real person would: "I've been using X and...", "X is pretty good for...", "Not sponsored but X worked for me"
 - Don't sound like an ad. Sound like a friend recommending something.` : '- No brand mention needed'}
 
-${(input.websiteUrl && ['medium', 'github', 'quora', 'shopify'].includes(input.targetPlatform)) || (input.websiteUrl && input.contentType === 'blog_article') ? `🔗 **BACKLINK (IMPORTANT - INCLUDE NATURALLY)**
-- You MUST include 1-2 natural backlinks to: ${input.websiteUrl}
-- Weave the link naturally into the content where it adds value to the reader
-- Use contextual anchor text related to the topic, NOT generic "click here" or "visit website"
-- Good examples: "as detailed in [this guide](${input.websiteUrl})", "tools like [${input.brandMention || 'this platform'}](${input.websiteUrl}) can help"
-- Place at least one link within the body of the content (not just at the end)
-- Optionally add a subtle CTA near the conclusion: "For more insights, check out [${input.brandMention || (() => { try { return new URL(input.websiteUrl!).hostname; } catch { return input.websiteUrl; } })()}](${input.websiteUrl})"
-- Make the links feel helpful, not promotional -- like a friend sharing a useful resource
-- Do NOT add more than 2 backlinks -- keep it natural` : ''}
+${input.websiteUrl && ['medium', 'github', 'quora'].includes(input.targetPlatform!) ? `🔗 **BACKLINKS (IMPORTANT - INCLUDE NATURALLY)**
+- Content is published on a third-party platform. Include 1-2 natural links to your site: ${input.websiteUrl}
+- These links from this platform to your site are backlinks for you (another site pointing to you).
+- Weave the link naturally into the content where it adds value. Use contextual anchor text, NOT "click here".
+- Examples: "as detailed in [this guide](${input.websiteUrl})", "tools like [${input.brandMention || 'this platform'}](${input.websiteUrl}) can help"
+- Place at least one link within the body. Optionally add a subtle CTA near the conclusion.
+- Do NOT add more than 2 links to your site — keep it natural.` : ''}
+${input.websiteUrl && input.targetPlatform === 'shopify' ? `🔗 **INTERNAL LINKS (IMPORTANT - INCLUDE WHERE RELEVANT)**
+- Content is published on your own site (Shopify store). Include 1-2 internal links to other pages on your site: ${input.websiteUrl}
+- Link to relevant pages (e.g. /blogs, /pages/about, product or collection pages) where it helps the reader. These are internal links (same site).
+- Use contextual anchor text. Keep it natural and helpful. Do NOT add more than 2 internal links.` : ''}
+${input.websiteUrl && input.contentType === 'blog_article' && input.targetPlatform !== 'shopify' ? `🔗 **LINKS TO YOUR SITE (INCLUDE NATURALLY)**
+- Include 1-2 natural links to your site: ${input.websiteUrl}
+- If you publish this on a third-party platform (e.g. WordPress.com, Medium), these will be backlinks to your site. If you publish on your own site (e.g. self-hosted WordPress), they act as internal links to other pages on your site.
+- Weave the link naturally into the content. Use contextual anchor text. Do NOT add more than 2 — keep it natural.` : ''}
+
+🔗 **LINKS & SOURCES — REAL AND WORKING ONLY (ALL CONTENT)**
+- Every link you include (to the user's site or to external sources) must be a real, working URL that does not 404. Use only authentic, credible sources (e.g. official .gov/.gouv sites, major publications, Wikipedia, known articles).
+- Do NOT invent or guess URLs. Invented or wrong URLs cause dead links and hurt credibility. If you cannot provide a verified working URL for a source, omit the link or cite the source by name only without a URL.
+- Backlinks/sources must be authentic and real — no placeholder or fake links.
 
 7️⃣ **LENGTH & FORMATTING**
 ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
-- BLOG ARTICLE FORMAT: Write a comprehensive, long-form blog post (1200-2000 words)
+- BLOG ARTICLE FORMAT: Write a comprehensive Article-layer blog post (800–1,500 words per Universal Content Standards)
 - Structure: Short intro → 3–5 key insights in the body → positive, actionable conclusion
 - Use HTML headings: <h2> for main sections, <h3> for subsections; keep paragraphs short (2–4 sentences)
-- Include at least TWO structural elements: e.g. table, checklist, bullet list, blockquote/key quote, practical example, or highlight box
+- Include at least TWO structural elements: e.g. table, checklist, bullet list, blockquote/key quote, practical example, or highlight box. For tables: use pipe format (columns separated by " | ", one line per row) so they render correctly.
 - When citing data or research, add 1–2 <a href="..."> links to authority sources
 - Include an engaging introduction, 4–6 main sections, and a conclusion with a clear call-to-action
-- Format with proper HTML tags: <p>, <h2>, <h3>, <ul>, <li>, <ol>, <table>, <blockquote>, <strong>, <em>, <a>
+- Format with proper HTML tags: <p>, <h2>, <h3>, <ul>, <li>, <ol>, <blockquote>, <strong>, <em>, <a>. Tables: plain text with " | " between columns, one line per row (see TABLES rule above).
 - Make content SEO- and GEO-optimized (keywords in headings and throughout; readable for both humans and AI)
 ` : `
 - Length: Write 150-300 words minimum. Do not output short or truncated content. Complete every sentence and paragraph. Aim for a full, substantive response.
 ${input.language === "he" ? "- Hebrew: minimum 150 words, aim 200-300. End with a complete sentence. Never output garbled characters, Latin letters, or transliterations—only Hebrew letters and punctuation." : ""}
 ${input.language === "ar" ? "- Arabic: minimum 150 words, aim 200-300. End with a complete sentence. Output only Arabic script and punctuation (right-to-left)." : ""}
 ${input.language === "fr" ? "- French: minimum 150 words, aim 200-300. End with a complete sentence. Use correct French grammar and accents." : ""}
+${input.language === "pt" ? "- Portuguese: minimum 150 words, aim 200-300. End with a complete sentence. Use correct Portuguese grammar and accents." : ""}
+${input.language === "it" ? "- Italian: minimum 150 words, aim 200-300. End with a complete sentence. Use correct Italian grammar and accents." : ""}
 ${learningRules?.wordCount ? `- Target: ${learningRules.wordCount.min || 150}-${learningRules.wordCount.max || 300} words` : ''}
 `}
 - Paragraphs vary: Sometimes 1 sentence, sometimes 5 sentences
@@ -753,10 +786,12 @@ ${input.targetPlatform === 'medium' ? `✅ Medium style: Reflective, narrative-d
 ${input.targetPlatform === 'github' ? `✅ GitHub style: Technical, plain-spoken, documentation-style but personal — professional, no informal words` : ''}
 ${input.targetPlatform === 'linkedin' ? `✅ LinkedIn style: Professional yet human, thoughtful — no informal words` : ''}
 ${input.targetPlatform === 'twitter' ? `✅ X/Twitter style: Short, punchy — professional tone, no informal words or slang` : ''}
-${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `✅ Blog quality: Short intro + 3–5 key insights + positive conclusion; at least one original Spark; H2/H3 + short paragraphs; 1–2 authority links; at least two of: table, checklist, bullets, quote, example, highlight box` : ''}
+${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `✅ Article layer: 800–1,500 words; intro + explanation + examples + insights + conclusion; H2/H3; internal/external links; FAQ for AI; at least one comparison table, chart, or statistical reference` : ''}
 ${input.language === "he" ? `✅ Hebrew only: Content uses only Hebrew script (א-ת) and punctuation; no Latin/transliterations/corrupted chars; 150+ words, complete sentence at end` : ''}
 ${input.language === "ar" ? `✅ Arabic only: Content uses only Arabic script and punctuation; no Latin/mixed script; 150+ words, complete sentence at end` : ''}
 ${input.language === "fr" ? `✅ French only: Content uses only French; correct grammar and accents; 150+ words, complete sentence at end` : ''}
+${input.language === "pt" ? `✅ Portuguese only: Content uses only Portuguese; correct grammar and accents; 150+ words, complete sentence at end` : ''}
+${input.language === "it" ? `✅ Italian only: Content uses only Italian; correct grammar and accents; 150+ words, complete sentence at end` : ''}
 
 ${learningRules?.tone ? `📚 LEARNED: Use ${learningRules.tone} tone` : ''}
 ${learningRules?.useEmojis ? `📚 LEARNED: Include ${learningRules.emojiCount || 3} emojis naturally` : ''}
@@ -771,15 +806,19 @@ ${finalReminder}
 
   // Build conditional system message based on brand voice
   const isBlog = input.contentType === "blog_article" || input.targetPlatform === "shopify";
-  const blogLangNote = isBlog && (input.language === "he" || input.language === "ar" || input.language === "fr")
-    ? ` Apply the SAME blog quality standards: clear structure (short intro, 3–5 key insights, positive conclusion), at least one Spark, proper H2/H3 and short paragraphs, 1–2 authority links, at least two structural elements (table, checklist, bullets, quote, example). Length 1200–2000 words.`
+  const blogLangNote = isBlog && (input.language === "he" || input.language === "ar" || input.language === "fr" || input.language === "pt" || input.language === "it")
+    ? ` Apply the SAME Article-layer standards: structure (intro, explanation, examples, insights, conclusion), H2/H3, internal/external links, FAQ for AI, at least one comparison table/chart/stat. Length 800–1,500 words.`
     : "";
   const languageNote = input.language === "he"
-    ? `\n🌐 HEBREW OUTPUT ONLY: Content must be 100% Hebrew script (א-ת and punctuation). No Latin letters, no transliterations in parentheses, no corrupted or mixed characters. Express any proper nouns (e.g. Israel) in Hebrew (ישראל).${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
+    ? `\n🌐 HEBREW OUTPUT ONLY: Content must be 100% Hebrew script (א-ת and punctuation). No Latin letters, no transliterations in parentheses, no corrupted or mixed characters. Express any proper nouns (e.g. Israel) in Hebrew (ישראל). Professional quality: no grammar or spelling errors; humanized, natural content as a fluent professional would write.${isBlog ? ` Blog length 800–1,500 words (Article layer).${blogLangNote}` : " Post length 300–600 words; write a complete, unabbreviated response."}\n`
     : input.language === "ar"
-    ? `\n🌐 ARABIC OUTPUT ONLY: Content must be 100% Arabic script (right-to-left) and punctuation. No Latin letters, no mixed script. Use Modern Standard Arabic.${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
+    ? `\n🌐 ARABIC OUTPUT ONLY: Content must be 100% Arabic script (right-to-left) and punctuation. No Latin letters, no mixed script. Use Modern Standard Arabic. Professional quality: no grammar or spelling errors; humanized, natural content as a fluent professional would write.${isBlog ? ` Blog length 800–1,500 words (Article layer).${blogLangNote}` : " Post length 300–600 words; write a complete, unabbreviated response."}\n`
     : input.language === "fr"
-    ? `\n🌐 FRENCH OUTPUT ONLY: Content must be 100% French. Use correct French grammar, accents, and punctuation. No English or other languages.${isBlog ? ` Blog length 1200–2000 words.${blogLangNote}` : " Minimum 150 words; write a complete, unabbreviated response."}\n`
+    ? `\n🌐 FRENCH OUTPUT ONLY: Content must be 100% French. Use correct French grammar, accents, and punctuation. No English or other languages. Professional quality: no grammar or spelling errors; humanized, natural content as a fluent professional would write.${isBlog ? ` Blog length 800–1,500 words (Article layer).${blogLangNote}` : " Post length 300–600 words; write a complete, unabbreviated response."}\n`
+    : input.language === "pt"
+    ? `\n🌐 PORTUGUESE OUTPUT ONLY: Content must be 100% Portuguese. Use correct Portuguese grammar, accents, and punctuation. No English or other languages. Professional quality: no grammar or spelling errors; humanized, natural content as a fluent professional would write.${isBlog ? ` Blog length 800–1,500 words (Article layer).${blogLangNote}` : " Post length 300–600 words; write a complete, unabbreviated response."}\n`
+    : input.language === "it"
+    ? `\n🌐 ITALIAN OUTPUT ONLY: Content must be 100% Italian. Use correct Italian grammar, accents, and punctuation. No English or other languages. Professional quality: no grammar or spelling errors; humanized, natural content as a fluent professional would write.${isBlog ? ` Blog length 800–1,500 words (Article layer).${blogLangNote}` : " Post length 300–600 words; write a complete, unabbreviated response."}\n`
     : "";
 
   let systemMessage = `You are a REAL HUMAN typing on a phone or laptop RIGHT NOW. You are NOT an AI, NOT a bot, NOT a content writer.
@@ -847,7 +886,7 @@ CRITICAL: Write professional, clean, structured content.
 Respond ONLY in JSON with "content" field containing the text.`;
   }
 
-  const maxTokens = (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : (input.language === "he" || input.language === "ar" || input.language === "fr") ? 2500 : 2000;
+  const maxTokens = (input.targetPlatform === 'shopify' || input.contentType === 'blog_article') ? 4000 : (input.language === "he" || input.language === "ar" || input.language === "fr" || input.language === "pt" || input.language === "it") ? 2500 : 2000;
   const claudeModel = "claude-sonnet-4-5-20250929";
   let raw: string = "";
   let aiModel: string = "gpt-4-turbo";
@@ -986,6 +1025,9 @@ Respond ONLY in JSON with "content" field containing the text.`;
     if (input.language === "ar" && finalContent) {
       finalContent = finalContent.replace(/\s+/g, " ").trim();
     }
+
+    // Remove ** and __ from generated content (all languages, all flows)
+    finalContent = stripMarkdownBoldMarkers(finalContent);
 
     return {
       content: finalContent,

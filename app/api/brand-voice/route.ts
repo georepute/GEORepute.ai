@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServerSupabaseClient, getAuthenticatedUser } from "@/lib/supabase/server";
 
 // GET: Fetch all brand voice profiles for the authenticated user
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -17,7 +14,7 @@ export async function GET(request: NextRequest) {
     const { data: voices, error } = await supabase
       .from("brand_voice_profiles")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .order("is_default", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -40,11 +37,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -78,7 +72,7 @@ export async function POST(request: NextRequest) {
       await supabase
         .from("brand_voice_profiles")
         .update({ is_default: false })
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .eq("is_default", true);
     }
 
@@ -86,7 +80,7 @@ export async function POST(request: NextRequest) {
     const { data: voice, error } = await supabase
       .from("brand_voice_profiles")
       .insert({
-        user_id: session.user.id,
+        user_id: user.id,
         brand_name,
         description: description || null,
         personality_traits: personality_traits || [],
@@ -126,11 +120,8 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -149,7 +140,7 @@ export async function PATCH(request: NextRequest) {
       await supabase
         .from("brand_voice_profiles")
         .update({ is_default: false })
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .eq("is_default", true);
     }
 
@@ -158,7 +149,7 @@ export async function PATCH(request: NextRequest) {
       .from("brand_voice_profiles")
       .update(updates)
       .eq("id", id)
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .select()
       .single();
 
@@ -191,11 +182,8 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const supabase = await createServerSupabaseClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    const user = await getAuthenticatedUser(supabase);
+    if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -214,7 +202,7 @@ export async function DELETE(request: NextRequest) {
       .from("brand_voice_profiles")
       .delete()
       .eq("id", id)
-      .eq("user_id", session.user.id);
+      .eq("user_id", user.id);
 
     if (error) {
       console.error("Error deleting brand voice:", error);

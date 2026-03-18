@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { publishToWordPress, WordPressConfig } from "@/lib/integrations/wordpress";
+import { buildWordPressArticleHtml } from "@/lib/blog/wordpress-article-template";
+import type { ThemePreset } from "@/lib/blog/wordpress-article-template";
 
 /**
  * WordPress.com Publish API
  * POST: Publish a blog post to WordPress.com
+ * When useArticleTemplate is true, wraps content in the Universal Content Standards article HTML (script format) with user-chosen theme.
  */
 
 export async function POST(request: NextRequest) {
@@ -19,7 +22,24 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, content, excerpt, tags, categories, status, featuredImage, siteId } = body;
+    const {
+      title,
+      content,
+      excerpt,
+      tags,
+      categories,
+      status,
+      featuredImage,
+      siteId,
+      useArticleTemplate,
+      author,
+      organizationName,
+      organizationUrl,
+      themePreset,
+      themeColors,
+      publishedDate,
+      ctaText,
+    } = body;
 
     // Validate required fields
     if (!title || !content) {
@@ -27,6 +47,38 @@ export async function POST(request: NextRequest) {
         { error: "Title and content are required" },
         { status: 400 }
       );
+    }
+
+    const escapeAttr = (s: string) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    let finalContent: string;
+
+    if (useArticleTemplate) {
+      const tagsArr = Array.isArray(tags) ? tags : typeof tags === "string" ? tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [];
+      const bodyLen = typeof content === "string" ? content.length : 0;
+      const readTimeMinutes = bodyLen > 0 ? Math.max(1, Math.round(bodyLen / 2200)) : undefined;
+      finalContent = buildWordPressArticleHtml({
+        title,
+        description: excerpt || (typeof content === "string" ? content.replace(/<[^>]*>/g, " ").slice(0, 160) : ""),
+        keywords: tagsArr.join(", "),
+        date: publishedDate || new Date().toISOString().slice(0, 10),
+        author: author || "Author",
+        organizationName: organizationName || "Brand",
+        organizationUrl: organizationUrl || undefined,
+        bodyHtml: content,
+        featuredImageUrl: featuredImage,
+        themePreset: (themePreset as ThemePreset) || "default",
+        themeColors: themeColors || undefined,
+        categoryTag: categories ? (Array.isArray(categories) ? categories.join(" · ") : String(categories)) : undefined,
+        heroBadges: tagsArr.slice(0, 5),
+        readTimeMinutes,
+        ctaText: ctaText || undefined,
+      });
+    } else {
+      finalContent = content;
+      if (featuredImage && typeof featuredImage === "string" && /^https?:\/\//i.test(featuredImage)) {
+        const heroBlock = `<figure class="wp-block-image size-full" style="margin:0 0 1.5em 0;"><img src="${escapeAttr(featuredImage)}" alt="${escapeAttr(title)}" style="width:100%;height:auto;max-width:100%;display:block;" /></figure>`;
+        finalContent = heroBlock + content;
+      }
     }
 
     // Get WordPress.com integration
@@ -73,7 +125,7 @@ export async function POST(request: NextRequest) {
     // Publish to WordPress.com
     const result = await publishToWordPress(config, {
       title,
-      content,
+      content: finalContent,
       excerpt,
       status: status || 'publish',
       tags: tags ? (Array.isArray(tags) ? tags : tags.split(',').map((t: string) => t.trim())) : undefined,

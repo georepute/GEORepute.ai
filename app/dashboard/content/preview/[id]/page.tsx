@@ -19,9 +19,9 @@ import {
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase/client";
 import ImageUpload from "@/components/ImageUpload";
-import "react-quill/dist/quill.snow.css";
+import "react-quill-new/dist/quill.snow.css";
 
-const ReactQuill = dynamic(() => import("react-quill"), {
+const ReactQuill = dynamic(() => import("react-quill-new"), {
   ssr: false,
   loading: () => (
     <div className="h-64 bg-gray-100 rounded-lg animate-pulse flex items-center justify-center">
@@ -87,8 +87,10 @@ export default function PublicationPreviewPage() {
         [{ align: [] }],
         ["blockquote", "code-block"],
         ["link", "image"],
+        [{ table: [] }],
         ["clean"],
       ],
+      table: true,
     }),
     []
   );
@@ -100,6 +102,7 @@ export default function PublicationPreviewPage() {
     "align",
     "blockquote", "code-block",
     "link", "image",
+    "table",
   ];
 
   const fetchContent = useCallback(async () => {
@@ -773,6 +776,26 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** Remove Markdown bold/emphasis markers (** and __) so they don't show in content. */
+function stripMarkdownBoldMarkers(html: string): string {
+  if (!html || typeof html !== "string") return html;
+  let out = html
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(.+?)__/g, "<em>$1</em>");
+  return out.replace(/\*\*/g, "").replace(/__/g, "");
+}
+
+/** Sanitize HTML for safe preview: strip script/iframe and event handlers so content can be rendered. */
+function sanitizeHtmlForPreview(html: string): string {
+  if (!html || typeof html !== "string") return "";
+  const noMarkdownMarkers = stripMarkdownBoldMarkers(html);
+  return noMarkdownMarkers
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
+    .replace(/\s+on\w+=["'][^"']*["']/gi, "")
+    .replace(/\s+on\w+\s*=\s*[^\s>]+/gi, "");
+}
+
 /** First full line of text (no mid-word cut). Strips HTML, takes first line; if longer than maxChars, ends at last word. */
 function getFirstFullLine(htmlOrText: string, maxChars: number = 160): string {
   if (!htmlOrText) return "";
@@ -806,20 +829,28 @@ function PlatformPreview({
   const plain = stripHtml(body);
   const truncated = plain.length > 200 ? plain.slice(0, 200) + "…" : plain;
   const truncatedShort = plain.length > 120 ? plain.slice(0, 120) + "…" : plain;
-  const fullContent = plain;
+  const blogBodyHtml = platform === "blog" || platform === "wordpress" || platform === "medium" || platform === "shopify"
+    ? sanitizeHtmlForPreview(body)
+    : "";
 
   if (platform === "blog" || platform === "wordpress" || platform === "medium" || platform === "shopify") {
     return (
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden text-left">
-        <h3 className="text-lg font-semibold text-gray-900 p-3 border-b">{title || "Untitled"}</h3>
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden text-left flex flex-col max-h-[70vh]">
+        <h3 className="text-lg font-semibold text-gray-900 p-3 border-b flex-shrink-0">{title || "Untitled"}</h3>
         {imageUrl && (
-          <div className="aspect-video bg-gray-100">
+          <div className="aspect-video bg-gray-100 flex-shrink-0">
             <img src={imageUrl} alt="" className="w-full h-full object-cover" />
           </div>
         )}
-        <p className="p-3 text-sm text-gray-700 whitespace-pre-wrap">{fullContent}</p>
+        <div className="p-3 text-sm text-gray-700 overflow-y-auto flex-1 min-h-0 blog-preview-content [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:my-2 [&_ul]:my-2 [&_ul]:pl-6 [&_ul]:list-disc [&_ol]:my-2 [&_ol]:pl-6 [&_ol]:list-decimal [&_li]:my-0.5 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-300 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:my-2 [&_table]:border [&_table]:border-gray-300 [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_td]:border [&_td]:border-gray-300 [&_td]:px-2 [&_td]:py-1 [&_div]:my-1">
+          {blogBodyHtml ? (
+            <div dangerouslySetInnerHTML={{ __html: blogBodyHtml }} />
+          ) : (
+            <p className="whitespace-pre-wrap">{plain}</p>
+          )}
+        </div>
         {ctaText && (
-          <div className="px-3 pb-3">
+          <div className="px-3 pb-3 flex-shrink-0">
             <span className="inline-block px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg">
               {ctaText}
             </span>

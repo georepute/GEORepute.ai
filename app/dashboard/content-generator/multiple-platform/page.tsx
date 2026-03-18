@@ -49,7 +49,7 @@ export default function MultiplePlatformPage() {
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
   const [targetPlatforms, setTargetPlatforms] = useState<string[]>([]);
-  const [language, setLanguage] = useState<"en" | "he" | "ar" | "fr">("en");
+  const [language, setLanguage] = useState<"en" | "he" | "ar" | "fr" | "pt" | "it">("en");
   const [influenceLevel, setInfluenceLevel] = useState<"subtle" | "moderate" | "strong">("subtle");
   const [brandVoices, setBrandVoices] = useState<any[]>([]);
   const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
@@ -357,13 +357,15 @@ export default function MultiplePlatformPage() {
                 </label>
                 <select
                   value={language}
-                  onChange={(e) => setLanguage(e.target.value as "en" | "he" | "ar" | "fr")}
+                  onChange={(e) => setLanguage(e.target.value as "en" | "he" | "ar" | "fr" | "pt" | "it")}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white"
                 >
                   <option value="en">{cg.english ?? "English"}</option>
                   <option value="he">{cg.hebrew ?? "Hebrew"}</option>
                   <option value="ar">{cg.arabic ?? "Arabic"}</option>
                   <option value="fr">{cg.french ?? "French"}</option>
+                  <option value="pt">{cg.portuguese ?? "Portuguese"}</option>
+                  <option value="it">{cg.italian ?? "Italian"}</option>
                 </select>
               </div>
               <div>

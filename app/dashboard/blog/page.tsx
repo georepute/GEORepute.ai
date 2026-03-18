@@ -29,10 +29,38 @@ import {
 import toast from "react-hot-toast";
 import Link from "next/link";
 import Image from "next/image";
-import "react-quill/dist/quill.snow.css";
+import "react-quill-new/dist/quill.snow.css";
+
+// Structured blog (charts, tables, sources) from Claude
+interface StructuredSectionText {
+  type: "text";
+  heading: string;
+  content: string;
+}
+interface StructuredSectionChart {
+  type: "chart";
+  heading: string;
+  caption?: string;
+  chartType: "bar" | "line" | "pie" | "doughnut";
+  labels: string[];
+  datasets: { label: string; data: number[] }[];
+}
+interface StructuredSectionTable {
+  type: "table";
+  heading: string;
+  headers: string[];
+  rows: string[][];
+}
+type StructuredSection = StructuredSectionText | StructuredSectionChart | StructuredSectionTable;
+interface StructuredBlog {
+  title: string;
+  subtitle: string;
+  sections: StructuredSection[];
+  sources: { title: string; url: string }[];
+}
 
 // Dynamic import for React Quill (client-side only)
-const ReactQuill = dynamic(() => import("react-quill"), { 
+const ReactQuill = dynamic(() => import("react-quill-new"), { 
   ssr: false,
   loading: () => <div className="h-64 bg-gray-100 rounded-lg animate-pulse flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
 });
@@ -61,6 +89,153 @@ interface BlogPost {
 }
 
 type PublishPlatform = "shopify" | "wordpress" | "wordpress_self_hosted";
+
+/** Convert markdown bold/emphasis to HTML and remove leftover ** and __ so they don't show in the editor. */
+function stripMarkdownBoldMarkers(html: string): string {
+  if (!html || typeof html !== "string") return html;
+  // Match across newlines so __text\nmore__ works
+  let out = html
+    .replace(/\*\*([\s\S]+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([\s\S]+?)__/g, "<em>$1</em>");
+  // Remove any remaining ** or __ (standalone or unbalanced)
+  out = out.replace(/\*\*/g, "").replace(/__/g, "");
+  return out;
+}
+
+/** Replace em dashes (—) and en dashes (–) with " - " so they don't appear in the editor. */
+function replaceEmDashes(html: string): string {
+  if (!html || typeof html !== "string") return html;
+  return html
+    .replace(/\u2014/g, " - ")
+    .replace(/\u2013/g, " - ")
+    .replace(/\u2012/g, " - ");
+}
+
+/** Escape HTML for safe insertion. */
+function escapeHtmlForTable(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Find consecutive <p>...</p> tags whose content contains " | " (pipe table rows) and replace
+ * that run with a single div-based table so Quill can render it. Preserves the rest of the HTML.
+ */
+function convertPipeTablesInHtml(html: string): string {
+  if (!html || typeof html !== "string" || !html.includes(" | ")) return html;
+  const tableStyle = "display:table; width:100%; border-collapse:collapse; margin:1em 0;";
+  const rowStyle = "display:table-row;";
+  const thStyle = "display:table-cell; padding:8px 12px; border:1px solid #d1d5db; background:#f3f4f6; font-weight:600; text-align:left;";
+  const tdStyle = "display:table-cell; padding:8px 12px; border:1px solid #d1d5db; text-align:left;";
+
+  const pWithPipe = /<p[^>]*>([\s\S]*?)<\/p>/gi;
+  let match;
+  const candidates: { full: string; inner: string; index: number; end: number }[] = [];
+  while ((match = pWithPipe.exec(html)) !== null) {
+    const inner = (match[1] || "").replace(/<[^>]+>/g, " ").trim();
+    if (inner.includes(" | ")) {
+      const end = match.index + match[0].length;
+      candidates.push({ full: match[0], inner, index: match.index, end });
+    }
+  }
+  if (candidates.length < 2) return html;
+
+  const runs: { start: number; end: number; rows: string[][] }[] = [];
+  let i = 0;
+  while (i < candidates.length) {
+    const rows: string[][] = [candidates[i].inner.split(/\s*\|\s*/).map((c) => c.trim())];
+    const colCount = rows[0].length;
+    let start = candidates[i].index;
+    let end = candidates[i].end;
+    let j = i + 1;
+    while (j < candidates.length) {
+      const gap = candidates[j].index - end;
+      if (gap > 30) break;
+      const nextRow = candidates[j].inner.split(/\s*\|\s*/).map((c) => c.trim());
+      if (nextRow.length !== colCount) break;
+      rows.push(nextRow);
+      end = candidates[j].end;
+      j++;
+    }
+    if (rows.length >= 2) runs.push({ start, end, rows });
+    i = j;
+  }
+
+  let out = html;
+  for (let r = runs.length - 1; r >= 0; r--) {
+    const { start, end, rows } = runs[r];
+    let tableHtml = `<div class="blog-table" style="${tableStyle}">`;
+    rows.forEach((row, i) => {
+      const cellStyle = i === 0 ? thStyle : tdStyle;
+      tableHtml += `<div style="${rowStyle}">`;
+      row.forEach((cell) => { tableHtml += `<div style="${cellStyle}">${cell.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")}</div>`; });
+      tableHtml += "</div>";
+    });
+    tableHtml += "</div>";
+    out = out.slice(0, start) + tableHtml + out.slice(end);
+  }
+  return out;
+}
+
+/**
+ * Detect table-like blocks (lines with tabs, 2+ spaces, or pipe | as column separators) and convert
+ * to div-based table HTML so Quill can display them (Quill strips real <table> tags).
+ * Also strips ** around lines so "**Method|Core|Best**" can be parsed as a table row.
+ */
+function convertTableLikeContentInHtml(text: string): string {
+  if (!text || typeof text !== "string") return text;
+  const tableStyle = "display:table; width:100%; border-collapse:collapse; margin:1em 0;";
+  const rowStyle = "display:table-row;";
+  const thStyle = "display:table-cell; padding:8px 12px; border:1px solid #d1d5db; background:#f3f4f6; font-weight:600; text-align:left;";
+  const tdStyle = "display:table-cell; padding:8px 12px; border:1px solid #d1d5db; text-align:left;";
+
+  if (/<p[^>]*>[\s\S]*\|[\s\S]*<\/p>/i.test(text)) {
+    return convertPipeTablesInHtml(text);
+  }
+
+  const blocks = text.split(/\n\s*\n/);
+  const result: string[] = [];
+
+  for (const block of blocks) {
+    let trimmed = block.trim();
+    if (!trimmed) continue;
+    // Strip ** from start/end of each line so "**Header1**Header2**" style rows can be split
+    const lines = trimmed
+      .split(/\n/)
+      .map((l) => l.trim().replace(/^\*\*|\*\*$/g, ""))
+      .filter(Boolean);
+    if (lines.length < 2) {
+      result.push(`<p>${trimmed.replace(/\n/g, "<br/>")}</p>`);
+      continue;
+    }
+    // Try tab, then pipe (|), then 2+ spaces
+    const splitByTab = lines.map((l) => l.split(/\t/).map((c) => c.trim()));
+    const splitByPipe = lines.map((l) => l.split(/\s*\|\s*/).map((c) => c.trim()));
+    const splitBySpaces = lines.map((l) => l.split(/\s{2,}/).map((c) => c.trim()));
+    const byTab = splitByTab.every((row) => row.length >= 2 && row.length === splitByTab[0].length);
+    const byPipe = splitByPipe.every((row) => row.length >= 2 && row.length === splitByPipe[0].length);
+    const bySpaces = splitBySpaces.every((row) => row.length >= 2 && row.length === splitBySpaces[0].length);
+    const rows = byTab ? splitByTab : byPipe ? splitByPipe : bySpaces ? splitBySpaces : null;
+    if (rows && rows.length >= 2) {
+      let tableHtml = `<div class="blog-table" style="${tableStyle}">`;
+      rows.forEach((row, i) => {
+        const cellStyle = i === 0 ? thStyle : tdStyle;
+        tableHtml += `<div style="${rowStyle}">`;
+        row.forEach((cell) => { tableHtml += `<div style="${cellStyle}">${escapeHtmlForTable(cell)}</div>`; });
+        tableHtml += "</div>";
+      });
+      tableHtml += "</div>";
+      result.push(tableHtml);
+    } else {
+      result.push(`<p>${trimmed.replace(/\n/g, "<br/>")}</p>`);
+    }
+  }
+  return result.join("");
+}
 
 /**
  * Ensure HTML has block-level elements so Quill creates separate blocks.
@@ -118,6 +293,8 @@ function BlogPageContent() {
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
   const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr">("en");
+  const [generatedTags, setGeneratedTags] = useState<string[]>([]);
+  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr" | "pt" | "it">("en");
   const [brandVoices, setBrandVoices] = useState<Array<{ id: string; brand_name: string; is_default?: boolean }>>([]);
   const [selectedBrandVoiceId, setSelectedBrandVoiceId] = useState<string | null>(null);
   const [loadingVoices, setLoadingVoices] = useState(false);
@@ -133,8 +310,13 @@ function BlogPageContent() {
   
   const [generatingContent, setGeneratingContent] = useState(false);
   const [contentGenerated, setContentGenerated] = useState(false);
+  const [generatingStructured, setGeneratingStructured] = useState(false);
   const [sendingToPublication, setSendingToPublication] = useState(false);
   const sendingToPublicationRef = useRef(false);
+
+  // WordPress article template (script format): user-filled org name, theme colour, CTA text
+  const [organizationName, setOrganizationName] = useState("");
+  const [wordpressArticleTheme, setWordpressArticleTheme] = useState<"default" | "green" | "purple" | "navy">("default");
 
   // Image selection state (Pixabay + manual upload)
   const [showImageModal, setShowImageModal] = useState(false);
@@ -153,29 +335,32 @@ function BlogPageContent() {
   const [publishedPosts, setPublishedPosts] = useState<any[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
 
-  // React Quill editor configuration
+  // React Quill editor configuration (table: true for Quill v2 table module; no-op on Quill 1.x)
   const quillModules = useMemo(() => ({
     toolbar: [
-      [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
-      ['bold', 'italic', 'underline', 'strike'],
-      [{ 'color': [] }, { 'background': [] }],
-      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-      [{ 'indent': '-1'}, { 'indent': '+1' }],
-      [{ 'align': [] }],
-      ['blockquote', 'code-block'],
-      ['link', 'image'],
-      ['clean']
+      [{ header: [1, 2, 3, 4, 5, 6, false] }],
+      ["bold", "italic", "underline", "strike"],
+      [{ color: [] }, { background: [] }],
+      [{ list: "ordered" }, { list: "bullet" }],
+      [{ indent: "-1" }, { indent: "+1" }],
+      [{ align: [] }],
+      ["blockquote", "code-block"],
+      ["link", "image"],
+      [{ table: [] }],
+      ["clean"],
     ],
+    table: true,
   }), []);
 
   const quillFormats = [
-    'header',
-    'bold', 'italic', 'underline', 'strike',
-    'color', 'background',
-    'list', 'bullet', 'indent',
-    'align',
-    'blockquote', 'code-block',
-    'link', 'image'
+    "header",
+    "bold", "italic", "underline", "strike",
+    "color", "background",
+    "list", "bullet", "indent",
+    "align",
+    "blockquote", "code-block",
+    "link", "image",
+    "table",
   ];
 
   // Pre-fill from action plan when redirected from action-plans (e.g. blog step)
@@ -184,7 +369,7 @@ function BlogPageContent() {
     const keywordsParam = searchParams.get("keywords");
     const platformParam = searchParams.get("platform");
     if (topicParam) setTopic(topicParam);
-    if (keywordsParam) setTargetKeywords(keywordsParam);
+    if (keywordsParam) setGeneratedTags(keywordsParam.split(",").map((k: string) => k.trim()).filter(Boolean));
     if (platformParam === "wordpress" || platformParam === "shopify" || platformParam === "wordpress_self_hosted") {
       setSelectedPlatform(platformParam);
     }
@@ -375,13 +560,22 @@ function BlogPageContent() {
     setGeneratingContent(true);
     try {
       // Call the content generation API (skip schema - will be generated when sending to publication)
+      const tagsRes = await fetch("/api/blog/generate-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic.trim() }),
+      });
+      const tagsData = tagsRes.ok ? await tagsRes.json() : { tags: [] };
+      const tags = Array.isArray(tagsData.tags) ? tagsData.tags : topic.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+      setGeneratedTags(tags);
+
       const response = await fetch("/api/geo-core/content-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: topic.trim(),
           targetPlatform: selectedPlatform,
-          targetKeywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
+          targetKeywords: tags,
           influenceLevel: "moderate",
           contentType: "blog_article",
           language: contentGenerationLanguage,
@@ -413,12 +607,12 @@ function BlogPageContent() {
 
         // Update the post with generated content and summary
         // NOTE: Schema will be generated separately when clicking "Send to Publication"
-        // Ensure content has block structure so Quill shows separate blocks; applying H1 then only affects one block
+        // Convert table-like text to div tables (Quill-safe), strip **/__, then ensure block structure
         setPost({
           ...post,
           title: topic.trim(),
-          content: ensureBlockStructure(data.content),
-          tags: targetKeywords || "",
+          content: ensureBlockStructure(replaceEmDashes(stripMarkdownBoldMarkers(convertTableLikeContentInHtml(data.content)))),
+          tags: tags.join(", "),
           summary: generatedSummary,
         });
         
@@ -440,6 +634,136 @@ function BlogPageContent() {
     }
   };
 
+  // Generate structured blog and always put content in the editor (charts as images, tables, sources)
+  const handleGenerateStructured = async () => {
+    if (!topic.trim()) {
+      toast.error(t.dashboard.blogPage.enterTopic);
+      return;
+    }
+    setGeneratingStructured(true);
+    try {
+      const tagsRes = await fetch("/api/blog/generate-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic.trim() }),
+      });
+      const tagsData = tagsRes.ok ? await tagsRes.json() : { tags: [] };
+      const tags = Array.isArray(tagsData.tags) ? tagsData.tags : topic.trim().split(/\s+/).filter(Boolean).slice(0, 6);
+      setGeneratedTags(tags);
+
+      const res = await fetch("/api/blog/generate-structured", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic.trim(), language: contentGenerationLanguage }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Failed (${res.status})`);
+      }
+      const blog: StructuredBlog = await res.json();
+
+      // Convert to HTML and set in editor (charts as images)
+      const parts: string[] = [];
+      for (const section of blog.sections) {
+        if (section.type === "text") {
+          if (section.heading) parts.push(`<h2>${escapeHtml(section.heading)}</h2>`);
+          parts.push(`<p>${escapeHtml(section.content).replace(/\n/g, "<br/>")}</p>`);
+        } else if (section.type === "chart") {
+          const chartRes = await fetch("/api/blog/chart-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chartType: section.chartType,
+              labels: section.labels,
+              datasets: section.datasets,
+            }),
+          });
+          if (!chartRes.ok) throw new Error("Chart image failed");
+          const { url } = await chartRes.json();
+          parts.push(`<figure class="blog-chart"><img src="${escapeHtml(url)}" alt="${escapeHtml(section.heading)}" style="max-width:100%;height:auto;" /></figure>`);
+          if (section.heading) parts.push(`<p><strong>${escapeHtml(section.heading)}</strong></p>`);
+          if (section.caption) parts.push(`<p class="text-gray-500 text-sm">${escapeHtml(section.caption)}</p>`);
+        } else if (section.type === "table") {
+          // Use real <table> so Quill 2 table module preserves it and it shows as a table in the editor
+          let headers = section.headers || [];
+          let rows = section.rows || [];
+          // Fix "one column" formatting: if AI returns concatenated headers/rows, split by pipe or tab
+          const splitIntoColumns = (val: string): string[] => {
+            const s = String(val).trim();
+            if (s.includes("|")) return s.split(/\s*\|\s*/).map((c) => c.trim()).filter(Boolean);
+            if (s.includes("\t")) return s.split(/\t/).map((c) => c.trim()).filter(Boolean);
+            return [s];
+          };
+          if (headers.length === 1 && (headers[0].includes("|") || headers[0].includes("\t"))) {
+            headers = splitIntoColumns(headers[0]);
+          }
+          const colCount = headers.length;
+          rows = rows.map((row) => {
+            const arr = Array.isArray(row) ? row : [row];
+            if (arr.length === 1 && colCount > 1 && (arr[0].includes("|") || arr[0].includes("\t"))) {
+              return splitIntoColumns(arr[0]);
+            }
+            return arr.map((c) => String(c ?? "").trim());
+          });
+          const tableStyle = "width:100%; border-collapse:collapse; margin:1em 0; border:1px solid #d1d5db;";
+          const thStyle = "padding:8px 12px; border:1px solid #d1d5db; background:#f3f4f6; font-weight:600; text-align:left;";
+          const tdStyle = "padding:8px 12px; border:1px solid #d1d5db; text-align:left;";
+          let tableHtml = "";
+          if (section.heading) tableHtml += `<p><strong>${escapeHtml(section.heading)}</strong></p>`;
+          tableHtml += `<table class="blog-table" style="${tableStyle}"><thead><tr>`;
+          headers.forEach((h) => { tableHtml += `<th style="${thStyle}">${escapeHtml(h)}</th>`; });
+          tableHtml += "</tr></thead><tbody>";
+          rows.forEach((row) => {
+            tableHtml += "<tr>";
+            const cells = row.length >= colCount ? row : [...row, ...Array(colCount - row.length).fill("")];
+            cells.slice(0, colCount).forEach((cell) => { tableHtml += `<td style="${tdStyle}">${escapeHtml(cell)}</td>`; });
+            tableHtml += "</tr>";
+          });
+          tableHtml += "</tbody></table>";
+          parts.push(tableHtml);
+        }
+      }
+      if (blog.sources?.length) {
+        parts.push("<h3>Sources</h3><ul>");
+        for (const s of blog.sources) {
+          const hasValidUrl = s.url && s.url.trim() !== "" && s.url !== "#" && /^https?:\/\//i.test(s.url.trim());
+          if (hasValidUrl) {
+            parts.push(`<li><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title)}</a></li>`);
+          } else {
+            parts.push(`<li>${escapeHtml(s.title)}</li>`);
+          }
+        }
+        parts.push("</ul>");
+      }
+      const html = parts.join("");
+      setPost((prev) => ({
+        ...prev,
+        title: blog.title,
+        content: ensureBlockStructure(replaceEmDashes(stripMarkdownBoldMarkers(html))),
+        summary: blog.subtitle || prev.summary,
+        tags: tags.join(", "),
+      }));
+      setContentGenerated(true);
+      setImageSearchQuery(topic.trim());
+      setShowImageModal(true);
+      toast.success("Blog generated. Content is in the editor. Add a featured image when ready.");
+    } catch (e: any) {
+      console.error("Structured blog error:", e);
+      toast.error(e.message || "Failed to generate blog");
+    } finally {
+      setGeneratingStructured(false);
+    }
+  };
+
+  function escapeHtml(s: string): string {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   // Fetch images from Pixabay
   const handleFetchImages = async () => {
     if (!imageSearchQuery || imageSearchQuery.trim().length === 0) {
@@ -456,7 +780,7 @@ function BlogPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: imageSearchQuery,
-          keywords: targetKeywords ? targetKeywords.split(",").map(k => k.trim()) : [],
+          keywords: generatedTags,
         }),
       });
 
@@ -602,7 +926,7 @@ function BlogPageContent() {
 
   const handleStartOver = () => {
     setTopic("");
-    setTargetKeywords("");
+    setGeneratedTags([]);
     setPost({
       title: "",
       content: "",
@@ -648,7 +972,7 @@ function BlogPageContent() {
 
       // Clean up imageUrl - don't store base64 data URLs (too large)
       const cleanImageUrl = post.imageUrl && !post.imageUrl.startsWith('data:') ? post.imageUrl : "";
-      const keywordsArray = post.tags ? post.tags.split(",").map(t => t.trim()) : [];
+      const keywordsArray = generatedTags.length > 0 ? generatedTags : (post.tags ? post.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : []);
 
       let schemaData = null;
       let structuredSEO = null;
@@ -710,7 +1034,7 @@ function BlogPageContent() {
       // Build metadata with schema (platform-specific)
       const contentMetadata: Record<string, any> = {
         author: post.author || "GeoRepute.ai",
-        tags: post.tags,
+        tags: generatedTags.length > 0 ? generatedTags.join(", ") : post.tags,
         imageUrl: cleanImageUrl,
         summary: post.summary,
         contentType: "blog_article",
@@ -723,15 +1047,13 @@ function BlogPageContent() {
         contentMetadata.shopifyBlogId = selectedBlogId;
       } else if (selectedPlatform === "wordpress") {
         contentMetadata.wordpressSiteId = selectedWordPressSiteId;
-        // Add WordPress-specific categories
-        if (post.categories) {
-          contentMetadata.categories = post.categories;
-        }
+        contentMetadata.useWordPressArticleTemplate = true;
+        contentMetadata.organizationName = organizationName || "";
+        contentMetadata.wordpressArticleTheme = wordpressArticleTheme;
       } else if (selectedPlatform === "wordpress_self_hosted") {
-        // Self-hosted uses single site from integration; no site ID needed
-        if (post.categories) {
-          contentMetadata.categories = post.categories;
-        }
+        contentMetadata.useWordPressArticleTemplate = true;
+        contentMetadata.organizationName = organizationName || "";
+        contentMetadata.wordpressArticleTheme = wordpressArticleTheme;
       }
 
       if (existingContent) {
@@ -793,8 +1115,8 @@ function BlogPageContent() {
       
       // Clear form and reset state
       setTopic("");
-      setTargetKeywords("");
-      setPost({
+      setGeneratedTags([]);
+    setPost({
         title: "",
         content: "",
         author: "",
@@ -1089,23 +1411,6 @@ function BlogPageContent() {
                         </p>
                       </div>
 
-                      {/* Target Keywords */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          {t.dashboard.blogPage.targetKeywords}
-                        </label>
-                        <input
-                          type="text"
-                          value={targetKeywords}
-                          onChange={(e) => setTargetKeywords(e.target.value)}
-                          placeholder={t.dashboard.blogPage.keywordsPlaceholder}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          {t.dashboard.blogPage.keywordsHint}
-                        </p>
-                      </div>
-
                       {/* Content language */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1113,14 +1418,47 @@ function BlogPageContent() {
                         </label>
                         <select
                           value={contentGenerationLanguage}
-                          onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he")}
+                          onChange={(e) => setContentGenerationLanguage(e.target.value as "en" | "he" | "ar" | "fr" | "pt" | "it")}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
                         >
                           <option value="en">{t.dashboard.blogPage.english}</option>
                           <option value="he">{t.dashboard.blogPage.hebrew}</option>
                           <option value="ar">{t.dashboard.blogPage.arabic}</option>
                           <option value="fr">{t.dashboard.blogPage.french}</option>
+                          <option value="pt">{t.dashboard.blogPage.portuguese}</option>
+                          <option value="it">{t.dashboard.blogPage.italian}</option>
                         </select>
+                      </div>
+
+                      {/* Brand voice profile */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Brand voice profile
+                        </label>
+                        <select
+                          value={selectedBrandVoiceId ?? ""}
+                          onChange={(e) => setSelectedBrandVoiceId(e.target.value || null)}
+                          disabled={loadingVoices}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                        >
+                          <option value="">None</option>
+                          {brandVoices.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.brand_name}{v.is_default ? " (default)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Optional. Content will match this voice’s tone and style.
+                        </p>
+                        {brandVoices.length === 0 && !loadingVoices && (
+                          <Link
+                            href="/dashboard/settings?tab=brand-voice"
+                            className="text-xs text-purple-600 hover:underline mt-1 inline-block"
+                          >
+                            Create a brand voice in Settings
+                          </Link>
+                        )}
                       </div>
 
                       {/* Brand voice profile */}
@@ -1156,19 +1494,20 @@ function BlogPageContent() {
 
                       {/* Generate Button */}
                       <button
-                        onClick={handleGenerateContent}
-                        disabled={generatingContent || !topic.trim()}
+                        type="button"
+                        onClick={handleGenerateStructured}
+                        disabled={generatingStructured || !topic.trim()}
                         className="w-full px-6 py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-medium rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
-                        {generatingContent ? (
+                        {generatingStructured ? (
                           <>
                             <Loader2 className="w-5 h-5 animate-spin" />
-                            {t.dashboard.blogPage.generatingContent}
+                            Generating blog…
                           </>
                         ) : (
                           <>
                             <Sparkles className="w-5 h-5" />
-                            {t.dashboard.blogPage.generateBlogContent}
+                            Generate Blog
                           </>
                         )}
                       </button>
@@ -1234,30 +1573,46 @@ function BlogPageContent() {
                           </label>
                           <input
                             type="text"
-                            value={post.tags}
-                            onChange={(e) => setPost({ ...post, tags: e.target.value })}
-                            placeholder={t.dashboard.blogPage.tagsPlaceholder}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
+                            value={generatedTags.join(", ")}
+                            readOnly
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 cursor-default"
                           />
-                          <p className="text-xs text-gray-500 mt-1">{t.dashboard.blogPage.commaSeparated}</p>
+                          <p className="text-xs text-gray-500 mt-1">Generated from your blog topic when you clicked Generate.</p>
                         </div>
 
-                        {/* Categories - WordPress only */}
+                        {/* Organization name & theme (WordPress article template) */}
                         {(selectedPlatform === "wordpress" || selectedPlatform === "wordpress_self_hosted") && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              {t.dashboard.blogPage.categories}
-                              <span className="ml-2 text-xs font-normal text-blue-600">({t.dashboard.blogPage.wordpress})</span>
-                            </label>
-                            <input
-                              type="text"
-                              value={post.categories || ""}
-                              onChange={(e) => setPost({ ...post, categories: e.target.value })}
-                              placeholder={t.dashboard.blogPage.categoriesPlaceholder}
-                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">{t.dashboard.blogPage.categoriesHint}</p>
-                          </div>
+                          <>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Organization name
+                              </label>
+                              <input
+                                type="text"
+                                value={organizationName}
+                                onChange={(e) => setOrganizationName(e.target.value)}
+                                placeholder="Your company or brand name"
+                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
+                              />
+                              <p className="text-xs text-gray-500 mt-1">Used in article template (brand bar, footer, schema).</p>
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Article theme (colour)
+                              </label>
+                              <select
+                                value={wordpressArticleTheme}
+                                onChange={(e) => setWordpressArticleTheme(e.target.value as "default" | "green" | "purple" | "navy")}
+                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all bg-white"
+                              >
+                                <option value="default">Default (blue / navy)</option>
+                                <option value="green">Green</option>
+                                <option value="purple">Purple</option>
+                                <option value="navy">Navy</option>
+                              </select>
+                              <p className="text-xs text-gray-500 mt-1">Background and accent colours for the published article.</p>
+                            </div>
+                          </>
                         )}
                       </div>
 
