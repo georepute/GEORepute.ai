@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Server,
@@ -15,6 +15,9 @@ import {
   Clock,
   XCircle,
   Link as LinkIcon,
+  Lock,
+  Crown,
+  ArrowUpRight,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { useLanguage } from "@/lib/language-context";
@@ -44,6 +47,13 @@ interface Domain {
   updated_at: string;
 }
 
+interface PlanUsage {
+  domains_used: number;
+  domain_limit: number;
+  plan_name: string | null;
+  plan_display_name: string | null;
+}
+
 export default function DomainsPage() {
   const router = useRouter();
   const { isRtl, t } = useLanguage();
@@ -54,10 +64,29 @@ export default function DomainsPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [planUsage, setPlanUsage] = useState<PlanUsage | null>(null);
+
+  const loadPlanUsage = useCallback(async () => {
+    try {
+      const res = await fetch("/api/billing/overview");
+      const data = await res.json();
+      if (data.success) {
+        setPlanUsage({
+          domains_used: data.usage?.domains_used ?? 0,
+          domain_limit: data.plan?.domain_limit ?? 0,
+          plan_name: data.plan?.name ?? null,
+          plan_display_name: data.plan?.display_name ?? null,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to load plan usage:", err);
+    }
+  }, []);
 
   useEffect(() => {
     loadUserOrganization();
-  }, []);
+    loadPlanUsage();
+  }, [loadPlanUsage]);
 
   useEffect(() => {
     if (organizationId) {
@@ -118,6 +147,14 @@ export default function DomainsPage() {
     e.preventDefault();
     if (!newDomain.trim() || !organizationId) return;
 
+    // Enforce domain limit
+    if (planUsage && planUsage.domain_limit > 0 && domains.length >= planUsage.domain_limit) {
+      setError(
+        `You've reached the ${planUsage.domain_limit}-domain limit on your ${planUsage.plan_display_name ?? ''} plan. Upgrade your plan to add more domains.`
+      );
+      return;
+    }
+
     try {
       setAddingDomain(true);
       setError("");
@@ -151,7 +188,9 @@ export default function DomainsPage() {
       setDomains([data, ...domains]);
       setNewDomain("");
       setSuccess("Domain added successfully!");
-      
+      // Refresh usage counter
+      loadPlanUsage();
+
       setTimeout(() => setSuccess(""), 3000);
     } catch (error: any) {
       console.error("Error adding domain:", error);
@@ -177,7 +216,8 @@ export default function DomainsPage() {
 
       setDomains(domains.filter((d) => d.id !== domainId));
       setSuccess("Domain deleted successfully!");
-      
+      loadPlanUsage();
+
       setTimeout(() => setSuccess(""), 3000);
     } catch (error: any) {
       console.error("Error deleting domain:", error);
@@ -213,7 +253,7 @@ export default function DomainsPage() {
         </span>
       );
     }
-    
+
     if (verificationStatus === 'pending') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">
@@ -222,7 +262,7 @@ export default function DomainsPage() {
         </span>
       );
     }
-    
+
     if (verificationStatus === 'failed') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">
@@ -232,7 +272,6 @@ export default function DomainsPage() {
       );
     }
 
-    // Default - GSC integration exists but no valid status
     return (
       <span className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">
         <LinkIcon className="w-3 h-3" />
@@ -241,20 +280,100 @@ export default function DomainsPage() {
     );
   };
 
+  const atLimit = planUsage
+    ? planUsage.domain_limit > 0 && domains.length >= planUsage.domain_limit
+    : false;
+
+  const usagePercent = planUsage && planUsage.domain_limit > 0
+    ? Math.min(100, Math.round((domains.length / planUsage.domain_limit) * 100))
+    : 0;
+
   return (
     <div className="p-4 sm:p-6 lg:p-8" dir={isRtl ? "rtl" : "ltr"}>
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <Server className="w-8 h-8 text-primary-600" />
-          <h1 className="text-3xl font-bold text-gray-900">
-            Domain Management
-          </h1>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3 mb-2">
+            <Server className="w-8 h-8 text-primary-600" />
+            <h1 className="text-3xl font-bold text-gray-900">
+              Domain Management
+            </h1>
+          </div>
         </div>
         <p className="text-gray-600">
-          Add and manage domains for your organization.
+          Add and manage domains for your organization. Each domain slot is included in your plan.
         </p>
       </div>
+
+      {/* Plan Usage Banner */}
+      {planUsage && planUsage.domain_limit > 0 && (
+        <div className={`mb-6 p-5 rounded-xl border ${
+          atLimit
+            ? "bg-amber-50 border-amber-200"
+            : "bg-white border-gray-200"
+        }`}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Crown className={`w-4 h-4 ${atLimit ? "text-amber-600" : "text-primary-600"}`} />
+              <span className="font-semibold text-gray-800">
+                {planUsage.plan_display_name ?? "Current Plan"} — Domain Slots
+              </span>
+            </div>
+            <span className={`text-sm font-bold ${
+              atLimit ? "text-amber-700" : "text-gray-700"
+            }`}>
+              {domains.length} / {planUsage.domain_limit} used
+            </span>
+          </div>
+          {/* Progress bar */}
+          <div className="w-full bg-gray-100 rounded-full h-2 mb-2">
+            <div
+              className={`h-2 rounded-full transition-all duration-300 ${
+                usagePercent >= 100
+                  ? "bg-amber-500"
+                  : usagePercent >= 80
+                  ? "bg-yellow-400"
+                  : "bg-primary-500"
+              }`}
+              style={{ width: `${usagePercent}%` }}
+            />
+          </div>
+          {atLimit ? (
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-sm text-amber-700 flex items-center gap-1">
+                <Lock className="w-3.5 h-3.5" />
+                Domain limit reached. Upgrade your plan to add more domains.
+              </p>
+              <a
+                href="/dashboard/billing"
+                className="text-sm font-medium text-amber-700 hover:text-amber-800 flex items-center gap-1"
+              >
+                Upgrade <ArrowUpRight className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500 mt-1">
+              {planUsage.domain_limit - domains.length} domain slot{planUsage.domain_limit - domains.length !== 1 ? "s" : ""} remaining on your {planUsage.plan_display_name} plan
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* No-plan banner */}
+      {planUsage && planUsage.domain_limit === 0 && (
+        <div className="mb-6 p-5 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-gray-600">
+            <Lock className="w-4 h-4" />
+            <span className="text-sm">Subscribe to a plan to enable domain management.</span>
+          </div>
+          <a
+            href="/dashboard/select-plan"
+            className="text-sm font-medium text-primary-600 hover:text-primary-700 flex items-center gap-1"
+          >
+            Choose a plan <ArrowUpRight className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      )}
 
       {/* Alerts */}
       {error && (
@@ -288,24 +407,30 @@ export default function DomainsPage() {
       )}
 
       {/* Add Domain Form */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+      <div className={`bg-white rounded-xl border p-6 mb-6 ${atLimit ? "opacity-60 pointer-events-none border-gray-200" : "border-gray-200"}`}>
+        <h2 className="text-lg font-semibold text-gray-900 mb-1">
           Add New Domain
         </h2>
-        <form onSubmit={handleAddDomain} className="flex gap-3">
+        {atLimit && (
+          <p className="text-sm text-amber-600 mb-3 flex items-center gap-1">
+            <Lock className="w-3.5 h-3.5" />
+            Domain limit reached — upgrade your plan to add more.
+          </p>
+        )}
+        <form onSubmit={handleAddDomain} className="flex gap-3 mt-3">
           <div className="flex-1">
             <input
               type="text"
               value={newDomain}
               onChange={(e) => setNewDomain(e.target.value)}
               placeholder="example.com"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-              disabled={addingDomain}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none disabled:bg-gray-50"
+              disabled={addingDomain || atLimit}
             />
           </div>
           <button
             type="submit"
-            disabled={addingDomain || !newDomain.trim()}
+            disabled={addingDomain || !newDomain.trim() || atLimit}
             className="px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {addingDomain ? (
@@ -328,11 +453,16 @@ export default function DomainsPage() {
 
       {/* Domains List */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Your Domains</h2>
-          <p className="text-sm text-gray-600 mt-1">
-            {domains.length} {domains.length === 1 ? "domain" : "domains"} registered
-          </p>
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Your Domains</h2>
+            <p className="text-sm text-gray-600 mt-0.5">
+              {domains.length} {domains.length === 1 ? "domain" : "domains"} registered
+              {planUsage && planUsage.domain_limit > 0 && (
+                <span className="text-gray-400"> · {planUsage.domain_limit - domains.length} slots remaining</span>
+              )}
+            </p>
+          </div>
         </div>
 
         {loading ? (
@@ -418,4 +548,3 @@ export default function DomainsPage() {
     </div>
   );
 }
-
