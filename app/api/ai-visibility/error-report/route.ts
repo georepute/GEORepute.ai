@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { sendErrorReportEmail } from '@/lib/email';
 import { jsPDF } from 'jspdf';
+import {
+  getDisclaimerText,
+  getMethodologyDisclaimerTitle,
+} from '@/lib/disclaimer';
 
 export const maxDuration = 30;
 
@@ -80,6 +84,9 @@ function buildErrorReportPdf(payload: ErrorReportBody): Buffer {
     addLine('User agent', 11, true);
     addLine(payload.userAgent, 8);
   }
+
+  addLine(getMethodologyDisclaimerTitle('en'), 11, true);
+  addLine(getDisclaimerText('en'), 8);
 
   const pdfOutput = doc.output('arraybuffer');
   return Buffer.from(pdfOutput);

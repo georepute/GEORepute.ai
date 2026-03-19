@@ -328,6 +328,134 @@
   margin-left: auto;
 }
 
+/* Personal Voice Layer (About the Author) – after Sources in blog preview & published article */
+.personal-voice-layer {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 28px 32px;
+  margin-top: 2rem;
+  font-family: "Inter", system-ui, sans-serif;
+}
+.personal-voice-layer .pvl-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+.personal-voice-layer .pvl-photo-wrap {
+  flex-shrink: 0;
+}
+.personal-voice-layer .pvl-photo {
+  width: 110px;
+  height: 130px;
+  object-fit: cover;
+  object-position: top center;
+  border-radius: 12px;
+  border: 2px solid #e5e7eb;
+  display: block;
+}
+.personal-voice-layer .pvl-content {
+  flex: 1;
+  min-width: 0;
+}
+.personal-voice-layer .pvl-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #2563eb;
+  background: #eff6ff;
+  padding: 4px 10px;
+  border-radius: 20px;
+  display: inline-block;
+  margin-bottom: 10px;
+}
+.personal-voice-layer .pvl-name {
+  font-family: "Playfair Display", serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 6px;
+}
+.personal-voice-layer .pvl-title {
+  font-size: 13px;
+  color: #7c3aed;
+  font-weight: 600;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+.personal-voice-layer .pvl-bio {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #374151;
+  margin-bottom: 14px;
+}
+.personal-voice-layer .pvl-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.personal-voice-layer .pvl-tag {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  background: #f1f5f9;
+  color: #334155;
+}
+.personal-voice-layer .pvl-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.personal-voice-layer .pvl-btn {
+  display: inline-block;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 2px solid #2563eb;
+  color: #2563eb;
+  text-decoration: none;
+  transition: background 0.2s, color 0.2s;
+}
+.personal-voice-layer .pvl-btn:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.blog-editor-rtl .personal-voice-layer .pvl-inner {
+  flex-direction: row-reverse;
+}
+.blog-editor-rtl .personal-voice-layer .pvl-badge,
+.blog-editor-rtl .personal-voice-layer .pvl-name,
+.blog-editor-rtl .personal-voice-layer .pvl-title,
+.blog-editor-rtl .personal-voice-layer .pvl-bio,
+.blog-editor-rtl .personal-voice-layer .pvl-tags,
+.blog-editor-rtl .personal-voice-layer .pvl-buttons {
+  text-align: right;
+}
+
+/* Mandatory disclaimer – end of every blog/report output (smaller, separated) */
+.geo-disclaimer {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e5e7eb;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #6b7280;
+}
+.geo-disclaimer p {
+  margin: 0;
+}
+.geo-disclaimer-section-title {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #374151;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
 .ql-toolbar.ql-snow {
   border: none;
   border-bottom: 1px solid #e5e7eb;

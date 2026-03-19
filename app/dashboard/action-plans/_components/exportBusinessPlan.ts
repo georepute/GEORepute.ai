@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import { appendMandatoryCompliancePdfSection } from "@/lib/disclaimer-pdf";
 import { format } from "date-fns";
 import {
   Chart,
@@ -947,6 +948,17 @@ export async function exportClientFilePDF(data: ClientFilePDFData): Promise<void
     });
   }
 
+  doc.addPage();
+  header();
+  appendMandatoryCompliancePdfSection(doc, {
+    margin,
+    pageWidth,
+    contentTop,
+    contentBottom: contentBot,
+    locale: "en",
+    startWithNewPage: false,
+  });
+
   // ── Patch all footers ─────────────────────────────────────────────────────
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
@@ -1214,6 +1226,17 @@ export async function exportPlanToPDF(plan: ActionPlan): Promise<void> {
       4.5
     );
     yPos += 3;
+  });
+
+  doc.addPage();
+  addPageHeader();
+  appendMandatoryCompliancePdfSection(doc, {
+    margin,
+    pageWidth,
+    contentTop,
+    contentBottom: contentBottom,
+    locale: "en",
+    startWithNewPage: false,
   });
 
   const totalPages = doc.getNumberOfPages();

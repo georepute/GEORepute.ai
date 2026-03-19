@@ -11,6 +11,8 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from "recharts";
+import { useLanguage } from "@/lib/language-context";
+import { getDisclaimerText, getMethodologyDisclaimerTitle } from "@/lib/disclaimer";
 
 const REPORT_LABELS: Record<string, string> = {
   ai_vs_google_gap: "AI vs Google Gap",
@@ -91,6 +93,8 @@ function formatCurrency(n: number): string {
 }
 
 export default function PublicProposalPage() {
+  const { language } = useLanguage();
+  const loc = language === "he" ? "he" : "en";
   const params = useParams();
   const token = typeof params?.token === "string" ? params.token : "";
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -160,7 +164,7 @@ export default function PublicProposalPage() {
     agencyFooter?: string;
     poweredByEnabled?: boolean;
   } | null;
-  const disclaimer = wl?.disclaimerText || rev.disclaimer || DEFAULT_DISCLAIMER;
+  const disclaimer = wl?.disclaimerText || rev.disclaimer || getDisclaimerText(loc);
   const brandName = wl?.companyName || "Strategic Intelligence";
   const primaryColor = wl?.primaryColor || "#6366f1";
   const agencyFooter = wl?.agencyFooter ?? "";
@@ -547,6 +551,18 @@ export default function PublicProposalPage() {
               <p className="text-xs text-gray-500 leading-relaxed">{disclaimer}</p>
             </div>
           )}
+        </section>
+
+        <section
+          className="bg-gray-50 rounded-xl border border-gray-200 p-5 sm:p-6 mb-8"
+          role="note"
+        >
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">
+            {getMethodologyDisclaimerTitle(loc)}
+          </h3>
+          <p className="text-xs text-gray-500 leading-relaxed max-w-3xl">
+            {getDisclaimerText(loc)}
+          </p>
         </section>
 
         <footer className="mt-12 pt-8 border-t border-gray-200 text-center text-sm text-gray-500 space-y-2">

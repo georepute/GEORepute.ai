@@ -41,6 +41,11 @@ import {
   Radar,
 } from "recharts";
 import { format } from "date-fns";
+import { useLanguage } from "@/lib/language-context";
+import {
+  getDisclaimerText,
+  getMethodologyDisclaimerTitle,
+} from "@/lib/disclaimer";
 
 // Color palette for charts
 const COLORS = {
@@ -142,6 +147,8 @@ interface ReportData {
 }
 
 export default function PublicReport({ params }: { params: { shareToken: string } }) {
+  const { language } = useLanguage();
+  const loc = language === "he" ? "he" : "en";
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -753,6 +760,18 @@ export default function PublicReport({ params }: { params: { shareToken: string 
             </ResponsiveContainer>
           </motion.div>
         )}
+
+        <section
+          className="max-w-4xl mx-auto mb-10 px-4 py-5 rounded-xl border border-gray-200 bg-gray-50/80"
+          role="note"
+        >
+          <h3 className="text-sm font-semibold text-gray-800 mb-2">
+            {getMethodologyDisclaimerTitle(loc)}
+          </h3>
+          <p className="text-xs text-gray-600 leading-relaxed text-left">
+            {getDisclaimerText(loc)}
+          </p>
+        </section>
 
         {/* Footer */}
         <div className="mt-12 text-center">

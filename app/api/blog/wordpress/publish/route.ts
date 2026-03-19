@@ -4,6 +4,7 @@ import { publishToWordPress, WordPressConfig } from "@/lib/integrations/wordpres
 import { buildWordPressArticleHtml } from "@/lib/blog/wordpress-article-template";
 import type { ThemePreset } from "@/lib/blog/wordpress-article-template";
 import { wrapHtmlForRtl } from "@/lib/blog/rtl";
+import { getDisclaimerHtml } from "@/lib/disclaimer";
 
 /**
  * WordPress.com Publish API
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest) {
       publishedDate,
       ctaText,
       contentLanguage,
+      personalVoice,
     } = body;
 
     // Validate required fields
@@ -74,7 +76,12 @@ export async function POST(request: NextRequest) {
         categoryTag: categories ? (Array.isArray(categories) ? categories.join(" · ") : String(categories)) : undefined,
         heroBadges: tagsArr.slice(0, 5),
         readTimeMinutes,
-        ctaText: ctaText || undefined,
+        ctaText: ctaText || "Request a Demo →",
+        contentLanguage: contentLanguage || undefined,
+        personalVoice: personalVoice || undefined,
+        heroMethodologyNote: (body as any).heroMethodologyNote || undefined,
+        heroStats: (body as any).heroStats || undefined,
+        heroItalicWord: (body as any).heroItalicWord || undefined,
       });
     } else {
       finalContent = bodyHtmlForPublish;
@@ -82,6 +89,7 @@ export async function POST(request: NextRequest) {
         const heroBlock = `<figure class="wp-block-image size-full" style="margin:0 0 1.5em 0;"><img src="${escapeAttr(featuredImage)}" alt="${escapeAttr(title)}" style="width:100%;height:auto;max-width:100%;display:block;" /></figure>`;
         finalContent = heroBlock + bodyHtmlForPublish;
       }
+      finalContent = finalContent + getDisclaimerHtml({ locale: contentLanguage ?? null });
     }
 
     // Get WordPress.com integration

@@ -29,6 +29,18 @@ const getSavedLanguage = (): Language => {
   } catch {
     // localStorage not available
   }
+  // Fallback to cookie (important for public/shared pages)
+  try {
+    const existingCookie = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith('preferred-language='));
+    if (existingCookie) {
+      const value = existingCookie.split('=')[1];
+      if (value === 'he' || value === 'en') return value;
+    }
+  } catch {
+    // cookie not available
+  }
   return 'en';
 };
 

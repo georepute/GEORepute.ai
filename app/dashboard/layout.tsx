@@ -42,6 +42,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { filterNavigationByRole, NavigationItem } from "@/lib/permissions/permissions";
 import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/LanguageToggle";
+import { DashboardComplianceFooter } from "@/components/compliance/DashboardComplianceFooter";
 
 export default function DashboardLayout({
   children,
@@ -426,8 +427,9 @@ export default function DashboardLayout({
         </header>
 
         {/* Page Content */}
-        <main className="pt-16">
-          {children}
+        <main className="pt-16 min-h-[calc(100vh-4rem)] flex flex-col">
+          <div className="flex-1">{children}</div>
+          <DashboardComplianceFooter />
         </main>
       </div>
     </div>

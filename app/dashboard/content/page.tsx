@@ -85,6 +85,8 @@ function ContentInner() {
   const [viewMode, setViewMode] = useState<'content' | 'schema' | 'image'>('content');
   const [refreshing, setRefreshing] = useState(false);
   const [publishingContentId, setPublishingContentId] = useState<string | null>(null);
+  /** IDs we've triggered publish for — tick stays disabled until list refreshes (prevents duplicate links) */
+  const [publishTriggeredIds, setPublishTriggeredIds] = useState<Set<string>>(new Set());
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [isDeletingMultiple, setIsDeletingMultiple] = useState(false);
   const [stats, setStats] = useState({
@@ -466,6 +468,14 @@ function ContentInner() {
 
       const data = await response.json();
       setContentItems(data.content || []);
+      // Clear publish-triggered set for items that are no longer in review (prevents tick staying disabled)
+      setPublishTriggeredIds((prev) => {
+        const next = new Set(prev);
+        (data.content || []).forEach((c: any) => {
+          if (c.status !== "review") next.delete(c.id);
+        });
+        return next;
+      });
       setStats(data.stats || {
         total: 0,
         published: 0,
@@ -573,31 +583,20 @@ function ContentInner() {
 
   const handleReviewAction = async (action: "publish" | "schedule" | "reject", contentId: string, scheduledAt?: string) => {
     if (action === "publish") {
-      // Check if this is Medium publishing
+      // Disable the tick immediately and remember we triggered publish (prevents duplicate links)
+      setPublishingContentId(contentId);
+      setPublishTriggeredIds((prev) => new Set(prev).add(contentId));
       const contentItem = contentItems.find(item => item.id === contentId);
       const isMedium = contentItem?.raw?.target_platform === "medium" || contentItem?.platforms?.includes("medium");
-      
-      if (isMedium) {
-        setPublishingContentId(contentId);
-      }
-      
+
       try {
         await handleAction("approve", contentId, { autoPublish: true });
-        // Note: loadContent() is already called in handleAction (line 438), no need to call it again here
-        // This prevents double refresh
       } catch (error) {
-        // On error, clear loading state immediately
-        if (isMedium) {
-          setPublishingContentId(null);
-        }
+        setPublishingContentId(null);
+        setPublishTriggeredIds((prev) => { const n = new Set(prev); n.delete(contentId); return n; });
         throw error;
       } finally {
-        if (isMedium) {
-          // Keep loading state for a bit to show success, then clear
-          setTimeout(() => {
-            setPublishingContentId(null);
-          }, 2000);
-        }
+        setTimeout(() => setPublishingContentId(null), isMedium ? 2000 : 1500);
       }
     } else if (action === "schedule") {
       if (scheduledAt) {
@@ -2405,8 +2404,8 @@ function ContentInner() {
                                   <>
                                     <button
                                       onClick={() => handleReviewAction("publish", item.id)}
-                                      disabled={publishingContentId === item.id}
-                                      className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
+                                      disabled={publishingContentId === item.id || publishTriggeredIds.has(item.id)}
+                                      className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                       title={t.dashboard.content.publish}
                                     >
                                       <CheckCircle className="w-5 h-5" />
@@ -2706,7 +2705,7 @@ function ContentInner() {
                             <>
                               <button
                                 onClick={() => handleReviewAction("publish", item.id)}
-                                disabled={publishingContentId === item.id}
+                                disabled={publishingContentId === item.id || publishTriggeredIds.has(item.id)}
                                 className="p-2 text-green-600 hover:bg-green-50 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 title={t.dashboard.content.publish}
                               >

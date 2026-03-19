@@ -28,6 +28,8 @@ import {
 import toast from "react-hot-toast";
 import Link from "next/link";
 import Image from "next/image";
+import { buildPersonalVoiceLayerHtml } from "@/lib/blog/personal-voice-layer";
+import { getDisclaimerHtml } from "@/lib/disclaimer";
 // Structured blog (charts, tables, sources) from Claude
 interface StructuredSectionText {
   type: "text";
@@ -50,7 +52,7 @@ interface StructuredSectionTable {
 }
 interface StructuredSectionInfographic {
   type: "infographic";
-  svg: string;
+  svg?: string;
   url?: string;
 }
 type StructuredSection = StructuredSectionText | StructuredSectionChart | StructuredSectionTable | StructuredSectionInfographic;
@@ -82,9 +84,51 @@ interface BlogPost {
   categories?: string; // WordPress-specific: comma-separated categories
   imageUrl?: string;
   summary?: string;
+  /** Hero italic phrase from structured blog (WordPress article template) */
+  titleItalicPhrase?: string;
 }
 
 type PublishPlatform = "shopify" | "wordpress" | "wordpress_self_hosted";
+
+const BLOG_DRAFT_STORAGE_KEY = "georepute_blog_draft";
+
+/** Convert plain-text FAQ (Q: ... / A: ...) into styled HTML so it always renders; no raw tags. */
+function faqPlainTextToHtml(text: string): string {
+  if (!text || typeof text !== "string") return text;
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const parts: string[] = [];
+  const blocks = trimmed.split(/\n\s*\n/).filter((b) => b.trim());
+  for (const block of blocks) {
+    const lines = block.split(/\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) continue;
+    if (/^Q:\s*/i.test(lines[0])) {
+      parts.push(`<p><strong>${esc(lines[0])}</strong></p>`);
+      if (lines.length > 1) parts.push(`<p>${lines.slice(1).map(esc).join("<br/>")}</p>`);
+    } else {
+      parts.push(`<p>${lines.map(esc).join("<br/>")}</p>`);
+    }
+  }
+  return parts.length ? parts.join("") : trimmed;
+}
+
+/** Decode HTML entities so tags render (no literal <em>, <a href=...>). Repeats until no change to fix double/triple encoding. */
+function decodeHtmlEntitiesForDisplay(html: string): string {
+  if (!html || typeof html !== "string") return html;
+  let out = html;
+  let prev = "";
+  while (out !== prev) {
+    prev = out;
+    out = out
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+  }
+  return out;
+}
 
 /** Convert markdown bold/emphasis to HTML and remove leftover ** and __ so they don't show in the editor. */
 function stripMarkdownBoldMarkers(html: string): string {
@@ -159,6 +203,112 @@ function buildTableHTML(
     )
     .join("")}</tbody>`;
   return `<table class="blog-table"${dirAttr} style="width:100%;border-collapse:collapse;margin:1em 0;border:1px solid #e5e7eb;table-layout:fixed;direction:${isRtl ? "rtl" : "ltr"};">${colgroup}${thead}${tbody}</table>`;
+}
+
+/** GEO comparison table: dark header, zebra rows, no vertical borders, tone pills, Risk/Opportunity colored. */
+function buildGeoTableHTML(
+  headers: string[],
+  rows: string[][],
+  isRtl: boolean,
+  escapeHtml: (s: string) => string
+): string {
+  const colCount = Math.max(headers.length, 1);
+  const textAlign = isRtl ? "right" : "left";
+  const dirAttr = isRtl ? ' dir="rtl"' : "";
+  const isToneHeader = (h: string) => /tone/i.test(h);
+  const tonePillStyle = (val: string): string => {
+    const v = val.trim().toUpperCase();
+    const pillBase = "white-space:nowrap;min-width:4.5em;text-align:center;font-weight:600;padding:4px 10px;border-radius:999px;font-size:0.75rem;text-transform:uppercase;display:inline-block;";
+    if (/MIXED/.test(v)) return pillBase + "background:#fef3e2;color:#c2410c;";
+    if (/BALANCED/.test(v)) return pillBase + "background:#fefce8;color:#a16207;";
+    if (/CONTESTED/.test(v)) return pillBase + "background:#fef2f2;color:#b91c1c;";
+    if (/POSITIVE/.test(v)) return pillBase + "background:#f0fdf4;color:#15803d;";
+    return pillBase + "background:#f1f5f9;color:#475569;";
+  };
+  const formatCell = (val: string, colIndex: number): string => {
+    const raw = val?.trim() || "";
+    if (!raw) return "&nbsp;";
+    const safe = escapeHtml(raw);
+    const isTone = colIndex < headers.length && isToneHeader(headers[colIndex]);
+    if (isTone) {
+      return `<span style="${tonePillStyle(raw)}">${safe}</span>`;
+    }
+    let out = safe
+      .replace(/Key Risk:\s*/gi, '<span style="font-weight:700;color:#b91c1c;">Key Risk: </span>')
+      .replace(/Opportunity:\s*/gi, '<span style="font-weight:700;color:#c2410c;">Opportunity: </span>')
+      .replace(/Risk:\s*/gi, '<span style="font-weight:700;color:#b91c1c;">Risk: </span>')
+      .replace(/סיכון מרכזי:\s*/g, '<span style="font-weight:700;color:#b91c1c;">סיכון מרכזי: </span>')
+      .replace(/הזדמנות:\s*/g, '<span style="font-weight:700;color:#c2410c;">הזדמנות: </span>');
+    return out;
+  };
+  const normalizeRow = (row: string[]): string[] => {
+    const n = [...row];
+    while (n.length < colCount) n.push("");
+    return n.slice(0, colCount);
+  };
+  const thStyle = (h: string, colIdx: number) => {
+    const base = `padding:14px 18px;background:#1A1C2C;color:#fff;font-weight:700;text-transform:uppercase;text-align:${textAlign};font-size:0.8125rem;letter-spacing:0.02em;border:none;`;
+    if (colIdx === 0) return base + "white-space:nowrap;";
+    if (isToneHeader(h)) return base + "white-space:nowrap;";
+    return base;
+  };
+  // Fixed column widths so ENGINE and TONE are never squeezed (tone pills and names stay on one line)
+  const colgroup =
+    colCount >= 4
+      ? `<colgroup>${headers
+          .map((h, i) => {
+            if (i === 0) return `<col style="width:12%">`;
+            if (isToneHeader(h)) return `<col style="width:14%">`;
+            if (i === 2) return `<col style="width:36%">`;
+            return `<col style="width:38%">`;
+          })
+          .join("")}</colgroup>`
+      : "";
+  const thead = `<thead><tr>${headers.map((h, i) => `<th style="${thStyle(h, i)}">${escapeHtml(h)}</th>`).join("")}</tr></thead>`;
+  const tbody = rows.map((row, rowIdx) => {
+    const bg = rowIdx % 2 === 0 ? "#fff" : "#F9F8F4";
+    const cells = normalizeRow(row).map((cell, colIdx) => {
+      const firstCol = colIdx === 0;
+      const isToneCol = colIdx < headers.length && isToneHeader(headers[colIdx]);
+      const tdStyle = `padding:14px 18px;text-align:${textAlign};vertical-align:top;word-break:break-word;border:none;background:${bg};${firstCol ? "font-weight:700;color:#111;white-space:nowrap;" : "color:#374151;line-height:1.5;"}${isToneCol ? "white-space:nowrap;" : ""}`;
+      return `<td style="${tdStyle}">${formatCell(cell, colIdx)}</td>`;
+    });
+    return `<tr>${cells.join("")}</tr>`;
+  }).join("");
+  return `<table class="blog-table geo-comparison-table" data-geo-table="true"${dirAttr} style="width:100%;border-collapse:collapse;margin:1em 0;table-layout:fixed;direction:${isRtl ? "rtl" : "ltr"};border:none;">${colgroup}${thead}<tbody>${tbody}</tbody></table>`;
+}
+
+/** Same visual styling as GEO table (dark header, zebra rows, no vertical borders, bold first column) but plain cell content—no tone pills or Risk/Opportunity formatting. */
+function buildStyledTableHTML(
+  headers: string[],
+  rows: string[][],
+  isRtl: boolean,
+  escapeHtml: (s: string) => string
+): string {
+  const colCount = Math.max(headers.length, 1);
+  const textAlign = isRtl ? "right" : "left";
+  const dirAttr = isRtl ? ' dir="rtl"' : "";
+  const safeCell = (val: string) => {
+    const t = val?.trim();
+    return t ? escapeHtml(t) : "&nbsp;";
+  };
+  const normalizeRow = (row: string[]): string[] => {
+    const n = [...row];
+    while (n.length < colCount) n.push("");
+    return n.slice(0, colCount);
+  };
+  const thStyle = `padding:14px 18px;background:#1A1C2C;color:#fff;font-weight:700;text-transform:uppercase;text-align:${textAlign};font-size:0.8125rem;letter-spacing:0.02em;border:none;`;
+  const thead = `<thead><tr>${headers.map((h) => `<th style="${thStyle}">${escapeHtml(h)}</th>`).join("")}</tr></thead>`;
+  const tbody = rows.map((row, rowIdx) => {
+    const bg = rowIdx % 2 === 0 ? "#fff" : "#F9F8F4";
+    const cells = normalizeRow(row).map((cell, colIdx) => {
+      const firstCol = colIdx === 0;
+      const tdStyle = `padding:14px 18px;text-align:${textAlign};vertical-align:top;word-break:break-word;border:none;background:${bg};${firstCol ? "font-weight:700;color:#111;" : "color:#374151;line-height:1.5;"}`;
+      return `<td style="${tdStyle}">${safeCell(cell)}</td>`;
+    });
+    return `<tr>${cells.join("")}</tr>`;
+  }).join("");
+  return `<table class="blog-table blog-styled-table"${dirAttr} style="width:100%;border-collapse:collapse;margin:1em 0;table-layout:auto;direction:${isRtl ? "rtl" : "ltr"};border:none;">${thead}<tbody>${tbody}</tbody></table>`;
 }
 
 /**
@@ -351,10 +501,29 @@ function BlogPageContent() {
   const [generatingStructured, setGeneratingStructured] = useState(false);
   const [sendingToPublication, setSendingToPublication] = useState(false);
   const sendingToPublicationRef = useRef(false);
+  const saveDraftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** When true, do not persist draft (e.g. after sending to publication so returning to blog shows empty). */
+  const skipDraftPersistRef = useRef(false);
 
   // WordPress article template (script format): user-filled org name, theme colour, CTA text
   const [organizationName, setOrganizationName] = useState("");
   const [wordpressArticleTheme, setWordpressArticleTheme] = useState<"default" | "green" | "purple" | "navy">("default");
+
+  // Personal Voice Layer (About the Author) – after Sources
+  const defaultExpertiseTags = [
+    "AI Reputation Management",
+    "Generative Engine Optimization",
+    "Brand Perception Intelligence",
+    "Digital Narrative Strategy",
+    "Representation Gap Detection",
+  ];
+  const [personalVoicePhotoBase64, setPersonalVoicePhotoBase64] = useState<string | null>(null);
+  const [personalVoiceName, setPersonalVoiceName] = useState("");
+  const [personalVoiceTitleLine, setPersonalVoiceTitleLine] = useState("");
+  const [personalVoiceBio, setPersonalVoiceBio] = useState("");
+  const [personalVoiceTags, setPersonalVoiceTags] = useState<string[]>(() => [...defaultExpertiseTags]);
+  const [personalVoiceLinkedInUrl, setPersonalVoiceLinkedInUrl] = useState("");
+  const [personalVoiceWebsiteUrl, setPersonalVoiceWebsiteUrl] = useState("");
 
   // Image selection state (Pixabay + manual upload)
   const [showImageModal, setShowImageModal] = useState(false);
@@ -372,6 +541,96 @@ function BlogPageContent() {
   // Published posts state
   const [publishedPosts, setPublishedPosts] = useState<any[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
+
+  // Restore blog draft from localStorage so refresh doesn’t lose generated content
+  useEffect(() => {
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem(BLOG_DRAFT_STORAGE_KEY) : null;
+      if (!raw) return;
+      const draft = JSON.parse(raw) as {
+        topic?: string;
+        post?: BlogPost;
+        generatedTags?: string[];
+        contentGenerationLanguage?: string;
+        organizationName?: string;
+        wordpressArticleTheme?: string;
+        personalVoice?: Record<string, unknown>;
+      };
+      if (!draft?.post?.content?.trim()) return;
+      if (draft.topic != null) setTopic(draft.topic);
+      if (draft.post) setPost(draft.post);
+      if (Array.isArray(draft.generatedTags)) setGeneratedTags(draft.generatedTags);
+      if (draft.contentGenerationLanguage) setContentGenerationLanguage(draft.contentGenerationLanguage as "en" | "he" | "ar" | "fr" | "pt" | "it");
+      if (draft.organizationName != null) setOrganizationName(draft.organizationName);
+      if (draft.wordpressArticleTheme) setWordpressArticleTheme(draft.wordpressArticleTheme as "default" | "green" | "purple" | "navy");
+      if (draft.personalVoice && typeof draft.personalVoice === "object") {
+        const pv = draft.personalVoice as Record<string, unknown>;
+        if (pv.authorPhotoBase64 != null) setPersonalVoicePhotoBase64(typeof pv.authorPhotoBase64 === "string" ? pv.authorPhotoBase64 : null);
+        setPersonalVoiceName(typeof pv.authorName === "string" ? pv.authorName : (draft.post?.author ?? ""));
+        if (typeof pv.authorTitleLine === "string") setPersonalVoiceTitleLine(pv.authorTitleLine);
+        if (typeof pv.authorBio === "string") setPersonalVoiceBio(pv.authorBio);
+        if (Array.isArray(pv.authorExpertiseTags)) setPersonalVoiceTags(pv.authorExpertiseTags.map(String));
+        if (typeof pv.linkedInUrl === "string") setPersonalVoiceLinkedInUrl(pv.linkedInUrl);
+        if (typeof pv.websiteUrl === "string") setPersonalVoiceWebsiteUrl(pv.websiteUrl);
+      } else if (draft.post?.author) {
+        setPersonalVoiceName(draft.post.author);
+      }
+      setContentGenerated(true);
+    } catch (_) {
+      // ignore invalid or old draft
+    }
+  }, []);
+
+  // Persist draft to localStorage when user has generated content or edits (debounced)
+  useEffect(() => {
+    if (skipDraftPersistRef.current) return;
+    if (!contentGenerated || !post.content?.trim()) return;
+    if (saveDraftTimeoutRef.current) clearTimeout(saveDraftTimeoutRef.current);
+    saveDraftTimeoutRef.current = setTimeout(() => {
+      if (skipDraftPersistRef.current) return;
+      try {
+        const draft = {
+          topic,
+          post,
+          generatedTags,
+          contentGenerationLanguage,
+          organizationName,
+          wordpressArticleTheme,
+          personalVoice: {
+            authorPhotoBase64: personalVoicePhotoBase64,
+            authorName: personalVoiceName,
+            authorTitleLine: personalVoiceTitleLine,
+            authorBio: personalVoiceBio,
+            authorExpertiseTags: personalVoiceTags,
+            linkedInUrl: personalVoiceLinkedInUrl,
+            websiteUrl: personalVoiceWebsiteUrl,
+          },
+        };
+        localStorage.setItem(BLOG_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      } catch (_) {
+        // ignore quota or parse errors
+      }
+      saveDraftTimeoutRef.current = null;
+    }, 1000);
+    return () => {
+      if (saveDraftTimeoutRef.current) clearTimeout(saveDraftTimeoutRef.current);
+    };
+  }, [
+    contentGenerated,
+    topic,
+    post,
+    generatedTags,
+    contentGenerationLanguage,
+    organizationName,
+    wordpressArticleTheme,
+    personalVoicePhotoBase64,
+    personalVoiceName,
+    personalVoiceTitleLine,
+    personalVoiceBio,
+    personalVoiceTags,
+    personalVoiceLinkedInUrl,
+    personalVoiceWebsiteUrl,
+  ]);
 
   // Pre-fill from action plan when redirected from action-plans (e.g. blog step)
   useEffect(() => {
@@ -679,14 +938,26 @@ function BlogPageContent() {
       for (const section of blog.sections) {
         if (section.type === "text") {
           if (section.heading) parts.push(`<h2>${escapeHtml(section.heading)}</h2>`);
-          const content = (section as StructuredSectionText).content || "";
-          const paragraphs = content.split(/\n\s*\n/).filter((p) => p.trim());
-          if (paragraphs.length > 0) {
-            for (const para of paragraphs) {
-              parts.push(`<p>${escapeHtml(para.trim()).replace(/\n/g, "<br/>")}</p>`);
-            }
+          let content = (section as StructuredSectionText).content || "";
+          const isFaq = /faq/i.test(section.heading || "");
+          if (isFaq) {
+            // FAQ: strip HTML tags so no raw <strong>/<br> show; keep Q:/A: boundaries, then convert to styled HTML
+            content = content.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "");
+            content = content.replace(/\s+Q:\s+/gi, "\n\nQ: ").replace(/\s+A:\s+/gi, "\nA: ").replace(/[^\S\n]+/g, " ").trim();
+            parts.push(faqPlainTextToHtml(content));
           } else {
-            parts.push(`<p>${escapeHtml(content).replace(/\n/g, "<br/>")}</p>`);
+            // Decode HTML entities so tags render; preserve inline HTML
+            content = content.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+            const paragraphs = content.split(/\n\s*\n/).filter((p) => p.trim());
+            if (paragraphs.length > 0) {
+              for (const para of paragraphs) {
+                const trimmed = para.trim().replace(/\n/g, "<br/>");
+                parts.push(trimmed.startsWith("<") && trimmed.length > 2 ? trimmed : `<p>${trimmed}</p>`);
+              }
+            } else {
+              const trimmed = content.replace(/\n/g, "<br/>");
+              parts.push(trimmed.startsWith("<") && trimmed.length > 2 ? trimmed : `<p>${trimmed}</p>`);
+            }
           }
           sectionIndex++;
         } else if (section.type === "chart") {
@@ -709,21 +980,29 @@ function BlogPageContent() {
           const inf = section as StructuredSectionInfographic;
           const url = inf.url;
           const svg = inf.svg;
-          // Prefer inline SVG (data URL) when available so preview works even if storage URL is private or fails to load
-          if (svg && typeof svg === "string") {
+          let infographicHtml: string | null = null;
+          if (svg && typeof svg === "string" && svg.includes("<svg")) {
             try {
-              const base64 = btoa(unescape(encodeURIComponent(svg)));
-              const dataUrl = `data:image/svg+xml;base64,${base64}`;
-              parts.push(`<figure class="blog-chart"><img src="${dataUrl.replace(/"/g, "&quot;")}" alt="Infographic" style="max-width:100%;height:auto;display:block;" /></figure>`);
-            } catch {
-              if (url && typeof url === "string") {
-                parts.push(`<figure class="blog-chart"><img src="${escapeHtml(url)}" alt="Infographic" style="max-width:100%;height:auto;" /></figure>`);
-              } else {
-                parts.push(`<p style="margin:1em 0;color:#666;">[Infographic could not be embedded]</p>`);
+              // Prefer base64 data URL; fall back to URI-encoded if btoa throws (e.g. Unicode)
+              let dataUrl: string;
+              try {
+                const base64 = btoa(unescape(encodeURIComponent(svg)));
+                dataUrl = `data:image/svg+xml;base64,${base64}`;
+              } catch {
+                dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
               }
+              infographicHtml = `<figure class="blog-chart"><img src="${dataUrl.replace(/"/g, "&quot;")}" alt="Infographic" style="max-width:100%;height:auto;display:block;" /></figure>`;
+            } catch (_) {
+              // ignore
             }
-          } else if (url && typeof url === "string") {
-            parts.push(`<figure class="blog-chart"><img src="${escapeHtml(url)}" alt="Infographic" style="max-width:100%;height:auto;" /></figure>`);
+          }
+          if (!infographicHtml && url && typeof url === "string") {
+            infographicHtml = `<figure class="blog-chart"><img src="${escapeHtml(url)}" alt="Infographic" style="max-width:100%;height:auto;" /></figure>`;
+          }
+          if (infographicHtml) {
+            parts.push(infographicHtml);
+          } else {
+            parts.push(`<p style="margin:1em 0;color:#666;">[Infographic could not be embedded]</p>`);
           }
         } else if (section.type === "table") {
           // Parse headers/rows (flatten nested arrays, split by pipe/tab); then build table HTML for Quill v2
@@ -749,7 +1028,11 @@ function BlogPageContent() {
             return padded;
           });
           const isRtlTable = contentGenerationLanguage === "he" || contentGenerationLanguage === "ar";
-          const tableHtml = buildTableHTML(headers, rows, isRtlTable, escapeHtml);
+          const headingLower = (section.heading || "").toLowerCase();
+          const isGeoComparisonTable = headingLower.includes("chatgpt") && headingLower.includes("gemini");
+          const tableHtml = isGeoComparisonTable
+            ? buildGeoTableHTML(headers, rows, isRtlTable, escapeHtml)
+            : buildStyledTableHTML(headers, rows, isRtlTable, escapeHtml);
           let block = "";
           if (section.heading) block += `<h3>${escapeHtml(section.heading)}</h3>`;
           block += tableHtml;
@@ -757,29 +1040,67 @@ function BlogPageContent() {
         }
       }
       if (blog.sources?.length) {
-        parts.push("<h3>Sources</h3><ul>");
+        parts.push('<h3>References &amp; Sources</h3><ul class="ref-list">');
         for (const s of blog.sources) {
+          const type = (s as { type?: string }).type === "GeoRepute" ? "georepute" : "external";
+          const typeLabel = type === "georepute" ? "GeoRepute Analysis" : "External";
           const hasValidUrl = s.url && s.url.trim() !== "" && s.url !== "#" && /^https?:\/\//i.test(s.url.trim());
-          if (hasValidUrl) {
-            parts.push(`<li><a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title)}</a></li>`);
-          } else {
-            parts.push(`<li>${escapeHtml(s.title)}</li>`);
-          }
+          const citeHtml = hasValidUrl
+            ? `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title)}</a>`
+            : escapeHtml(s.title);
+          parts.push(
+            `<li style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;"><span>${citeHtml}</span><span class="ref-type ${type}" style="flex-shrink:0;white-space:nowrap;font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 8px;border-radius:4px;margin-left:8px;">${escapeHtml(typeLabel)}</span></li>`
+          );
         }
         parts.push("</ul>");
       }
       const html = parts.join("");
-      const fullHtml = ensureBlockStructure(replaceEmDashes(stripMarkdownBoldMarkers(html)));
-      setPost((prev) => ({
-        ...prev,
+      let fullHtml = ensureBlockStructure(replaceEmDashes(stripMarkdownBoldMarkers(html)));
+      fullHtml = decodeHtmlEntitiesForDisplay(fullHtml);
+      if (
+        !/geo-disclaimer|proprietary analytical models|מודלים אנליטיים קנייניים/.test(
+          fullHtml
+        )
+      ) {
+        fullHtml += getDisclaimerHtml({ locale: contentGenerationLanguage ?? null });
+      }
+      const newPost = {
         title: blog.title,
         content: fullHtml,
-        summary: blog.subtitle || prev.summary,
+        summary: blog.subtitle || "",
         tags: tags.join(", "),
-      }));
+        author: "",
+        categories: "",
+        imageUrl: "",
+        ...("titleItalicPhrase" in blog && typeof blog.titleItalicPhrase === "string" && blog.titleItalicPhrase.trim()
+          ? { titleItalicPhrase: blog.titleItalicPhrase.trim() }
+          : {}),
+      };
+      setPost((prev) => ({ ...prev, ...newPost }));
       setContentGenerated(true);
       setImageSearchQuery(topic.trim());
       setShowImageModal(true);
+      // Persist draft immediately so refresh doesn’t lose content
+      try {
+        const draft = {
+          topic: topic.trim(),
+          post: { ...post, ...newPost },
+          generatedTags: tags,
+          contentGenerationLanguage,
+          organizationName,
+          wordpressArticleTheme,
+          personalVoice: {
+            authorPhotoBase64: personalVoicePhotoBase64,
+            authorName: personalVoiceName,
+            authorTitleLine: personalVoiceTitleLine,
+            authorBio: personalVoiceBio,
+            authorExpertiseTags: personalVoiceTags,
+            linkedInUrl: personalVoiceLinkedInUrl,
+            websiteUrl: personalVoiceWebsiteUrl,
+          },
+        };
+        localStorage.setItem(BLOG_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      } catch (_) {}
       toast.success("Blog generated. View full content below (including infographic). Add a featured image when ready.");
     } catch (e: any) {
       console.error("Structured blog error:", e);
@@ -1075,8 +1396,20 @@ function BlogPageContent() {
         schema: schemaData,
         structuredSEO: structuredSEO,
         contentLanguage: contentGenerationLanguage,
+        personalVoice:
+          personalVoiceName.trim() || post.author.trim()
+            ? {
+                authorPhotoBase64: personalVoicePhotoBase64 || undefined,
+                authorName: personalVoiceName.trim() || post.author.trim(),
+                authorTitleLine: personalVoiceTitleLine.trim() || undefined,
+                authorBio: personalVoiceBio.trim() || undefined,
+                authorExpertiseTags: personalVoiceTags.filter(Boolean),
+                linkedInUrl: personalVoiceLinkedInUrl.trim() || undefined,
+                websiteUrl: personalVoiceWebsiteUrl.trim() || undefined,
+              }
+            : undefined,
       };
-      
+
       // Add platform-specific fields
       if (selectedPlatform === "shopify") {
         contentMetadata.shopifyBlogId = selectedBlogId;
@@ -1085,10 +1418,14 @@ function BlogPageContent() {
         contentMetadata.useWordPressArticleTemplate = true;
         contentMetadata.organizationName = organizationName || "";
         contentMetadata.wordpressArticleTheme = wordpressArticleTheme;
+        const italicPhrase = post.titleItalicPhrase;
+        if (typeof italicPhrase === "string" && italicPhrase.trim()) contentMetadata.heroItalicWord = italicPhrase.trim();
       } else if (selectedPlatform === "wordpress_self_hosted") {
         contentMetadata.useWordPressArticleTemplate = true;
         contentMetadata.organizationName = organizationName || "";
         contentMetadata.wordpressArticleTheme = wordpressArticleTheme;
+        const italicPhrase = post.titleItalicPhrase;
+        if (typeof italicPhrase === "string" && italicPhrase.trim()) contentMetadata.heroItalicWord = italicPhrase.trim();
       }
 
       if (existingContent) {
@@ -1147,11 +1484,22 @@ function BlogPageContent() {
       sessionStorage.setItem('contentToPublish', JSON.stringify(publishData));
 
       toast.success(t.dashboard.blogPage.contentSaved);
-      
+
+      // Prevent draft from being re-saved (effect runs with stale state before navigate)
+      skipDraftPersistRef.current = true;
+      if (saveDraftTimeoutRef.current) {
+        clearTimeout(saveDraftTimeoutRef.current);
+        saveDraftTimeoutRef.current = null;
+      }
+      // Clear saved draft so returning to blog page doesn’t show previous generated content
+      try {
+        if (typeof window !== "undefined") localStorage.removeItem(BLOG_DRAFT_STORAGE_KEY);
+      } catch (_) {}
+
       // Clear form and reset state
       setTopic("");
       setGeneratedTags([]);
-    setPost({
+      setPost({
         title: "",
         content: "",
         author: "",
@@ -1543,25 +1891,39 @@ function BlogPageContent() {
                         <div className="border border-gray-300 rounded-lg overflow-hidden bg-white max-h-[70vh] overflow-y-auto">
                           <div
                             className="blog-generated-preview prose prose-sm max-w-none p-6 min-h-[350px] text-gray-800"
-                            dangerouslySetInnerHTML={{ __html: post.content }}
+                            dangerouslySetInnerHTML={{ __html: decodeHtmlEntitiesForDisplay(post.content) }}
+                          />
+                          {/* Personal Voice Layer – after Sources */}
+                          {(personalVoiceName.trim() || post.author.trim()) && (
+                            <div
+                              className="p-6 pt-0"
+                              dangerouslySetInnerHTML={{
+                                __html: buildPersonalVoiceLayerHtml({
+                                  authorPhotoBase64: personalVoicePhotoBase64 || undefined,
+                                  authorName: personalVoiceName.trim() || post.author.trim(),
+                                  authorTitleLine: personalVoiceTitleLine.trim() || undefined,
+                                  authorBio: personalVoiceBio.trim() || undefined,
+                                  authorExpertiseTags: personalVoiceTags.filter(Boolean),
+                                  linkedInUrl: personalVoiceLinkedInUrl.trim() || undefined,
+                                  websiteUrl: personalVoiceWebsiteUrl.trim() || undefined,
+                                  organizationName: organizationName.trim() || undefined,
+                                  isRtl: contentGenerationLanguage === "he" || contentGenerationLanguage === "ar",
+                                }),
+                              }}
+                            />
+                          )}
+                          {/* Mandatory disclaimer – end of every blog */}
+                          <div
+                            className="p-6 pt-0"
+                            dangerouslySetInnerHTML={{
+                              __html: getDisclaimerHtml({ locale: contentGenerationLanguage ?? null }),
+                            }}
                           />
                         </div>
                       </div>
 
-                      {/* Author & Tags Row */}
+                      {/* Tags + WordPress theme (author is in Personal Voice below) */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            {t.dashboard.blogPage.author}
-                          </label>
-                          <input
-                            type="text"
-                            value={post.author}
-                            onChange={(e) => setPost({ ...post, author: e.target.value })}
-                            placeholder={t.dashboard.blogPage.authorPlaceholder}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
-                          />
-                        </div>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">
                             {t.dashboard.blogPage.tags}
@@ -1574,41 +1936,152 @@ function BlogPageContent() {
                           />
                           <p className="text-xs text-gray-500 mt-1">Generated from your blog topic when you clicked Generate.</p>
                         </div>
-
-                        {/* Organization name & theme (WordPress article template) */}
                         {(selectedPlatform === "wordpress" || selectedPlatform === "wordpress_self_hosted") && (
-                          <>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Organization name
-                              </label>
-                              <input
-                                type="text"
-                                value={organizationName}
-                                onChange={(e) => setOrganizationName(e.target.value)}
-                                placeholder="Your company or brand name"
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all"
-                              />
-                              <p className="text-xs text-gray-500 mt-1">Used in article template (brand bar, footer, schema).</p>
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Article theme (colour)
-                              </label>
-                              <select
-                                value={wordpressArticleTheme}
-                                onChange={(e) => setWordpressArticleTheme(e.target.value as "default" | "green" | "purple" | "navy")}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all bg-white"
-                              >
-                                <option value="default">Default (blue / navy)</option>
-                                <option value="green">Green</option>
-                                <option value="purple">Purple</option>
-                                <option value="navy">Navy</option>
-                              </select>
-                              <p className="text-xs text-gray-500 mt-1">Background and accent colours for the published article.</p>
-                            </div>
-                          </>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Article theme (colour)
+                            </label>
+                            <select
+                              value={wordpressArticleTheme}
+                              onChange={(e) => setWordpressArticleTheme(e.target.value as "default" | "green" | "purple" | "navy")}
+                              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all bg-white"
+                            >
+                              <option value="default">Default (blue / navy)</option>
+                              <option value="green">Green</option>
+                              <option value="purple">Purple</option>
+                              <option value="navy">Navy</option>
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">Background and accent colours for the published article.</p>
+                          </div>
                         )}
+                      </div>
+
+                      {/* Personal Voice Layer (About the Author) – appears after Sources */}
+                      <div className="border border-gray-200 rounded-xl p-4 bg-gray-50/50 space-y-4">
+                        <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                          <Camera className="w-4 h-4" />
+                          Personal Voice Layer (About the Author)
+                        </h3>
+                        <p className="text-xs text-gray-500">
+                          Shown at the end of the post after Sources. Photo is embedded as base64 so it never breaks.
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Author photo (110×130)</label>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="block w-full text-sm text-gray-500 file:mr-2 file:py-2 file:px-3 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-gray-700"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  const dataUrl = reader.result as string;
+                                  setPersonalVoicePhotoBase64(dataUrl);
+                                  toast.success("Photo added (embedded as base64)");
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                            {personalVoicePhotoBase64 && (
+                              <button
+                                type="button"
+                                onClick={() => setPersonalVoicePhotoBase64(null)}
+                                className="mt-1 text-xs text-red-600 hover:underline"
+                              >
+                                Remove photo
+                              </button>
+                            )}
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Author name</label>
+                            <input
+                              type="text"
+                              value={personalVoiceName}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setPersonalVoiceName(v);
+                                setPost((prev) => ({ ...prev, author: v }));
+                              }}
+                              placeholder="e.g. Itai Gelman"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Organization name</label>
+                            <input
+                              type="text"
+                              value={organizationName}
+                              onChange={(e) => setOrganizationName(e.target.value)}
+                              placeholder="e.g. GeoRepute"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Shown as the website button label and used in article template.</p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Title line</label>
+                          <input
+                            type="text"
+                            value={personalVoiceTitleLine}
+                            onChange={(e) => setPersonalVoiceTitleLine(e.target.value)}
+                            placeholder="Founder & CEO, GeoRepute | AI Perception Intelligence & GEO"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Bio (min 50 words)</label>
+                          <textarea
+                            value={personalVoiceBio}
+                            onChange={(e) => setPersonalVoiceBio(e.target.value)}
+                            placeholder="2–3 sentences: what GeoRepute does and what you identified. Authoritative tone."
+                            rows={3}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Expertise tags (5)</label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {personalVoiceTags.map((tag, i) => (
+                              <input
+                                key={i}
+                                type="text"
+                                value={tag}
+                                onChange={(e) => {
+                                  const next = [...personalVoiceTags];
+                                  next[i] = e.target.value;
+                                  setPersonalVoiceTags(next);
+                                }}
+                                placeholder={`Tag ${i + 1}`}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 text-sm"
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Website domain</label>
+                            <input
+                              type="url"
+                              value={personalVoiceWebsiteUrl}
+                              onChange={(e) => setPersonalVoiceWebsiteUrl(e.target.value)}
+                              placeholder="https://yourwebsite.com"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">LinkedIn URL</label>
+                            <input
+                              type="url"
+                              value={personalVoiceLinkedInUrl}
+                              onChange={(e) => setPersonalVoiceLinkedInUrl(e.target.value)}
+                              placeholder="https://linkedin.com/in/username"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500/20"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Website button shows Organization name and uses Website URL above.</p>
+                          </div>
+                        </div>
                       </div>
 
                       {/* Featured Image */}

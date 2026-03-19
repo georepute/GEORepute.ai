@@ -145,7 +145,8 @@ ${language === "he" ? `
 - The user's query is in Hebrew. You MUST write the ENTIRE synthesized response in HEBREW (עברית) only.
 - Use Hebrew script (right-to-left). Do not mix in English or other languages.
 - If any source response is in Hebrew, prefer and preserve Hebrew. If sources are in English, translate the synthesized answer into natural Hebrew.
-- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in Hebrew.` : ""}
+- Brand name "${brandName}" can stay as-is if it is a proper noun; all other text must be in Hebrew.
+- Hebrew humanization: Write as a fluent professional would. Vary sentence length and openings; avoid filler phrases (e.g. חשוב לציין, לסיכום, יתר על כן, בנוסף, לפיכך, בעולם המודרני). Use natural Hebrew terminology, not literal translations of English. No repetitive or robotic phrasing; include a clear point of view or example where it fits.` : ""}
 ${language === "ar" ? `
 ## CRITICAL - Arabic Output:
 - The user's query is in Arabic. You MUST write the ENTIRE synthesized response in ARABIC only.

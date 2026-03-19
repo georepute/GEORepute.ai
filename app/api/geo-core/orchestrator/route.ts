@@ -1316,7 +1316,12 @@ export async function POST(request: NextRequest) {
               heroEyebrow: meta?.organizationName ? `${meta.organizationName} — Article` : undefined,
               heroBadges: keywordsArr.slice(0, 5),
               readTimeMinutes,
-              ctaText: meta?.wordpressCtaText || meta?.ctaText,
+              ctaText: meta?.wordpressCtaText || meta?.ctaText || "Request a Demo →",
+              contentLanguage: meta?.contentLanguage || undefined,
+              personalVoice: meta?.personalVoice || undefined,
+              heroMethodologyNote: meta?.heroMethodologyNote,
+              heroStats: meta?.heroStats,
+              heroItalicWord: meta?.heroItalicWord,
             });
           }
 

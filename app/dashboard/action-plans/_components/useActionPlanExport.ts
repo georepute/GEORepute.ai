@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import jsPDF from "jspdf";
+import { appendMandatoryCompliancePdfSection } from "@/lib/disclaimer-pdf";
 import { format } from "date-fns";
 
 interface ActionStep {
@@ -288,6 +289,17 @@ export function useActionPlanExport() {
         ].filter(Boolean) as string[];
         doc.text(stepMeta.join(" | "), margin + 4, yPos);
         yPos += 6;
+      });
+
+      doc.addPage();
+      addPageHeader();
+      appendMandatoryCompliancePdfSection(doc, {
+        margin,
+        pageWidth,
+        contentTop,
+        contentBottom,
+        locale: "en",
+        startWithNewPage: false,
       });
 
       // Add footer to all pages

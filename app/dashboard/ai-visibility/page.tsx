@@ -6,6 +6,7 @@ import Image from "next/image";
 import { supabase } from '@/lib/supabase/client';
 import { useLanguage } from "@/lib/language-context";
 import jsPDF from 'jspdf';
+import { appendMandatoryCompliancePdfSection } from "@/lib/disclaimer-pdf";
 import html2canvas from 'html2canvas';
 // @ts-ignore - pptxgenjs types may not be available
 import PptxGenJS from 'pptxgenjs';
@@ -2749,6 +2750,16 @@ function AIVisibilityContent() {
           });
         }
       }
+
+      appendMandatoryCompliancePdfSection(doc, {
+        margin,
+        pageWidth,
+        contentTop,
+        contentBottom,
+        locale: language === "he" ? "he" : "en",
+        startWithNewPage: true,
+        onNewPage: addPageHeader,
+      });
 
       // =====================================================
       //  APPLY HEADERS & FOOTERS TO ALL PAGES

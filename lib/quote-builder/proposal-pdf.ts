@@ -4,6 +4,7 @@
  */
 
 import { jsPDF } from "jspdf";
+import { appendMandatoryCompliancePdfSection } from "@/lib/disclaimer-pdf";
 import {
   Chart,
   CategoryScale,
@@ -398,7 +399,7 @@ export async function generateProposalPDF(
   const logoDataUrl = await loadLogoAsDataUrl(wl?.logoUrl ?? undefined);
   const disclaimer = (wl?.disclaimerText ?? quote.revenue_exposure?.disclaimer) || DEFAULT_DISCLAIMER;
 
-  let totalPages = 4;
+  let totalPages = 5;
 
   const header = (pageNum: number) => {
     doc.setFillColor(primary.r, primary.g, primary.b);
@@ -854,6 +855,21 @@ export async function generateProposalPDF(
     doc.text(wl.agencyFooter, margin, y);
   }
   footer(4);
+
+  // Page 5 — mandatory compliance (Methodology & Disclaimer); same text on every proposal PDF
+  doc.addPage();
+  header(5);
+  const inferredLocale =
+    typeof document !== "undefined" && document.documentElement?.lang === "he" ? "he" : "en";
+  appendMandatoryCompliancePdfSection(doc, {
+    margin,
+    pageWidth,
+    contentTop,
+    contentBottom: contentBot,
+    locale: inferredLocale,
+    startWithNewPage: false,
+  });
+  footer(5);
 
   if (options?.returnBuffer) {
     return doc.output("arraybuffer") as ArrayBuffer;

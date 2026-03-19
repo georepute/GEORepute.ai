@@ -53,6 +53,7 @@ import { BusinessDevelopmentView } from "./_components/BusinessDevelopmentView";
 import { CompetitorResearchView } from "./_components/CompetitorResearchView";
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, ReferenceLine } from "recharts";
 import jsPDF from "jspdf";
+import { appendMandatoryCompliancePdfSection } from "@/lib/disclaimer-pdf";
 // @ts-ignore - pptxgenjs types may not be available
 import PptxGenJS from "pptxgenjs";
 
@@ -1225,6 +1226,16 @@ export default function ActionPlansPage() {
         const meta = [step.channel, step.platform, `Impact: ${step.estimatedImpact}`].filter(Boolean).join(' | ');
         doc.text(meta, margin + 7, y);
         y += 6;
+      });
+
+      doc.addPage();
+      appendMandatoryCompliancePdfSection(doc, {
+        margin,
+        pageWidth: pageW,
+        contentTop: 22,
+        contentBottom: pageH - 12,
+        locale: "en",
+        startWithNewPage: false,
       });
 
       // Fix page numbers

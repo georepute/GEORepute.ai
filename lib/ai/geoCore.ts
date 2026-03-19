@@ -441,10 +441,10 @@ export async function generateStrategicContent(
   const languageInstruction = input.language === "he"
     ? `\n🌐 HEBREW-ONLY REQUIREMENT (STRICT):
 - Output ONLY valid Hebrew text: Hebrew letters (א-ת), optional niqqud, standard punctuation (. , ? ! " ' - : ;). No other characters.
-- Do NOT use Latin/English letters (e.g. "Israel", "L") or transliterations in parentheses like (Israel haGedolah). Write the concept in Hebrew only (e.g. ישראל, ישראל הגדולה).
-- Do NOT output corrupted text, random symbols, or mixed scripts (e.g. no L†)@)\\|&$^ or similar). If a word is normally written in Hebrew, use only Hebrew.
-- Write naturally in Hebrew, as a native speaker. Every word must be in Hebrew script. No English, no transliterations, no mixed/corrupted characters.
-- PROFESSIONAL QUALITY: Zero grammar or spelling errors. Content must be humanized (natural, as a fluent professional would write). Publication-ready.
+- Do NOT use Latin/English letters or transliterations in parentheses. Write the concept in Hebrew only (e.g. ישראל, ישראל הגדולה).
+- Do NOT output corrupted text, random symbols, or mixed scripts. If a word is normally written in Hebrew, use only Hebrew.
+- Write naturally in Hebrew, as a native speaker. Every word must be in Hebrew script. No English, no transliterations.
+- HUMANIZATION (Hebrew): Content must NOT feel machine-generated. Use natural Hebrew terminology (e.g. prefer everyday professional Hebrew over literal translations of English biz-speak). Vary sentence length and structure—mix short and long sentences; avoid starting consecutive sentences the same way. Do NOT use filler phrases (e.g. חשוב לציין, לסיכום, יתר על כן, בנוסף, לפיכך, בעולם המודרני, מצד אחד מצד שני). Reduce repetition: do not repeat the same phrase or structure in adjacent sentences. Where appropriate, include a clear point of view or a concrete example so the text feels authored, not templated. Professional tone, natural flow, zero grammar errors. Publication-ready.
 - Length: ${lengthForLang} Complete every sentence; never cut off mid-word or with garbage characters.\n`
     : input.language === "ar"
     ? `\n🌐 ARABIC-ONLY REQUIREMENT (STRICT):
@@ -698,6 +698,7 @@ ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
 - AVOID: No hedging with "it's important to note that". Never use "delve" or "rich tapestry". Don't end with vague optimism.
 
 - STRUCTURE: Use proper HTML for WordPress/Shopify: <h2> for main sections, <h3> for subsections, <p>, <ul><li>, <ol><li>, <strong>, <em>, <a href="...">. For comparison tables use the pipe format below (not raw <table>).
+- EDITORIAL STYLING (so fonts and layout take effect): The article is rendered with Lora serif for body, Inter for headings/nav/tables, styled blockquotes (left border + background), and stat cards. Produce content so this styling takes effect: (1) Include at least one <blockquote><p>...</p><cite>...</cite></blockquote> pull quote per article. (2) Use <em> for one key phrase in the title or first heading and for brief editorial emphasis (5–10 words); use <strong> only for branded terms and key data points—never bold random words. (3) For key metrics use <div class="stat-grid"><div class="stat-card"><span class="stat-number">X</span><span class="stat-label">Y</span></div>...</div> so they render as stat cards.
 - TABLES: When including a comparison table, format it with one line per row and columns separated by a pipe with spaces: " | ". Example:
   Column One | Column Two | Column Three
   Row one value | Row one value 2 | Row one value 3
@@ -747,9 +748,10 @@ ${input.targetPlatform === 'shopify' || input.contentType === 'blog_article' ? `
 - Structure: Short intro → 3–5 key insights in the body → positive, actionable conclusion
 - Use HTML headings: <h2> for main sections, <h3> for subsections; keep paragraphs short (2–4 sentences)
 - Include at least TWO structural elements: e.g. table, checklist, bullet list, blockquote/key quote, practical example, or highlight box. For tables: use pipe format (columns separated by " | ", one line per row) so they render correctly.
-- When citing data or research, add 1–2 <a href="..."> links to authority sources
+- IN-TEXT SOURCE LINKS: Link using only the SOURCE NAME as the clickable text (e.g. According to <a href="https://...">Gartner</a>, 25% will shift). Do not wrap the whole claim in the link; do not show raw HTML to the reader. Use only real, working URLs.
+- REFERENCES & SOURCES: End with <h3>References & Sources</h3><ul class="ref-list"> then for each source <li style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;"><span><a href="url" target="_blank" rel="noopener">Source name only</a></span><span class="ref-type external">External</span></li> (use ref-type georepute and "GeoRepute Analysis" for your analysis). Show only the source name (e.g. Gartner, McKinsey) as the hyperlink, not the full article title. Close with </ul>. Use only real URLs.
 - Include an engaging introduction, 4–6 main sections, and a conclusion with a clear call-to-action
-- Format with proper HTML tags: <p>, <h2>, <h3>, <ul>, <li>, <ol>, <blockquote>, <strong>, <em>, <a>. Tables: plain text with " | " between columns, one line per row (see TABLES rule above).
+- Format with proper HTML tags: <p>, <h2>, <h3>, <ul>, <li>, <ol>, <blockquote>, <strong>, <em>, <a>. Tables: plain text with " | " between columns, one line per row (see TABLES rule above). So editorial styling (Lora/Inter, blockquotes, stat cards) takes effect: include at least one blockquote, use em/strong as above, and use stat-grid/stat-card/stat-number/stat-label for key metrics.
 - Make content SEO- and GEO-optimized (keywords in headings and throughout; readable for both humans and AI)
 ` : `
 - Length: Write 150-300 words minimum. Do not output short or truncated content. Complete every sentence and paragraph. Aim for a full, substantive response.

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getIndustryBenchmark } from "@/lib/quote-builder/industry-benchmarks";
+import { getDisclaimerText } from "@/lib/disclaimer";
 
 export const dynamic = "force-dynamic";
-
-const MANDATORY_DISCLAIMER = "";
 
 export async function GET(request: NextRequest) {
   try {
@@ -109,7 +108,9 @@ export async function GET(request: NextRequest) {
       advertisingComparison: opportunityReport
         ? { avgCpc: opportunityReport.avg_cpc, revenueAtRisk: opportunityReport.revenue_at_risk }
         : null,
-      disclaimer: MANDATORY_DISCLAIMER,
+      disclaimer: getDisclaimerText(
+        request.cookies.get("preferred-language")?.value ?? null
+      ),
     };
     if (mode === "advanced") {
       payload.aiQueryGrowthTrend = null;
