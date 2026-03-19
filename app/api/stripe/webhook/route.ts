@@ -475,14 +475,17 @@ async function handleCheckoutSessionExpired(session: Stripe.Checkout.Session) {
 async function handleSubscriptionCreated(sub: Stripe.Subscription) {
   console.log('Processing customer.subscription.created:', sub.id);
   const metadata = sub.metadata || {};
+  const subAny = sub as any;
 
   if (metadata.type === 'plan_subscription') {
     // Already handled in checkout.session.completed; update period dates
+    const periodStart = subAny.current_period_start ?? sub.items?.data?.[0]?.current_period_start;
+    const periodEnd = subAny.current_period_end ?? sub.items?.data?.[0]?.current_period_end;
     await supabase
       .from('subscriptions')
       .update({
-        current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
-        current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+        ...(periodStart && { current_period_start: new Date(periodStart * 1000).toISOString() }),
+        ...(periodEnd && { current_period_end: new Date(periodEnd * 1000).toISOString() }),
         status: sub.status,
       })
       .eq('stripe_subscription_id', sub.id);
@@ -494,11 +497,14 @@ async function handleSubscriptionCreated(sub: Stripe.Subscription) {
 // ────────────────────────────────────────────────────
 async function handleSubscriptionUpdated(sub: Stripe.Subscription) {
   console.log('Processing customer.subscription.updated:', sub.id);
+  const subAny = sub as any;
+  const periodStart = subAny.current_period_start ?? sub.items?.data?.[0]?.current_period_start;
+  const periodEnd = subAny.current_period_end ?? sub.items?.data?.[0]?.current_period_end;
 
   const updateData: Record<string, any> = {
     status: sub.status,
-    current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
-    current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+    ...(periodStart && { current_period_start: new Date(periodStart * 1000).toISOString() }),
+    ...(periodEnd && { current_period_end: new Date(periodEnd * 1000).toISOString() }),
     cancel_at_period_end: sub.cancel_at_period_end,
   };
 
@@ -515,13 +521,13 @@ async function handleSubscriptionUpdated(sub: Stripe.Subscription) {
     .single();
 
   // Also check report monitoring subscriptions
-  if (!updated) {
+  if (!updated && periodStart && periodEnd) {
     await supabase
       .from('report_monitoring_subscriptions')
       .update({
         status: sub.status,
-        current_period_start: new Date(sub.current_period_start * 1000).toISOString(),
-        current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+        current_period_start: new Date(periodStart * 1000).toISOString(),
+        current_period_end: new Date(periodEnd * 1000).toISOString(),
       })
       .eq('stripe_subscription_id', sub.id);
   }
@@ -591,8 +597,8 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
     .join(' · ');
 
   const invAny = invoice as any;
-  const invSubId = typeof invoice.subscription === 'string'
-    ? invoice.subscription
+  const invSubId = typeof invAny.subscription === 'string'
+    ? invAny.subscription
     : invAny.subscription?.id || null;
 
   // Determine invoice type
@@ -636,8 +642,8 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
     type: invoiceType,
   }, { onConflict: 'stripe_invoice_id' });
 
-  if (invoice.subscription) {
-    const subId = typeof invoice.subscription === 'string' ? invoice.subscription : (invoice.subscription as any)?.id;
+  if (invAny.subscription) {
+    const subId = typeof invAny.subscription === 'string' ? invAny.subscription : invAny.subscription?.id;
     try {
       const stripeSub = await stripe.subscriptions.retrieve(subId) as any;
       await supabase
@@ -659,9 +665,9 @@ async function handleInvoicePaid(invoice: Stripe.Invoice) {
 // ────────────────────────────────────────────────────
 async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
   console.log('Processing invoice.payment_failed:', invoice.id);
-
-  if (invoice.subscription) {
-    const subId = typeof invoice.subscription === 'string' ? invoice.subscription : (invoice.subscription as any)?.id;
+  const invAny = invoice as any;
+  if (invAny.subscription) {
+    const subId = typeof invAny.subscription === 'string' ? invAny.subscription : invAny.subscription?.id;
     await supabase
       .from('subscriptions')
       .update({ status: 'past_due' })
@@ -694,9 +700,10 @@ async function handleInvoiceFinalized(invoice: Stripe.Invoice) {
     .map(l => l.description || 'Item')
     .join(' · ');
 
-  const finalSubId = typeof invoice.subscription === 'string'
-    ? invoice.subscription
-    : (invoice.subscription as any)?.id || null;
+  const invAny = invoice as any;
+  const finalSubId = typeof invAny.subscription === 'string'
+    ? invAny.subscription
+    : invAny.subscription?.id || null;
 
   await supabase.from('invoices').upsert({
     stripe_invoice_id: invoice.id,

@@ -292,9 +292,8 @@ function BlogPageContent() {
   // Blog post form state
   const [topic, setTopic] = useState("");
   const [targetKeywords, setTargetKeywords] = useState("");
-  const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr">("en");
-  const [generatedTags, setGeneratedTags] = useState<string[]>([]);
   const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr" | "pt" | "it">("en");
+  const [generatedTags, setGeneratedTags] = useState<string[]>([]);
   const [brandVoices, setBrandVoices] = useState<Array<{ id: string; brand_name: string; is_default?: boolean }>>([]);
   const [selectedBrandVoiceId, setSelectedBrandVoiceId] = useState<string | null>(null);
   const [loadingVoices, setLoadingVoices] = useState(false);

@@ -638,7 +638,7 @@ export default function StrategicBlindSpotsPage() {
                       <h3 className="font-semibold text-gray-900">Video Report</h3>
                       {video.generatedAt && (
                         <p className="text-xs text-gray-500 mt-0.5">
-                          Generated {new Date(video.generatedAt).toLocaleString()}
+                          Generated {new Date(video.generatedAt as string).toLocaleString()}
                         </p>
                       )}
                     </div>
@@ -702,7 +702,7 @@ export default function StrategicBlindSpotsPage() {
                   </div>
                   <div className="flex-1 min-h-0 bg-gray-950 flex items-center justify-center p-4">
                     <video
-                      src={video.url}
+                      src={video.url ?? undefined}
                       controls
                       autoPlay
                       className="max-w-full max-h-[calc(90vh-80px)]"
