@@ -34,6 +34,7 @@ import {
   X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useReportPDFExport } from '@/lib/useReportPDFExport';
 import { useLanguage } from '@/lib/language-context';
 
 type VideoStatus = 'idle' | 'pending' | 'done' | 'failed';
@@ -109,6 +110,7 @@ function getCountryName(code: string): string {
 }
 
 export default function GeoVisibilityMarketCoveragePage() {
+  const { reportRef, exportingPDF, handleExportPDF } = useReportPDFExport();
   const { t, isRtl } = useLanguage();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState('');
@@ -521,6 +523,20 @@ export default function GeoVisibilityMarketCoveragePage() {
               <RefreshCw className={`w-4 h-4 ${calculating ? 'animate-spin' : ''}`} />
               {calculating ? 'Calculating...' : calculateMatrixLabel}
             </button>
+            {matrixData.length > 0 && (
+              <button
+                onClick={() => handleExportPDF({
+                  reportTitle: 'GEO Visibility & Market Coverage',
+                  domain: domains.find(d => d.id === selectedDomain)?.domain || 'Report',
+                  fileName: `GEO_Visibility_Market_Coverage_${domains.find(d => d.id === selectedDomain)?.domain || 'report'}_${new Date().toISOString().slice(0, 10)}.pdf`,
+                })}
+                disabled={exportingPDF}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+              >
+                <Download className={`w-4 h-4 ${exportingPDF ? 'animate-bounce' : ''}`} />
+                {exportingPDF ? 'Exporting…' : 'Export PDF'}
+              </button>
+            )}
           </div>
           {calculating && calcProgress && (
             <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -558,7 +574,7 @@ export default function GeoVisibilityMarketCoveragePage() {
             </div>
           </div>
         ) : (
-          <>
+          <div ref={reportRef}>
             {/* ========== VIDEO REPORT SECTION (commented out - add back later) ========== */}
             {/* <div className="mb-6">
               {video.status === 'idle' && (
@@ -614,7 +630,7 @@ export default function GeoVisibilityMarketCoveragePage() {
             </div> */}
 
             {/* Summary cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
               <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg shadow-sm border border-gray-200 p-6">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-gray-700">{totalMarketsLabel}</span>
@@ -647,7 +663,7 @@ export default function GeoVisibilityMarketCoveragePage() {
             </div>
 
             {/* Charts */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+            <div data-pdf-section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
                 <BarChart3 className="w-5 h-5 text-primary-600" />
                 Demand vs Organic vs AI (top 12 by demand)
@@ -682,7 +698,7 @@ export default function GeoVisibilityMarketCoveragePage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
                   <Target className="w-5 h-5 text-amber-600" />
@@ -750,7 +766,7 @@ export default function GeoVisibilityMarketCoveragePage() {
             </div>
 
             {/* Gap breakdown */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+            <div data-pdf-section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 text-amber-600" />
                 Gap breakdown
@@ -778,7 +794,7 @@ export default function GeoVisibilityMarketCoveragePage() {
             </div>
 
             {/* Quadrant Distribution + Priority Actions */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">{quadrantDistributionLabel}</h3>
                 {quadrantPieData.length > 0 ? (
@@ -835,7 +851,7 @@ export default function GeoVisibilityMarketCoveragePage() {
             </div>
 
             {/* Regional Table */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div data-pdf-section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-1">{regionalTableLabel}</h3>
               <p className="text-sm text-gray-500 mb-4">Where demand exists but visibility is missing</p>
               <div className="overflow-x-auto">
@@ -899,7 +915,7 @@ export default function GeoVisibilityMarketCoveragePage() {
                 </table>
               </div>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

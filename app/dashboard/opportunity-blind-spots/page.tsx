@@ -16,6 +16,7 @@ import {
 } from 'recharts';
 import { Target, TrendingUp, AlertCircle, DollarSign, BarChart3, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, Brain, Video, Download, Loader2, Play, RotateCcw, XCircle, X } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useReportPDFExport } from '@/lib/useReportPDFExport';
 import { useLanguage } from '@/lib/language-context';
 
 type VideoStatus = 'idle' | 'pending' | 'done' | 'failed';
@@ -97,6 +98,7 @@ function bandToGapType(band: string): GapType {
 }
 
 export default function OpportunityBlindSpotsPage() {
+  const { reportRef, exportingPDF, handleExportPDF } = useReportPDFExport();
   const { t, isRtl } = useLanguage();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState<string>('');
@@ -483,6 +485,20 @@ export default function OpportunityBlindSpotsPage() {
               <Brain className={`w-4 h-4 ${generating ? 'animate-pulse' : ''}`} />
               {rows.length > 0 ? 'Regenerate' : 'Generate'} Report
             </button>
+            {rows.length > 0 && (
+              <button
+                onClick={() => handleExportPDF({
+                  reportTitle: 'Opportunity & Blind Spots',
+                  domain: reportMeta?.domain || domains.find(d => d.id === selectedDomain)?.domain || 'Report',
+                  fileName: `Opportunity_Blind_Spots_${reportMeta?.domain || domains.find(d => d.id === selectedDomain)?.domain || 'report'}_${new Date().toISOString().slice(0, 10)}.pdf`,
+                })}
+                disabled={exportingPDF}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+              >
+                <Download className={`w-4 h-4 ${exportingPDF ? 'animate-bounce' : ''}`} />
+                {exportingPDF ? 'Exporting…' : 'Export PDF'}
+              </button>
+            )}
           </div>
           {hasAiVsGoogleReport === false && selectedDomain && (
             <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
@@ -591,9 +607,9 @@ export default function OpportunityBlindSpotsPage() {
             )}
           </div>
         ) : (
-          <>
+          <div ref={reportRef}>
             {/* Summary cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
               <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg shadow-sm border border-gray-200 p-6">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-gray-700">{totalQueriesLabel}</span>
@@ -626,7 +642,7 @@ export default function OpportunityBlindSpotsPage() {
             </div>
 
             {/* Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">{gapDistributionLabel}</h3>
                 {gapPieData.length > 0 ? (
@@ -662,7 +678,7 @@ export default function OpportunityBlindSpotsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">{revenueByGapLabel}</h3>
                 {revenueByGapData.length > 0 ? (
@@ -706,7 +722,7 @@ export default function OpportunityBlindSpotsPage() {
             </div>
 
             {/* Opportunity table */}
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div data-pdf-section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-1">{opportunityTableTitle}</h3>
               <p className="text-sm text-gray-500 mb-4">{opportunityTableSubtitle}</p>
               <p className="text-xs text-gray-500 mb-4">{tableNote}</p>
@@ -786,7 +802,7 @@ export default function OpportunityBlindSpotsPage() {
                 <p className="text-xs text-gray-500 mt-3">{gapFromReportLabel}</p>
               )}
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

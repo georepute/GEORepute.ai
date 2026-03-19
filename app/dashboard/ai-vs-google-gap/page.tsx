@@ -36,6 +36,7 @@ import {
   XCircle,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useReportPDFExport } from "@/lib/useReportPDFExport";
 
 type VideoStatus = "idle" | "pending" | "done" | "failed";
 interface VideoState { status: VideoStatus; url: string | null; generatedAt: string | null; requestId: string | null; }
@@ -107,6 +108,7 @@ const BAND_LABELS: Record<string, string> = {
 };
 
 export default function AiVsGoogleGapPage() {
+  const { reportRef, exportingPDF, handleExportPDF } = useReportPDFExport();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState("");
   const [report, setReport] = useState<ReportData | null>(null);
@@ -451,6 +453,20 @@ export default function AiVsGoogleGapPage() {
               <Brain className={`w-4 h-4 ${generating ? "animate-pulse" : ""}`} />
               {report ? "Regenerate" : "Generate"} Report
             </button>
+            {report && (
+              <button
+                onClick={() => handleExportPDF({
+                  reportTitle: "AI vs Google Gap",
+                  domain: report.domain,
+                  fileName: `AI_vs_Google_Gap_${report.domain.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`,
+                })}
+                disabled={exportingPDF}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+              >
+                <Download className={`w-4 h-4 ${exportingPDF ? "animate-bounce" : ""}`} />
+                {exportingPDF ? "Exporting…" : "Export PDF"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -473,7 +489,7 @@ export default function AiVsGoogleGapPage() {
         )}
 
         {report && (
-          <>
+          <div ref={reportRef}>
             {/* ========== VIDEO REPORT SECTION (commented out - add back later) ========== */}
             {/* <div className="mb-6">
               {video.status === "idle" && (
@@ -559,7 +575,7 @@ export default function AiVsGoogleGapPage() {
             </div> */}
 
             {/* Summary Stats - Gradient cards like global reports */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
               <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg shadow-sm border border-red-200 p-6">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-red-700">AI Risk</span>
@@ -603,7 +619,7 @@ export default function AiVsGoogleGapPage() {
             </div>
 
             {/* Meta info row */}
-            <div className="flex flex-wrap gap-4 mb-6 text-sm text-gray-600">
+            <div data-pdf-section className="flex flex-wrap gap-4 mb-6 text-sm text-gray-600">
               <span><strong>Domain:</strong> {report.domain}</span>
               <span><strong>Avg Gap:</strong> {report.summary.avgGapScore} (positive = stronger on Google)</span>
               <span><strong>Queries:</strong> {report.summary.totalQueries}</span>
@@ -614,7 +630,7 @@ export default function AiVsGoogleGapPage() {
             </div>
 
             {/* Charts Row 1: Pie + Band Bar */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Gap Distribution by Band</h3>
                 <p className="text-sm text-gray-600 mb-4">Share of queries in each visibility band</p>
@@ -669,7 +685,7 @@ export default function AiVsGoogleGapPage() {
             </div>
 
             {/* Charts Row 2: Google vs AI + Avg by Band */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Google vs AI Score (Top 15 Queries)</h3>
                 <p className="text-sm text-gray-600 mb-4">Compare visibility scores per query</p>
@@ -720,7 +736,7 @@ export default function AiVsGoogleGapPage() {
             </div>
 
             {/* Charts Row 3: Top AI Risk + Top SEO Opp + Scatter */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
               <div className="bg-white rounded-lg shadow-sm border border-red-100 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Top 10 AI Risk Queries</h3>
                 <p className="text-sm text-gray-600 mb-4">Highest gap – strong on Google, weak on AI</p>
@@ -801,7 +817,7 @@ export default function AiVsGoogleGapPage() {
 
             {/* Query Details Table */}
             {report.queries?.length > 0 && (
-              <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+              <div data-pdf-section className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
                 <h3 className="text-lg font-semibold text-gray-900 p-4 border-b border-gray-200">Query Details</h3>
                 {/* Band Filters */}
                 <div className="flex flex-wrap items-center gap-2 p-4 border-b border-gray-100 bg-gray-50">
@@ -886,7 +902,7 @@ export default function AiVsGoogleGapPage() {
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>
