@@ -38,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useReportPDFExport } from "@/lib/useReportPDFExport";
 import Link from "next/link";
 
 type VideoStatus = "idle" | "pending" | "done" | "failed";
@@ -89,6 +90,7 @@ interface ReportData {
 }
 
 export default function AiSearchPresencePage() {
+  const { reportRef, exportingPDF, handleExportPDF } = useReportPDFExport();
   const [projects, setProjects] = useState<ReportData["projects"]>([]);
   const [enginesByProject, setEnginesByProject] = useState<
     ReportData["enginesByProject"]
@@ -396,6 +398,20 @@ export default function AiSearchPresencePage() {
               <Globe className="w-4 h-4" />
               Run AI Visibility Analysis
             </Link>
+            {projects.length > 0 && (
+              <button
+                onClick={() => handleExportPDF({
+                  reportTitle: "AI Search Presence",
+                  domain: projects.find(p => p.id === selectedProjectId)?.brand_name || "Report",
+                  fileName: `AI_Search_Presence_${(projects.find(p => p.id === selectedProjectId)?.brand_name || "report").replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`,
+                })}
+                disabled={exportingPDF}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+              >
+                <Download className={`w-4 h-4 ${exportingPDF ? "animate-bounce" : ""}`} />
+                {exportingPDF ? "Exporting…" : "Export PDF"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -426,10 +442,11 @@ export default function AiSearchPresencePage() {
             </Link>
           </div>
         ) : (
-          <>
+          <div ref={reportRef}>
             {/* Decision Insight Card */}
             {computedSummary && (
               <div
+                data-pdf-section
                 className={`rounded-lg shadow-sm border p-6 mb-6 ${
                   computedSummary.hasRepresentationIssue
                     ? "bg-gradient-to-br from-red-50 to-red-100 border-red-200"
@@ -475,7 +492,7 @@ export default function AiSearchPresencePage() {
 
             {/* Summary Stats */}
             {computedSummary && computedSummary.totalQueries > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+              <div data-pdf-section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-600">
@@ -535,8 +552,8 @@ export default function AiSearchPresencePage() {
               </div>
             )}
 
-            {/* Video Report Section */}
-            {enginesWithData.length > 0 && computedSummary && (
+            {/* Video Report Section (commented out - add back later) */}
+            {/* {enginesWithData.length > 0 && computedSummary && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
@@ -607,10 +624,10 @@ export default function AiSearchPresencePage() {
                   </div>
                 )}
               </div>
-            )}
+            )} */}
 
-            {/* Video Preview Modal */}
-            {showVideoModal && video.url && (
+            {/* Video Preview Modal (commented out - add back later) */}
+            {/* {showVideoModal && video.url && (
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={() => setShowVideoModal(false)}>
                 <div className="relative bg-black rounded-xl overflow-hidden max-w-4xl w-full shadow-2xl" onClick={e => e.stopPropagation()}>
                   <button onClick={() => setShowVideoModal(false)} className="absolute top-3 right-3 z-10 p-1.5 bg-black/50 rounded-full text-white hover:bg-black/80">
@@ -625,11 +642,11 @@ export default function AiSearchPresencePage() {
                   </div>
                 </div>
               </div>
-            )}
+            )} */}
 
             {/* AI Engine Cards */}
             {enginesWithData.length > 0 && (
-              <div className="mb-6">
+              <div data-pdf-section className="mb-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
                   AI Engine Cards
                 </h3>
@@ -703,7 +720,7 @@ export default function AiSearchPresencePage() {
 
             {/* Charts */}
             {computedSummary && computedSummary.totalQueries > 0 && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                 {/* Pie: Mentioned vs Not Mentioned */}
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">
@@ -1110,7 +1127,7 @@ export default function AiSearchPresencePage() {
                 )}
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

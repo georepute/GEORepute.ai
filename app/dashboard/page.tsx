@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useLanguage } from "@/lib/language-context";
+import { useBillingContext } from "@/lib/billing/billing-context";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {
@@ -23,6 +24,8 @@ import {
   CheckCircle,
   Clock,
   XCircle,
+  Lock,
+  Package,
 } from "lucide-react";
 import {
   BarChart,
@@ -76,15 +79,135 @@ interface DomainItem {
   gsc_integration?: { verification_status?: string } | null;
 }
 
+// Reusable locked card overlay
+function LockedCard({
+  moduleName,
+  moduleLabel,
+  children,
+  className = "",
+}: {
+  moduleName: string;
+  moduleLabel: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  const billing = useBillingContext();
+  const isLocked = billing.hasPlan && !billing.activeModules.includes(moduleName);
+
+  if (!isLocked) return <>{children}</>;
+
+  return (
+    <div className={`relative ${className}`}>
+      {/* Blurred content underneath */}
+      <div className="blur-sm pointer-events-none select-none opacity-40">{children}</div>
+      {/* Lock overlay */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 rounded-xl backdrop-blur-[2px]">
+        <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center mb-2">
+          <Lock className="w-5 h-5 text-purple-600" />
+        </div>
+        <p className="text-xs font-semibold text-gray-700 text-center px-3 mb-2 leading-tight">
+          {moduleLabel}
+        </p>
+        <Link
+          href="/dashboard/modules"
+          className="inline-flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 transition-colors"
+        >
+          <Package className="w-3 h-3" />
+          Unlock
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// Locked stat card (inline, compact)
+function StatCard({
+  stat,
+  index,
+  moduleName,
+  moduleLabel,
+}: {
+  stat: {
+    label: string;
+    value: string;
+    sub: string;
+    icon: any;
+    color: string;
+    bgColor: string;
+    href: string;
+  };
+  index: number;
+  moduleName?: string;
+  moduleLabel?: string;
+}) {
+  const billing = useBillingContext();
+  const isLocked =
+    billing.hasPlan &&
+    !!moduleName &&
+    !billing.activeModules.includes(moduleName);
+
+  return (
+    <motion.div
+      key={stat.label}
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.03 }}
+    >
+      {isLocked ? (
+        <div className="relative block bg-white rounded-xl p-5 border border-gray-200 overflow-hidden">
+          {/* Blurred background */}
+          <div className="blur-sm pointer-events-none select-none opacity-30">
+            <div className="flex items-start justify-between mb-3">
+              <div className={`w-10 h-10 ${stat.bgColor} rounded-lg flex items-center justify-center`}>
+                <stat.icon className={`w-5 h-5 ${stat.color}`} />
+              </div>
+            </div>
+            <div className="text-xl font-bold text-gray-900 mb-0.5">{stat.value}</div>
+            <div className="text-sm font-medium text-gray-600">{stat.label}</div>
+            <div className="text-xs text-gray-500 mt-1">{stat.sub}</div>
+          </div>
+          {/* Lock overlay */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 backdrop-blur-[2px]">
+            <Lock className="w-4 h-4 text-purple-500 mb-1" />
+            <span className="text-xs text-gray-500 font-medium text-center px-2 leading-tight">
+              {moduleLabel}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <Link
+          href={stat.href}
+          className="block bg-white rounded-xl p-5 border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all group"
+        >
+          <div className="flex items-start justify-between mb-3">
+            <div className={`w-10 h-10 ${stat.bgColor} rounded-lg flex items-center justify-center`}>
+              <stat.icon className={`w-5 h-5 ${stat.color}`} />
+            </div>
+            <ArrowUpRight className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors shrink-0" />
+          </div>
+          <div className="text-xl font-bold text-gray-900 mb-0.5">{stat.value}</div>
+          <div className="text-sm font-medium text-gray-600">{stat.label}</div>
+          <div className="text-xs text-gray-500 mt-1 line-clamp-2">{stat.sub}</div>
+        </Link>
+      )}
+    </motion.div>
+  );
+}
+
 export default function Dashboard() {
   const { loading: permissionsLoading } = usePermissions();
   const { isRtl, t } = useLanguage();
+  const billing = useBillingContext();
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const [intentDistribution, setIntentDistribution] = useState<Array<{ name: string; value: number; color: string }>>([]);
   const [topPrompts, setTopPrompts] = useState<Prompt[]>([]);
   const [domains, setDomains] = useState<DomainItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const hasAiVisibility = !billing.hasPlan || billing.activeModules.includes("ai_visibility");
+  const hasAnalytics = !billing.hasPlan || billing.activeModules.includes("analytics_competitor");
+  const hasContent = !billing.hasPlan || billing.activeModules.includes("content_publishing");
 
   const fetchSummary = async () => {
     try {
@@ -177,7 +300,17 @@ export default function Dashboard() {
   }
 
   const s = summary!;
-  const stats = [
+  const stats: Array<{
+    label: string;
+    value: string;
+    sub: string;
+    icon: any;
+    color: string;
+    bgColor: string;
+    href: string;
+    moduleName?: string;
+    moduleLabel?: string;
+  }> = [
     {
       label: t.dashboard.client.totalVisibility,
       value: `${s.visibility.totalVisibility}%`,
@@ -188,6 +321,8 @@ export default function Dashboard() {
       color: "text-primary-600",
       bgColor: "bg-primary-100",
       href: "/dashboard/ai-visibility",
+      moduleName: "ai_visibility",
+      moduleLabel: "AI Visibility module",
     },
     {
       label: t.dashboard.client.keywordsTracked,
@@ -197,6 +332,8 @@ export default function Dashboard() {
       color: "text-secondary-600",
       bgColor: "bg-secondary-100",
       href: "/dashboard/keyword-forecast",
+      moduleName: "analytics_competitor",
+      moduleLabel: "Analytics module",
     },
     {
       label: t.dashboard.client.visibility,
@@ -215,6 +352,8 @@ export default function Dashboard() {
       color: "text-green-600",
       bgColor: "bg-green-100",
       href: "/dashboard/content",
+      moduleName: "content_publishing",
+      moduleLabel: "Content & Publishing module",
     },
     {
       label: t.dashboard.client.reports,
@@ -224,6 +363,8 @@ export default function Dashboard() {
       color: "text-indigo-600",
       bgColor: "bg-indigo-100",
       href: "/dashboard/reports",
+      moduleName: "analytics_competitor",
+      moduleLabel: "Analytics module",
     },
     {
       label: t.dashboard.client.videoReports,
@@ -233,6 +374,8 @@ export default function Dashboard() {
       color: "text-rose-600",
       bgColor: "bg-rose-100",
       href: "/dashboard/reports",
+      moduleName: "analytics_competitor",
+      moduleLabel: "Analytics module",
     },
     {
       label: "Projects",
@@ -242,6 +385,8 @@ export default function Dashboard() {
       color: "text-purple-600",
       bgColor: "bg-purple-100",
       href: "/dashboard/ai-visibility",
+      moduleName: "ai_visibility",
+      moduleLabel: "AI Visibility module",
     },
     {
       label: "Team",
@@ -288,86 +433,78 @@ export default function Dashboard() {
       </div>
 
       {/* Hero: AI Visibility summary card */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="mb-8 rounded-xl border border-gray-200 overflow-hidden bg-gradient-to-r from-primary-50 via-white to-accent-50"
+      <LockedCard
+        moduleName="ai_visibility"
+        moduleLabel="AI Visibility & AI Search Intelligence module"
+        className="mb-8"
       >
-        <div className="p-6 sm:p-8 flex flex-col sm:flex-row items-center gap-6">
-          <div className="relative shrink-0">
-            <svg width="160" height="160" viewBox="0 0 160 160">
-              <circle cx="80" cy="80" r={gaugeRadius} stroke="#e5e7eb" strokeWidth="10" fill="none" />
-              <circle
-                cx="80" cy="80"
-                r={gaugeRadius}
-                stroke="url(#gaugeGrad)"
-                strokeWidth="10"
-                fill="none"
-                strokeLinecap="round"
-                strokeDasharray={circumference}
-                strokeDashoffset={strokeDashoffset}
-                transform="rotate(-90 80 80)"
-              />
-              <defs>
-                <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#3b82f6" />
-                  <stop offset="100%" stopColor="#8b5cf6" />
-                </linearGradient>
-              </defs>
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-2xl font-bold text-gray-900">{visibilityPct}%</span>
-              <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Overall <br></br>Visibility</span>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="rounded-xl border border-gray-200 overflow-hidden bg-gradient-to-r from-primary-50 via-white to-accent-50"
+        >
+          <div className="p-6 sm:p-8 flex flex-col sm:flex-row items-center gap-6">
+            <div className="relative shrink-0">
+              <svg width="160" height="160" viewBox="0 0 160 160">
+                <circle cx="80" cy="80" r={gaugeRadius} stroke="#e5e7eb" strokeWidth="10" fill="none" />
+                <circle
+                  cx="80" cy="80"
+                  r={gaugeRadius}
+                  stroke="url(#gaugeGrad)"
+                  strokeWidth="10"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={strokeDashoffset}
+                  transform="rotate(-90 80 80)"
+                />
+                <defs>
+                  <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#3b82f6" />
+                    <stop offset="100%" stopColor="#8b5cf6" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-2xl font-bold text-gray-900">{visibilityPct}%</span>
+                <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">Overall <br />Visibility</span>
+              </div>
+            </div>
+            <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-4 w-full">
+              {[
+                { label: "Brand Mentions", value: s.visibility.totalMentions.toLocaleString(), icon: TrendingUp },
+                { label: "Queries Analyzed", value: s.visibility.totalQueries.toLocaleString(), icon: Server },
+                { label: "Completed Sessions", value: String(s.visibility.completedSessions), icon: BarChart3 },
+              ].map((item) => (
+                <div key={item.label} className="rounded-lg bg-white/80 border border-gray-100 p-4">
+                  <item.icon className="w-5 h-5 text-primary-600 mb-2" />
+                  <div className="text-xl font-bold text-gray-900">{item.value}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{item.label}</div>
+                </div>
+              ))}
+              <Link
+                href="/dashboard/ai-visibility"
+                className="col-span-2 sm:col-span-3 inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
+              >
+                View full AI Visibility report
+                <ArrowUpRight className="w-4 h-4" />
+              </Link>
             </div>
           </div>
-          <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-4 w-full">
-            {[
-              { label: "Brand Mentions", value: s.visibility.totalMentions.toLocaleString(), icon: TrendingUp },
-              { label: "Queries Analyzed", value: s.visibility.totalQueries.toLocaleString(), icon: Server },
-              { label: "Completed Sessions", value: String(s.visibility.completedSessions), icon: BarChart3 },
-            ].map((item) => (
-              <div key={item.label} className="rounded-lg bg-white/80 border border-gray-100 p-4">
-                <item.icon className="w-5 h-5 text-primary-600 mb-2" />
-                <div className="text-xl font-bold text-gray-900">{item.value}</div>
-                <div className="text-xs text-gray-500 mt-0.5">{item.label}</div>
-              </div>
-            ))}
-            <Link
-              href="/dashboard/ai-visibility"
-              className="col-span-2 sm:col-span-3 inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
-            >
-              View full AI Visibility report
-              <ArrowUpRight className="w-4 h-4" />
-            </Link>
-          </div>
-        </div>
-      </motion.div>
+        </motion.div>
+      </LockedCard>
 
       {/* Account Summary Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-4 mb-8">
         {stats.map((stat, index) => (
-          <motion.div
+          <StatCard
             key={stat.label}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: index * 0.03 }}
-          >
-            <Link
-              href={stat.href}
-              className="block bg-white rounded-xl p-5 border border-gray-200 hover:shadow-lg hover:border-primary-200 transition-all group"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div className={`w-10 h-10 ${stat.bgColor} rounded-lg flex items-center justify-center`}>
-                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
-                </div>
-                <ArrowUpRight className="w-4 h-4 text-gray-400 group-hover:text-primary-600 transition-colors shrink-0" />
-              </div>
-              <div className="text-xl font-bold text-gray-900 mb-0.5">{stat.value}</div>
-              <div className="text-sm font-medium text-gray-600">{stat.label}</div>
-              <div className="text-xs text-gray-500 mt-1 line-clamp-2">{stat.sub}</div>
-            </Link>
-          </motion.div>
+            stat={stat}
+            index={index}
+            moduleName={stat.moduleName}
+            moduleLabel={stat.moduleLabel}
+          />
         ))}
       </div>
 
@@ -424,7 +561,7 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* Domains Card */}
+        {/* Domains Card — always unlocked (plan-only) */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -473,186 +610,209 @@ export default function Dashboard() {
           </Link>
         </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-          className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-md transition-shadow flex flex-col h-full"
+        {/* AI Visibility Card — locked without ai_visibility module */}
+        <LockedCard
+          moduleName="ai_visibility"
+          moduleLabel="AI Visibility & AI Search Intelligence module"
+          className="h-full"
         >
-          <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <Server className="w-5 h-5 text-primary-600" />
-            AI Visibility
-          </h2>
-          <div className="flex-1">
-            <dl className="space-y-3">
-              <div className="flex justify-between">
-                <dt className="text-gray-600">Total visibility</dt>
-                <dd className="font-medium text-gray-900">{s.visibility.totalVisibility}%</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-600">Brand mentions</dt>
-                <dd className="font-medium text-gray-900">{s.visibility.totalMentions.toLocaleString()}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-600">Queries analyzed</dt>
-                <dd className="font-medium text-gray-900">{s.visibility.totalQueries.toLocaleString()}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-600">Completed sessions</dt>
-                <dd className="font-medium text-gray-900">{s.visibility.completedSessions}</dd>
-              </div>
-            </dl>
-          </div>
-          <Link
-            href="/dashboard/ai-visibility"
-            className="mt-4 pt-4 border-t border-gray-100 inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-md transition-shadow flex flex-col h-full"
           >
-            View AI Visibility
-            <ArrowUpRight className="w-4 h-4" />
-          </Link>
-        </motion.div>
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <Server className="w-5 h-5 text-primary-600" />
+              AI Visibility
+            </h2>
+            <div className="flex-1">
+              <dl className="space-y-3">
+                <div className="flex justify-between">
+                  <dt className="text-gray-600">Total visibility</dt>
+                  <dd className="font-medium text-gray-900">{s.visibility.totalVisibility}%</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-600">Brand mentions</dt>
+                  <dd className="font-medium text-gray-900">{s.visibility.totalMentions.toLocaleString()}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-600">Queries analyzed</dt>
+                  <dd className="font-medium text-gray-900">{s.visibility.totalQueries.toLocaleString()}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-gray-600">Completed sessions</dt>
+                  <dd className="font-medium text-gray-900">{s.visibility.completedSessions}</dd>
+                </div>
+              </dl>
+            </div>
+            <Link
+              href="/dashboard/ai-visibility"
+              className="mt-4 pt-4 border-t border-gray-100 inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
+            >
+              View AI Visibility
+              <ArrowUpRight className="w-4 h-4" />
+            </Link>
+          </motion.div>
+        </LockedCard>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-md transition-shadow flex flex-col h-full"
+        {/* Reports & Videos — locked without analytics_competitor module */}
+        <LockedCard
+          moduleName="analytics_competitor"
+          moduleLabel="Analytics & Competitor Intelligence module"
+          className="h-full"
         >
-          <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <FileBarChart className="w-5 h-5 text-indigo-600" />
-            Reports & Videos
-          </h2>
-          <div className="flex-1">
-            <dl className="space-y-3">
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-600">Generated reports</dt>
-                <dd className="font-medium text-gray-900">{s.counts.reports ?? 0}</dd>
-              </div>
-              <div className="flex justify-between items-center">
-                <dt className="text-gray-600">Video reports</dt>
-                <dd className="font-medium text-gray-900">{s.counts.videoReports ?? 0}</dd>
-              </div>
-            </dl>
-          </div>
-          <Link
-            href="/dashboard/reports"
-            className="mt-4 pt-4 border-t border-gray-100 inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="bg-white rounded-xl p-6 border border-gray-200 hover:shadow-md transition-shadow flex flex-col h-full"
           >
-            View Reports
-            <ArrowUpRight className="w-4 h-4" />
-          </Link>
-        </motion.div>
+            <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <FileBarChart className="w-5 h-5 text-indigo-600" />
+              Reports & Videos
+            </h2>
+            <div className="flex-1">
+              <dl className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-600">Generated reports</dt>
+                  <dd className="font-medium text-gray-900">{s.counts.reports ?? 0}</dd>
+                </div>
+                <div className="flex justify-between items-center">
+                  <dt className="text-gray-600">Video reports</dt>
+                  <dd className="font-medium text-gray-900">{s.counts.videoReports ?? 0}</dd>
+                </div>
+              </dl>
+            </div>
+            <Link
+              href="/dashboard/reports"
+              className="mt-4 pt-4 border-t border-gray-100 inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
+            >
+              View Reports
+              <ArrowUpRight className="w-4 h-4" />
+            </Link>
+          </motion.div>
+        </LockedCard>
       </div>
 
-      {/* Prompt Intent Distribution */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.35 }}
-        className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm mb-8"
+      {/* Prompt Intent Distribution — locked without ai_visibility */}
+      <LockedCard
+        moduleName="ai_visibility"
+        moduleLabel="AI Visibility & AI Search Intelligence module"
+        className="mb-8"
       >
-        <h2 className="text-lg font-bold text-gray-900 mb-2">
-          {t.dashboard.client.promptIntentDistribution}
-        </h2>
-        <p className="text-sm text-gray-500 mb-6">
-          {t.dashboard.client.promptIntentDistributionDesc}
-        </p>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart
-            data={intentData}
-            layout="vertical"
-            margin={{ top: 0, right: 20, left: 80, bottom: 0 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis type="number" domain={[0, 100]} unit="%" />
-            <YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 12 }} />
-            <Tooltip formatter={(value) => [`${value}%`, ""]} />
-            <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-              {intentData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </motion.div>
-
-      {/* Top Prompts from AI Visibility */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.45 }}
-        className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
-      >
-        <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <h2 className="text-lg font-bold text-gray-900">
-            {t.dashboard.client.topPromptsTitle}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.35 }}
+          className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm"
+        >
+          <h2 className="text-lg font-bold text-gray-900 mb-2">
+            {t.dashboard.client.promptIntentDistribution}
           </h2>
-          <Link
-            href="/dashboard/ai-visibility"
-            className="inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
-          >
-            {t.dashboard.client.viewAllInAiVisibility}
-            <ArrowUpRight className="w-4 h-4" />
-          </Link>
-        </div>
-        <div className="p-4">
-          {topPrompts.length > 0 ? (
-            <ul className="space-y-3">
-              {topPrompts.map((prompt) => {
-                const pct = prompt.visibility;
-                const circ = 2 * Math.PI * 20;
-                const ringColor = pct >= 70 ? "#22c55e" : pct >= 40 ? "#3b82f6" : "#f97316";
-                return (
-                  <li
-                    key={prompt.id}
-                    className="flex items-center justify-between gap-4 p-3 rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <span className="font-medium text-gray-900">{prompt.text}</span>
-                      {prompt.projectName && (
-                        <span className="block text-xs text-gray-500 mt-0.5">{prompt.projectName}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center shrink-0">
-                      <div className="relative w-12 h-12">
-                        <svg className="w-12 h-12 transform -rotate-90">
-                          <circle cx="24" cy="24" r="20" stroke="#e5e7eb" strokeWidth="4" fill="none" />
-                          <circle
-                            cx="24"
-                            cy="24"
-                            r="20"
-                            stroke={ringColor}
-                            strokeWidth="4"
-                            fill="none"
-                            strokeDasharray={`${(pct / 100) * circ} ${circ}`}
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-900">
-                          {pct}%
-                        </span>
+          <p className="text-sm text-gray-500 mb-6">
+            {t.dashboard.client.promptIntentDistributionDesc}
+          </p>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart
+              data={intentData}
+              layout="vertical"
+              margin={{ top: 0, right: 20, left: 80, bottom: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis type="number" domain={[0, 100]} unit="%" />
+              <YAxis type="category" dataKey="name" width={70} tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(value) => [`${value}%`, ""]} />
+              <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                {intentData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </motion.div>
+      </LockedCard>
+
+      {/* Top Prompts — locked without ai_visibility */}
+      <LockedCard
+        moduleName="ai_visibility"
+        moduleLabel="AI Visibility & AI Search Intelligence module"
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45 }}
+          className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
+        >
+          <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <h2 className="text-lg font-bold text-gray-900">
+              {t.dashboard.client.topPromptsTitle}
+            </h2>
+            <Link
+              href="/dashboard/ai-visibility"
+              className="inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
+            >
+              {t.dashboard.client.viewAllInAiVisibility}
+              <ArrowUpRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <div className="p-4">
+            {topPrompts.length > 0 ? (
+              <ul className="space-y-3">
+                {topPrompts.map((prompt) => {
+                  const pct = prompt.visibility;
+                  const circ = 2 * Math.PI * 20;
+                  const ringColor = pct >= 70 ? "#22c55e" : pct >= 40 ? "#3b82f6" : "#f97316";
+                  return (
+                    <li
+                      key={prompt.id}
+                      className="flex items-center justify-between gap-4 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium text-gray-900">{prompt.text}</span>
+                        {prompt.projectName && (
+                          <span className="block text-xs text-gray-500 mt-0.5">{prompt.projectName}</span>
+                        )}
                       </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <div className="py-12 text-center text-gray-500">
-              <Target className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-              <p className="font-medium">{t.dashboard.common.noData}</p>
-              <p className="text-sm mt-1">{t.dashboard.client.topPromptsEmpty}</p>
-              <Link
-                href="/dashboard/ai-visibility"
-                className="mt-4 inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
-              >
-                {t.dashboard?.reports?.goToAIVisibility ?? "Go to AI Visibility"}
-                <ArrowUpRight className="w-4 h-4" />
-              </Link>
-            </div>
-          )}
-        </div>
-      </motion.div>
+                      <div className="flex items-center shrink-0">
+                        <div className="relative w-12 h-12">
+                          <svg className="w-12 h-12 transform -rotate-90">
+                            <circle cx="24" cy="24" r="20" stroke="#e5e7eb" strokeWidth="4" fill="none" />
+                            <circle
+                              cx="24" cy="24" r="20"
+                              stroke={ringColor}
+                              strokeWidth="4"
+                              fill="none"
+                              strokeDasharray={`${(pct / 100) * circ} ${circ}`}
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                          <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-gray-900">
+                            {pct}%
+                          </span>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div className="py-12 text-center text-gray-500">
+                <Target className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p className="font-medium">{t.dashboard.common.noData}</p>
+                <p className="text-sm mt-1">{t.dashboard.client.topPromptsEmpty}</p>
+                <Link
+                  href="/dashboard/ai-visibility"
+                  className="mt-4 inline-flex items-center gap-2 text-primary-600 hover:text-primary-700 text-sm font-medium"
+                >
+                  {t.dashboard?.reports?.goToAIVisibility ?? "Go to AI Visibility"}
+                  <ArrowUpRight className="w-4 h-4" />
+                </Link>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </LockedCard>
     </div>
   );
 }

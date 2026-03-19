@@ -481,8 +481,9 @@ function BlogPageContent() {
 
   // Blog post form state
   const [topic, setTopic] = useState("");
-  const [generatedTags, setGeneratedTags] = useState<string[]>([]);
+  const [targetKeywords, setTargetKeywords] = useState("");
   const [contentGenerationLanguage, setContentGenerationLanguage] = useState<"en" | "he" | "ar" | "fr" | "pt" | "it">("en");
+  const [generatedTags, setGeneratedTags] = useState<string[]>([]);
   const [brandVoices, setBrandVoices] = useState<Array<{ id: string; brand_name: string; is_default?: boolean }>>([]);
   const [selectedBrandVoiceId, setSelectedBrandVoiceId] = useState<string | null>(null);
   const [loadingVoices, setLoadingVoices] = useState(false);
@@ -1844,7 +1845,38 @@ function BlogPageContent() {
                         )}
                       </div>
 
-                      {/* Generate Blog (structured: charts, tables, sources) */}
+                      {/* Brand voice profile */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Brand voice profile
+                        </label>
+                        <select
+                          value={selectedBrandVoiceId ?? ""}
+                          onChange={(e) => setSelectedBrandVoiceId(e.target.value || null)}
+                          disabled={loadingVoices}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+                        >
+                          <option value="">None</option>
+                          {brandVoices.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.brand_name}{v.is_default ? " (default)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Optional. Content will match this voice’s tone and style.
+                        </p>
+                        {brandVoices.length === 0 && !loadingVoices && (
+                          <Link
+                            href="/dashboard/settings?tab=brand-voice"
+                            className="text-xs text-purple-600 hover:underline mt-1 inline-block"
+                          >
+                            Create a brand voice in Settings
+                          </Link>
+                        )}
+                      </div>
+
+                      {/* Generate Button */}
                       <button
                         type="button"
                         onClick={handleGenerateStructured}

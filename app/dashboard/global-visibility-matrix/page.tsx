@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Globe, TrendingUp, TrendingDown, MousePointerClick, Eye, Target, RefreshCw, Download, AlertCircle, CheckCircle, ArrowUpRight, ArrowDownRight, Check, X, Brain, Sparkles, Bot, Zap, MessageSquare, Video, Loader2, Play, RotateCcw, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useReportPDFExport } from '@/lib/useReportPDFExport';
 
 type VideoStatus = 'idle' | 'pending' | 'done' | 'failed';
 interface VideoState { status: VideoStatus; url: string | null; generatedAt: string | null; requestId: string | null; }
@@ -51,6 +52,7 @@ interface MatrixCountry {
 }
 
 export default function GlobalVisibilityMatrixPage() {
+  const { reportRef, exportingPDF, handleExportPDF } = useReportPDFExport();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [selectedDomain, setSelectedDomain] = useState('');
   const [countries, setCountries] = useState<MatrixCountry[]>([]);
@@ -641,7 +643,7 @@ export default function GlobalVisibilityMatrixPage() {
             </select>
           </div>
 
-          <div className="flex items-end">
+          <div className="flex items-end gap-3">
             <button
               onClick={calculateMatrix}
               disabled={calculating || !selectedDomain}
@@ -650,6 +652,20 @@ export default function GlobalVisibilityMatrixPage() {
               <RefreshCw className={`w-4 h-4 ${calculating ? 'animate-spin' : ''}`} />
               {calculating ? 'Calculating...' : 'Calculate All-Time Matrix'}
             </button>
+            {countries.length > 0 && (
+              <button
+                onClick={() => handleExportPDF({
+                  reportTitle: 'Global Visibility Matrix',
+                  domain: domains.find(d => d.id === selectedDomain)?.domain || 'Report',
+                  fileName: `Global_Visibility_Matrix_${domains.find(d => d.id === selectedDomain)?.domain || 'report'}_${new Date().toISOString().slice(0, 10)}.pdf`,
+                })}
+                disabled={exportingPDF}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium whitespace-nowrap"
+              >
+                <Download className={`w-4 h-4 ${exportingPDF ? 'animate-bounce' : ''}`} />
+                {exportingPDF ? 'Exporting…' : 'Export PDF'}
+              </button>
+            )}
           </div>
         </div>
         {calculating && calcProgress && (
@@ -668,7 +684,8 @@ export default function GlobalVisibilityMatrixPage() {
         )}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs + Content (ref for PDF export) */}
+      <div ref={reportRef}>
       <div className="mb-6">
         <div className="border-b border-gray-200">
           <nav className="-mb-px flex space-x-8" aria-label="Tabs">
@@ -785,8 +802,8 @@ export default function GlobalVisibilityMatrixPage() {
             </div>
           ) : (
             <>
-          {/* ========== VIDEO REPORT SECTION (Region vs AI) ========== */}
-          {countries.length > 0 && (
+          {/* ========== VIDEO REPORT SECTION (Region vs AI) - commented out, add back later ========== */}
+          {/* {countries.length > 0 && (
             <div className="mb-6">
               {videoAi.status === 'idle' && (
                 <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -831,11 +848,11 @@ export default function GlobalVisibilityMatrixPage() {
                 </div>
               )}
             </div>
-          )}
+          )} */}
 
           {/* Summary Cards - Focus on Brand Absence */}
           {countries.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+            <div data-pdf-section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
               <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-xl shadow-sm border border-red-200 p-6">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-red-700">Brand Absent</span>
@@ -883,7 +900,7 @@ export default function GlobalVisibilityMatrixPage() {
           )}
 
           {/* Charts Section - Focus on Brand Absence */}
-          <div className="space-y-6 mb-6">
+          <div data-pdf-section className="space-y-6 mb-6">
             {/* Bar Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Countries with Zero/Lowest AI Presence */}
@@ -1045,7 +1062,7 @@ export default function GlobalVisibilityMatrixPage() {
           </div>
 
           {/* Countries Table */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <div data-pdf-section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
@@ -1229,8 +1246,8 @@ export default function GlobalVisibilityMatrixPage() {
             </div>
           ) : (
             <>
-              {/* ========== VIDEO REPORT SECTION (Region vs Google Search) ========== */}
-              {countries.length > 0 && (
+              {/* ========== VIDEO REPORT SECTION (Region vs Google Search) - commented out, add back later ========== */}
+              {/* {countries.length > 0 && (
                 <div className="mb-6">
                   {videoGoogle.status === 'idle' && (
                     <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -1275,10 +1292,10 @@ export default function GlobalVisibilityMatrixPage() {
                     </div>
                   )}
                 </div>
-              )}
+              )} */}
 
               {/* Google Search Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+              <div data-pdf-section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-600">Total Countries</span>
@@ -1323,7 +1340,7 @@ export default function GlobalVisibilityMatrixPage() {
               </div>
 
               {/* Google Search Charts */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <div data-pdf-section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                 {/* Top Countries by Clicks */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Top 10 Countries by Clicks</h3>
@@ -1380,7 +1397,7 @@ export default function GlobalVisibilityMatrixPage() {
               </div>
 
               {/* Google Search Data Table */}
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div data-pdf-section className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-green-50">
                   <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                     <Globe className="w-6 h-6 text-blue-600" />
@@ -1462,16 +1479,17 @@ export default function GlobalVisibilityMatrixPage() {
           )}
         </>
       )}
+      </div>
 
-      {/* Shared Video Modal */}
-      {showVideoModal && (showVideoModalTab === 'ai' ? videoAi.url : videoGoogle.url) && (
+      {/* Shared Video Modal - commented out, add back later */}
+      {/* {showVideoModal && (showVideoModalTab === 'ai' ? videoAi.url : videoGoogle.url) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={() => setShowVideoModal(false)}>
           <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50"><h3 className="font-semibold text-gray-900">{showVideoModalTab === 'ai' ? 'Region vs AI Video Report' : 'Region vs Google Video Report'}</h3><div className="flex items-center gap-2"><button onClick={() => downloadVideo(showVideoModalTab)} className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200 rounded-lg flex items-center gap-1.5">Download</button><button onClick={() => setShowVideoModal(false)} className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors" aria-label="Close"><X className="w-5 h-5" /></button></div></div>
             <div className="flex-1 min-h-0 bg-gray-950 flex items-center justify-center p-4"><video src={showVideoModalTab === 'ai' ? videoAi.url! : videoGoogle.url!} controls autoPlay className="max-w-full max-h-[calc(90vh-80px)]">Your browser does not support the video tag.</video></div>
           </div>
         </div>
-      )}
+      )} */}
     </div>
   );
 }

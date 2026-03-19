@@ -43,6 +43,7 @@ import {
   X,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useReportPDFExport } from "@/lib/useReportPDFExport";
 
 type VideoStatus = "idle" | "pending" | "done" | "failed";
 interface VideoState { status: VideoStatus; url: string | null; generatedAt: string | null; requestId: string | null; }
@@ -178,6 +179,8 @@ function CustomTooltip({ active, payload, label }: any) {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function MarketShareOfAttentionPage() {
+  const { reportRef, exportingPDF, handleExportPDF } = useReportPDFExport();
+  const [showAllForExport, setShowAllForExport] = useState(false);
   const [domains, setDomains] = useState<DomainOption[]>([]);
   const [selectedDomainId, setSelectedDomainId] = useState<string>("");
   const [report, setReport] = useState<Report | null>(null);
@@ -318,7 +321,7 @@ export default function MarketShareOfAttentionPage() {
       toast.dismiss("msa-gen");
       if (data.success) {
         setReport(data.data?.report || null);
-        toast.success("Market Share of Attention report generated! Generate a video report to visualize your data.");
+        toast.success("Market Share of Attention report generated!");
         loadData(selectedDomainId);
       } else {
         toast.error(data.error || "Failed to generate report");
@@ -484,6 +487,25 @@ export default function MarketShareOfAttentionPage() {
             <RefreshCw className={`w-4 h-4 ${generating ? "animate-spin" : ""}`} />
             {generating ? "Analysing…" : "Generate Report"}
           </button>
+          {report && (
+            <button
+              onClick={() => handleExportPDF({
+                reportTitle: "Market Share of Attention",
+                domain: report.domain,
+                fileName: `Market_Share_${report.domain.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().split("T")[0]}.pdf`,
+                prepareExport: async () => {
+                  setShowAllForExport(true);
+                  await new Promise((r) => setTimeout(r, 150));
+                },
+                cleanupExport: () => setShowAllForExport(false),
+              })}
+              disabled={exportingPDF}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              <Download className={`w-4 h-4 ${exportingPDF ? "animate-bounce" : ""}`} />
+              {exportingPDF ? "Exporting…" : "Export PDF"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -553,9 +575,9 @@ export default function MarketShareOfAttentionPage() {
 
       {/* ── Report body ── */}
       {report && (
-        <>
-          {/* ========== VIDEO REPORT SECTION ========== */}
-          <div className="mb-6">
+        <div ref={reportRef}>
+          {/* ========== VIDEO REPORT SECTION (commented out - add back later) ========== */}
+          {/* <div className="mb-6">
             {video.status === "idle" && (
               <div className="bg-gradient-to-r from-violet-50 to-indigo-50 rounded-xl border border-violet-200 p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
                 <div className="flex-shrink-0 w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Video className="w-6 h-6 text-violet-600" /></div>
@@ -609,7 +631,7 @@ export default function MarketShareOfAttentionPage() {
                 </div>
               </div>
             )}
-          </div>
+          </div> */}
 
           {/* Default Leader badge */}
           {report.is_default_leader && (
@@ -625,7 +647,7 @@ export default function MarketShareOfAttentionPage() {
           )}
 
           {/* ── KPI Cards ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div data-pdf-section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard
               icon={<Trophy className="w-5 h-5" />}
               iconBg="from-primary-500 to-purple-600"
@@ -664,7 +686,7 @@ export default function MarketShareOfAttentionPage() {
             />
           </div>
 
-          {/* ── Tabs ── */}
+          {/* ── Tabs (excluded from PDF) ── */}
           <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
             {(["overview", "engines", "organic", "intent"] as const).map(tab => (
               <button
@@ -682,8 +704,8 @@ export default function MarketShareOfAttentionPage() {
           </div>
 
           {/* ── OVERVIEW TAB ── */}
-          {activeTab === "overview" && (
-            <div className="grid lg:grid-cols-2 gap-6">
+          <div style={{ display: activeTab === "overview" || showAllForExport ? "block" : "none" }}>
+            <div data-pdf-section data-pdf-section-name="Overview" className="grid lg:grid-cols-2 gap-6">
               {/* Dominance Pie */}
               <div className="bg-white border border-gray-200 rounded-2xl p-6">
                 <div className="flex items-center gap-2 mb-1">
@@ -801,11 +823,11 @@ export default function MarketShareOfAttentionPage() {
                 </ResponsiveContainer>
               </div>
             </div>
-          )}
+          </div>
 
           {/* ── AI ENGINES TAB ── */}
-          {activeTab === "engines" && (
-            <div className="grid lg:grid-cols-2 gap-6">
+          <div style={{ display: activeTab === "engines" || showAllForExport ? "block" : "none" }}>
+            <div data-pdf-section data-pdf-section-name="AI Engines" className="grid lg:grid-cols-2 gap-6">
               {/* Engine mention share table */}
               <div className="bg-white border border-gray-200 rounded-2xl p-6">
                 <div className="flex items-center gap-2 mb-4">
@@ -938,11 +960,11 @@ export default function MarketShareOfAttentionPage() {
                 </div>
               )}
             </div>
-          )}
+          </div>
 
           {/* ── ORGANIC TAB ── */}
-          {activeTab === "organic" && (
-            <div className="grid lg:grid-cols-2 gap-6">
+          <div style={{ display: activeTab === "organic" || showAllForExport ? "block" : "none" }}>
+            <div data-pdf-section data-pdf-section-name="Organic" className="grid lg:grid-cols-2 gap-6">
               <div className="bg-white border border-gray-200 rounded-2xl p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <Search className="w-4 h-4 text-emerald-600" />
@@ -974,33 +996,6 @@ export default function MarketShareOfAttentionPage() {
                     <p className="text-xs text-amber-700">
                       No Google Search Console data found. Connect your domain to GSC in the Assets Hub to unlock organic proxy data.
                     </p>
-                  </div>
-                )}
-                {report.gsc_queries && report.gsc_queries.length > 0 && (
-                  <div className="mt-4">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">GSC Queries</h4>
-                    <div className="border border-gray-200 rounded-xl overflow-hidden">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-gray-50 text-left">
-                            <th className="px-3 py-2 font-medium text-gray-600">Query</th>
-                            <th className="px-3 py-2 font-medium text-gray-600 text-right">Impressions</th>
-                            <th className="px-3 py-2 font-medium text-gray-600 text-right">Clicks</th>
-                            <th className="px-3 py-2 font-medium text-gray-600 text-right">Position</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {report.gsc_queries.map((q, i) => (
-                            <tr key={i} className="border-t border-gray-100 hover:bg-gray-50/50">
-                              <td className="px-3 py-2 text-gray-900">{q.query}</td>
-                              <td className="px-3 py-2 text-right text-gray-600">{q.impressions.toLocaleString()}</td>
-                              <td className="px-3 py-2 text-right text-gray-600">{q.clicks.toLocaleString()}</td>
-                              <td className="px-3 py-2 text-right text-gray-600">{q.position.toFixed(1)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
                   </div>
                 )}
               </div>
@@ -1036,6 +1031,35 @@ export default function MarketShareOfAttentionPage() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+
+              {/* GSC Queries table - full width */}
+              {report.gsc_queries && report.gsc_queries.length > 0 && (
+                <div className="col-span-full bg-white border border-gray-200 rounded-2xl p-6">
+                  <h4 className="text-sm font-medium text-gray-700 mb-4">GSC Queries (Organic Proxy Share Matrix)</h4>
+                  <div className="border border-gray-200 rounded-xl overflow-x-auto">
+                    <table className="w-full text-sm min-w-full">
+                      <thead>
+                        <tr className="bg-gray-50 text-left">
+                          <th className="px-4 py-3 font-medium text-gray-600">Query</th>
+                          <th className="px-4 py-3 font-medium text-gray-600 text-right">Impressions</th>
+                          <th className="px-4 py-3 font-medium text-gray-600 text-right">Clicks</th>
+                          <th className="px-4 py-3 font-medium text-gray-600 text-right">Position</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {report.gsc_queries.map((q, i) => (
+                          <tr key={i} className="border-t border-gray-100 hover:bg-gray-50/50">
+                            <td className="px-4 py-3 text-gray-900">{q.query}</td>
+                            <td className="px-4 py-3 text-right text-gray-600">{q.impressions.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-right text-gray-600">{q.clicks.toLocaleString()}</td>
+                            <td className="px-4 py-3 text-right text-gray-600">{q.position.toFixed(1)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* Top GSC queries by impressions */}
               {topGscQueriesBarData.length > 0 && (
@@ -1079,11 +1103,11 @@ export default function MarketShareOfAttentionPage() {
                 </div>
               )}
             </div>
-          )}
+          </div>
 
           {/* ── INTENT TAB ── */}
-          {activeTab === "intent" && (
-            <div className="grid lg:grid-cols-2 gap-6">
+          <div style={{ display: activeTab === "intent" || showAllForExport ? "block" : "none" }}>
+            <div data-pdf-section data-pdf-section-name="Query Intent" className="grid lg:grid-cols-2 gap-6">
               <div className="bg-white border border-gray-200 rounded-2xl p-6">
                 <div className="flex items-center gap-2 mb-1">
                   <Target className="w-4 h-4 text-primary-600" />
@@ -1197,14 +1221,14 @@ export default function MarketShareOfAttentionPage() {
                 </div>
               )}
             </div>
-          )}
+          </div>
 
           {report.generated_at && (
             <p className="text-xs text-gray-400 text-center">
               Report generated: {new Date(report.generated_at).toLocaleString()}
             </p>
           )}
-        </>
+        </div>
       )}
     </div>
   );

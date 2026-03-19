@@ -36,12 +36,17 @@ import {
   Package,
   Map,
   Trophy,
+  CreditCard,
+  Lock,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { usePermissions } from "@/hooks/usePermissions";
 import { filterNavigationByRole, NavigationItem } from "@/lib/permissions/permissions";
 import { useLanguage } from "@/lib/language-context";
 import LanguageToggle from "@/components/LanguageToggle";
+import { BillingProvider, useBillingContext } from "@/lib/billing/billing-context";
+import BillingGate from "@/components/billing/BillingGate";
+import { getNavItemLockReason } from "@/lib/billing/route-access";
 import { DashboardComplianceFooter } from "@/components/compliance/DashboardComplianceFooter";
 
 export default function DashboardLayout({
@@ -49,11 +54,24 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  return (
+    <BillingProvider>
+      <DashboardLayoutInner>{children}</DashboardLayoutInner>
+    </BillingProvider>
+  );
+}
+
+function DashboardLayoutInner({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const router = useRouter();
   const { isRtl, t } = useLanguage();
+  const billing = useBillingContext();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<string[]>(["analytics", "strategyReports"]); // Track expanded parent items (stable keys)
+  const [expandedItems, setExpandedItems] = useState<string[]>(["aiVisibilitySearchIntelligence", "contentPublishing", "analyticsCompetitorIntelligence", "strategyReports"]); // Track expanded parent items (stable keys)
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { role, capabilities, loading: permissionsLoading } = usePermissions();
@@ -105,51 +123,71 @@ export default function DashboardLayout({
   const allNavigation: NavigationItem[] = [
     { name: t.dashboard.sidebar.dashboard, href: "/dashboard", icon: LayoutDashboard, requiredCapability: undefined },
     { name: t.dashboard.sidebar.domainManagement, href: "/dashboard/domains", icon: Server, requiredCapability: "canManageSettings" },
-    { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
-    { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
-    { 
-      name: t.dashboard.sidebar.contentGenerator, 
-      icon: Sparkles, 
+    // AI Visibility & AI Search Intelligence (billing module)
+    {
+      name: t.dashboard.sidebar.aiVisibilitySearchIntelligence,
+      icon: Globe,
+      requiredCapability: undefined, // Mixed: canViewAIVisibility, canViewReports
+      expandKey: "aiVisibilitySearchIntelligence",
+      children: [
+        { name: t.dashboard.sidebar.aiVisibility, href: "/dashboard/ai-visibility", icon: Globe, requiredCapability: "canViewAIVisibility" },
+        { name: t.dashboard.sidebar.actionPlans, href: "/dashboard/action-plans", icon: Lightbulb, requiredCapability: "canViewReports" },
+        { name: t.dashboard.sidebar.googleSearchConsole, href: "/dashboard/google-search-console", icon: Search, requiredCapability: "canViewAnalytics" },
+      ]
+    },
+    // Content & Publishing (billing module)
+    {
+      name: t.dashboard.sidebar.contentPublishing,
+      icon: Sparkles,
       requiredCapability: "canManageContent",
-      expandKey: "contentGenerator",
+      expandKey: "contentPublishing",
       children: [
         { name: t.dashboard.sidebar.newContent, href: "/dashboard/content-generator", icon: Sparkles, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.multiplePlatform, href: "/dashboard/content-generator/multiple-platform", icon: Layers, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.missedPrompts, href: "/dashboard/missed-prompts", icon: FileText, requiredCapability: "canManageContent" },
         { name: t.dashboard.sidebar.blog, href: "/dashboard/blog", icon: Globe, requiredCapability: "canManageContent" },
+        { name: t.dashboard.sidebar.publication, href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
       ]
     },
-    { name: t.dashboard.sidebar.publication, href: "/dashboard/content", icon: Layers, requiredCapability: "canManageContent" },
-    { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
-    // { name: t.dashboard.sidebar.adSync, href: "/dashboard/ad-sync", icon: Zap, requiredCapability: "canViewAnalytics" },
-    // { name: t.dashboard.sidebar.keywords, href: "/dashboard/keywords", icon: Target, requiredCapability: "canManageKeywords" },
-    // { name: t.dashboard.sidebar.rankings, href: "/dashboard/rankings", icon: TrendingUp, requiredCapability: "canViewRankings" },
-    // // { name: t.dashboard.sidebar.reputation, href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
-    // { name: t.dashboard.sidebar.leads, href: "/dashboard/leads", icon: Users, requiredCapability: "canViewAnalytics" },
-    { 
-      name: t.dashboard.sidebar.assetsHub, 
-      icon: Package, 
-      requiredCapability: "canViewAnalytics",
-      expandKey: "assetsHub",
+    // Analytics & Competitor Intelligence (billing module)
+    {
+      name: t.dashboard.sidebar.analyticsCompetitorIntelligence,
+      icon: BarChart3,
+      requiredCapability: undefined, // Mixed: canManageKeywords, canViewAnalytics, canViewReports
+      expandKey: "analyticsCompetitorIntelligence",
       children: [
-        { name: t.dashboard.sidebar.googleSearchConsole, href: "/dashboard/google-search-console", icon: Search, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.keywordForecast, href: "/dashboard/keyword-forecast", icon: TrendingUp, requiredCapability: "canManageKeywords" },
+        { name: t.dashboard.sidebar.keywordForecastAnalytics, href: "/dashboard/analytics", icon: TrendingUp, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.gscAnalytics, href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
+        { name: t.dashboard.sidebar.biReports, href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" },
         { name: t.dashboard.sidebar.googleMaps, href: "/dashboard/google-maps", icon: Map, requiredCapability: "canViewAnalytics" },
       ]
     },
-    { 
-      name: t.dashboard.sidebar.analytics, 
-      icon: BarChart3, 
-      requiredCapability: "canViewAnalytics",
-      expandKey: "analytics",
+    // Reputation Monitoring (billing module)
+    {
+      name: t.dashboard.sidebar.reputationMonitoring,
+      icon: Shield,
+      requiredCapability: "canViewReports",
+      expandKey: "reputationMonitoring",
       children: [
-        { name: t.dashboard.sidebar.keywordForecastAnalytics, href: "/dashboard/analytics", icon: TrendingUp, requiredCapability: "canViewAnalytics" },
-        { name: t.dashboard.sidebar.gscAnalytics, href: "/dashboard/gsc-analytics", icon: Search, requiredCapability: "canViewAnalytics" },
-        { name: t.dashboard.sidebar.biReports, href: "/dashboard/reports", icon: FileText, requiredCapability: "canViewReports" }
+        { name: t.dashboard.sidebar.reputation, href: "/dashboard/reputation", icon: Shield, requiredCapability: "canViewReports" },
       ]
     },
-    { 
-      name: t.dashboard.sidebar.coreReports, 
-      icon: Activity, 
+    // Opportunity & Sales Intelligence (billing module)
+    {
+      name: t.dashboard.sidebar.opportunitySalesIntelligence,
+      icon: Target,
+      requiredCapability: "canBuildQuotes",
+      expandKey: "opportunitySalesIntelligence",
+      children: [
+        { name: t.dashboard.sidebar.quoteBuilder, href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
+      ]
+    },
+
+    // Core Reports (report-gated)
+    {
+      name: t.dashboard.sidebar.coreReports,
+      icon: Activity,
       requiredCapability: "canViewReports",
       expandKey: "coreReports",
       children: [
@@ -160,18 +198,20 @@ export default function DashboardLayout({
         { name: t.dashboard.sidebar.opportunityBlindSpots, href: "/dashboard/opportunity-blind-spots", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
-    { 
-      name: t.dashboard.sidebar.strategyReports, 
-      icon: Crosshair, 
+    // Strategy Reports (report-gated)
+    {
+      name: t.dashboard.sidebar.strategyReports,
+      icon: Crosshair,
       requiredCapability: "canViewReports",
       expandKey: "strategyReports",
       children: [
         { name: t.dashboard.sidebar.strategicBlindSpots, href: "/dashboard/strategic-blind-spots", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
-    { 
-      name: t.dashboard.sidebar.globalReports, 
-      icon: Globe, 
+    // Global Reports (report-gated)
+    {
+      name: t.dashboard.sidebar.globalReports,
+      icon: Globe,
       requiredCapability: "canViewReports",
       expandKey: "globalReports",
       children: [
@@ -179,14 +219,17 @@ export default function DashboardLayout({
         { name: t.dashboard.sidebar.globalVisibilityMatrix, href: "/dashboard/global-visibility-matrix", icon: Target, requiredCapability: "canViewReports" },
       ]
     },
-    // { name: t.dashboard.sidebar.learning, href: "/dashboard/learning", icon: Brain, requiredCapability: "canViewAnalytics" },
-    // { name: t.dashboard.sidebar.videoReports, href: "/dashboard/video-reports", icon: Video, requiredCapability: "canAccessVideoReports" },
-    { name: t.dashboard.sidebar.quoteBuilder, href: "/dashboard/quote-builder", icon: FileText, requiredCapability: "canBuildQuotes" },
+    { name: t.dashboard.sidebar.modules, href: "/dashboard/modules", icon: Package, requiredCapability: "canManageSettings" },
+    { name: t.dashboard.sidebar.billing, href: "/dashboard/billing", icon: CreditCard, requiredCapability: "canManageSettings" },
     { name: t.dashboard.sidebar.team, href: "/dashboard/team", icon: Users, requiredCapability: "canManageTeam" },
     { name: t.dashboard.sidebar.settings, href: "/dashboard/settings", icon: Settings, requiredCapability: "canManageSettings" },
   ];
 
-  const navigation = filterNavigationByRole(role, allNavigation);
+  const filteredByRole = filterNavigationByRole(role, allNavigation);
+  // Hide parent groups that have no visible children after role filtering
+  const navigation = filteredByRole.filter(
+    (item) => !item.children || item.children.length > 0
+  );
 
   return (
     <div className="min-h-screen bg-gray-50" dir={isRtl ? 'rtl' : 'ltr'}>
@@ -243,62 +286,124 @@ export default function DashboardLayout({
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 overflow-y-auto">
             <ul className="space-y-1">
-              {navigation.map((item) => (
-                <li key={item.expandKey || item.href || item.name}>
-                  {item.children ? (
-                    // Parent item with children
-                    <div>
-                      <button
-                        onClick={() => toggleExpanded(item.expandKey!)}
-                        className={`w-full flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
+              {navigation.map((item) => {
+                const itemLock = item.href
+                  ? getNavItemLockReason(item.href, billing.activeModules, billing.purchasedReportSlugs, billing.hasPlan)
+                  : null;
+                const isLocked = !!itemLock;
+
+                // For parent groups: check if every child is locked
+                const childLocks = item.children?.map((child) =>
+                  child.href
+                    ? getNavItemLockReason(child.href, billing.activeModules, billing.purchasedReportSlugs, billing.hasPlan)
+                    : null
+                );
+                const allChildrenLocked = !!childLocks?.length && childLocks.every(Boolean);
+
+                return (
+                  <li key={item.expandKey || item.href || item.name}>
+                    {item.children ? (
+                      // Parent item with children
+                      <div>
+                        <button
+                          onClick={() => toggleExpanded(item.expandKey!)}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                            sidebarCollapsed ? "justify-center" : ""
+                          } ${
+                            allChildrenLocked
+                              ? "text-gray-400 hover:bg-gray-50"
+                              : "text-gray-700 hover:bg-primary-50 hover:text-primary-600"
+                          }`}
+                          title={sidebarCollapsed ? item.name : undefined}
+                        >
+                          <item.icon className="w-5 h-5 flex-shrink-0" />
+                          {!sidebarCollapsed && (
+                            <>
+                              <span className="font-medium flex-1 text-left">{item.name}</span>
+                              {allChildrenLocked && (
+                                <Lock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mr-1" />
+                              )}
+                              {expandedItems.includes(item.expandKey!) ? (
+                                <ChevronUp className="w-4 h-4" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
+                            </>
+                          )}
+                        </button>
+                        {/* Child items */}
+                        {!sidebarCollapsed && expandedItems.includes(item.expandKey!) && (
+                          <ul className="mt-1 ml-4 space-y-1">
+                            {item.children.map((child) => {
+                              const childLock = child.href
+                                ? getNavItemLockReason(child.href, billing.activeModules, billing.purchasedReportSlugs, billing.hasPlan)
+                                : null;
+                              return (
+                                <li key={child.name}>
+                                  <Link
+                                    href={child.href || '#'}
+                                    className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                                      childLock
+                                        ? "text-gray-400 hover:bg-gray-50 cursor-not-allowed"
+                                        : "text-gray-600 hover:bg-primary-50 hover:text-primary-600"
+                                    }`}
+                                    onClick={childLock ? (e) => e.preventDefault() : undefined}
+                                    title={
+                                      childLock?.type === "module"
+                                        ? `Requires ${childLock.label} module`
+                                        : childLock?.type === "report"
+                                        ? `Requires ${childLock.label}`
+                                        : childLock?.type === "plan"
+                                        ? "Requires an active plan"
+                                        : undefined
+                                    }
+                                  >
+                                    <child.icon className="w-4 h-4 flex-shrink-0" />
+                                    <span className="flex-1">{child.name}</span>
+                                    {childLock && <Lock className="w-3 h-3 text-gray-400 flex-shrink-0" />}
+                                  </Link>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    ) : (
+                      // Regular item without children
+                      <Link
+                        href={isLocked ? '#' : (item.href || '#')}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
                           sidebarCollapsed ? "justify-center" : ""
+                        } ${
+                          isLocked
+                            ? "text-gray-400 hover:bg-gray-50 cursor-not-allowed"
+                            : "text-gray-700 hover:bg-primary-50 hover:text-primary-600"
                         }`}
-                        title={sidebarCollapsed ? item.name : undefined}
+                        onClick={isLocked ? (e) => e.preventDefault() : undefined}
+                        title={
+                          sidebarCollapsed
+                            ? item.name
+                            : itemLock?.type === "module"
+                            ? `Requires ${itemLock.label} module`
+                            : itemLock?.type === "report"
+                            ? `Requires ${itemLock.label}`
+                            : itemLock?.type === "plan"
+                            ? "Requires an active plan"
+                            : undefined
+                        }
                       >
                         <item.icon className="w-5 h-5 flex-shrink-0" />
                         {!sidebarCollapsed && (
                           <>
-                            <span className="font-medium flex-1 text-left">{item.name}</span>
-                            {expandedItems.includes(item.expandKey!) ? (
-                              <ChevronUp className="w-4 h-4" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4" />
-                            )}
+                            <span className="font-medium flex-1">{item.name}</span>
+                            {isLocked && <Lock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
                           </>
                         )}
-                      </button>
-                      {/* Child items */}
-                      {!sidebarCollapsed && expandedItems.includes(item.expandKey!) && (
-                        <ul className="mt-1 ml-4 space-y-1">
-                          {item.children.map((child) => (
-                            <li key={child.name}>
-                              <Link
-                                href={child.href || '#'}
-                                className="flex items-center gap-3 px-3 py-2 text-gray-600 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors text-sm"
-                              >
-                                <child.icon className="w-4 h-4 flex-shrink-0" />
-                                <span>{child.name}</span>
-                              </Link>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ) : (
-                    // Regular item without children
-                    <Link
-                      href={item.href || '#'}
-                      className={`flex items-center gap-3 px-3 py-2 text-gray-700 rounded-lg hover:bg-primary-50 hover:text-primary-600 transition-colors ${
-                        sidebarCollapsed ? "justify-center" : ""
-                      }`}
-                      title={sidebarCollapsed ? item.name : undefined}
-                    >
-                      <item.icon className="w-5 h-5 flex-shrink-0" />
-                      {!sidebarCollapsed && <span className="font-medium">{item.name}</span>}
-                    </Link>
-                  )}
-                </li>
-              ))}
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </nav>
 
@@ -428,7 +533,9 @@ export default function DashboardLayout({
 
         {/* Page Content */}
         <main className="pt-16 min-h-[calc(100vh-4rem)] flex flex-col">
-          <div className="flex-1">{children}</div>
+          <div className="flex-1">
+            <BillingGate>{children}</BillingGate>
+          </div>
           <DashboardComplianceFooter />
         </main>
       </div>
